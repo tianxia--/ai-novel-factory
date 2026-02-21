@@ -4,18 +4,15 @@
 
 ## 安装方式
 
-在 OpenCode 中发送以下指令：
+在终端执行：
 
-```
-请从 GitHub 安装 AI Novel Factory：
-https://github.com/你的用户名/ai-novel-factory
-
-将文件下载到 ./studio 目录
-```
-
-或使用命令：
 ```bash
-git clone https://github.com/你的用户名/ai-novel-factory.git studio
+curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/install-inline.sh | bash
+```
+
+或克隆仓库：
+```bash
+git clone https://github.com/tianxia--/ai-novel-factory.git studio
 ```
 
 ## 快速开始
