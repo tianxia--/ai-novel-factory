@@ -1,0 +1,20 @@
+# 目标字数
+target_word_count=2500
+
+# 是否自动跳过检查
+auto_skip_check=false
+
+# 是否生成后自动更新记忆
+auto_memory_update=true
+
+# 最大连续生成章节数
+max_continuous_chapters=5
+
+# 质量检查阈值（低于此分数需要人工确认）
+quality_threshold=7
+
+# 文风检查开关
+style_check=true
+
+# 一致性检查开关
+consistency_check=true
