@@ -1,0 +1,7 @@
+target_word_count=2500
+auto_skip_check=false
+auto_memory_update=true
+max_continuous_chapters=5
+quality_threshold=7
+style_check=true
+consistency_check=true

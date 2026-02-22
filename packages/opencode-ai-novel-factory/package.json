@@ -1,0 +1,53 @@
+{
+  "name": "opencode-ai-novel-factory",
+  "version": "1.0.0",
+  "description": "AI Novel Factory - Complete novel writing system for OpenCode",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "agents",
+    "skills",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "ai",
+    "novel",
+    "writing",
+    "creative-writing"
+  ],
+  "author": "tianxia--",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tianxia--/ai-novel-factory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tianxia--/ai-novel-factory/issues"
+  },
+  "homepage": "https://github.com/tianxia--/ai-novel-factory#readme",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^3.0.0"
+  }
+}
