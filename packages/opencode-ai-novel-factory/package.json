@@ -1,15 +1,15 @@
 {
   "name": "opencode-ai-novel-factory",
-  "version": "1.0.0",
-  "description": "AI Novel Factory - Complete novel writing system for OpenCode",
+  "version": "1.2.0",
+  "description": "AI Novel Factory - Official OpenCode plugin for AI-powered novel writing with multi-agent system, memory management, and automated chapter generation",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [
@@ -28,8 +28,13 @@
     "plugin",
     "ai",
     "novel",
+    "factory",
+    "AI Novel Factory",
     "writing",
-    "creative-writing"
+    "creative-writing",
+    "小说工厂",
+    "小说创作",
+    "novel-generation"
   ],
   "author": "tianxia--",
   "license": "MIT",
@@ -46,6 +51,7 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "latest",
+    "@types/node": "^25.3.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
     "zod": "^3.0.0"

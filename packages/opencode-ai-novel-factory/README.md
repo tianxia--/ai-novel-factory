@@ -14,19 +14,52 @@ Can stably support 100+ chapters of creation.
 
 ## Installation
 
-### Method 1: npm (Recommended)
+### 🤖 AI 引导式完整安装（强烈推荐）
+
+在 OpenCode 中说一句话：
+
+```
+请帮我安装和配置完整的 AI Novel Factory
+```
+
+AI 将引导你完成：
+1. ✅ 环境检查（Node.js/npm）
+2. ✅ 插件安装（npm）
+3. ✅ OpenCode 配置（opencode.json）
+4. ✅ 项目初始化（可选）
+5. ✅ 世界观创建（可选）
+
+或者直接运行完整安装脚本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/ai-guided-complete-install.sh | bash
+```
+
+### 🚀 一键项目安装
+
+在 OpenCode 中运行：
+
+```
+curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/install-inline.sh | bash
+```
+
+安装完成后，插件会自动配置 `opencode.json` 文件，无需手动操作。
+
+### 📦 标准 npm 安装
 
 ```bash
 npm install -g opencode-ai-novel-factory
 ```
 
-Or add to your project:
+然后让 AI 助手自动配置：
 
-```bash
-npm install opencode-ai-novel-factory
+```
+请帮我配置 opencode.json 添加 opencode-ai-novel-factory 插件
 ```
 
-Then add to your `opencode.json`:
+### 🛠️ 手动配置
+
+如果需要手动配置，在 `opencode.json` 中添加：
 
 ```json
 {
@@ -34,15 +67,23 @@ Then add to your `opencode.json`:
 }
 ```
 
-### Method 2: Local Installation
+### 🔧 单独配置脚本
 
-Clone the repository:
+运行专门的配置脚本（AI 可引导用户执行）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/setup-opencode.sh | bash
+```
+
+### 📁 本地开发安装
+
+克隆仓库：
 
 ```bash
 git clone https://github.com/tianxia--/ai-novel-factory.git
 ```
 
-Add to your `opencode.json`:
+在 `opencode.json` 中配置本地路径：
 
 ```json
 {
@@ -54,13 +95,26 @@ Add to your `opencode.json`:
 
 ### 1. Initialize Project
 
-In OpenCode, run:
+🤖 **让 AI 助手引导你完成初始化**：
+
+在 OpenCode 中输入：
+
+```
+请帮我初始化 AI 小说工厂项目
+```
+
+AI 助手将自动：
+1. 创建完整的目录结构
+2. 生成所有必要的模板文件
+3. 引导你填写核心设定
+
+或者手动运行：
 
 ```
 @novel-init
 ```
 
-Or manually create the directory structure:
+手动创建目录结构：
 
 ```
 studio/
@@ -76,12 +130,22 @@ studio/
 
 ### 2. Fill in Basic Settings
 
-Fill in the following files in order:
+🤖 **让 AI 助手引导你填写设定**：
 
-1. `studio/story/world.md` - World settings
-2. `studio/story/master_outline.md` - Main story outline
-3. `studio/characters/protagonist.md` - Protagonist settings
-4. `studio/style/*.md` - Style guides (optional)
+在 OpenCode 中输入：
+
+```
+请帮我创建小说的世界观设定
+```
+
+AI 助手将引导你逐步填写：
+
+1. `studio/story/world.md` - 世界观设定
+2. `studio/story/master_outline.md` - 主线大纲
+3. `studio/characters/protagonist.md` - 主角设定
+4. `studio/style/*.md` - 文风指南（可选）
+
+或者按顺序手动填写上述文件。
 
 ### 3. Start Writing
 

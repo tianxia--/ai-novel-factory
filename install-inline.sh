@@ -682,16 +682,86 @@ studio/
 ```
 README_EOF
 
+# ============================================
+# 自动配置 opencode.json
+# ============================================
+setup_opencode_config() {
+    local opencode_json=""
+    local user_home="$HOME"
+    
+    # 查找 opencode.json 文件
+    if [ -f "./opencode.json" ]; then
+        opencode_json="./opencode.json"
+    elif [ -f "$user_home/.opencode/opencode.json" ]; then
+        opencode_json="$user_home/.opencode/opencode.json"
+    else
+        echo "⚠️  未找到 opencode.json 文件"
+        echo ""
+        echo "📝 请手动创建并编辑 opencode.json 文件，添加以下内容："
+        echo "{"
+        echo "  \"plugin\": [\"opencode-ai-novel-factory\"]"
+        echo "}"
+        echo ""
+        echo "📍 文件位置建议："
+        echo "   - 项目根目录：./opencode.json"
+        echo "   - 全局配置：~/.opencode/opencode.json"
+        return 1
+    fi
+    
+    # 检查是否已包含插件
+    if grep -q "opencode-ai-novel-factory" "$opencode_json"; then
+        echo "✅ opencode-ai-novel-factory 插件已配置"
+        return 0
+    fi
+    
+    # 备份原文件
+    cp "$opencode_json" "$opencode_json.backup.$(date +%s)"
+    
+    # 添加插件配置
+    if grep -q '"plugin"' "$opencode_json"; then
+        # 已有 plugin 字段，添加到数组中
+        sed -i.tmp 's/"plugin": \[/ "plugin": [\n    "opencode-ai-novel-factory",/g' "$opencode_json"
+        rm -f "$opencode_json.tmp"
+    else
+        # 没有 plugin 字段，创建新的
+        sed -i.tmp '1i\
+{\
+  "plugin": ["opencode-ai-novel-factory"]\
+}
+' "$opencode_json"
+        rm -f "$opencode_json.tmp"
+    fi
+    
+    echo "✅ opencode.json 已自动配置"
+    echo "📁 配置文件: $opencode_json"
+    echo "💾 已备份原文件"
+    return 0
+}
+
+# 执行配置
+setup_opencode_config
+
 echo ""
 echo "=========================================="
-echo "   ✅ AI Novel Factory 安装完成！"
+echo "   ✅ AI Novel Factory 项目初始化完成！"
 echo "=========================================="
 echo ""
-echo "安装目录: $INSTALL_DIR"
+echo "📁 项目目录: $INSTALL_DIR"
 echo ""
 echo "📖 下一步:"
 echo "1. 填写 $INSTALL_DIR/story/world.md"
 echo "2. 填写 $INSTALL_DIR/story/master_outline.md"
 echo "3. 填写 $INSTALL_DIR/characters/protagonist.md"
 echo "4. 执行 @daily_pipeline 开始创作"
+echo ""
+echo "💡 重要提示:"
+echo "- ✅ 插件已全局安装，无需再次执行 npm install"
+echo "- ✅ 项目结构已创建，可以直接使用"
+echo "- ✅ 只需填写设定文件即可开始创作"
+echo ""
+if [ $? -eq 0 ]; then
+    echo "🎉 OpenCode 配置已完成，可以直接使用 @daily_pipeline 命令"
+else
+    echo "⚠️  请手动配置 opencode.json 后才能使用插件功能"
+fi
 echo ""
