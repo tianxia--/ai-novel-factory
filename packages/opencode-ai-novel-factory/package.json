@@ -1,6 +1,6 @@
 {
   "name": "opencode-ai-novel-factory",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "AI Novel Factory - Official OpenCode plugin for AI-powered novel writing with multi-agent system, memory management, and automated chapter generation",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -34,7 +34,10 @@
     "creative-writing",
     "小说工厂",
     "小说创作",
-    "novel-generation"
+    "novel-generation",
+    "opencode-ai-novel-factory",
+    "official-novel-factory",
+    "tianxia-novel-factory"
   ],
   "author": "tianxia--",
   "license": "MIT",
