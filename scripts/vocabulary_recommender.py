@@ -189,6 +189,235 @@ class VocabularyRecommender:
 
         return output
 
+    def check_idiom_relevance(self, idiom, context_text):
+        """
+        检查成语与上下文的关联性
+
+        Args:
+            idiom: 成语
+            context_text: 上下文文本
+
+        Returns:
+            (是否关联, 关联原因, 关联度0-1)
+        """
+        # 简化的关联性检查
+        if not self.index or not self.index.get("word_index"):
+            return False, "词汇数据库未加载", 0.0
+
+        idiom_data = self.index["word_index"].get(idiom, {})
+        definition = idiom_data.get("definition", "")
+
+        # 检查成语释义中的关键词是否在上下文中
+        relevance_keywords = []
+        if "战" in definition or "斗" in definition or "攻" in definition or "守" in definition:
+            relevance_keywords.extend(["战", "斗", "打", "攻", "守", "兵", "军"])
+        if "情" in definition or "感" in definition or "思" in definition or "想" in definition:
+            relevance_keywords.extend(["情", "感", "思", "想", "心", "意"])
+        if "景" in definition or "色" in definition or "光" in definition or "影" in definition:
+            relevance_keywords.extend(["景", "色", "光", "影", "天", "地"])
+        if "人" in definition or "言" in definition or "语" in definition or "行" in definition:
+            relevance_keywords.extend(["人", "说", "道", "言", "行", "走"])
+
+        # 计算关联度
+        relevance_count = sum(1 for keyword in relevance_keywords if keyword in context_text)
+        relevance_score = min(relevance_count / 3.0, 1.0) if relevance_keywords else 0
+
+        if relevance_score > 0.5:
+            return True, f"成语含义与上下文内容高度匹配（关联度：{relevance_score:.2f}）", relevance_score
+        elif relevance_score > 0.2:
+            return True, f"成语含义与上下文内容有一定关联（关联度：{relevance_score:.2f}）", relevance_score
+        else:
+            return False, f"成语含义与上下文内容关联度低（关联度：{relevance_score:.2f}）", relevance_score
+
+    def recommend_idioms_with_context(self, context_text, scene_type, top_n=10):
+        """
+        根据上下文和场景推荐成语
+
+        Args:
+            context_text: 上下文文本
+            scene_type: 场景类型
+            top_n: 返回推荐数量
+
+        Returns:
+            [(成语, 定义, 是否关联, 关联原因, 关联度), ...]
+        """
+        if not self.index:
+            return []
+
+        # 获取场景对应的分类
+        categories = SCENE_TYPE_MAPPING.get(scene_type, ["cultural"])
+
+        # 收集成语（定义为4个字以上的词汇）
+        idioms = []
+        for word, word_data in self.index["word_index"].items():
+            # 检查是否是成语（4个字以上）
+            if len(word) >= 4:
+                # 检查是否属于目标分类
+                if any(cat in word_data.get("categories", []) for cat in categories):
+                    idioms.append(word)
+
+        # 检查每个成语与上下文的关联性
+        idiom_relevance = []
+        for idiom in idioms[:50]:  # 限制检查数量
+            is_relevant, reason, score = self.check_idiom_relevance(idiom, context_text)
+            idiom_relevance.append((idiom, is_relevant, reason, score))
+
+        # 按关联度排序
+        idiom_relevance.sort(key=lambda x: x[3], reverse=True)
+
+        # 返回结果
+        results = []
+        for idiom, is_relevant, reason, score in idiom_relevance[:top_n]:
+            idiom_data = self.index["word_index"][idiom]
+            definition = idiom_data.get("definition", "")
+            results.append((idiom, definition, is_relevant, reason, score))
+
+        return results
+
+    def generate_vocabulary_prompt(self, scene_type, context_text=""):
+        """
+        生成词汇推荐提示
+
+        Args:
+            scene_type: 场景类型
+            context_text: 上下文文本
+
+        Returns:
+            Markdown 格式的提示文本
+        """
+        prompt = f"""## 📚 {scene_type}场景 - 词汇使用指南
+
+### ⚠️ 核心原则：成语必须与文本关联
+
+**成语使用的"三要三不要"：**
+
+**三要：**
+1. ✅ 要有前文铺垫
+2. ✅ 要有逻辑关联
+3. ✅ 要符合场景氛围
+
+**三不要：**
+1. ❌ 不要孤零零地使用
+2. ❌ 不要堆砌叠加
+3. ❌ 不要强行植入
+
+### 📊 词汇使用金字塔
+
+- 基础词汇: 50% - 保证可读性
+- 进阶词汇: 30% - 丰富表达
+- 高级词汇: 15% - 提升文采
+- 稀有/成语: 5% - 点睛之笔
+
+### 🎯 成语使用策略
+
+**什么时候可以用成语？**
+1. 有具体的内容描写在前（铺垫）
+2. 成语与上下文有直接的逻辑关联
+3. 成语起到总结、对比、强调的作用
+
+**什么时候不要用成语？**
+1. 孤零零的成语，没有前文铺垫
+2. 成语与上下文内容无直接关联
+3. 为了展示文采而强行使用
+
+### 💡 写作检查清单
+
+- [ ] 这段话有没有孤零零的成语？
+- [ ] 成语是否与上下文有逻辑关联？
+- [ ] 去掉成语后，句意是否完整？
+- [ ] 是否为了用成语而用成语？
+
+### 📝 推荐词汇（按使用优先级）
+
+---
+
+"""
+
+        # 添加词汇推荐
+        words = self.recommend_by_scene(scene_type, top_n=20)
+
+        # 分类推荐
+        level_1 = words[:10]  # 基础词汇
+        level_2 = words[10:15]  # 进阶词汇
+        level_3 = words[15:18]  # 高级词汇
+        level_4 = words[18:20]  # 稀有/成语
+
+        # 如果有上下文，推荐关联的成语
+        if context_text:
+            prompt += "### 🔍 成语关联性检查（基于当前上下文）\n\n"
+            idioms = self.recommend_idioms_with_context(context_text, scene_type, top_n=5)
+
+            if idioms:
+                for idiom, definition, is_relevant, reason, score in idioms:
+                    status = "✅ 推荐使用" if is_relevant else "⚠️  不推荐使用"
+                    prompt += f"- **{idiom}**: {definition}\n"
+                    prompt += f"  - 状态: {status}\n"
+                    prompt += f"  - 关联度: {score:.2f}\n"
+                    prompt += f"  - 原因: {reason}\n\n"
+            else:
+                prompt += "未找到高度相关的成语，建议使用基础词汇表达。\n\n"
+
+            prompt += "---\n\n"
+
+        # 添加按等级推荐的词汇
+        prompt += "#### 基础词汇 (10个) - 优先使用\n"
+        for word_data in level_1:
+            word = word_data["word"]
+            definition = word_data["definition"].split("\n")[0][:50]
+            prompt += f"- {word}: {definition}\n"
+
+        prompt += "\n#### 进阶词汇 (5个) - 适当使用\n"
+        for word_data in level_2:
+            word = word_data["word"]
+            definition = word_data["definition"].split("\n")[0][:50]
+            prompt += f"- {word}: {definition}\n"
+
+        prompt += "\n#### 高级词汇 (3个) - 谨慎使用\n"
+        for word_data in level_3:
+            word = word_data["word"]
+            definition = word_data["definition"].split("\n")[0][:50]
+            prompt += f"- {word}: {definition}\n"
+
+        prompt += "\n#### 稀有/成语 (2个) - 慎重使用\n"
+        for word_data in level_4:
+            word = word_data["word"]
+            definition = word_data["definition"].split("\n")[0][:50]
+            prompt += f"- {word}: {definition}\n"
+
+        prompt += """
+
+---
+
+### 🎯 写作建议
+
+1. **优先使用基础词汇**，保证文章流畅自然
+2. **进阶词汇穿插使用**，丰富表达层次
+3. **高级词汇谨慎使用**，确保不破坏文风
+4. **成语慎重考虑**，确保与上下文有明确关联
+5. **不要堆砌成语**，每段最多1个成语，每章不超过5个
+
+### ✅ 优质写作示例
+
+```
+基础表达 + 基础词汇 + 进阶词汇 + 偶尔高级词汇 + 少量成语 = 自然流畅
+```
+
+**好的示例：**
+```
+他慢慢走到窗前，看着外面飘落的雪花。雪越下越大，整个城市都被白雪覆盖。
+他想起了小时候在老家玩雪的日子，那时候真是无忧无虑。
+                                          （成语在结尾，起到总结和升华作用，与前文内容有明确关联）
+```
+
+**不好的示例：**
+```
+他踱步至窗前，看着外面飘落的鹅毛大雪，真是瑞雪兆丰年啊。
+ （成语"瑞雪兆丰年"与前面的描述没有直接关联，显得突兀）
+```
+"""
+
+        return prompt
+
     def analyze_chapter_context(self, chapter_text):
         """
         分析章节文本，提取场景类型和关键词

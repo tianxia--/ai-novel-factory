@@ -14,3 +14,4 @@ studio/production/chapters/*.md
 !screenshots/**/*.jpg
 !screenshots/**/*.jpeg
 !screenshots/**/*.gif
+scripts/__pycache__/
