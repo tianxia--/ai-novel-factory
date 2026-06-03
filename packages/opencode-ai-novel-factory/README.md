@@ -9,8 +9,220 @@ A complete AI novel writing system plugin for OpenCode.
 - Automatic memory maintenance
 - Long-form serialized writing support
 - Commercial-grade writing structure
+- Autonomous CLI workspace for long-running novel orchestration
 
 Can stably support 100+ chapters of creation.
+
+## Autonomous CLI MVP
+
+The package now includes a first-pass `ai-novel` CLI for stateful novel orchestration outside the OpenCode skill flow.
+
+### What it does now
+
+- Initializes a `.ai-novel/` workspace from a single story idea
+- Persists project state, ReAct setup notes, and chapter task queue
+- Stores reusable OpenAI-compatible LLM provider settings for the workspace
+- Reports runtime status with pending chapter counts
+- Reviews user interruptions and decides whether the change is local or requires replanning
+- Prepares asset planning files for cover generation and future comic adaptation
+- Seeds global consensus, style assets, and per-agent prompt layers
+- Runs a visible multi-agent discussion loop through a chat command
+- Shows provider configuration state in the TUI and can test provider reachability
+
+### What it does not do yet
+
+- It does not run a background autonomous worker yet
+- It does not draft all chapters end-to-end yet
+- It does not generate final cover images or comic pages yet
+
+### CLI commands
+
+```bash
+ai-novel init --idea "A fallen sword immortal rebuilds heaven's order" --chapters 48 --chapter-words 3200
+ai-novel status
+ai-novel chat --message "The protagonist should sound colder, but still carry hidden obsession"
+ai-novel advance
+ai-novel cover
+ai-novel provider-test
+ai-novel tui
+ai-novel interrupt --message "Change the entire genre to cyberpunk and rewrite the core world rules"
+```
+
+Chapter length is configurable, but the minimum is locked at `2500` words. If you omit `--chapter-words`, the CLI defaults to `2500`.
+
+### Workspace layout
+
+```text
+.ai-novel/
+├── config.json
+├── chat/
+│   └── discussion-log.md
+├── state.json
+├── assets/
+│   ├── comic/
+│   │   └── comic-plan.md
+│   └── cover/
+│       └── cover-brief.md
+│       └── cover-prompt.md
+├── chapters/
+├── memory/
+│   └── characters/
+│       ├── core/
+│       │   └── protagonist.md
+│       ├── evolution.md
+│       └── relations.md
+├── plans/
+│   ├── chapter-blueprints/
+│   └── plan-and-solve-brief.md
+│   └── setting-freeze.md
+├── prompts/
+│   ├── agents/
+│   │   ├── author.base.md
+│   │   ├── author.dynamic.md
+│   │   └── ...
+│   └── global-consensus.md
+└── style/
+    ├── anti-patterns.md
+    ├── profile.md
+    ├── references.md
+    └── rulebook.md
+├── reports/
+    └── interruptions.log.md
+└── prompts/
+    └── react-worldbuilding.md
+```
+
+This is the execution backbone for the next stage, where ReAct discussion, Plan-and-Solve outlining, and full chapter generation can be wired into the same persistent workflow.
+
+### TUI mode
+
+Run `ai-novel tui` to open a terminal dashboard for the active project. The current MVP supports:
+
+- live status view for stage, chapter count, word target, cover, and comic state
+- story memory and workflow control panels
+- recent multi-agent discussion transcript
+- live streamed agent replies while a discussion is in progress
+- a pending chapter task list
+- a bottom composer that accepts direct chat input
+- `Enter` to send the current composer content
+- slash commands such as `/advance`, `/cover`, `/provider-test`, `/interrupt ...`
+- `/env base_url=... model=... api_key=...` to update provider settings inline
+- `Ctrl+C` or `Esc` to quit
+
+### Multi-agent prompt layering
+
+Each role has two prompt layers:
+
+- `*.base.md`: short identity and responsibility prompt that should stay stable
+- `*.dynamic.md`: evolving role memory that gets refreshed as the project changes
+
+All agents also read `prompts/global-consensus.md`, which acts as the shared novel truth source. This is the backbone for keeping the author, editor, reviewer, world architect, prose stylist, and showrunner aligned over longer runs.
+
+### `.env` configuration
+
+The CLI reads provider settings from the current working directory's `.env` file. Start from the included template:
+
+```bash
+cp packages/opencode-ai-novel-factory/.env.example .env
+```
+
+Supported keys:
+
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL_ID`
+- `LLM_TIMEOUT_MS`
+- `LLM_TEMPERATURE`
+- `MAX_STEPS`
+- `NOVEL_CHAPTER_WORD_TARGET`
+
+After `.env` is present, you can validate it either from the CLI:
+
+```bash
+ai-novel provider-test
+```
+
+or from the TUI with the `t` key. The right rail will show whether provider config is complete, which model is active, and the latest connectivity result.
+or from the TUI composer with:
+
+```text
+/provider-test
+```
+
+The workflow panel shows whether provider config is complete, which model is active, and the latest connectivity result.
+
+### Shared Web/Desktop studio
+
+The repo now also includes a shared frontend shell under [apps/desktop](/Users/pengfei.chen/Desktop/gitlabWork/ai-novel-factory/apps/desktop) that uses the same orchestration core as the CLI and TUI.
+
+Run the web studio from the package directory:
+
+```bash
+npm run build
+npm run studio:web
+```
+
+Then open:
+
+```text
+http://127.0.0.1:4310
+```
+
+What works now:
+
+- starts from a project manager view instead of assuming a single active novel
+- creates isolated novel projects under `.ai-novel-projects/<project-id>/`
+- opens a creation modal for title, core idea, chapter count, and chapter word target
+- automatically runs the first autonomous kickoff discussion after project creation
+- loads real project workspace state through the local API
+- streams multi-agent discussion replies into the center chat area
+- keeps one transcript/history per novel project
+- triggers real `/advance`, `/cover`, `/provider-test`, `/interrupt`, and provider env update flows
+- renders chapter tasks, workflow stage, and story memory from the same persisted state used by the CLI
+- defaults discussion output to Simplified Chinese and keeps the discussion constrained to the active workflow stage
+
+Desktop status:
+
+- `apps/desktop/src-tauri/` now contains a Tauri v2 scaffold
+- this machine does **not** have `rustc`, `cargo`, or the Tauri CLI installed yet
+- the desktop shell is scaffolded, but local `tauri dev` is not runnable until the Rust/Tauri toolchain is installed
+
+### Planning chain
+
+Once you have at least one meaningful discussion turn, repeated `/advance` calls now move the project through a real chain:
+
+1. `worldbuilding_dialogue -> setting_review`
+   Generates `setting-freeze.md` using persisted discussion consensus, protagonist notes, and style updates.
+2. `setting_review -> master_planning`
+   Generates `master-outline.md` using the same discussion-backed direction.
+3. `master_planning -> chapter_task_generation`
+   Generates chapter blueprints under `.ai-novel/plans/chapter-blueprints/`.
+4. `chapter_task_generation -> drafting`
+   Generates rolling chapter drafts under `.ai-novel/chapters/`, one chapter per advance.
+
+This means the TUI and CLI no longer stop at generic placeholder planning; discussion artifacts now feed directly into the planning and drafting pipeline.
+
+### Multi-project layout
+
+The web/desktop studio now treats each novel as its own managed project:
+
+```text
+.ai-novel-projects/
+├── my-first-novel/
+│   └── .ai-novel/
+├── palace-revenge/
+│   └── .ai-novel/
+└── projects.json
+```
+
+`projects.json` acts as the registry for the Studio manager page. Each project gets:
+
+- its own state machine
+- its own discussion transcript
+- its own consensus and memory files
+- its own chapter queue and draft outputs
+
+This avoids mixing history, settings, and generated artifacts across different books.
 
 ## Installation
 
@@ -51,7 +263,13 @@ curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/ins
 npm install -g opencode-ai-novel-factory
 ```
 
-然后让 AI 助手自动配置：
+然后在你的小说项目目录里基于 `.env.example` 创建 `.env`，填写自己的模型配置：
+
+```bash
+cp /path/to/opencode-ai-novel-factory/packages/opencode-ai-novel-factory/.env.example .env
+```
+
+再让 AI 助手自动配置：
 
 ```
 请帮我配置 opencode.json 添加 opencode-ai-novel-factory 插件
