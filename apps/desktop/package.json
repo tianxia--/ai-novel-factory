@@ -1,0 +1,9 @@
+{
+  "name": "ai-novel-factory-desktop-shell",
+  "private": true,
+  "scripts": {
+    "dev": "node ../../packages/opencode-ai-novel-factory/dist/server.mjs --root-dir ../.. --static-dir . --port 4310",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
+  }
+}

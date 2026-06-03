@@ -5,6 +5,9 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "bin": {
+    "ai-novel": "dist/cli.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,8 +22,11 @@
     "templates"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "build": "tsup src/index.ts src/cli.ts src/orchestrator.ts src/cli-types.ts src/env-manager.ts src/llm-config.ts src/runtime-llm.ts src/discussion.ts src/router.ts src/tui.ts src/tui-controller.ts src/server.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts src/cli.ts src/orchestrator.ts src/cli-types.ts src/env-manager.ts src/llm-config.ts src/runtime-llm.ts src/discussion.ts src/router.ts src/tui.ts src/tui-controller.ts src/server.ts --format cjs,esm --dts --watch",
+    "server": "node dist/server.mjs",
+    "studio:web": "node dist/server.mjs --root-dir ../.. --static-dir ../../apps/desktop --port 4310",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
