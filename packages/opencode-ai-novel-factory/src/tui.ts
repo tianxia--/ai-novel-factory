@@ -2,9 +2,8 @@ import readline from "node:readline"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import type { AutonomousNovelState } from "./cli-types"
-import { getProjectEnvStatus } from "./env-manager"
-import { loadAutonomousState } from "./orchestrator"
+import { getProjectEnvStatus, loadAutonomousState } from "ai-novel-core"
+import type { AutonomousNovelState } from "ai-novel-core"
 import { executeComposerAction, parseComposerInput } from "./tui-controller"
 
 interface RenderOptions {
@@ -179,38 +178,34 @@ function clearScreen() {
 async function loadRecentDiscussion(rootDir: string) {
   try {
     const content = await fs.readFile(path.join(rootDir, ".ai-novel", "chat", "discussion-log.md"), "utf8")
+    const rolePattern = /^(User|Showrunner|World Architect|Author|Editor|Reviewer|Prose Stylist):\s*(.*)$/
     const sections = content
       .trim()
       .split(/^## /m)
       .map((section) => section.trim())
       .filter(Boolean)
-    const latestSection = sections.at(-1)
 
-    if (!latestSection) {
+    if (sections.length === 0) {
       return ["No discussion yet."]
     }
 
-    const sectionLines = latestSection
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
+    const entries = sections.flatMap((section) => {
+      const sectionLines = section
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const timestamp = sectionLines[0] || ""
+      return sectionLines
+        .slice(1)
+        .filter((line) => rolePattern.test(line))
+        .map((line) => ({ timestamp, line }))
+    })
 
-    const timestamp = sectionLines[0]
-    const interestingLines = sectionLines.filter(
-      (line) =>
-        line.startsWith("User:") ||
-        line.startsWith("Showrunner:") ||
-        line.startsWith("World Architect:") ||
-        line.startsWith("Author:") ||
-        line.startsWith("Editor:") ||
-        line.startsWith("Reviewer:") ||
-        line.startsWith("Prose Stylist:"),
-    )
-
-    const lines = [
-      timestamp ? `When: ${timestamp}` : null,
-      ...interestingLines.slice(0, 6),
-    ].filter((line): line is string => Boolean(line))
+    const recentEntries = entries.slice(-8)
+    const lines = recentEntries.flatMap((entry) => [
+      entry.timestamp ? `When: ${entry.timestamp}` : "",
+      entry.line,
+    ]).filter(Boolean)
 
     return lines.length > 0 ? lines : ["No discussion yet."]
   } catch {

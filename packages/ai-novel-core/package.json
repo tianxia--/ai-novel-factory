@@ -1,0 +1,50 @@
+{
+  "name": "ai-novel-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Core AI Novel Factory engine: workflow, agents, memory, graph, and runtime LLM services",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./server-core": {
+      "types": "./dist/server-core.d.ts",
+      "import": "./dist/server-core.js",
+      "require": "./dist/server-core.cjs"
+    },
+    "./studio-server": {
+      "types": "./dist/studio-server.d.ts",
+      "import": "./dist/studio-server.js",
+      "require": "./dist/studio-server.cjs"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "require": "./dist/worker.cjs"
+    },
+    "./embedding": {
+      "types": "./dist/embedding.d.ts",
+      "import": "./dist/embedding.js",
+      "require": "./dist/embedding.cjs"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge.d.ts",
+      "import": "./dist/knowledge.js",
+      "require": "./dist/knowledge.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/server-core.ts src/studio-server.ts src/worker.ts src/embedding.ts src/knowledge.ts src/writing-pipeline.ts src/novel-director.ts src/messages.ts --format esm,cjs --dts --clean",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

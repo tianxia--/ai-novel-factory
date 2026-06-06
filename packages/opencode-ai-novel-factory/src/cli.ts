@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 
 import {
-  advanceAutonomousProject,
+  executeManualAdvanceCommand,
+  executeManualInterruptCommand,
   formatStatus,
   getWorkspaceSummary,
   initAutonomousProject,
   loadAutonomousState,
   prepareCoverGeneration,
-  reviewInterruption,
   saveAutonomousState,
-} from "./orchestrator"
-import { runMultiAgentDiscussion } from "./discussion"
-import { routeUserMessage } from "./router"
-import { testProviderConnectivity } from "./runtime-llm"
+  runMultiAgentDiscussion,
+  routeUserMessage,
+  testProviderConnectivity,
+} from "ai-novel-core"
 import { runTui } from "./tui"
 
 function printHelp() {
@@ -98,7 +98,10 @@ async function run() {
     }
 
     case "advance": {
-      const state = await advanceAutonomousProject(rootDir)
+      const { state } = await executeManualAdvanceCommand(rootDir, {
+        source: "cli",
+        requestedBy: "cli:advance",
+      })
       console.log(`Stage: ${state.runtime.stage}`)
       console.log(`Status: ${state.runtime.statusMessage}`)
       return
@@ -145,7 +148,10 @@ async function run() {
       }
 
       if (route.type === "workflow_control") {
-        const nextState = await advanceAutonomousProject(rootDir)
+        const { state: nextState } = await executeManualAdvanceCommand(rootDir, {
+          source: "cli",
+          requestedBy: "cli:chat:workflow_control",
+        })
         nextState.runtime.lastRoute = "workflow_control"
         nextState.runtime.lastAction = "advanced workflow stage"
         await saveAutonomousState(rootDir, nextState)
@@ -155,14 +161,17 @@ async function run() {
       }
 
       if (route.type === "interruption_change") {
-        const review = await reviewInterruption({ rootDir, message })
-        const nextState = await loadAutonomousState(rootDir)
+        const { state: nextState } = await executeManualInterruptCommand(rootDir, message, {
+          source: "cli",
+          requestedBy: "cli:chat:interruption_change",
+        })
+        const review = nextState.runtime.lastInterruption
         nextState.runtime.lastRoute = "interruption_change"
         nextState.runtime.lastAction = "reviewed user change request"
         await saveAutonomousState(rootDir, nextState)
-        console.log(`Interruption scope: ${review.scope}`)
+        console.log(`Interruption scope: ${review?.scope || "unknown"}`)
         console.log(`Stage: ${nextState.runtime.stage}`)
-        console.log(`Action: ${review.recommendedAction}`)
+        console.log(`Action: ${review?.recommendedAction || nextState.runtime.statusMessage}`)
         return
       }
 
@@ -184,7 +193,11 @@ async function run() {
         throw new Error("`ai-novel interrupt` requires `--message`.")
       }
 
-      const review = await reviewInterruption({ rootDir, message })
+      const { state } = await executeManualInterruptCommand(rootDir, message, {
+        source: "cli",
+        requestedBy: "cli:interrupt",
+      })
+      const review = state.runtime.lastInterruption
       const stage = review.scope === "global" ? "replanning" : "in_progress"
 
       console.log(`Interruption scope: ${review.scope}`)

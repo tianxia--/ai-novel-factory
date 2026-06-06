@@ -1,0 +1,16 @@
+{
+  "name": "ai-novel-factory-workspace",
+  "private": true,
+  "scripts": {
+    "build:core": "npm --prefix packages/ai-novel-core run build",
+    "build:plugin": "npm --prefix packages/opencode-ai-novel-factory run build",
+    "build:server": "npm --prefix packages/ai-novel-server run build",
+    "build": "npm run build:core && npm run build:plugin && npm run build:server",
+    "server": "npm --prefix packages/ai-novel-server run dev",
+    "studio:web": "npm --prefix apps/desktop run dev",
+    "test:core": "npm --prefix packages/ai-novel-core test",
+    "test:plugin": "npm --prefix packages/opencode-ai-novel-factory test",
+    "test:server": "npm --prefix packages/ai-novel-server test",
+    "test": "npm run test:core && npm run test:plugin && npm run test:server"
+  }
+}

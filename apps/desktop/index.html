@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Novel Factory - 智能小说创作工坊</title>
-  <!-- Google Fonts: Outfit & Inter -->
+  <!-- Google Fonts: Noto Sans SC, Outfit & Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Stylesheet -->
@@ -18,35 +18,97 @@
     <div class="project-manager-shell">
       <div class="project-manager-hero">
         <div>
-          <span class="badge badge-primary"><i class="fa-solid fa-books"></i> Novel Projects</span>
+          <span class="project-manager-kicker"><span></span> Novel Projects</span>
           <h1>管理你的小说工坊</h1>
           <p>每一部小说都有独立的工作区、聊天记录、设定资产和自动编剧室闭环。先选项目，再进入创作台。</p>
         </div>
-        <button class="btn-send" id="open-project-create-button" type="button">
-          <i class="fa-solid fa-plus"></i> 新建小说项目
+        <button class="project-new-button" id="open-project-create-button" type="button">
+          <i class="fa-solid fa-plus"></i>
+          <span>新建小说项目</span>
         </button>
       </div>
 
       <div class="project-manager-grid">
-        <div class="project-manager-panel">
-          <div class="card-header">
-            <h3><i class="fa-solid fa-folder-tree"></i> 小说项目列表</h3>
-            <span class="badge badge-secondary" id="project-count-badge">0 个项目</span>
+        <aside class="project-manager-sidebar">
+          <div class="manager-side-panel">
+            <div class="manager-panel-title"><span></span> 全局 AI 配置</div>
+            <div class="manager-config-row">
+              <span>当前模型</span>
+              <strong id="manager-model-name"><i class="fa-solid fa-robot"></i> 待配置</strong>
+            </div>
+            <div class="manager-config-row">
+              <span>服务状态</span>
+              <strong class="manager-pill" id="manager-service-status">检测中</strong>
+            </div>
+            <div class="manager-config-row">
+              <span>API Key</span>
+              <strong class="manager-pill" id="manager-api-key-status">待配置</strong>
+            </div>
+            <div class="manager-config-row">
+              <span>自动保存</span>
+              <strong class="manager-pill">已开启</strong>
+            </div>
+            <button class="manager-soft-button" id="manager-provider-settings-button" type="button">
+              <i class="fa-solid fa-gear"></i>
+              <span>进入全局设置</span>
+            </button>
           </div>
-          <div class="project-list" id="project-list-container"></div>
-        </div>
 
-        <div class="project-manager-panel">
-          <div class="card-header">
-            <h3><i class="fa-solid fa-bolt"></i> 自动启动流程</h3>
+          <div class="manager-side-panel">
+            <div class="manager-panel-title"><span></span> 今日写作目标</div>
+            <div class="manager-goal-number">
+              <strong id="manager-goal-done">0</strong>
+              <span>/</span>
+              <em id="manager-goal-total">6,000 字</em>
+            </div>
+            <div class="manager-goal-bar">
+              <div id="manager-goal-fill"></div>
+            </div>
+            <div class="manager-goal-hint" id="manager-goal-hint">还差 6,000 字</div>
           </div>
-          <div class="project-manager-flow">
-            <div class="manager-flow-item"><span>1</span><p>输入书名 / 想法 / 总章数 / 单章字数</p></div>
-            <div class="manager-flow-item"><span>2</span><p>系统初始化独立工作区与设定资产</p></div>
-            <div class="manager-flow-item"><span>3</span><p>AI 自动发起首轮编剧室讨论并写回共识</p></div>
-            <div class="manager-flow-item"><span>4</span><p>进入项目专属创作台继续推进</p></div>
+
+          <div class="manager-side-panel">
+            <div class="manager-panel-title"><span></span> 最近动态</div>
+            <div class="manager-activity-list" id="manager-activity-list">
+              <div class="manager-activity-item">
+                <span></span>
+                <div>
+                  <p>等待项目创建或选择</p>
+                  <small>刚刚</small>
+                </div>
+              </div>
+            </div>
+            <button class="manager-link-button" type="button">查看全部动态 <i class="fa-solid fa-arrow-right"></i></button>
           </div>
-        </div>
+
+          <div class="manager-side-panel">
+            <div class="manager-panel-title"><span></span> 系统公告</div>
+            <div class="manager-announcement">
+              <strong><i class="fa-solid fa-circle-nodes"></i> 超级图工作流已接入</strong>
+              <p>讨论、共识、上下文、记忆与任务恢复会进入统一生产状态源。</p>
+            </div>
+            <div class="manager-announcement">
+              <strong><i class="fa-solid fa-lightbulb"></i> 小贴士</strong>
+              <p>无人值守任务会记录租约和进度，下次进入仍可恢复。</p>
+            </div>
+          </div>
+        </aside>
+
+        <main class="project-manager-main">
+          <div class="project-list-header">
+            <div class="project-list-title">
+              <span></span>
+              <h2>小说项目列表</h2>
+              <em id="project-count-badge">0 个项目</em>
+            </div>
+            <button class="project-sort-button" type="button">
+              <i class="fa-solid fa-arrow-down-wide-short"></i>
+              <span>按最近活跃</span>
+            </button>
+          </div>
+
+          <div class="project-list" id="project-list-container"></div>
+        </main>
       </div>
     </div>
   </section>
@@ -145,6 +207,22 @@
             </div>
           </div>
         </div>
+        <div class="workflow-automation-status is-idle" id="workflow-automation-status">
+          <div class="workflow-automation-title">
+            <i class="fa-regular fa-circle"></i>
+            <span>等待下一步</span>
+          </div>
+          <p>发送消息或启动无人值守流程后会更新。</p>
+        </div>
+        <div class="workflow-production-status" id="workflow-production-status">
+          <div class="workflow-production-grid">
+            <span>蓝图 <strong>0</strong></span>
+            <span>成稿 <strong>0</strong></span>
+            <span>质检 <strong>0</strong></span>
+            <span>记忆 <strong>0</strong></span>
+          </div>
+          <p>生产产物会从数据库快照同步。</p>
+        </div>
       </div>
 
       <!-- Story Memory -->
@@ -182,6 +260,10 @@
     <main class="chat-container">
       <!-- Chat Header -->
       <header class="chat-header">
+        <div class="network-status-banner is-online" id="network-status-banner" role="status" aria-live="polite">
+          <i class="fa-solid fa-wifi"></i>
+          <span>连接正常</span>
+        </div>
         <div class="stage-info">
           <div class="stage-title-row">
             <h2>工作流状态: <span id="current-stage-text">worldbuilding_dialogue</span></h2>
@@ -348,23 +430,40 @@
       <!-- Composer & Command Box -->
       <footer class="composer-container">
         <!-- Interactive quick command tag list -->
+        <div class="autopilot-controls" aria-label="自动创作控制">
+          <button class="btn-autopilot-control btn-autopilot-start" id="autopilot-start-button" type="button">
+            <i class="fa-solid fa-play"></i>
+            <span>开始创作</span>
+          </button>
+          <button class="btn-autopilot-control btn-autopilot-stop" id="autopilot-stop-button" type="button" disabled>
+            <i class="fa-solid fa-pause"></i>
+            <span>暂停并保留进度</span>
+          </button>
+          <span class="autopilot-control-hint" id="autopilot-control-hint">进入项目后手动开始自动创作</span>
+        </div>
         <div class="composer-suggestions">
           <span class="suggestion-label"><i class="fa-solid fa-terminal"></i> 快捷指令:</span>
           <button class="btn-command" onclick="insertCommand('/advance')"><code>/advance</code> (推进阶段)</button>
           <button class="btn-command" onclick="insertCommand('/cover')"><code>/cover</code> (生成封面)</button>
           <button class="btn-command" onclick="insertCommand('/provider-test')"><code>/provider-test</code> (连接测试)</button>
-          <button class="btn-command" onclick="insertCommand('/interrupt')"><code>/interrupt</code> (中断运行)</button>
+          <button class="btn-command" onclick="insertCommand('/stop')"><code>/stop</code> (暂停自动创作)</button>
+          <button class="btn-command" onclick="insertCommand('/interrupt')"><code>/interrupt</code> (介入修改)</button>
         </div>
 
         <div class="input-row">
           <!-- Text Input Area -->
           <div class="input-wrapper">
             <span class="prompt-arrow">&gt;</span>
-            <input type="text" id="composer-input" placeholder="输入对话内容或斜杠命令 / (例如 /advance)..." autocomplete="off">
+            <input type="text" id="composer-input" placeholder="输入消息与 agent 讨论；自动创作请点击开始按钮" autocomplete="off">
           </div>
           <button class="btn-send" id="send-button" title="发送消息">
             <i class="fa-solid fa-paper-plane"></i>
           </button>
+        </div>
+
+        <div class="composer-status is-idle" id="composer-status" role="status" aria-live="polite">
+          <i class="fa-regular fa-circle"></i>
+          <span>输入指令后会显示发送和处理状态</span>
         </div>
 
         <div class="composer-footer">
@@ -384,7 +483,7 @@
       <!-- Global Progress Bar -->
       <div class="global-progress-card">
         <div class="progress-info">
-          <span>总进度 (24章)</span>
+          <span id="progress-total-label">总进度</span>
           <span id="progress-percent">0 / 24 章</span>
         </div>
         <div class="progress-bar-container">
@@ -567,7 +666,7 @@
       <div class="modal-header">
         <div>
           <h3>新建小说项目</h3>
-          <p>填写初始化信息后，系统会自动建立独立工作区，并立刻启动第一轮编剧室讨论。</p>
+          <p>填写初始化信息后，系统会建立独立工作区；进入创作台后可手动开始自动创作。</p>
         </div>
         <button class="modal-close-button" id="project-create-modal-close-button" type="button" aria-label="关闭">
           <i class="fa-solid fa-xmark"></i>
@@ -594,14 +693,32 @@
 
         <div class="modal-status" id="project-create-modal-status">
           <i class="fa-solid fa-circle-info"></i>
-          <span>创建后会直接进入该项目，并自动执行首轮世界观/主线 kickoff 讨论。</span>
+          <span>创建后只初始化独立工作区；进入创作台后需要手动点击开始创作。</span>
         </div>
       </div>
 
       <div class="modal-footer">
         <button class="btn-send" id="project-create-submit-button" type="button">
-          <i class="fa-solid fa-wand-magic-sparkles"></i> 创建并启动
+          <i class="fa-solid fa-wand-magic-sparkles"></i> 创建项目
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="chapter-preview-modal">
+    <div class="modal-card chapter-preview-card">
+      <div class="modal-header">
+        <div>
+          <h3 id="chapter-preview-title">章节预览</h3>
+          <p id="chapter-preview-path">读取正式章节文件</p>
+        </div>
+        <button class="modal-close-button" id="chapter-preview-close-button" type="button" aria-label="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body chapter-preview-body" id="chapter-preview-body">
+        正在读取章节...
       </div>
     </div>
   </div>

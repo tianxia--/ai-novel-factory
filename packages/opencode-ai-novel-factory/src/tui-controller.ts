@@ -1,16 +1,16 @@
-import { upsertProjectEnvValues } from "./env-manager"
 import {
-  advanceAutonomousProject,
+  executeManualAdvanceCommand,
+  executeManualInterruptCommand,
   formatStatus,
   loadAutonomousState,
   prepareCoverGeneration,
-  reviewInterruption,
   saveAutonomousState,
-} from "./orchestrator"
-import { runMultiAgentDiscussion } from "./discussion"
-import { routeUserMessage } from "./router"
-import { testProviderConnectivity } from "./runtime-llm"
-import type { AutonomousNovelState } from "./cli-types"
+  runMultiAgentDiscussion,
+  routeUserMessage,
+  testProviderConnectivity,
+  upsertProjectEnvValues,
+} from "ai-novel-core"
+import type { AutonomousNovelState } from "ai-novel-core"
 
 export type ComposerAction =
   | { type: "chat"; message: string }
@@ -115,7 +115,10 @@ export async function executeComposerAction(
   options: ComposerExecutionOptions = {},
 ): Promise<ComposerActionResult> {
   if (action.type === "advance") {
-    const state = await advanceAutonomousProject(rootDir)
+    const { state } = await executeManualAdvanceCommand(rootDir, {
+      source: "tui",
+      requestedBy: "tui:/advance",
+    })
     state.runtime.lastRoute = "composer_advance"
     state.runtime.lastAction = "advanced workflow stage from composer"
     await saveAutonomousState(rootDir, state)
@@ -150,11 +153,10 @@ export async function executeComposerAction(
   }
 
   if (action.type === "interrupt") {
-    await reviewInterruption({
-      rootDir,
-      message: action.message,
+    const { state } = await executeManualInterruptCommand(rootDir, action.message, {
+      source: "tui",
+      requestedBy: "tui:/interrupt",
     })
-    const state = await loadAutonomousState(rootDir)
     state.runtime.lastRoute = "composer_interrupt"
     state.runtime.lastAction = "reviewed interruption from composer"
     await saveAutonomousState(rootDir, state)
@@ -203,7 +205,10 @@ export async function executeComposerAction(
   }
 
   if (route.type === "workflow_control") {
-    const nextState = await advanceAutonomousProject(rootDir)
+    const { state: nextState } = await executeManualAdvanceCommand(rootDir, {
+      source: "tui",
+      requestedBy: "tui:workflow_control",
+    })
     nextState.runtime.lastRoute = "workflow_control"
     nextState.runtime.lastAction = "advanced workflow stage"
     await saveAutonomousState(rootDir, nextState)
@@ -214,11 +219,10 @@ export async function executeComposerAction(
   }
 
   if (route.type === "interruption_change") {
-    await reviewInterruption({
-      rootDir,
-      message: action.message,
+    const { state: nextState } = await executeManualInterruptCommand(rootDir, action.message, {
+      source: "tui",
+      requestedBy: "tui:interruption_change",
     })
-    const nextState = await loadAutonomousState(rootDir)
     nextState.runtime.lastRoute = "interruption_change"
     nextState.runtime.lastAction = "reviewed user change request"
     await saveAutonomousState(rootDir, nextState)

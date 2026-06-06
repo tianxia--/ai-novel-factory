@@ -1,112 +1,152 @@
-# AI Novel Factory - 使用指南
+# AI Novel Factory - Production Guide
 
-这是一个完整的 AI 小说写作系统，可直接在 OpenCode 中使用。
+This project is now a production-style AI novel workflow system. The API server, worker, web/desktop client, CLI, and OpenCode plugin all use the same core engine and the same durable factory database.
 
-## 安装方式
+## Active Architecture
 
-### 🤖 AI 引导式完整安装（强烈推荐）
+- `packages/ai-novel-core`: state machine, factory DB, Director, LLM runtime, memory/RAG, Super Graph, writing pipeline, and worker logic.
+- `packages/ai-novel-server`: standalone HTTP/SSE API service and static web hosting.
+- `apps/desktop`: web/desktop client shell. It renders API snapshots only.
+- `packages/opencode-ai-novel-factory`: OpenCode plugin and CLI adapter.
+- `packages/ai-novel-core/resources/writing`: production writing guides, quality rules, and vocabulary resources.
 
-在 OpenCode 中说一句话：
-```
-请帮我安装和配置完整的 AI Novel Factory
-```
+The source of truth is `.ai-novel-factory/factory.sqlite`. Per-project `.ai-novel/` files are artifacts/cache, not independent workflow state.
 
-AI 将引导完成：
-1. ✅ 环境检查（Node.js/npm）
-2. ✅ 插件安装（npm）
-3. ✅ OpenCode 配置（opencode.json）
-4. ✅ 项目初始化（可选）
-5. ✅ 世界观创建（可选）
+## Current Production Commands
 
-### 🚀 完整安装脚本
+Build and test:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/ai-guided-complete-install.sh | bash
+rtk npm test
 ```
 
-### 📦 标准 npm 安装
+Run API/web:
 
 ```bash
-npm install -g opencode-ai-novel-factory
+rtk node packages/ai-novel-server/dist/index.js --root-dir . --static-dir apps/desktop --port 4311
 ```
 
-然后让 AI 助手自动配置：
-```
-请帮我配置 opencode.json 添加 opencode-ai-novel-factory 插件
-```
-
-### 🔧 单独配置脚本
+Run worker separately:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tianxia--/ai-novel-factory/main/setup-opencode.sh | bash
+rtk node packages/ai-novel-core/dist/worker.js --root-dir .
 ```
 
-### 📁 克隆仓库
+Local embedded-worker mode is allowed only for development:
 
 ```bash
-git clone https://github.com/tianxia--/ai-novel-factory.git studio
+rtk node packages/ai-novel-server/dist/index.js --root-dir . --static-dir apps/desktop --port 4311 --embedded-worker
 ```
 
-## 快速开始
+## OpenCode Plugin Tools
 
-### 🎯 AI 引导流程（推荐）
+Only production tools are active:
 
-1. **安装配置**：`请帮我安装和配置 AI Novel Factory`
-2. **项目初始化**：`请帮我初始化小说工厂项目`
-3. **创建设定**：`请帮我创建小说世界观设定`
-4. **开始写作**：`请帮我开始写小说`
+| Tool | Purpose |
+|------|---------|
+| `novel-init` | Create or report a managed production project. |
+| `novel-status` | Report production state from managed projects, DB, and artifacts. |
 
-### 📝 手动操作
+Removed legacy tools and flows must not be reintroduced as active workflow state. In particular, there is no root `studio/` workflow and no `@daily_pipeline` production skill.
 
-安装完成后，按顺序填写：
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
 
-1. **世界观** - `studio/story/world.md`
-2. **主线大纲** - `studio/story/master_outline.md`
-3. **主角设定** - `studio/characters/protagonist.md`
+This project is indexed by GitNexus as **ai-novel-factory** (2443 symbols, 5347 relationships, 210 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-然后开始创作：
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/ai-novel-factory/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/ai-novel-factory/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/ai-novel-factory/clusters` | All functional areas |
+| `gitnexus://repo/ai-novel-factory/processes` | All execution flows |
+| `gitnexus://repo/ai-novel-factory/process/{name}` | Step-by-step execution trace |
+
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope
+4. All d=1 (WILL BREAK) dependents were updated
+
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+npx gitnexus analyze
 ```
-@daily_pipeline
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+npx gitnexus analyze --embeddings
 ```
 
-## 可用命令
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
 
-| 命令 | 功能 |
-|------|------|
-| `@daily_pipeline` | 一键生成下一章 |
-| `@story_architect` | 创建世界观 |
-| `@volume_planner` | 生成分卷大纲 |
-| `@writer [章节]` | 写作指定章节 |
-| `@editor [章节]` | 质量检查 |
-| `@memory_keeper` | 更新记忆系统 |
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
 
-## 可用工具
+## CLI
 
-| 工具 | 功能 |
-|------|------|
-| `novel-init` | 初始化项目结构 |
-| `novel-chapter` | 生成新章节 |
-| `novel-status` | 查看项目状态 |
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
-## 🤖 AI 常用引导语
-
-### 安装配置
-- `请帮我安装和配置 AI Novel Factory`
-- `请帮我配置 opencode.json 添加插件`
-
-### 项目管理
-- `请帮我初始化小说工厂项目`
-- `请帮我检查项目状态`
-- `请帮我查看当前写到第几章了`
-
-### 创作流程
-- `请帮我创建小说世界观设定`
-- `请帮我制定故事大纲`
-- `请帮我设计主角角色`
-- `请帮我开始写小说`
-
-### 章节操作
-- `请帮我写下一章`
-- `请帮我检查第X章的质量`
-- `请帮我修改第X章的文风`
-- `请帮我更新记忆系统`
+<!-- gitnexus:end -->
