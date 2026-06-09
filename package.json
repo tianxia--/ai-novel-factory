@@ -12,5 +12,8 @@
     "test:plugin": "npm --prefix packages/opencode-ai-novel-factory test",
     "test:server": "npm --prefix packages/ai-novel-server test",
     "test": "npm run test:core && npm run test:plugin && npm run test:server"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.1.0"
   }
 }

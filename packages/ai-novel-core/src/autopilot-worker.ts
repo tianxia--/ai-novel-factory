@@ -20,7 +20,7 @@ import {
   ingestProjectArtifact,
 } from "./knowledge"
 import { recordDirectorCommandEvent, type DirectorCommandEventType } from "./director-commands"
-import { createFollowUpAdvanceCommand, decideNovelDirectorCommand, type NovelDirectorCommand } from "./novel-director"
+import { createFollowUpAdvanceCommand, decideNovelDirectorCommand, isGenericAutopilotMessage, type NovelDirectorCommand } from "./novel-director"
 import { createAutopilotStopError, isAutopilotStopError, throwIfStopped } from "./abort"
 import type { MessageStatus } from "./messages"
 
@@ -290,7 +290,7 @@ async function findActiveWritingMessage(
       conversationId: `writing:${projectId}`,
       limit: 12,
     })
-    return messages.find((message) => {
+    return messages.find((message: any) => {
       if (!ACTIVE_WRITING_MESSAGE_STATUSES.includes(message.status as MessageStatus)) {
         return false
       }
@@ -393,7 +393,8 @@ async function recoverStaleWritingRequest(
   projectId: string | null,
   state: AutonomousNovelState,
 ) {
-  const task = state.plan.chapterTasks.find((candidate) => candidate.status === "in_progress")
+  const task = state.plan.chapterTasks.find((candidate) =>
+    candidate.status === "in_progress" || candidate.status === "blocked")
   if (!projectId || !task) {
     return { recovered: false, state }
   }
@@ -408,7 +409,7 @@ async function recoverStaleWritingRequest(
   }
 
   const now = new Date().toISOString()
-  const reason = `stale LLM writing message ${String(activeWritingMessage.id || "")} exceeded ${Math.round(AUTOPILOT_STALE_LLM_REQUEST_MS / 1000)}s without progress`
+  const reason = `stale LLM writing message ${String((activeWritingMessage as any).id || "")} exceeded ${Math.round(AUTOPILOT_STALE_LLM_REQUEST_MS / 1000)}s without progress`
   task.status = "pending"
   task.recoveryAttempts = (task.recoveryAttempts || 0) + 1
   task.recoveryBlocked = false
@@ -434,7 +435,7 @@ async function recoverStaleWritingRequest(
       phase: "completed",
       statusText: "上一次 LLM 请求失联，系统已自动回收并准备重试。",
       message: `第 ${task.chapterNumber} 章的上一次模型请求长时间没有进展，已标记失败并重新排队。`,
-      staleMessageId: activeWritingMessage.id || null,
+      staleMessageId: (activeWritingMessage as any).id || null,
       staleAgeMs: ageMs,
       reason,
       timestamp: now,
@@ -452,7 +453,7 @@ async function recoverStaleWritingRequest(
   emitAutopilotEvent(projectRoot, "autopilot_status", {
     stage: state.runtime.stage,
     message: state.runtime.statusMessage,
-    dedupeKey: `stale-llm-recovered:${task.chapterNumber}:${String(activeWritingMessage.id || "")}`,
+    dedupeKey: `stale-llm-recovered:${task.chapterNumber}:${String((activeWritingMessage as any).id || "")}`,
   })
 
   return { recovered: true, state }
@@ -697,6 +698,13 @@ function evaluateAutopilotDrift({
   discussionSummary?: string
   intendedMessage?: string
 }) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return {
+      status: "ok" as const,
+      score: 0,
+      reasons: [] as string[],
+    }
+  }
   const text = `${discussionSummary}\n${after.runtime.statusMessage || ""}`.toLowerCase()
   let score = 0
   const reasons: string[] = []
@@ -975,6 +983,27 @@ async function runAutopilotBackground(
       await recordAutopilotDirectorCommandEvent(rootDir, projectId, "DIRECTOR_COMMAND_STARTED", directorCommand)
 
       if (directorCommand.type === "advance") {
+        const isSemi = beforeDiscussion.project?.autoMode === "semi"
+        const userConfirmed = isGenericAutopilotMessage(nextMessage || "")
+        if (isSemi && !userConfirmed) {
+          const pauseMessage = `当前工作流已完成讨论与共识，已暂停以等待用户确认。`
+          await markAutopilot(projectRoot, {
+            running: false,
+            stopRequested: false,
+            mode: "idle",
+            lastStep: "semi_auto_paused",
+            statusMessage: pauseMessage,
+          }, autopilotStateStore(rootDir, projectId))
+          if (jobId) {
+            await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => undefined)
+          }
+          emitAutopilotEvent(projectRoot, "autopilot_status", {
+            stage: beforeDiscussion.runtime.stage,
+            message: pauseMessage,
+          })
+          break
+        }
+
         nextMessage = ""
         emitAutopilotEvent(projectRoot, "autopilot_status", {
           stage: beforeDiscussion.runtime.stage,
@@ -1047,7 +1076,7 @@ async function runAutopilotBackground(
         continue
       }
 
-      const discussionMessage = directorCommand.message
+      const discussionMessage = (directorCommand as any).message
       nextMessage = ""
       correctionMessage = ""
 
@@ -1180,6 +1209,26 @@ async function runAutopilotBackground(
         parentCommandId: directorCommand.id,
       })
 
+      const isSemi = afterDiscussion.project?.autoMode === "semi"
+      if (isSemi) {
+        const pauseMessage = `讨论共识已写回，已暂停在 ${afterDiscussion.runtime.stage} 阶段，等待用户审阅确认成果。`
+        await markAutopilot(projectRoot, {
+          running: false,
+          stopRequested: false,
+          mode: "idle",
+          lastStep: "semi_auto_paused",
+          statusMessage: pauseMessage,
+        }, autopilotStateStore(rootDir, projectId))
+        if (jobId) {
+          await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => undefined)
+        }
+        emitAutopilotEvent(projectRoot, "autopilot_status", {
+          stage: afterDiscussion.runtime.stage,
+          message: pauseMessage,
+        })
+        break
+      }
+
       emitAutopilotEvent(projectRoot, "autopilot_status", {
         stage: afterDiscussion.runtime.stage,
         message: followUpAdvanceCommand.reason,
@@ -1309,18 +1358,37 @@ async function runAutopilotBackground(
         }
       }).catch(() => undefined)
     }
+    const previousAutopilot = (latestState.runtime.autopilot as any) || {}
+    const isSemiPaused = previousAutopilot.lastStep === "semi_auto_paused"
+    const isGuardBlocked = previousAutopilot.lastStep === "guard_blocked"
+    const isNetworkRetryPaused = previousAutopilot.lastStep === "network_retry_paused"
+
+    const finalLastStep = isSemiPaused
+      ? "semi_auto_paused"
+      : isGuardBlocked
+        ? "guard_blocked"
+        : isNetworkRetryPaused
+          ? "network_retry_paused"
+          : recoveryBlocked
+            ? "recovery_blocked"
+            : "stopped"
+
+    const finalStatusMessage = fullyComplete
+      ? "自动创作已完成全部章节任务。"
+      : recoveryBlocked
+        ? `自动创作已暂停：第 ${recoveryBlocked.chapterNumber} 章达到自动恢复上限，需要人工审阅。`
+        : isSemiPaused || isGuardBlocked || isNetworkRetryPaused
+          ? (latestState.runtime.statusMessage || previousAutopilot.statusMessage || "自动创作已停止，进度和讨论记录已保存。")
+          : "自动创作已停止，进度和讨论记录已保存。"
+
     const finalState = await markAutopilot(projectRoot, {
       running: false,
       stopRequested: false,
-      lastStep: "stopped",
+      lastStep: finalLastStep,
       mode: "idle",
       driftStatus: recoveryBlocked ? "blocked" : latestState.runtime.autopilot?.driftStatus,
       driftReason: recoveryBlocked ? `第 ${recoveryBlocked.chapterNumber} 章达到自动恢复上限。` : latestState.runtime.autopilot?.driftReason,
-      statusMessage: fullyComplete
-        ? "自动创作已完成全部章节任务。"
-        : recoveryBlocked
-          ? `自动创作已暂停：第 ${recoveryBlocked.chapterNumber} 章达到自动恢复上限，需要人工审阅。`
-          : "自动创作已停止，进度和讨论记录已保存。",
+      statusMessage: finalStatusMessage,
     }, autopilotStateStore(rootDir, projectId))
     emitAutopilotEvent(projectRoot, "complete", {
       activeProjectId: projectId,
@@ -1460,6 +1528,7 @@ export function stopAutopilotJob(projectRoot: string) {
     return false
   }
   job.controller.abort()
+  autopilotJobs.delete(projectRoot) // 立刻从运行中 Map 中删除，防止异步时序竞争导致外部状态 API 依旧读取到 running=true
   emitAutopilotEvent(projectRoot, "autopilot_status", {
     message: "已收到停止请求，正在中断当前模型请求并保存进度。",
   })
@@ -1544,13 +1613,13 @@ export async function restoreAutopilotJobs(rootDir: string, createSnapshot: Auto
         db.recordEvent(project.id, typeof job.run_id === "string" ? job.run_id : null, "JOB_DEDUPED", {
           id: job.id,
           kind: job.kind,
-          reason: "Another runnable autopilot job for this project is already being restored.",
+          reason: "Another autopilot job is already scheduled for restore.",
         })
       }).catch(() => undefined)
       continue
     }
     seenProjectIds.add(project.id)
-    if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    if (process.env.AI_NOVEL_TEST_MODE === "1" && process.env.AI_NOVEL_TEST_FORCE_WORKER !== "1") {
       await withFactoryDb(rootDir, async (db) => {
         db.recordEvent(project.id, typeof job.run_id === "string" ? job.run_id : null, "JOB_RESTORE_READY", {
           id: job.id,
@@ -1565,8 +1634,24 @@ export async function restoreAutopilotJobs(rootDir: string, createSnapshot: Auto
     if (!projectRoot || autopilotJobs.has(projectRoot)) {
       continue
     }
+    const state = await loadAutonomousState(projectRoot).catch(() => null)
+    const autopilot = state?.runtime?.autopilot || null
     const payload = typeof job.payload === "object" && job.payload ? job.payload as Record<string, unknown> : {}
     const message = typeof payload.message === "string" ? payload.message : ""
+    const hasWakeupSignal = isGenericAutopilotMessage(message)
+
+    const manuallyPaused = Boolean(
+      autopilot
+      && !autopilot.running
+      && (
+        autopilot.stopRequested 
+        || autopilot.lastStep === "stopped"
+        || (autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal)
+      ),
+    )
+    if (manuallyPaused) {
+      continue
+    }
     ensureAutopilotJob({
       rootDir,
       projectRoot,

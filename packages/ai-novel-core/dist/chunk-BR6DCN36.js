@@ -6,10 +6,10 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-5STCOAYV.js";
+} from "./chunk-YPZ72LHB.js";
 import {
   retrieveKnowledge
-} from "./chunk-SLEOECOV.js";
+} from "./chunk-AXLXISKJ.js";
 import {
   FactoryDb,
   createLocalTextEmbedding,
@@ -17,7 +17,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-LMBE7PPD.js";
+} from "./chunk-7ZCRCHQW.js";
 import {
   createAgentMessage
 } from "./chunk-GZKJNHMN.js";
@@ -1260,7 +1260,26 @@ async function produceChapterTask(rootDir, paths, state, task, pipelineOptions) 
       reason: "chapter_production_started"
     });
   }
-  const produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions);
+  let produced;
+  try {
+    produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions);
+  } catch (error) {
+    if (error.isProviderFailure) {
+      task.status = "pending";
+      state.runtime.statusMessage = `Provider error: ${error.message}`;
+      stampRuntimeProgress(state, `provider_failure:${task.chapterNumber}`);
+      await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+        await recordWorkflowEvent(pipelineOptions, "CHAPTER_TASK_STATUS_UPDATED", {
+          chapterNumber: task.chapterNumber,
+          status: "pending",
+          reason: `provider_failure: ${error.message}`
+        });
+      }
+    }
+    throw error;
+  }
   throwIfStopped(pipelineOptions.signal);
   task.status = produced.qualityGate.status === "blocked" ? "blocked" : "complete";
   task.qualityGate = {
@@ -1846,6 +1865,109 @@ function getWorkspaceSummary(rootDir) {
 // src/discussion.ts
 import fs4 from "fs/promises";
 import path4 from "path";
+
+// src/context-budget.ts
+var CONTEXT_BUDGET = {
+  // 各类 Agent 的总上下文上限
+  independent_total: 8e3,
+  // World Architect / Author / Prose Stylist（独立视角，不累积他人发言）
+  reviewer_total: 1e4,
+  // Editor / Reviewer（需要看前面专家的核心意见）
+  synthesis_total: 16e3,
+  // Showrunner closing_synthesis（需要综合所有专家输出）
+  opening_total: 8e3,
+  // Showrunner opening_brief（需要看上一次讨论结论）
+  // 各层独立上限
+  story_core: 2e3,
+  // Layer 1：小说核心（标题/主角/阶段/讨论目标）
+  role_specific: 4e3,
+  // Layer 3：角色专属内容（暂留给调用方控制）
+  history: {
+    independent: 0,
+    // 独立视角专家：不传历史（避免锚定效应）
+    reviewer: 1e3,
+    // Editor/Reviewer：只看 World Architect + Author 的核心发言
+    synthesis: 3e3,
+    // Showrunner 综合：所有专家发言的精华摘要
+    opening: 500
+    // Showrunner 开场：上一轮最终结论摘要
+  }
+};
+var NOISE_PATTERNS = [
+  /\[LLM\s+REQUEST/i,
+  /\[LLM\s+STREAM/i,
+  /请求已送达\s*LLM/,
+  /正在持续返回内容/,
+  /LLM\s+已开始响应/,
+  /LLM\s+返回完成/,
+  /Status:\s*(in_progress|running|completed|error)/i,
+  /step_\w+_(started|completed|streaming)/,
+  /知识库召回/,
+  /score:\s*[\d.]+/,
+  /phase:\s*\w+/,
+  /statusText:/,
+  /statusDetail:/,
+  /Agent.*消息会在模型返回/,
+  /请求已提交给\s*LLM/,
+  /等待模型开始响应/,
+  /返回内容会持续合并/
+];
+function filterCreativeHistory(transcript, maxChars) {
+  if (!transcript.trim() || maxChars <= 0) return "";
+  const filtered = transcript.split("\n").filter((line) => !NOISE_PATTERNS.some((p) => p.test(line))).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!filtered) return "";
+  if (filtered.length <= maxChars) return filtered;
+  return "\u2026[\u5386\u53F2\u5DF2\u622A\u65AD\uFF0C\u4FDD\u7559\u6700\u65B0\u5185\u5BB9]\n" + filtered.slice(filtered.length - maxChars);
+}
+function classifyAgent(agentId, discussionStage) {
+  if (agentId === "showrunner") {
+    return discussionStage === "closing_synthesis" ? "synthesis" : "opening";
+  }
+  if (agentId === "editor" || agentId === "reviewer") return "reviewer";
+  return "independent";
+}
+function buildHistoryForAgent(agentId, discussionStage, currentReplies, priorTranscript) {
+  const cls = classifyAgent(agentId, discussionStage);
+  const limit = CONTEXT_BUDGET.history[cls];
+  if (limit <= 0) return "";
+  if (cls === "opening") {
+    return filterCreativeHistory(priorTranscript, limit);
+  }
+  if (cls === "reviewer") {
+    const relevant = currentReplies.filter((r) => r.role === "World Architect" || r.role === "Author").map((r) => `### ${r.role}
+${r.content.slice(0, 450)}`).join("\n\n");
+    return relevant.slice(0, limit);
+  }
+  if (cls === "synthesis") {
+    const all = currentReplies.filter((r) => r.role !== "Showrunner").map((r) => `### ${r.role}
+${r.content.slice(0, 500)}`).join("\n\n");
+    return all.slice(0, limit);
+  }
+  return "";
+}
+function buildStoryCoreContext(state, sanitizedConsensus, target, userMessage) {
+  const bullets = sanitizedConsensus.split("\n").filter((line) => line.trim().startsWith("-")).slice(0, 8).join("\n");
+  const parts = [
+    `\u9879\u76EE\uFF1A${state.project.title}`,
+    `\u6838\u5FC3\u521B\u610F\uFF1A${state.project.idea}`,
+    `\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${state.runtime.stage}`,
+    `\u8BA1\u5212\u7AE0\u8282\u6570\uFF1A${state.plan.totalChapters}\uFF0C\u6BCF\u7AE0\u76EE\u6807\u5B57\u6570\uFF1A${state.plan.chapterWordTarget}`,
+    "",
+    `\u672C\u8F6E\u8BA8\u8BBA\u76EE\u6807\uFF1A${target.label}`,
+    `\u5199\u56DE\u8D44\u4EA7\u8DEF\u5F84\uFF1A${target.assetPath}`,
+    target.instruction ? `\u76EE\u6807\u6307\u4EE4\uFF1A${target.instruction}` : "",
+    "",
+    `\u7528\u6237\u5F53\u524D\u6D88\u606F\uFF1A${userMessage}`,
+    "",
+    bullets ? `\u6838\u5FC3\u5171\u8BC6\u8981\u70B9\uFF08\u6700\u591A 8 \u6761\uFF09\uFF1A
+${bullets}` : ""
+  ];
+  const text = parts.filter(Boolean).join("\n").trim();
+  if (text.length <= CONTEXT_BUDGET.story_core) return text;
+  return text.slice(0, CONTEXT_BUDGET.story_core) + "\n\u2026[\u6838\u5FC3\u5C42\u5DF2\u622A\u65AD]";
+}
+
+// src/discussion.ts
 var AGENT_FLOW = [
   { id: "showrunner", label: "Showrunner" },
   { id: "world-architect", label: "World Architect" },
@@ -2352,14 +2474,19 @@ ${state.project.idea}`,
     });
     let reply = "";
     try {
+      const storyCoreCtx = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message);
+      const historyCtx = buildHistoryForAgent(agent.id, discussionStage, replies, priorTranscript);
+      console.log(
+        `[CTX BUDGET] Agent: ${agent.label} | Stage: ${discussionStage} | StoryCore: ${storyCoreCtx.length}\u5B57 | History: ${historyCtx.length}\u5B57 | Base: ${basePrompt.length}\u5B57 | Dynamic: ${dynamicPrompt.length}\u5B57`
+      );
       reply = await generateAgentReply({
         roleName: agent.label,
         basePrompt,
         dynamicPrompt,
-        consensus: [autonomousContext, currentContextPacket, sanitizedConsensus].filter(Boolean).join("\n\n"),
+        consensus: storyCoreCtx,
         message,
         discussionStage,
-        priorTranscript: [clipText(priorTranscript, 8e3), transcriptContext.join("\n")].filter(Boolean).join("\n\n"),
+        priorTranscript: historyCtx,
         discussionTarget,
         preferredLanguage: "zh-CN",
         currentStage: state.runtime.stage,

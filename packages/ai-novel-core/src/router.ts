@@ -16,6 +16,7 @@ export function routeUserMessage(message: string, state: AutonomousNovelState): 
 
   if (
     normalized.includes("阶段") ||
+    normalized.includes("状态") ||
     normalized.includes("进度") ||
     normalized.includes("status") ||
     normalized.includes("现在进行到")

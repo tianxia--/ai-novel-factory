@@ -924,7 +924,26 @@ async function produceChapterTask(
       reason: "chapter_production_started",
     })
   }
-  const produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions)
+  let produced
+  try {
+    produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions)
+  } catch (error: any) {
+    if (error.isProviderFailure) {
+      task.status = "pending"
+      state.runtime.statusMessage = `Provider error: ${error.message}`
+      stampRuntimeProgress(state, `provider_failure:${task.chapterNumber}`)
+      await saveAutonomousState(rootDir, state)
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+        await recordWorkflowEvent(pipelineOptions, "CHAPTER_TASK_STATUS_UPDATED", {
+          chapterNumber: task.chapterNumber,
+          status: "pending",
+          reason: `provider_failure: ${error.message}`,
+        })
+      }
+    }
+    throw error
+  }
   throwIfStopped(pipelineOptions.signal)
   task.status = produced.qualityGate.status === "blocked" ? "blocked" : "complete"
   task.qualityGate = {

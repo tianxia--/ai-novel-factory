@@ -14,13 +14,27 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="dark-mode">
+  <!-- App Initialization Loading Mask -->
+  <div id="app-loading-mask" style="position:fixed;inset:0;background:#03050d;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.5s ease, visibility 0.5s;">
+    <div style="position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:24px;">
+      <div class="app-spinner" style="width:50px;height:50px;border:3px solid rgba(124,92,252,0.1);border-top-color:#7c5cfc;border-radius:50%;animation:app-spin 1.2s cubic-bezier(0.5,0,0.5,1) infinite;"></div>
+      <i class="fa-solid fa-wand-magic-sparkles" style="position:absolute;font-size:18px;color:#c084fc;animation:pulse-icon 2s ease-in-out infinite;"></i>
+    </div>
+    <div style="font-size:15px;color:#e2e8f0;letter-spacing:1px;font-weight:600;font-family:'Inter','Noto Sans SC',sans-serif;margin-bottom:8px;">AI Novel Factory</div>
+    <div style="font-size:12px;color:#64748b;font-family:'Inter','Noto Sans SC',sans-serif;letter-spacing:0.5px;" id="app-loading-status">正在同步小说工坊服务...</div>
+  </div>
+  <style>
+    @keyframes app-spin { to { transform: rotate(360deg); } }
+    @keyframes pulse-icon { 0%, 100% { opacity: 0.6; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.1); } }
+  </style>
+
   <section class="project-manager-view" id="project-manager-view">
     <div class="project-manager-shell">
       <div class="project-manager-hero">
         <div>
-          <span class="project-manager-kicker"><span></span> Novel Projects</span>
-          <h1>管理你的小说工坊</h1>
-          <p>每一部小说都有独立的工作区、聊天记录、设定资产和自动编剧室闭环。先选项目，再进入创作台。</p>
+          <span class="project-manager-kicker"><span></span> Novel Dashboard</span>
+          <h1>继续你的小说创作</h1>
+          <p>从这里进入每一本小说的创作指挥舱，查看进度、恢复长任务、处理章节与设定问题。</p>
         </div>
         <button class="project-new-button" id="open-project-create-button" type="button">
           <i class="fa-solid fa-plus"></i>
@@ -30,6 +44,14 @@
 
       <div class="project-manager-grid">
         <aside class="project-manager-sidebar">
+          <div class="manager-side-panel manager-continue-panel" id="manager-continue-panel">
+            <div class="manager-panel-title"><span></span> 继续创作</div>
+            <div class="manager-continue-empty">
+              <strong>还没有选中的小说</strong>
+              <p>选择一个项目后，这里会显示当前阶段、章节进度和可恢复任务。</p>
+            </div>
+          </div>
+
           <div class="manager-side-panel">
             <div class="manager-panel-title"><span></span> 全局 AI 配置</div>
             <div class="manager-config-row">
@@ -55,7 +77,7 @@
           </div>
 
           <div class="manager-side-panel">
-            <div class="manager-panel-title"><span></span> 今日写作目标</div>
+            <div class="manager-panel-title"><span></span> 当前小说产能</div>
             <div class="manager-goal-number">
               <strong id="manager-goal-done">0</strong>
               <span>/</span>
@@ -68,7 +90,7 @@
           </div>
 
           <div class="manager-side-panel">
-            <div class="manager-panel-title"><span></span> 最近动态</div>
+            <div class="manager-panel-title"><span></span> 待处理事项</div>
             <div class="manager-activity-list" id="manager-activity-list">
               <div class="manager-activity-item">
                 <span></span>
@@ -78,18 +100,17 @@
                 </div>
               </div>
             </div>
-            <button class="manager-link-button" type="button">查看全部动态 <i class="fa-solid fa-arrow-right"></i></button>
           </div>
 
           <div class="manager-side-panel">
-            <div class="manager-panel-title"><span></span> 系统公告</div>
+            <div class="manager-panel-title"><span></span> 创作增强</div>
             <div class="manager-announcement">
-              <strong><i class="fa-solid fa-circle-nodes"></i> 超级图工作流已接入</strong>
-              <p>讨论、共识、上下文、记忆与任务恢复会进入统一生产状态源。</p>
+              <strong><i class="fa-solid fa-book-open-reader"></i> 知识与记忆</strong>
+              <p>设定、资料、章节产物和质量结果会围绕小说项目沉淀。</p>
             </div>
             <div class="manager-announcement">
-              <strong><i class="fa-solid fa-lightbulb"></i> 小贴士</strong>
-              <p>无人值守任务会记录租约和进度，下次进入仍可恢复。</p>
+              <strong><i class="fa-solid fa-plug-circle-bolt"></i> MCP / Skill / Resource</strong>
+              <p>外接能力会作为创作过程里的工具调用展示，而不是替代小说工作流。</p>
             </div>
           </div>
         </aside>
@@ -120,6 +141,9 @@
       <!-- Logo / Header -->
       <div class="brand-header">
         <div class="logo-wrapper">
+          <button class="back-home-btn" id="back-to-projects-button" type="button" title="返回项目管理">
+            <i class="fa-solid fa-arrow-left"></i>
+          </button>
           <i class="fa-solid fa-wand-magic-sparkles logo-icon"></i>
           <div>
             <h1>AI Novel Factory</h1>
@@ -133,24 +157,29 @@
         <div class="card-header">
           <span class="badge badge-primary"><i class="fa-solid fa-book"></i> 当前项目</span>
         </div>
-        <h2 class="project-title" id="project-title-display">一个盲眼观星师在星噪中听见未来</h2>
+        <h2 class="project-title" id="project-title-display">等待选择小说项目</h2>
         <div class="project-meta-grid">
           <div class="meta-item">
             <span class="meta-label">目标章节</span>
-            <span class="meta-value">24 章</span>
+            <span class="meta-value">-- 章</span>
           </div>
           <div class="meta-item">
             <span class="meta-label">单章字数</span>
-            <span class="meta-value">2,500 字</span>
+            <span class="meta-value">-- 字</span>
           </div>
           <div class="meta-item">
             <span class="meta-label">封面状态</span>
-            <span class="meta-value text-warning" id="cover-status"><i class="fa-regular fa-clock"></i> 待生成 (Pending)</span>
+            <span class="meta-value text-warning" id="cover-status"><i class="fa-regular fa-clock"></i> 等待项目</span>
           </div>
           <div class="meta-item">
             <span class="meta-label">条漫状态</span>
-            <span class="meta-value text-warning" id="comic-status"><i class="fa-regular fa-clock"></i> 待生成 (Pending)</span>
+            <span class="meta-value text-warning" id="comic-status"><i class="fa-regular fa-clock"></i> 等待项目</span>
           </div>
+        </div>
+        <div class="project-actions">
+          <button class="btn-command" id="open-knowledge-graph-button" type="button" title="查看小说全景关系网">
+            <i class="fa-solid fa-diagram-project"></i> 知识图谱全景
+          </button>
         </div>
       </div>
 
@@ -158,61 +187,13 @@
       <div class="sidebar-card workflow-card">
         <div class="card-header">
           <h3><i class="fa-solid fa-route"></i> 创作工作流</h3>
-          <span class="stage-tag badge" id="stage-badge">世界观探讨</span>
+          <span class="stage-tag badge" id="stage-badge">等待状态</span>
         </div>
         <div class="workflow-stepper" id="workflow-stepper">
-          <div class="step-item completed">
-            <div class="step-indicator">
-              <i class="fa-solid fa-check"></i>
-            </div>
-            <div class="step-details">
-              <h4>故事构思 (Idea)</h4>
-              <p>概念确定与核发</p>
-            </div>
+          <div class="workflow-empty">
+            <i class="fa-solid fa-route"></i>
+            <span>等待数据库快照同步创作阶段。</span>
           </div>
-          <div class="step-item active" id="step-worldbuilding">
-            <div class="step-indicator">
-              <i class="fa-solid fa-comments"></i>
-            </div>
-            <div class="step-details">
-              <h4>世界观探讨 (Dialogue)</h4>
-              <p>多智能体ReAct协同论证</p>
-            </div>
-          </div>
-          <div class="step-item locked" id="step-chaptering">
-            <div class="step-indicator">
-              <i class="fa-solid fa-list-ol"></i>
-            </div>
-            <div class="step-details">
-              <h4>分章大纲 (Chaptering)</h4>
-              <p>精细化故事编排</p>
-            </div>
-          </div>
-          <div class="step-item locked" id="step-writing">
-            <div class="step-indicator">
-              <i class="fa-solid fa-pen-nib"></i>
-            </div>
-            <div class="step-details">
-              <h4>正文撰写 (Writing)</h4>
-              <p>内容生成与润色</p>
-            </div>
-          </div>
-          <div class="step-item locked" id="step-editing">
-            <div class="step-indicator">
-              <i class="fa-solid fa-wand-magic"></i>
-            </div>
-            <div class="step-details">
-              <h4>审校编辑 (Editing)</h4>
-              <p>多维度内容修正</p>
-            </div>
-          </div>
-        </div>
-        <div class="workflow-automation-status is-idle" id="workflow-automation-status">
-          <div class="workflow-automation-title">
-            <i class="fa-regular fa-circle"></i>
-            <span>等待下一步</span>
-          </div>
-          <p>发送消息或启动无人值守流程后会更新。</p>
         </div>
         <div class="workflow-production-status" id="workflow-production-status">
           <div class="workflow-production-grid">
@@ -222,6 +203,13 @@
             <span>记忆 <strong>0</strong></span>
           </div>
           <p>生产产物会从数据库快照同步。</p>
+        </div>
+        <div class="workflow-automation-status" id="workflow-automation-status">
+          <div class="workflow-automation-title">
+            <i class="fa-solid fa-robot"></i>
+            <span>自动创作状态</span>
+          </div>
+          <p>等待快照同步。</p>
         </div>
       </div>
 
@@ -233,23 +221,12 @@
         <div class="memory-content" id="story-memory-content">
           <div class="memory-section">
             <span class="memory-title"><i class="fa-solid fa-lightbulb"></i> 核心Idea</span>
-            <p class="memory-text">一个盲眼观星师在宇宙背景辐射的星噪中，听到了未来的回响，并试图在危机降临前警告世人。</p>
+            <p class="memory-text">等待项目状态同步。</p>
           </div>
           <div class="memory-section">
             <span class="memory-title"><i class="fa-solid fa-circle-question"></i> 世界观待决问题 (Open Questions)</span>
             <ul class="question-list">
-              <li>
-                <span class="q-num">Q1</span>
-                <span class="q-text">结局应该传递怎样的情感回报 (Emotional Payoff)？</span>
-              </li>
-              <li>
-                <span class="q-num">Q2</span>
-                <span class="q-text">在这个世界观中，什么事情是绝对不能发生的？</span>
-              </li>
-              <li>
-                <span class="q-num">Q3</span>
-                <span class="q-text">为什么主角是唯一适合承担主要矛盾冲突的人？</span>
-              </li>
+              <li><span class="q-text">进入项目后会显示真实待决问题。</span></li>
             </ul>
           </div>
         </div>
@@ -266,15 +243,12 @@
         </div>
         <div class="stage-info">
           <div class="stage-title-row">
-            <h2>工作流状态: <span id="current-stage-text">worldbuilding_dialogue</span></h2>
+            <h2>创作指挥舱: <span id="current-stage-text">等待快照</span></h2>
             <span class="pulse-indicator"></span>
           </div>
-          <p class="stage-desc" id="current-stage-desc">正通过多智能体 ReAct 讨论阶段收集并论证世界观设定。</p>
+          <p class="stage-desc" id="current-stage-desc">等待数据库快照同步创作阶段。</p>
         </div>
         <div class="system-controls">
-          <button class="btn-command" id="back-to-projects-button" type="button">
-            <i class="fa-solid fa-grid-2"></i> 项目管理
-          </button>
           <!-- Connection / Provider Status -->
         <div class="provider-status-card" id="provider-card" title="点击测试模型连接">
           <div class="provider-icon">
@@ -282,11 +256,11 @@
           </div>
           <div class="provider-details">
               <div class="provider-row">
-                <span class="provider-name">Model: Gemma-4-31b-it</span>
-                <span class="provider-badge">已配置</span>
+                <span class="provider-name">Model: waiting</span>
+                <span class="provider-badge">待同步</span>
               </div>
               <div class="provider-row sub-row">
-                <span class="provider-test-status" id="conn-status-text"><i class="fa-solid fa-circle-check text-success"></i> 联调成功 @ 10:40:20</span>
+                <span class="provider-test-status" id="conn-status-text"><i class="fa-regular fa-clock text-warning"></i> 等待 provider 状态同步</span>
               </div>
             </div>
             <button class="btn-command provider-edit-button" id="provider-edit-button" type="button">编辑配置</button>
@@ -300,161 +274,60 @@
           <p>当当前目录还没有 `.ai-novel` 工作区时，可以先在这里输入小说想法并创建完整项目状态。</p>
         </div>
         <div class="init-panel-form">
-          <input type="text" id="init-idea-input" placeholder="输入一句小说想法，例如：一个盲眼观星师在星噪中听见未来">
+          <input type="text" id="init-idea-input" placeholder="输入一句小说想法">
           <input type="number" id="init-chapters-input" value="24" min="1">
           <input type="number" id="init-words-input" value="2500" min="2500">
-          <button class="btn-send" id="init-button" type="button">初始化项目</button>
+          <button class="btn-primary" id="init-button" type="button">初始化项目</button>
         </div>
       </section>
 
       <!-- Chat Messages Area -->
-      <div class="chat-messages" id="chat-messages-box">
-        <!-- System Date Banner -->
-        <div class="system-time-divider">
-          <span>讨论启动于 2026-06-02 10:42:19</span>
-        </div>
-
-        <!-- Chat Bubble: User -->
-        <div class="message-wrapper user-message">
-          <div class="message-avatar user">
-            <i class="fa-solid fa-user-astronaut"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">你 (创作导演)</span>
-              <span class="message-time">10:42:19</span>
-            </div>
-            <div class="message-bubble">
-              你好
-            </div>
-          </div>
-        </div>
-
-        <!-- Chat Bubble: Showrunner -->
-        <div class="message-wrapper agent-message" data-agent="showrunner">
-          <div class="message-avatar showrunner">
-            <i class="fa-solid fa-clapperboard"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">Showrunner (执行制片)</span>
-              <span class="agent-badge showrunner-badge">编排中心</span>
-              <span class="message-time">10:42:20</span>
-            </div>
-            <div class="message-bubble">
-              你好！<strong>Showrunner</strong> 已就位。我将协调各智能体，为您的小说创作工作流提供全方位的统筹支持。
-            </div>
-          </div>
-        </div>
-
-        <!-- Chat Bubble: World Architect -->
-        <div class="message-wrapper agent-message" data-agent="worldbuilder">
-          <div class="message-avatar worldbuilder">
-            <i class="fa-solid fa-earth-asia"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">World Architect (世界观架构师)</span>
-              <span class="agent-badge worldbuilder-badge">世界设定</span>
-              <span class="message-time">10:42:21</span>
-            </div>
-            <div class="message-bubble">
-              你好！<strong>World Architect</strong> 报到。已加载星际电波、宇宙星噪以及盲眼观星师的核心设定。我已准备好完善庞大的世界观基石。
-            </div>
-          </div>
-        </div>
-
-        <!-- Chat Bubble: Author -->
-        <div class="message-wrapper agent-message" data-agent="author">
-          <div class="message-avatar author">
-            <i class="fa-solid fa-feather-pointed"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">Author (小说主笔)</span>
-              <span class="agent-badge author-badge">文本生成</span>
-              <span class="message-time">10:42:22</span>
-            </div>
-            <div class="message-bubble">
-              你好！看来我们已经完成了系统联调，<strong>Showrunner</strong> 与各协作环节已准备就绪。我期待把那些寂静星空下的低语化作优美的文字。
-            </div>
-          </div>
-        </div>
-
-        <!-- Chat Bubble: Editor -->
-        <div class="message-wrapper agent-message" data-agent="editor">
-          <div class="message-avatar editor">
-            <i class="fa-solid fa-file-pen"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">Editor (责任编辑)</span>
-              <span class="agent-badge editor-badge">审校润色</span>
-              <span class="message-time">10:42:23</span>
-            </div>
-            <div class="message-bubble">
-              你好！看来我们已经完成了系统层面的“联调”，现在我已经准备好进入 <strong>Showrunner (执行制片/主创)</strong> 辅助与内容把关的角色，为故事的叙事节奏、文学张力进行高标准评估。
-            </div>
-          </div>
-        </div>
-
-        <!-- Chat Bubble: Reviewer -->
-        <div class="message-wrapper agent-message" data-agent="reviewer">
-          <div class="message-avatar reviewer">
-            <i class="fa-solid fa-magnifying-glass-chart"></i>
-          </div>
-          <div class="message-content-area">
-            <div class="message-info">
-              <span class="sender-name">Reviewer (评审专家)</span>
-              <span class="agent-badge reviewer-badge">质量评估</span>
-              <span class="message-time">10:42:24</span>
-            </div>
-            <div class="message-bubble">
-              你好！我是你的 <strong>Reviewer</strong>。我会严格审查生成情节中的逻辑自洽性、世界观法则冲突，并在每个关键节点给出审核评估。
-            </div>
-          </div>
-        </div>
-
-        <!-- System Message / Log -->
-        <div class="system-log-message">
-          <i class="fa-solid fa-circle-info"></i>
-          <span class="log-text">智能体共识：既然我们已经完成了系统联调，且当前已达成 `Global Consensus`（全局共识）。</span>
-        </div>
-
-        <div class="system-log-message success">
-          <i class="fa-solid fa-circle-check"></i>
-          <span class="log-text">联调状态完毕：Showrunner 协调就绪，随时可输入指令以推进下一阶段。</span>
-        </div>
+        <div class="chat-messages" id="chat-messages-box">
+          <div data-discussion-context-region="true"></div>
+          <div data-discussion-history-region="true"></div>
+          <div data-discussion-empty-region="true"></div>
+          <div data-discussion-static-region="true"></div>
+          <div data-discussion-result-region="true"></div>
+          <div data-live-region="true"></div>
+          <div data-cocreate-review-region="true" class="hidden"></div>
       </div>
+
+      <!-- Scroll to Bottom Floating Button -->
+      <button class="btn-scroll-bottom hidden" id="btn-scroll-bottom" type="button">
+        <i class="fa-solid fa-arrow-down"></i>
+        <span>回到底部</span>
+      </button>
 
       <!-- Composer & Command Box -->
       <footer class="composer-container">
         <!-- Interactive quick command tag list -->
         <div class="autopilot-controls" aria-label="自动创作控制">
+          <button class="btn-autopilot-control btn-autopilot-mode" id="autopilot-mode-button" type="button" title="点击切换全自动托管/半自动共创" disabled>
+            <i class="fa-solid fa-robot"></i>
+            <span>全自动托管</span>
+          </button>
           <button class="btn-autopilot-control btn-autopilot-start" id="autopilot-start-button" type="button">
             <i class="fa-solid fa-play"></i>
             <span>开始创作</span>
           </button>
-          <button class="btn-autopilot-control btn-autopilot-stop" id="autopilot-stop-button" type="button" disabled>
+          <button class="btn-autopilot-control btn-autopilot-stop" id="autopilot-stop-button" data-composer-action="stop" type="button" disabled>
             <i class="fa-solid fa-pause"></i>
             <span>暂停并保留进度</span>
           </button>
           <span class="autopilot-control-hint" id="autopilot-control-hint">进入项目后手动开始自动创作</span>
         </div>
         <div class="composer-suggestions">
-          <span class="suggestion-label"><i class="fa-solid fa-terminal"></i> 快捷指令:</span>
-          <button class="btn-command" onclick="insertCommand('/advance')"><code>/advance</code> (推进阶段)</button>
-          <button class="btn-command" onclick="insertCommand('/cover')"><code>/cover</code> (生成封面)</button>
-          <button class="btn-command" onclick="insertCommand('/provider-test')"><code>/provider-test</code> (连接测试)</button>
-          <button class="btn-command" onclick="insertCommand('/stop')"><code>/stop</code> (暂停自动创作)</button>
-          <button class="btn-command" onclick="insertCommand('/interrupt')"><code>/interrupt</code> (介入修改)</button>
+          <span class="suggestion-label"><i class="fa-solid fa-wand-magic-sparkles"></i> 创作动作:</span>
+          <button class="btn-command" data-composer-action="advance" title="/advance"><i class="fa-solid fa-forward-step"></i> 推进阶段</button>
+          <button class="btn-command" data-composer-action="interrupt" title="/interrupt"><i class="fa-solid fa-hand"></i> 介入修改</button>
+          <button class="btn-command" data-composer-action="cover" title="/cover"><i class="fa-solid fa-image"></i> 生成封面</button>
         </div>
 
         <div class="input-row">
           <!-- Text Input Area -->
           <div class="input-wrapper">
             <span class="prompt-arrow">&gt;</span>
-            <input type="text" id="composer-input" placeholder="输入消息与 agent 讨论；自动创作请点击开始按钮" autocomplete="off">
+            <input type="text" id="composer-input" placeholder="和 Director 讨论设定、章节、资料或重写要求；自动创作用上方按钮控制" autocomplete="off">
           </div>
           <button class="btn-send" id="send-button" title="发送消息">
             <i class="fa-solid fa-paper-plane"></i>
@@ -467,196 +340,177 @@
         </div>
 
         <div class="composer-footer">
-          <span>快捷键: <kbd>Enter</kbd> 发送 | <kbd>Ctrl + C</kbd> 中断/清空输入</span>
-          <span class="connection-pill"><i class="fa-solid fa-wifi text-success"></i> 服务可用: 1个活跃模型</span>
+          <span>输入会进入当前小说项目的可追踪讨论流；状态事实仍以数据库快照为准。</span>
+          <span class="connection-pill"><i class="fa-solid fa-wifi text-success"></i> 服务可用</span>
         </div>
       </footer>
     </main>
 
     <!-- RIGHT PANEL: Chapter Tasks -->
     <aside class="sidebar-right" id="sidebar-right">
-      <div class="card-header border-bottom">
-        <h3><i class="fa-solid fa-list-check"></i> 章节写作任务</h3>
-        <span class="badge badge-secondary" id="total-progress-badge">0% 已完成</span>
-      </div>
-
-      <!-- Global Progress Bar -->
-      <div class="global-progress-card">
-        <div class="progress-info">
-          <span id="progress-total-label">总进度</span>
-          <span id="progress-percent">0 / 24 章</span>
+      <div class="card-header border-bottom sidebar-right-titlebar">
+        <div>
+          <h3><i class="fa-solid fa-list-check"></i> 正式章节任务</h3>
+          <p class="sidebar-right-subtitle">右侧模块可单独展开，便于聚焦章节任务。</p>
         </div>
-        <div class="progress-bar-container">
-          <div class="progress-bar-fill" id="global-progress-fill" style="width: 0%;"></div>
+        <div class="sidebar-right-actions">
+          <span class="badge badge-secondary" id="total-progress-badge">0% 已完成</span>
+          <button class="btn-command sidebar-focus-button" id="chapter-focus-toggle-button" type="button">
+            <i class="fa-solid fa-expand"></i> 聚焦章节
+          </button>
         </div>
       </div>
 
-      <!-- Task Lists -->
-      <div class="chapter-tasks-list" id="chapter-list-container">
-        <!-- Chapter 1 -->
-        <div class="chapter-task-item active" id="chap-1">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#1</span>
-            <span class="chapter-title">第 1 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
+      <section class="sidebar-module is-expanded" data-panel-module="overview">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="overview" aria-expanded="true">
+          <span><i class="fa-solid fa-chart-line"></i> 章节总览</span>
+          <div class="sidebar-module-meta">
+            <small id="overview-panel-summary">等待同步</small>
+            <i class="fa-solid fa-chevron-down"></i>
           </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(1)"><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-1" style="width: 0%"></div>
-          </div>
-        </div>
-
-        <!-- Chapter 2 -->
-        <div class="chapter-task-item" id="chap-2">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#2</span>
-            <span class="chapter-title">第 2 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
-          </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(2)" disabled><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-2" style="width: 0%"></div>
+        </button>
+        <div class="sidebar-module-body">
+          <div class="global-progress-card">
+            <div class="progress-info">
+              <span id="progress-total-label">总进度</span>
+              <span id="progress-percent">0 / 0 章</span>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="global-progress-fill" style="width: 0%;"></div>
+            </div>
           </div>
         </div>
+      </section>
 
-        <!-- Chapter 3 -->
-        <div class="chapter-task-item" id="chap-3">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#3</span>
-            <span class="chapter-title">第 3 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
+      <section class="sidebar-module is-expanded" data-panel-module="chapters">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="chapters" aria-expanded="true">
+          <span><i class="fa-solid fa-book-open-reader"></i> 正式章节任务</span>
+          <div class="sidebar-module-meta">
+            <small id="chapter-panel-summary">等待同步</small>
+            <i class="fa-solid fa-chevron-down"></i>
           </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(3)" disabled><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-3" style="width: 0%"></div>
+        </button>
+        <div class="sidebar-module-body sidebar-module-body-chapters">
+          <div class="chapter-tasks-list" id="chapter-list-container">
+            <div class="chapter-list-empty">
+              <i class="fa-solid fa-list-check"></i>
+              <span>等待数据库快照同步章节任务。</span>
+            </div>
           </div>
         </div>
+      </section>
 
-        <!-- Chapter 4 -->
-        <div class="chapter-task-item" id="chap-4">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#4</span>
-            <span class="chapter-title">第 4 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
+      <section class="sidebar-module" data-panel-module="observability">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="observability" aria-expanded="false">
+          <span><i class="fa-solid fa-tower-observation"></i> 创作过程观察</span>
+          <div class="sidebar-module-meta">
+            <small id="observability-panel-summary">等待同步</small>
+            <i class="fa-solid fa-chevron-down"></i>
           </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(4)" disabled><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-4" style="width: 0%"></div>
-          </div>
+        </button>
+        <div class="sidebar-module-body">
+          <section class="creation-observability-panel" id="creation-observability-panel" aria-label="创作过程观察">
+            <div class="panel-header">
+              <span><i class="fa-solid fa-tower-observation"></i> 创作过程观察</span>
+              <span class="observability-source">DB Snapshot</span>
+            </div>
+            <div class="observability-summary-grid">
+              <span><strong>0</strong><small>运行任务</small></span>
+              <span><strong>0</strong><small>可恢复</small></span>
+              <span><strong>0</strong><small>工具调用</small></span>
+            </div>
+            <div class="observability-empty">进入项目后，这里会显示 worker、工具调用和最近事件。</div>
+          </section>
         </div>
+      </section>
 
-        <!-- Chapter 5 -->
-        <div class="chapter-task-item" id="chap-5">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#5</span>
-            <span class="chapter-title">第 5 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
-          </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(5)" disabled><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-5" style="width: 0%"></div>
-          </div>
-        </div>
-
-        <!-- Chapter 6 -->
-        <div class="chapter-task-item" id="chap-6">
-          <div class="chapter-info-row">
-            <span class="chapter-num">#6</span>
-            <span class="chapter-title">第 6 章</span>
-            <span class="chapter-status-badge badge-pending">待完成</span>
-          </div>
-          <div class="chapter-details-row">
-            <span class="word-target"><i class="fa-solid fa-file-word"></i> 2500 字</span>
-            <span class="actions">
-              <button class="btn-action" title="开始写作" onclick="simulateWrite(6)" disabled><i class="fa-solid fa-play"></i></button>
-            </span>
-          </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" id="progress-chap-6" style="width: 0%"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Quick Action System Panel -->
-      <div class="system-logs-panel">
-        <div class="panel-header">
+      <section class="sidebar-module" data-panel-module="logs">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="logs" aria-expanded="false">
           <span><i class="fa-solid fa-microchip"></i> 运行环境日志</span>
-          <span class="status-dot green"></span>
+          <div class="sidebar-module-meta">
+            <small id="logs-panel-summary">等待日志</small>
+            <i class="fa-solid fa-chevron-down"></i>
+          </div>
+        </button>
+        <div class="sidebar-module-body">
+          <div class="system-logs-panel">
+            <div class="panel-header">
+              <span><i class="fa-solid fa-microchip"></i> 运行环境日志</span>
+              <span class="status-dot green"></span>
+            </div>
+            <div class="console-logs" id="console-logs-box">
+              <div class="log-empty">等待创作运行日志。</div>
+            </div>
+          </div>
         </div>
-        <div class="console-logs" id="console-logs-box">
-          <div class="log-line">[10:40:15] Initialize agent ecosystem...</div>
-          <div class="log-line">[10:40:18] Loaded provider configuration successfully.</div>
-          <div class="log-line">[10:40:20] Model test gemma-4-31b-it: latency 184ms, OK.</div>
-          <div class="log-line">[10:42:19] Discussion session #103 started.</div>
-        </div>
-      </div>
+      </section>
     </aside>
   </div>
 
   <div class="modal-backdrop hidden" id="provider-config-modal">
-    <div class="modal-card">
+    <div class="modal-card llm-config-card">
       <div class="modal-header">
         <div>
-          <h3>配置模型提供商</h3>
-          <p>直接填写模型地址、API Key 和模型名。可以先测试，再决定是否保存到当前目录的 `.env`。</p>
+          <h3>大模型配置中心</h3>
+          <p>添加和切换不同的大模型配置。选中的激活模型将被用于当前小说的讨论与创作。</p>
         </div>
         <button class="modal-close-button" id="provider-modal-close-button" type="button" aria-label="关闭">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
 
-      <div class="modal-body">
-        <label class="modal-field">
-          <span>LLM_BASE_URL</span>
-          <input type="text" id="provider-base-url-input" placeholder="https://example.com/v1">
-        </label>
-        <label class="modal-field">
-          <span>LLM_API_KEY</span>
-          <input type="password" id="provider-api-key-input" placeholder="sk-...">
-        </label>
-        <label class="modal-field">
-          <span>LLM_MODEL_ID</span>
-          <input type="text" id="provider-model-input" placeholder="/model/gemma-4-31b-it">
-        </label>
+      <div class="modal-body llm-config-layout">
+        <!-- 左侧：模型配置列表 -->
+        <div class="llm-configs-list-pane">
+          <h4>已保存的模型配置</h4>
+          <div class="llm-configs-list" id="llm-configs-list">
+            <!-- 动态渲染 -->
+          </div>
+        </div>
 
-        <div class="modal-status" id="provider-modal-status">
-          <i class="fa-solid fa-circle-info"></i>
-          <span>填写后可先测试连接，再保存配置。</span>
+        <!-- 右侧：添加/编辑表单 -->
+        <div class="llm-config-form-pane">
+          <h4 id="llm-form-title">添加模型配置</h4>
+          <input type="hidden" id="llm-config-id-input">
+          
+          <label class="modal-field">
+            <span>配置名称</span>
+            <input type="text" id="llm-config-name-input" placeholder="例如: Zhipu-Turbo, DeepSeek-V3">
+          </label>
+          <label class="modal-field">
+            <span>LLM_BASE_URL</span>
+            <input type="text" id="provider-base-url-input" placeholder="https://api.openai.com/v1">
+          </label>
+          <label class="modal-field">
+            <span>LLM_API_KEY</span>
+            <input type="password" id="provider-api-key-input" placeholder="sk-...">
+          </label>
+          <label class="modal-field">
+            <span>LLM_MODEL_ID</span>
+            <input type="text" id="provider-model-input" placeholder="gpt-4o">
+          </label>
+
+          <div class="modal-status" id="provider-modal-status">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>填写后可先测试连接，再保存。</span>
+          </div>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn-command" id="provider-test-button" type="button">
-          <i class="fa-solid fa-plug-circle-check"></i> 测试连接
-        </button>
-        <button class="btn-send" id="provider-save-button" type="button">
-          <i class="fa-solid fa-floppy-disk"></i> 保存配置
-        </button>
+        <div class="modal-footer-left">
+          <button class="btn-secondary" id="provider-test-button" type="button">
+            <i class="fa-solid fa-plug-circle-check"></i> 测试连接
+          </button>
+        </div>
+        <div class="modal-footer-right">
+          <button class="btn-secondary hidden" id="llm-config-cancel-edit-button" type="button">
+            取消编辑
+          </button>
+          <button class="btn-primary" id="provider-save-button" type="button">
+            <i class="fa-solid fa-floppy-disk"></i> 保存配置
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -676,7 +530,7 @@
       <div class="modal-body">
         <label class="modal-field">
           <span>项目标题（可选）</span>
-          <input type="text" id="project-create-title-input" placeholder="例如：仙侠小时候">
+          <input type="text" id="project-create-title-input" placeholder="输入项目标题">
         </label>
         <label class="modal-field">
           <span>小说想法</span>
@@ -698,7 +552,7 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn-send" id="project-create-submit-button" type="button">
+        <button class="btn-primary" id="project-create-submit-button" type="button">
           <i class="fa-solid fa-wand-magic-sparkles"></i> 创建项目
         </button>
       </div>
@@ -719,6 +573,34 @@
 
       <div class="modal-body chapter-preview-body" id="chapter-preview-body">
         正在读取章节...
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-primary" id="chapter-copy-button" type="button" disabled>
+          <i class="fa-regular fa-copy"></i> <span>复制全文</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knowledge Graph Modal -->
+  <div class="modal-backdrop hidden kg-modal-backdrop" id="knowledge-graph-modal">
+    <div class="kg-modal-card">
+      <div class="kg-modal-header">
+        <div class="kg-modal-title">
+          <i class="fa-solid fa-diagram-project"></i>
+          <span>知识图谱</span>
+          <em id="kg-modal-project-name"></em>
+        </div>
+        <div class="kg-modal-actions">
+          <span class="kg-hint"><i class="fa-solid fa-circle-info"></i> 点击节点查看详情 · 滚轮缩放 · 拖拽移动</span>
+          <button class="modal-close-button" id="knowledge-graph-modal-close" type="button" aria-label="关闭">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      <div class="kg-modal-body">
+        <iframe id="knowledge-graph-iframe" src="" frameborder="0" allowfullscreen style="background-color: #03050d; color-scheme: dark;"></iframe>
       </div>
     </div>
   </div>

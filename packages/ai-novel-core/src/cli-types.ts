@@ -81,6 +81,7 @@ export interface AutopilotRuntime {
   driftReason?: string | null
   checkpointPath?: string | null
   loopCount?: number
+  statusMessage?: string
 }
 
 export interface AutonomousNovelState {
@@ -89,6 +90,7 @@ export interface AutonomousNovelState {
     idea: string
     createdAt: string
     workspaceVersion: number
+    autoMode?: "full" | "semi"
   }
   runtime: {
     stage: NovelStage
@@ -147,4 +149,19 @@ export interface NovelProjectRecord {
   totalChapters: number
   chapterWordTarget: number
   projectRoot: string
+  summary?: {
+    source: "db" | "state" | "empty"
+    stage: string
+    progressPercent: number
+    totalChapters: number
+    completedChapters: number
+    pendingChapters: number
+    inProgressChapters: number
+    blockedChapters: number
+    activeJobs: number
+    runnableJobs: number
+    latestEventType: string
+    latestEventAt: string
+    updatedAt: string
+  }
 }

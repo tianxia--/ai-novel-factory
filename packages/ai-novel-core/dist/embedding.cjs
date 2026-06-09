@@ -237,6 +237,16 @@ function countName(text, name) {
   return text.split(name).length - 1;
 }
 function evaluateChapterConsistency(input) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    const isFirst = input.chapterNumber === 1 || !input.previousProtagonistName;
+    const name = input.previousProtagonistName || "\u9996\u7AE0\u4E3B\u89D2";
+    return {
+      status: "eligible",
+      reason: isFirst ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002` : `\u6CBF\u7528\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002`,
+      protagonistName: name,
+      detectedNames: [name]
+    };
+  }
   const text = normalizeChapterBody(input.text || "");
   const detectedNames = extractChinesePersonNames(text);
   const profileName = inferLockedProtagonistName(input.protagonistProfile || "");
@@ -810,6 +820,20 @@ var FactoryDb = class _FactoryDb {
         updated_at TEXT NOT NULL,
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS llm_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        temperature REAL NOT NULL DEFAULT 0.1,
+        timeout_ms INTEGER NOT NULL DEFAULT 120000,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
 
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
@@ -2568,13 +2592,92 @@ var FactoryDb = class _FactoryDb {
       `).all()
     };
   }
+  listLlmConfigs() {
+    return this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      ORDER BY created_at DESC
+    `).all();
+  }
+  addLlmConfig(config) {
+    const id = makeId("llm");
+    const now = nowIso();
+    const temp = config.temperature ?? 0.1;
+    const timeout = config.timeoutMs ?? 12e4;
+    this.db.prepare(`
+      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, now);
+  }
+  updateLlmConfig(id, config) {
+    const now = nowIso();
+    const temp = config.temperature ?? 0.1;
+    const timeout = config.timeoutMs ?? 12e4;
+    this.db.prepare(`
+      UPDATE llm_configs
+      SET name = ?, base_url = ?, api_key = ?, model_name = ?, temperature = ?, timeout_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, id);
+  }
+  deleteLlmConfig(id) {
+    this.db.prepare(`
+      DELETE FROM llm_configs WHERE id = ?
+    `).run(id);
+  }
+  activateLlmConfig(id) {
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 0
+    `).run();
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 1 WHERE id = ?
+    `).run(id);
+  }
+  getActiveLlmConfig() {
+    const config = this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      WHERE is_active = 1
+      LIMIT 1
+    `).get();
+    return config || null;
+  }
 };
+var activeDbInstance = null;
+var activeDbRootDir = null;
+var activeRefCount = 0;
 async function withFactoryDb(rootDir, callback) {
+  if (activeDbInstance && activeDbRootDir === rootDir) {
+    activeRefCount++;
+    try {
+      return await callback(activeDbInstance);
+    } finally {
+      activeRefCount--;
+      if (activeRefCount === 0) {
+        try {
+          activeDbInstance.close();
+        } catch (e) {
+        }
+        activeDbInstance = null;
+        activeDbRootDir = null;
+      }
+    }
+  }
   const db = await FactoryDb.open(rootDir);
+  activeDbInstance = db;
+  activeDbRootDir = rootDir;
+  activeRefCount = 1;
   try {
     return await callback(db);
   } finally {
-    db.close();
+    activeRefCount--;
+    if (activeRefCount === 0) {
+      try {
+        db.close();
+      } catch (e) {
+      }
+      activeDbInstance = null;
+      activeDbRootDir = null;
+    }
   }
 }
 

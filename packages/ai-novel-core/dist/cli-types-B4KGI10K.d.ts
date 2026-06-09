@@ -66,6 +66,7 @@ interface AutopilotRuntime {
     driftReason?: string | null;
     checkpointPath?: string | null;
     loopCount?: number;
+    statusMessage?: string;
 }
 interface AutonomousNovelState {
     project: {
@@ -73,6 +74,7 @@ interface AutonomousNovelState {
         idea: string;
         createdAt: string;
         workspaceVersion: number;
+        autoMode?: "full" | "semi";
     };
     runtime: {
         stage: NovelStage;
@@ -128,6 +130,21 @@ interface NovelProjectRecord {
     totalChapters: number;
     chapterWordTarget: number;
     projectRoot: string;
+    summary?: {
+        source: "db" | "state" | "empty";
+        stage: string;
+        progressPercent: number;
+        totalChapters: number;
+        completedChapters: number;
+        pendingChapters: number;
+        inProgressChapters: number;
+        blockedChapters: number;
+        activeJobs: number;
+        runnableJobs: number;
+        latestEventType: string;
+        latestEventAt: string;
+        updatedAt: string;
+    };
 }
 
 export type { AutonomousNovelState as A, ChapterTask as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, CausalChapterPlan as c, InitProjectOptions as d, InterruptOptions as e, InterruptionScope as f };

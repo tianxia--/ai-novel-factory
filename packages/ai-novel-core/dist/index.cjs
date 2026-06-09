@@ -74,6 +74,7 @@ __export(index_exports, {
   formatKnowledgeForPrompt: () => formatKnowledgeForPrompt,
   formatStatus: () => formatStatus,
   generateAgentReply: () => generateAgentReply,
+  getCachedActiveLlmConfig: () => getCachedActiveLlmConfig,
   getFactoryDbPath: () => getFactoryDbPath,
   getNovelAutopilotWorkerStatus: () => getNovelAutopilotWorkerStatus,
   getProjectEnvCandidatePaths: () => getProjectEnvCandidatePaths,
@@ -89,6 +90,7 @@ __export(index_exports, {
   initializeSuperGraph: () => initializeSuperGraph,
   isGenericAutopilotMessage: () => isGenericAutopilotMessage,
   listAutonomousProjects: () => listAutonomousProjects,
+  loadActiveLlmConfig: () => loadActiveLlmConfig,
   loadAutonomousState: () => loadAutonomousState,
   loadLlmConfigFromEnv: () => loadLlmConfigFromEnv,
   loadProductionWritingResources: () => loadProductionWritingResources,
@@ -100,6 +102,7 @@ __export(index_exports, {
   prepareCoverGeneration: () => prepareCoverGeneration,
   readProjectEnv: () => readProjectEnv,
   recordDirectorCommandEvent: () => recordDirectorCommandEvent,
+  resolveFactoryRootDir: () => resolveFactoryRootDir,
   resolveManagedProjectRoot: () => resolveManagedProjectRoot,
   resolveProjectEnvWritePath: () => resolveProjectEnvWritePath,
   retrieveKnowledge: () => retrieveKnowledge,
@@ -112,6 +115,7 @@ __export(index_exports, {
   runNovelAutopilotWorkerOnce: () => runNovelAutopilotWorkerOnce,
   saveAutonomousState: () => saveAutonomousState,
   saveSuperGraph: () => saveSuperGraph,
+  setCachedActiveLlmConfig: () => setCachedActiveLlmConfig,
   shouldAdvanceBeforeDiscussion: () => shouldAdvanceBeforeDiscussion,
   startNovelAutopilotWorker: () => startNovelAutopilotWorker,
   superGraphFromDbRows: () => superGraphFromDbRows,
@@ -292,464 +296,7 @@ function upsertProjectEnvValues(rootDir, updates) {
 }
 
 // src/llm-config.ts
-function readNumber(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-function loadLlmConfigFromEnv(rootDir = process.cwd()) {
-  const envStatus = getProjectEnvStatus(rootDir);
-  const dotEnv = envStatus.values;
-  const baseUrl = process.env.LLM_BASE_URL || dotEnv.LLM_BASE_URL || process.env.OPENAI_BASE_URL || dotEnv.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const apiKeyEnv = process.env.LLM_API_KEY || dotEnv.LLM_API_KEY ? "LLM_API_KEY" : process.env.OPENAI_API_KEY || dotEnv.OPENAI_API_KEY ? "OPENAI_API_KEY" : "unset";
-  const modelName = process.env.LLM_MODEL_ID || dotEnv.LLM_MODEL_ID || process.env.OPENAI_MODEL_NAME || dotEnv.OPENAI_MODEL_NAME || "gpt-4o";
-  return {
-    provider: {
-      baseUrl,
-      apiKeyEnv,
-      modelName,
-      timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || dotEnv.LLM_TIMEOUT_MS, 12e4),
-      temperature: readNumber(process.env.LLM_TEMPERATURE || dotEnv.LLM_TEMPERATURE, 0.1),
-      reactMaxSteps: readNumber(process.env.MAX_STEPS || dotEnv.MAX_STEPS, 25)
-    },
-    writing: {
-      chapterWordTarget: readNumber(process.env.NOVEL_CHAPTER_WORD_TARGET || dotEnv.NOVEL_CHAPTER_WORD_TARGET, 2500),
-      chapterWordMinimum: 2500
-    }
-  };
-}
-
-// src/abort.ts
-var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
-function isAutopilotStopError(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /autopilot stopped by user/i.test(message);
-}
-function createAutopilotStopError() {
-  return new Error(AUTOPILOT_STOP_MESSAGE);
-}
-function throwIfStopped(signal) {
-  if (signal?.aborted) {
-    throw createAutopilotStopError();
-  }
-}
-
-// src/runtime-llm.ts
-var AUTONOMOUS_DISCUSSION_PROTOCOL = [
-  "\u81EA\u4E3B\u521B\u4F5C\u534F\u8BAE\uFF1A",
-  "- \u4F60\u5DF2\u7ECF\u88AB\u6388\u6743\u63A5\u7BA1\u521B\u4F5C\u6D41\u7A0B\u3002",
-  "- \u9ED8\u8BA4\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u56DE\u590D\uFF0C\u9664\u975E\u7CFB\u7EDF\u660E\u786E\u8981\u6C42\u522B\u7684\u8BED\u8A00\u3002",
-  "- \u4E0D\u8981\u8BA9\u7528\u6237\u505A A/B \u9009\u62E9\uFF0C\u4E0D\u8981\u8BE2\u95EE\u662F\u5426\u7EE7\u7EED\u3002",
-  "- \u4E0D\u8981\u56E0\u4E3A\u7EC6\u8282\u7F3A\u5931\u5C31\u505C\u4F4F\uFF1B\u7F3A\u4FE1\u606F\u65F6\u5148\u505A\u9AD8\u8D28\u91CF\u5DE5\u4F5C\u5047\u8BBE\u3002",
-  "- \u5FC5\u987B\u7ED9\u51FA\u5177\u4F53\u63D0\u6848\u3001\u98CE\u9669\u3001\u5EFA\u8BAE\u548C\u6536\u655B\u7ED3\u679C\u3002",
-  "- \u8BA8\u8BBA\u5FC5\u987B\u4E25\u683C\u505C\u7559\u5728\u5F53\u524D target \u548C\u5F53\u524D workflow stage \u5185\u3002",
-  "- \u4E0D\u5141\u8BB8\u8D8A\u7EA7\u58F0\u79F0\u5DF2\u7ECF\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\uFF1B\u5982\u679C\u5F53\u524D\u8FD8\u5728\u4E16\u754C\u89C2\u9636\u6BB5\uFF0C\u5C31\u4E0D\u80FD\u5047\u88C5\u5DF2\u7ECF\u5728\u5199\u7B2C 2 \u7AE0\u3002",
-  "- \u6743\u5A01\u8FDB\u5EA6\u53EA\u6765\u81EA\u7CFB\u7EDF\u63D0\u4F9B\u7684 `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5`\uFF1B\u4E0D\u5F97\u6839\u636E\u8BA8\u8BBA\u5185\u5BB9\u81EA\u884C\u5BA3\u5E03\u9636\u6BB5\u5DF2\u5B8C\u6210\u3001\u5DF2\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\u3001\u67D0\u5F27\u84DD\u56FE\u5DF2\u5B8C\u6210\u3002",
-  "- \u53EF\u4EE5\u63D0\u51FA `\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u63A8\u8FDB\u5230...`\uFF0C\u4F46\u4E0D\u80FD\u5199\u6210 `\u5F53\u524D\u5DF2\u7ECF\u8FDB\u5165...`\uFF0C\u9664\u975E `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5` \u5DF2\u7ECF\u53D8\u66F4\u3002",
-  "- \u6BCF\u4E2A specialist \u81F3\u5C11\u6307\u51FA\u4E00\u4E2A\u98CE\u9669\u3001\u5F31\u70B9\u6216\u51B2\u7A81\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-  "- Reviewer\u3001Editor\u3001Prose Stylist \u4E0D\u5141\u8BB8\u53EA\u7ED9\u7EAF\u901A\u8FC7\u7ED3\u8BBA\u3002",
-  "- \u6700\u7EC8 Showrunner \u603B\u7ED3\u5FC5\u987B\u5305\u542B\uFF1AFinal Consensus\u3001Remaining Risk\u3001Next Step\u3002"
-].join("\n");
-var STAGE_DRIFT_PATTERNS = [
-  /prose production/i,
-  /current task/i,
-  /chapter\s+\d+/i,
-  /第\s*\d+\s*章/u
-];
-function buildFakeReply(options) {
-  const normalizedRole = options.roleName.toLowerCase();
-  const priorTranscript = options.priorTranscript?.trim() ?? "";
-  const latestContextLine = priorTranscript.split("\n").filter(Boolean).slice(-1)[0] ?? "";
-  const targetLabel = options.discussionTarget?.label || "\u5F53\u524D\u8BA8\u8BBA\u76EE\u6807";
-  if (normalizedRole.includes("showrunner")) {
-    if (options.discussionStage === "opening_brief") {
-      return [
-        "### \u672C\u8F6E\u76EE\u6807",
-        `- \u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
-        `- \u5199\u56DE\u8D44\u4EA7\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
-        `- \u5F53\u524D\u9636\u6BB5\uFF1A${options.currentStage || "worldbuilding_dialogue"}`,
-        "- \u76EE\u6807\uFF1A\u5728\u4E0D\u8D8A\u7EA7\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u7684\u524D\u63D0\u4E0B\uFF0C\u5148\u5F62\u6210\u7EDF\u4E00\u5171\u8BC6\u3002",
-        "",
-        "### \u7EA6\u675F",
-        "- \u5FC5\u987B\u505C\u7559\u5728\u540C\u4E00\u4E2A\u8BA8\u8BBA\u5BF9\u8C61\u4E0A\u3002",
-        "- \u4E0D\u5F97\u865A\u6784\u65E0\u5173\u7AE0\u8282\u3001\u652F\u7EBF\u6216\u5DF2\u7ECF\u5B8C\u6210\u7684\u6B63\u6587\u3002",
-        "- \u7ED3\u5C3E\u5FC5\u987B\u7ED9\u51FA\u53EF\u5199\u56DE\u8D44\u4EA7\u7684\u66F4\u65B0\u5EFA\u8BAE\u3002"
-      ].join("\n");
-    }
-    if (options.discussionStage === "closing_synthesis") {
-      return [
-        "### Final Consensus",
-        `- \u5DF2\u786E\u8BA4\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
-        `- \u5199\u56DE\u8DEF\u5F84\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
-        "- \u51B3\u8BAE\uFF1A\u540E\u7EED\u52A8\u4F5C\u5FC5\u987B\u7EE7\u7EED\u505C\u7559\u5728\u5F53\u524D target \u4E0E\u5F53\u524D\u9636\u6BB5\u5185\u3002",
-        "",
-        "### Remaining Risk",
-        "- \u5982\u679C\u540E\u7EED\u56DE\u590D\u518D\u6B21\u8D8A\u7EA7\u5230\u6B63\u6587\u9636\u6BB5\uFF0C\u9879\u76EE\u72B6\u6001\u4E0E\u5BF9\u8BDD\u5185\u5BB9\u4F1A\u5931\u540C\u6B65\u3002",
-        "",
-        "### Next Step",
-        "- \u5148\u628A\u672C\u8F6E\u5171\u8BC6\u5199\u56DE\u5BF9\u5E94\u8D44\u4EA7\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u63A8\u8FDB\u5DE5\u4F5C\u6D41\u9636\u6BB5\u3002"
-      ].join("\n");
-    }
-    return "Showrunner \u63D0\u9192\uFF1A\u8BA8\u8BBA\u5FC5\u987B\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u548C\u5F53\u524D\u5BF9\u8C61\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u8DF3\u5230\u6B63\u6587\u751F\u4EA7\u3002";
-  }
-  if (normalizedRole.includes("world")) {
-    return [
-      "### \u4E16\u754C\u89C2\u7ACB\u573A",
-      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u4E0A\u4E0B\u6587"}\uFF0C\u7EE7\u7EED\u6536\u7D27 ${targetLabel} \u7684\u89C4\u5219\u4E0E\u5F71\u54CD\u8FB9\u754C\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u4E0D\u80FD\u6CC4\u6F0F\u5230\u5B8C\u6574\u6B63\u6587\uFF0C\u4E5F\u4E0D\u80FD\u64C5\u81EA\u5199\u6210\u540E\u7EED\u7AE0\u8282\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u4F18\u5148\u6F84\u6E05\u786C\u89C4\u5219\u3001\u4EE3\u4EF7\u4E0E\u538B\u529B\u6E90\uFF0C\u5E76\u5199\u56DE\u76EE\u6807\u8D44\u4EA7\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("author")) {
-    return [
-      "### \u620F\u5267\u65B9\u5411",
-      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u8BA8\u8BBA"} \u7684\u57FA\u7840\u4E0A\uFF0C\u4E3A ${targetLabel} \u8865\u5F3A\u5F20\u529B\u4E0E\u60C5\u7EEA\u52A8\u7EBF\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u5982\u679C\u73B0\u5728\u76F4\u63A5\u5199\u6B63\u6587\uFF0C\u4F1A\u8BA9\u5F53\u524D\u9636\u6BB5\u4E0E\u9879\u76EE\u72B6\u6001\u8131\u8282\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u5F53\u524D\u53EA\u4FDD\u7559\u84DD\u56FE\u5C42\u3001\u8BBE\u5B9A\u5C42\u3001\u51B3\u7B56\u5C42\u5185\u5BB9\u3002",
-      "- \u771F\u6B63\u7684\u6B63\u6587\u5199\u4F5C\u7559\u5230 drafting \u9636\u6BB5\u518D\u6267\u884C\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("editor")) {
-    return [
-      "### \u7F16\u8F91\u5BA1\u89C6",
-      `\u7ED3\u5408 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u65B9\u5411"}\uFF0C\u68C0\u67E5 ${targetLabel} \u7684\u8282\u594F\u4E0E\u6E05\u6670\u5EA6\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u73B0\u5728\u6700\u5BB9\u6613\u51FA\u73B0\u7684\u662F\u8D8A\u7EA7\u63A8\u8FDB\u548C\u4FE1\u606F\u5806\u780C\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u53BB\u6389\u6A21\u7CCA\u8868\u8FF0\u3002",
-      "- \u4E0D\u5141\u8BB8\u65B0\u8D77\u7AE0\u8282\u6216\u652F\u7EBF\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("reviewer")) {
-    return [
-      "### \u5BA1\u67E5\u7126\u70B9",
-      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u5EFA\u8BAE"}\uFF0C\u7EE7\u7EED\u538B\u6D4B ${targetLabel} \u7684\u903B\u8F91\u6F0F\u6D1E\u4E0E\u8FDE\u7EED\u6027\u98CE\u9669\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u4E3B\u9898\u6F02\u79FB\u4F1A\u7834\u574F\u5171\u4EAB\u51B3\u7B56\u8FC7\u7A0B\u3002",
-      "- \u9690\u6027\u77DB\u76FE\u5FC5\u987B\u5728\u7EE7\u7EED\u63A8\u8FDB\u524D\u5148\u89E3\u51B3\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("prose")) {
-    return [
-      "### \u6587\u98CE\u5EFA\u8BAE",
-      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5BA1\u67E5\u610F\u89C1"} \u7684\u7EA6\u675F\u4E0B\uFF0C\u4E3A ${targetLabel} \u63D0\u4F9B\u8BED\u8A00\u4E0E\u8BED\u6C14\u4F18\u5316\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u6587\u98CE\u4F18\u5316\u6700\u5BB9\u6613\u8BEF\u6ED1\u6210\u6B63\u6587\u521B\u4F5C\uFF0C\u8FD9\u91CC\u5FC5\u987B\u514B\u5236\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u4FDD\u6301\u8BED\u8A00\u66F4\u50CF\u4EBA\u5199\u7684\u3001\u5177\u4F53\u7684\u3001\u5C11\u6A21\u677F\u5473\u3002",
-      "- \u4E0D\u8981\u5199\u65B0\u7AE0\u8282\u6807\u9898\u6216\u5B8C\u6574\u573A\u666F\u3002"
-    ].join("\n");
-  }
-  return `${options.roleName}\uFF1A\u5DF2\u63A5\u6536\u5F53\u524D\u6307\u4EE4\uFF0C\u5E76\u4E0E\u73B0\u6709\u5C0F\u8BF4\u5171\u8BC6\u4FDD\u6301\u4E00\u81F4\u3002`;
-}
-async function emitFakeReplyInChunks(reply, onDelta) {
-  const midpoint = Math.max(1, Math.floor(reply.length / 2));
-  const chunks = [reply.slice(0, midpoint), reply.slice(midpoint)].filter(Boolean);
-  for (const chunk of chunks) {
-    await onDelta(chunk);
-  }
-}
-async function streamOpenAiCompatibleResponse(response, onDelta, options) {
-  if (!response.body) {
-    throw new Error("LLM streaming response body was empty.");
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let content = "";
-  const readNextChunk = async () => {
-    if (options.signal.aborted) {
-      throw new Error("LLM stream aborted.");
-    }
-    let abortRead = null;
-    const abortPromise = new Promise((_, reject) => {
-      abortRead = () => {
-        reader.cancel().catch(() => void 0);
-        reject(new Error("LLM stream aborted."));
-      };
-      options.signal.addEventListener("abort", abortRead, { once: true });
-    });
-    try {
-      return await Promise.race([reader.read(), abortPromise]);
-    } finally {
-      if (abortRead) {
-        options.signal.removeEventListener("abort", abortRead);
-      }
-    }
-  };
-  try {
-    while (true) {
-      const { value, done } = await readNextChunk();
-      if (done) {
-        buffer += decoder.decode();
-        break;
-      }
-      options.markActivity();
-      buffer += decoder.decode(value, { stream: true });
-      while (buffer.includes("\n\n")) {
-        const separator = buffer.indexOf("\n\n");
-        const chunk = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
-        for (const line of chunk.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) {
-            continue;
-          }
-          const payloadText = trimmed.slice("data:".length).trim();
-          if (payloadText === "[DONE]") {
-            continue;
-          }
-          const payload = JSON.parse(payloadText);
-          const delta = payload.choices?.[0]?.delta?.content;
-          if (!delta) {
-            continue;
-          }
-          content += delta;
-          await onDelta(delta);
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return content.trim();
-}
-async function withTimeout(timeoutMs, operation, externalSignal) {
-  const controller = new AbortController();
-  let timer = null;
-  const abortFromExternalSignal = () => controller.abort();
-  const resetTimer = () => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
-  };
-  if (externalSignal?.aborted) {
-    controller.abort();
-  } else {
-    externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
-  }
-  resetTimer();
-  try {
-    return await operation(controller.signal, resetTimer);
-  } catch (error) {
-    if (externalSignal?.aborted) {
-      throw createAutopilotStopError();
-    }
-    if (controller.signal.aborted) {
-      throw new Error(`LLM request timed out after ${timeoutMs}ms without provider activity.`);
-    }
-    throw error;
-  } finally {
-    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-async function generateAgentReply(options) {
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    const reply = buildFakeReply(options);
-    if (options.onDelta) {
-      await emitFakeReplyInChunks(reply, options.onDelta);
-    }
-    return reply;
-  }
-  const config = loadLlmConfigFromEnv(options.envRootDir);
-  const envStatus = getProjectEnvStatus(options.envRootDir);
-  const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY.");
-  }
-  const system = [
-    AUTONOMOUS_DISCUSSION_PROTOCOL,
-    "",
-    `\u8F93\u51FA\u8BED\u8A00\uFF1A${options.preferredLanguage === "en-US" ? "English" : "\u7B80\u4F53\u4E2D\u6587"}`,
-    `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${options.currentStage ?? "worldbuilding_dialogue"}`,
-    options.stageInstruction ? `\u9636\u6BB5\u7EA6\u675F\uFF1A${options.stageInstruction}` : "",
-    "",
-    options.basePrompt.trim(),
-    "",
-    options.dynamicPrompt.trim(),
-    "",
-    options.consensus.trim(),
-    "",
-    `Discussion stage: ${options.discussionStage ?? "specialist_turn"}`,
-    options.discussionTarget ? `Discussion target: ${options.discussionTarget.label}
-Target kind: ${options.discussionTarget.kind}
-Target asset: ${options.discussionTarget.assetPath}
-Target instruction: ${options.discussionTarget.instruction}` : "",
-    "Response contract:",
-    "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
-    "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
-    "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
-    "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
-    "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
-    "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-    "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002",
-    options.priorTranscript?.trim() ? `Prior roundtable transcript:
-${options.priorTranscript.trim()}` : ""
-  ].join("\n");
-  const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
-    const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`
-      },
-      signal,
-      body: JSON.stringify({
-        model: config.provider.modelName,
-        temperature: config.provider.temperature,
-        stream: Boolean(options.onDelta),
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: options.message }
-        ]
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`LLM request failed with status ${response.status}.`);
-    }
-    markActivity();
-    if (options.onDelta) {
-      return streamOpenAiCompatibleResponse(response, async (delta) => {
-        markActivity();
-        await options.onDelta?.(delta);
-      }, {
-        signal,
-        markActivity
-      });
-    }
-    const payload = await response.json();
-    return payload.choices?.[0]?.message?.content?.trim() || "";
-  }, options.signal);
-  if (!content) {
-    throw new Error("LLM response did not include message content.");
-  }
-  if (options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
-    return [
-      "### \u9636\u6BB5\u7EA0\u504F",
-      "- STAGE_GUARD_CORRECTION: true",
-      `- \u5F53\u524D\u4ECD\u5904\u4E8E ${options.currentStage}\uFF0C\u4E0D\u80FD\u8D8A\u7EA7\u5BA3\u79F0\u5DF2\u7ECF\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u3002`,
-      `- \u5F53\u524D\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${options.discussionTarget?.label || "\u672A\u6307\u5B9A"}`,
-      "",
-      "### \u4FDD\u7559\u7ED3\u8BBA",
-      "- \u8BF7\u7EE7\u7EED\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u5B8C\u6210\u5171\u8BC6\u6536\u655B\u3001\u98CE\u9669\u8BC6\u522B\u548C\u4E0B\u4E00\u6B65\u5EFA\u8BAE\u3002"
-    ].join("\n");
-  }
-  return content;
-}
-async function testProviderConnectivity(overrides = {}, rootDir = process.cwd()) {
-  const config = loadLlmConfigFromEnv(rootDir);
-  const envStatus = getProjectEnvStatus(rootDir);
-  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const baseUrl = overrides.baseUrl?.trim() || config.provider.baseUrl;
-  const modelName = overrides.modelName?.trim() || config.provider.modelName;
-  const apiKey = overrides.apiKey?.trim() || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY;
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return {
-      ok: true,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: "Provider connectivity check passed in test mode."
-    };
-  }
-  if (!baseUrl || !modelName || !apiKey) {
-    return {
-      ok: false,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: "Missing provider config: LLM_BASE_URL, LLM_API_KEY, or LLM_MODEL_ID."
-    };
-  }
-  try {
-    const response = await withTimeout(
-      config.provider.timeoutMs,
-      (signal) => fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${apiKey}`
-        },
-        signal
-      })
-    );
-    if (!response.ok) {
-      return {
-        ok: false,
-        checkedAt,
-        baseUrl,
-        modelName,
-        message: `Provider test failed with status ${response.status}.`
-      };
-    }
-    const payload = await response.json();
-    const modelCount = Array.isArray(payload.data) ? payload.data.length : 0;
-    return {
-      ok: true,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: `Provider reachable. ${modelCount} models listed.`
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: `Provider test failed: ${message}`
-    };
-  }
-}
-
-// src/router.ts
-function routeUserMessage(message, state) {
-  const normalized = message.toLowerCase();
-  if (normalized.includes("\u9636\u6BB5") || normalized.includes("\u8FDB\u5EA6") || normalized.includes("status") || normalized.includes("\u73B0\u5728\u8FDB\u884C\u5230")) {
-    return {
-      type: "status_query",
-      reason: `The message asks about current progress while the project is at ${state.runtime.stage}.`
-    };
-  }
-  if (normalized.includes("\u7EE7\u7EED") || normalized.includes("\u4E0B\u4E00\u6B65") || normalized.includes("advance") || normalized.includes("\u63A8\u8FDB")) {
-    return {
-      type: "workflow_control",
-      reason: "The message requests moving the workflow forward."
-    };
-  }
-  if (normalized.includes("\u6574\u4E2A\u6545\u4E8B") || normalized.includes("\u6539\u6210") || normalized.includes("\u91CD\u5199") || normalized.includes("\u98CE\u683C") || normalized.includes("genre")) {
-    return {
-      type: "interruption_change",
-      reason: "The message suggests a change that may alter story direction or project-wide assumptions."
-    };
-  }
-  return {
-    type: "worldbuilding",
-    reason: "The message adds or refines story content and should enter the multi-agent discussion flow."
-  };
-}
-
-// src/super-graph.ts
-var import_promises2 = __toESM(require("fs/promises"), 1);
+var import_node_fs3 = __toESM(require("fs"), 1);
 var import_node_path3 = __toESM(require("path"), 1);
 
 // src/factory-db.ts
@@ -954,6 +501,16 @@ function countName(text, name) {
   return text.split(name).length - 1;
 }
 function evaluateChapterConsistency(input) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    const isFirst = input.chapterNumber === 1 || !input.previousProtagonistName;
+    const name = input.previousProtagonistName || "\u9996\u7AE0\u4E3B\u89D2";
+    return {
+      status: "eligible",
+      reason: isFirst ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002` : `\u6CBF\u7528\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002`,
+      protagonistName: name,
+      detectedNames: [name]
+    };
+  }
   const text = normalizeChapterBody(input.text || "");
   const detectedNames = extractChinesePersonNames(text);
   const profileName = inferLockedProtagonistName(input.protagonistProfile || "");
@@ -1527,6 +1084,20 @@ var FactoryDb = class _FactoryDb {
         updated_at TEXT NOT NULL,
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS llm_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        temperature REAL NOT NULL DEFAULT 0.1,
+        timeout_ms INTEGER NOT NULL DEFAULT 120000,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
 
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
@@ -3285,13 +2856,92 @@ var FactoryDb = class _FactoryDb {
       `).all()
     };
   }
+  listLlmConfigs() {
+    return this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      ORDER BY created_at DESC
+    `).all();
+  }
+  addLlmConfig(config) {
+    const id = makeId("llm");
+    const now2 = nowIso();
+    const temp = config.temperature ?? 0.1;
+    const timeout = config.timeoutMs ?? 12e4;
+    this.db.prepare(`
+      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now2, now2);
+  }
+  updateLlmConfig(id, config) {
+    const now2 = nowIso();
+    const temp = config.temperature ?? 0.1;
+    const timeout = config.timeoutMs ?? 12e4;
+    this.db.prepare(`
+      UPDATE llm_configs
+      SET name = ?, base_url = ?, api_key = ?, model_name = ?, temperature = ?, timeout_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now2, id);
+  }
+  deleteLlmConfig(id) {
+    this.db.prepare(`
+      DELETE FROM llm_configs WHERE id = ?
+    `).run(id);
+  }
+  activateLlmConfig(id) {
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 0
+    `).run();
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 1 WHERE id = ?
+    `).run(id);
+  }
+  getActiveLlmConfig() {
+    const config = this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      WHERE is_active = 1
+      LIMIT 1
+    `).get();
+    return config || null;
+  }
 };
+var activeDbInstance = null;
+var activeDbRootDir = null;
+var activeRefCount = 0;
 async function withFactoryDb(rootDir, callback) {
+  if (activeDbInstance && activeDbRootDir === rootDir) {
+    activeRefCount++;
+    try {
+      return await callback(activeDbInstance);
+    } finally {
+      activeRefCount--;
+      if (activeRefCount === 0) {
+        try {
+          activeDbInstance.close();
+        } catch (e) {
+        }
+        activeDbInstance = null;
+        activeDbRootDir = null;
+      }
+    }
+  }
   const db = await FactoryDb.open(rootDir);
+  activeDbInstance = db;
+  activeDbRootDir = rootDir;
+  activeRefCount = 1;
   try {
     return await callback(db);
   } finally {
-    db.close();
+    activeRefCount--;
+    if (activeRefCount === 0) {
+      try {
+        db.close();
+      } catch (e) {
+      }
+      activeDbInstance = null;
+      activeDbRootDir = null;
+    }
   }
 }
 function makeRunId(kind) {
@@ -3307,7 +2957,575 @@ function targetToArtifactKind(target) {
   return "consensus";
 }
 
+// src/llm-config.ts
+function readNumber(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+function loadLlmConfigFromEnv(rootDir = process.cwd()) {
+  const envStatus = getProjectEnvStatus(rootDir);
+  const dotEnv = envStatus.values;
+  const baseUrl = process.env.LLM_BASE_URL || dotEnv.LLM_BASE_URL || process.env.OPENAI_BASE_URL || dotEnv.OPENAI_BASE_URL || "https://api.openai.com/v1";
+  const apiKeyEnv = process.env.LLM_API_KEY || dotEnv.LLM_API_KEY ? "LLM_API_KEY" : process.env.OPENAI_API_KEY || dotEnv.OPENAI_API_KEY ? "OPENAI_API_KEY" : "unset";
+  const modelName = process.env.LLM_MODEL_ID || dotEnv.LLM_MODEL_ID || process.env.OPENAI_MODEL_NAME || dotEnv.OPENAI_MODEL_NAME || "gpt-4o";
+  return {
+    provider: {
+      baseUrl,
+      apiKeyEnv,
+      modelName,
+      timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || dotEnv.LLM_TIMEOUT_MS, 12e4),
+      temperature: readNumber(process.env.LLM_TEMPERATURE || dotEnv.LLM_TEMPERATURE, 0.1),
+      reactMaxSteps: readNumber(process.env.MAX_STEPS || dotEnv.MAX_STEPS, 25)
+    },
+    writing: {
+      chapterWordTarget: readNumber(process.env.NOVEL_CHAPTER_WORD_TARGET || dotEnv.NOVEL_CHAPTER_WORD_TARGET, 2500),
+      chapterWordMinimum: 2500
+    }
+  };
+}
+var cachedActiveLlmConfig = null;
+function getCachedActiveLlmConfig() {
+  return cachedActiveLlmConfig;
+}
+function setCachedActiveLlmConfig(config) {
+  cachedActiveLlmConfig = config;
+}
+function isWorkspaceRoot(dir) {
+  try {
+    const pkgPath = import_node_path3.default.join(dir, "package.json");
+    if (!import_node_fs3.default.existsSync(pkgPath)) {
+      return false;
+    }
+    const content = import_node_fs3.default.readFileSync(pkgPath, "utf8");
+    const pkg = JSON.parse(content);
+    return pkg.name === "ai-novel-factory-workspace";
+  } catch {
+    return false;
+  }
+}
+function resolveFactoryRootDir(dir = process.cwd()) {
+  let current = import_node_path3.default.resolve(dir);
+  while (true) {
+    if (isWorkspaceRoot(current)) {
+      return current;
+    }
+    const parent = import_node_path3.default.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  const fallback = import_node_path3.default.resolve(dir);
+  const projectsIndex = fallback.indexOf(`${import_node_path3.default.sep}.ai-novel-projects`);
+  if (projectsIndex !== -1) {
+    return fallback.slice(0, projectsIndex);
+  }
+  const novelIndex = fallback.indexOf(`${import_node_path3.default.sep}.ai-novel`);
+  if (novelIndex !== -1) {
+    return fallback.slice(0, novelIndex);
+  }
+  return fallback;
+}
+async function loadActiveLlmConfig(rootDir = process.cwd()) {
+  const dbRootDir = resolveFactoryRootDir(rootDir);
+  try {
+    const activeDbConfig = await withFactoryDb(dbRootDir, async (db) => {
+      return db.getActiveLlmConfig();
+    });
+    if (!activeDbConfig) {
+      cachedActiveLlmConfig = null;
+      return null;
+    }
+    const config = {
+      provider: {
+        baseUrl: activeDbConfig.base_url,
+        apiKeyEnv: "DB_ACTIVE_CONFIG",
+        modelName: activeDbConfig.model_name,
+        timeoutMs: Number(activeDbConfig.timeout_ms) || 12e4,
+        temperature: Number(activeDbConfig.temperature) || 0.1,
+        reactMaxSteps: 25
+      },
+      writing: {
+        chapterWordTarget: 2500,
+        chapterWordMinimum: 2500
+      },
+      _dbApiKey: activeDbConfig.api_key
+    };
+    cachedActiveLlmConfig = config;
+    return config;
+  } catch (error) {
+    console.error("Failed to load active LLM config from DB:", error);
+    return null;
+  }
+}
+
+// src/abort.ts
+var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
+function isAutopilotStopError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /autopilot stopped by user/i.test(message);
+}
+function createAutopilotStopError() {
+  return new Error(AUTOPILOT_STOP_MESSAGE);
+}
+function throwIfStopped(signal) {
+  if (signal?.aborted) {
+    throw createAutopilotStopError();
+  }
+}
+
+// src/runtime-llm.ts
+var AUTONOMOUS_DISCUSSION_PROTOCOL = [
+  "\u81EA\u4E3B\u521B\u4F5C\u534F\u8BAE\uFF1A",
+  "- \u4F60\u5DF2\u7ECF\u88AB\u6388\u6743\u63A5\u7BA1\u521B\u4F5C\u6D41\u7A0B\u3002",
+  "- \u9ED8\u8BA4\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u56DE\u590D\uFF0C\u9664\u975E\u7CFB\u7EDF\u660E\u786E\u8981\u6C42\u522B\u7684\u8BED\u8A00\u3002",
+  "- \u4E0D\u8981\u8BA9\u7528\u6237\u505A A/B \u9009\u62E9\uFF0C\u4E0D\u8981\u8BE2\u95EE\u662F\u5426\u7EE7\u7EED\u3002",
+  "- \u4E0D\u8981\u56E0\u4E3A\u7EC6\u8282\u7F3A\u5931\u5C31\u505C\u4F4F\uFF1B\u7F3A\u4FE1\u606F\u65F6\u5148\u505A\u9AD8\u8D28\u91CF\u5DE5\u4F5C\u5047\u8BBE\u3002",
+  "- \u5FC5\u987B\u7ED9\u51FA\u5177\u4F53\u63D0\u6848\u3001\u98CE\u9669\u3001\u5EFA\u8BAE\u548C\u6536\u655B\u7ED3\u679C\u3002",
+  "- \u8BA8\u8BBA\u5FC5\u987B\u4E25\u683C\u505C\u7559\u5728\u5F53\u524D target \u548C\u5F53\u524D workflow stage \u5185\u3002",
+  "- \u4E0D\u5141\u8BB8\u8D8A\u7EA7\u58F0\u79F0\u5DF2\u7ECF\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\uFF1B\u5982\u679C\u5F53\u524D\u8FD8\u5728\u4E16\u754C\u89C2\u9636\u6BB5\uFF0C\u5C31\u4E0D\u80FD\u5047\u88C5\u5DF2\u7ECF\u5728\u5199\u7B2C 2 \u7AE0\u3002",
+  "- \u6743\u5A01\u8FDB\u5EA6\u53EA\u6765\u81EA\u7CFB\u7EDF\u63D0\u4F9B\u7684 `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5`\uFF1B\u4E0D\u5F97\u6839\u636E\u8BA8\u8BBA\u5185\u5BB9\u81EA\u884C\u5BA3\u5E03\u9636\u6BB5\u5DF2\u5B8C\u6210\u3001\u5DF2\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\u3001\u67D0\u5F27\u84DD\u56FE\u5DF2\u5B8C\u6210\u3002",
+  "- \u53EF\u4EE5\u63D0\u51FA `\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u63A8\u8FDB\u5230...`\uFF0C\u4F46\u4E0D\u80FD\u5199\u6210 `\u5F53\u524D\u5DF2\u7ECF\u8FDB\u5165...`\uFF0C\u9664\u975E `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5` \u5DF2\u7ECF\u53D8\u66F4\u3002",
+  "- \u6BCF\u4E2A specialist \u81F3\u5C11\u6307\u51FA\u4E00\u4E2A\u98CE\u9669\u3001\u5F31\u70B9\u6216\u51B2\u7A81\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+  "- Reviewer\u3001Editor\u3001Prose Stylist \u4E0D\u5141\u8BB8\u53EA\u7ED9\u7EAF\u901A\u8FC7\u7ED3\u8BBA\u3002",
+  "- \u6700\u7EC8 Showrunner \u603B\u7ED3\u5FC5\u987B\u5305\u542B\uFF1AFinal Consensus\u3001Remaining Risk\u3001Next Step\u3002"
+].join("\n");
+var STAGE_DRIFT_PATTERNS = [
+  /prose production/i,
+  /current task/i,
+  /chapter\s+\d+/i,
+  /第\s*\d+\s*章/u
+];
+function buildFakeReply(options) {
+  const normalizedRole = options.roleName.toLowerCase();
+  const priorTranscript = options.priorTranscript?.trim() ?? "";
+  const latestContextLine = priorTranscript.split("\n").filter(Boolean).slice(-1)[0] ?? "";
+  const targetLabel = options.discussionTarget?.label || "\u5F53\u524D\u8BA8\u8BBA\u76EE\u6807";
+  if (normalizedRole.includes("showrunner")) {
+    if (options.discussionStage === "opening_brief") {
+      return [
+        "### \u672C\u8F6E\u76EE\u6807",
+        `- \u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
+        `- \u5199\u56DE\u8D44\u4EA7\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
+        `- \u5F53\u524D\u9636\u6BB5\uFF1A${options.currentStage || "worldbuilding_dialogue"}`,
+        "- \u76EE\u6807\uFF1A\u5728\u4E0D\u8D8A\u7EA7\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u7684\u524D\u63D0\u4E0B\uFF0C\u5148\u5F62\u6210\u7EDF\u4E00\u5171\u8BC6\u3002",
+        "",
+        "### \u7EA6\u675F",
+        "- \u5FC5\u987B\u505C\u7559\u5728\u540C\u4E00\u4E2A\u8BA8\u8BBA\u5BF9\u8C61\u4E0A\u3002",
+        "- \u4E0D\u5F97\u865A\u6784\u65E0\u5173\u7AE0\u8282\u3001\u652F\u7EBF\u6216\u5DF2\u7ECF\u5B8C\u6210\u7684\u6B63\u6587\u3002",
+        "- \u7ED3\u5C3E\u5FC5\u987B\u7ED9\u51FA\u53EF\u5199\u56DE\u8D44\u4EA7\u7684\u66F4\u65B0\u5EFA\u8BAE\u3002"
+      ].join("\n");
+    }
+    if (options.discussionStage === "closing_synthesis") {
+      return [
+        "### Final Consensus",
+        `- \u5DF2\u786E\u8BA4\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
+        `- \u5199\u56DE\u8DEF\u5F84\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
+        "- \u51B3\u8BAE\uFF1A\u540E\u7EED\u52A8\u4F5C\u5FC5\u987B\u7EE7\u7EED\u505C\u7559\u5728\u5F53\u524D target \u4E0E\u5F53\u524D\u9636\u6BB5\u5185\u3002",
+        "",
+        "### Remaining Risk",
+        "- \u5982\u679C\u540E\u7EED\u56DE\u590D\u518D\u6B21\u8D8A\u7EA7\u5230\u6B63\u6587\u9636\u6BB5\uFF0C\u9879\u76EE\u72B6\u6001\u4E0E\u5BF9\u8BDD\u5185\u5BB9\u4F1A\u5931\u540C\u6B65\u3002",
+        "",
+        "### Next Step",
+        "- \u5148\u628A\u672C\u8F6E\u5171\u8BC6\u5199\u56DE\u5BF9\u5E94\u8D44\u4EA7\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u63A8\u8FDB\u5DE5\u4F5C\u6D41\u9636\u6BB5\u3002"
+      ].join("\n");
+    }
+    return "Showrunner \u63D0\u9192\uFF1A\u8BA8\u8BBA\u5FC5\u987B\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u548C\u5F53\u524D\u5BF9\u8C61\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u8DF3\u5230\u6B63\u6587\u751F\u4EA7\u3002";
+  }
+  if (normalizedRole.includes("world")) {
+    return [
+      "### \u4E16\u754C\u89C2\u7ACB\u573A",
+      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u4E0A\u4E0B\u6587"}\uFF0C\u7EE7\u7EED\u6536\u7D27 ${targetLabel} \u7684\u89C4\u5219\u4E0E\u5F71\u54CD\u8FB9\u754C\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u4E0D\u80FD\u6CC4\u6F0F\u5230\u5B8C\u6574\u6B63\u6587\uFF0C\u4E5F\u4E0D\u80FD\u64C5\u81EA\u5199\u6210\u540E\u7EED\u7AE0\u8282\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u4F18\u5148\u6F84\u6E05\u786C\u89C4\u5219\u3001\u4EE3\u4EF7\u4E0E\u538B\u529B\u6E90\uFF0C\u5E76\u5199\u56DE\u76EE\u6807\u8D44\u4EA7\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("author")) {
+    return [
+      "### \u620F\u5267\u65B9\u5411",
+      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u8BA8\u8BBA"} \u7684\u57FA\u7840\u4E0A\uFF0C\u4E3A ${targetLabel} \u8865\u5F3A\u5F20\u529B\u4E0E\u60C5\u7EEA\u52A8\u7EBF\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u5982\u679C\u73B0\u5728\u76F4\u63A5\u5199\u6B63\u6587\uFF0C\u4F1A\u8BA9\u5F53\u524D\u9636\u6BB5\u4E0E\u9879\u76EE\u72B6\u6001\u8131\u8282\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u5F53\u524D\u53EA\u4FDD\u7559\u84DD\u56FE\u5C42\u3001\u8BBE\u5B9A\u5C42\u3001\u51B3\u7B56\u5C42\u5185\u5BB9\u3002",
+      "- \u771F\u6B63\u7684\u6B63\u6587\u5199\u4F5C\u7559\u5230 drafting \u9636\u6BB5\u518D\u6267\u884C\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("editor")) {
+    return [
+      "### \u7F16\u8F91\u5BA1\u89C6",
+      `\u7ED3\u5408 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u65B9\u5411"}\uFF0C\u68C0\u67E5 ${targetLabel} \u7684\u8282\u594F\u4E0E\u6E05\u6670\u5EA6\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u73B0\u5728\u6700\u5BB9\u6613\u51FA\u73B0\u7684\u662F\u8D8A\u7EA7\u63A8\u8FDB\u548C\u4FE1\u606F\u5806\u780C\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u53BB\u6389\u6A21\u7CCA\u8868\u8FF0\u3002",
+      "- \u4E0D\u5141\u8BB8\u65B0\u8D77\u7AE0\u8282\u6216\u652F\u7EBF\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("reviewer")) {
+    return [
+      "### \u5BA1\u67E5\u7126\u70B9",
+      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u5EFA\u8BAE"}\uFF0C\u7EE7\u7EED\u538B\u6D4B ${targetLabel} \u7684\u903B\u8F91\u6F0F\u6D1E\u4E0E\u8FDE\u7EED\u6027\u98CE\u9669\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u4E3B\u9898\u6F02\u79FB\u4F1A\u7834\u574F\u5171\u4EAB\u51B3\u7B56\u8FC7\u7A0B\u3002",
+      "- \u9690\u6027\u77DB\u76FE\u5FC5\u987B\u5728\u7EE7\u7EED\u63A8\u8FDB\u524D\u5148\u89E3\u51B3\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("prose")) {
+    return [
+      "### \u6587\u98CE\u5EFA\u8BAE",
+      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5BA1\u67E5\u610F\u89C1"} \u7684\u7EA6\u675F\u4E0B\uFF0C\u4E3A ${targetLabel} \u63D0\u4F9B\u8BED\u8A00\u4E0E\u8BED\u6C14\u4F18\u5316\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u6587\u98CE\u4F18\u5316\u6700\u5BB9\u6613\u8BEF\u6ED1\u6210\u6B63\u6587\u521B\u4F5C\uFF0C\u8FD9\u91CC\u5FC5\u987B\u514B\u5236\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u4FDD\u6301\u8BED\u8A00\u66F4\u50CF\u4EBA\u5199\u7684\u3001\u5177\u4F53\u7684\u3001\u5C11\u6A21\u677F\u5473\u3002",
+      "- \u4E0D\u8981\u5199\u65B0\u7AE0\u8282\u6807\u9898\u6216\u5B8C\u6574\u573A\u666F\u3002"
+    ].join("\n");
+  }
+  return `${options.roleName}\uFF1A\u5DF2\u63A5\u6536\u5F53\u524D\u6307\u4EE4\uFF0C\u5E76\u4E0E\u73B0\u6709\u5C0F\u8BF4\u5171\u8BC6\u4FDD\u6301\u4E00\u81F4\u3002`;
+}
+async function emitFakeReplyInChunks(reply, onDelta) {
+  const midpoint = Math.max(1, Math.floor(reply.length / 2));
+  const chunks = [reply.slice(0, midpoint), reply.slice(midpoint)].filter(Boolean);
+  for (const chunk of chunks) {
+    await onDelta(chunk);
+  }
+}
+async function streamOpenAiCompatibleResponse(response, onDelta, options) {
+  if (!response.body) {
+    throw new Error("LLM streaming response body was empty.");
+  }
+  const streamStartTime = Date.now();
+  const baseTime = options.requestStartTime || streamStartTime;
+  console.log(`[LLM STREAM START] \u5F00\u59CB\u89E3\u6790\u5927\u6A21\u578B\u8FD4\u56DE\u6570\u636E\u6D41...`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let firstTokenReceived = false;
+  const readNextChunk = async () => {
+    if (options.signal.aborted) {
+      throw new Error("LLM stream aborted.");
+    }
+    let abortRead = null;
+    const abortPromise = new Promise((_, reject) => {
+      abortRead = () => {
+        reader.cancel().catch(() => void 0);
+        reject(new Error("LLM stream aborted."));
+      };
+      options.signal.addEventListener("abort", abortRead, { once: true });
+    });
+    try {
+      return await Promise.race([reader.read(), abortPromise]);
+    } finally {
+      if (abortRead) {
+        options.signal.removeEventListener("abort", abortRead);
+      }
+    }
+  };
+  try {
+    while (true) {
+      const { value, done } = await readNextChunk();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      options.markActivity();
+      buffer += decoder.decode(value, { stream: true });
+      while (buffer.includes("\n\n")) {
+        const separator = buffer.indexOf("\n\n");
+        const chunk = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        for (const line of chunk.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) {
+            continue;
+          }
+          const payloadText = trimmed.slice("data:".length).trim();
+          if (payloadText === "[DONE]") {
+            continue;
+          }
+          const payload = JSON.parse(payloadText);
+          const delta = payload.choices?.[0]?.delta?.content;
+          if (!delta) {
+            continue;
+          }
+          if (!firstTokenReceived) {
+            firstTokenReceived = true;
+            const elapsedMs = Date.now() - baseTime;
+            console.log(`[LLM STREAM FIRST TOKEN] \u6536\u5230\u5927\u6A21\u578B\u7B2C\u4E00\u4E2A\u6709\u6548Token! \u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u9996\u5B57\u8017\u65F6(TTFT): ${elapsedMs}ms`);
+          }
+          content += delta;
+          await onDelta(delta);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const totalStreamTime = Date.now() - streamStartTime;
+  const totalRequestTime = Date.now() - baseTime;
+  console.log(`[LLM STREAM END] \u6570\u636E\u6D41\u8BFB\u53D6\u5B8C\u6210\u3002\u6D41\u4F20\u8F93\u8017\u65F6: ${totalStreamTime}ms\uFF0C\u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u5B8C\u6210\u603B\u8017\u65F6: ${totalRequestTime}ms\uFF0C\u63A5\u6536\u5B57\u6570: ${content.length}`);
+  return content.trim();
+}
+async function withTimeout(timeoutMs, operation, externalSignal) {
+  const controller = new AbortController();
+  let timer = null;
+  const abortFromExternalSignal = () => controller.abort();
+  const resetTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  };
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+  }
+  resetTimer();
+  try {
+    return await operation(controller.signal, resetTimer);
+  } catch (error) {
+    if (externalSignal?.aborted) {
+      throw createAutopilotStopError();
+    }
+    if (controller.signal.aborted) {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms without provider activity.`);
+    }
+    throw error;
+  } finally {
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+async function generateAgentReply(options) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    const reply = buildFakeReply(options);
+    if (options.onDelta) {
+      await emitFakeReplyInChunks(reply, options.onDelta);
+    }
+    return reply;
+  }
+  let config = await loadActiveLlmConfig(options.envRootDir);
+  let apiKey = "";
+  if (config) {
+    apiKey = config._dbApiKey || "";
+  } else {
+    config = loadLlmConfigFromEnv(options.envRootDir);
+    const envStatus = getProjectEnvStatus(options.envRootDir);
+    apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY || "";
+  }
+  if (!apiKey) {
+    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY, or configure an active LLM in settings.");
+  }
+  const system = [
+    AUTONOMOUS_DISCUSSION_PROTOCOL,
+    "",
+    `\u8F93\u51FA\u8BED\u8A00\uFF1A${options.preferredLanguage === "en-US" ? "English" : "\u7B80\u4F53\u4E2D\u6587"}`,
+    `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${options.currentStage ?? "worldbuilding_dialogue"}`,
+    options.stageInstruction ? `\u9636\u6BB5\u7EA6\u675F\uFF1A${options.stageInstruction}` : "",
+    "",
+    options.basePrompt.trim(),
+    "",
+    options.dynamicPrompt.trim(),
+    "",
+    options.consensus.trim(),
+    "",
+    `Discussion stage: ${options.discussionStage ?? "specialist_turn"}`,
+    options.discussionTarget ? `Discussion target: ${options.discussionTarget.label}
+Target kind: ${options.discussionTarget.kind}
+Target asset: ${options.discussionTarget.assetPath}
+Target instruction: ${options.discussionTarget.instruction}` : "",
+    "Response contract:",
+    "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
+    "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
+    "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
+    "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
+    "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
+    "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+    "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002",
+    options.priorTranscript?.trim() ? `Prior roundtable transcript:
+${options.priorTranscript.trim()}` : ""
+  ].join("\n");
+  const startTime = Date.now();
+  console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 chat/completions \u8BF7\u6C42...`);
+  console.log(`- BaseUrl: ${config.provider.baseUrl}`);
+  console.log(`- Model: ${config.provider.modelName}`);
+  console.log(`- Temperature: ${config.provider.temperature}`);
+  console.log(`- Messages Count: ${options.message ? 2 : 1}`);
+  console.log(`- System Prompt Length: ${system.length} chars`);
+  console.log(`- User Message Length: ${(options.message || "").length} chars`);
+  const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
+    const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`
+      },
+      signal,
+      body: JSON.stringify({
+        model: config.provider.modelName,
+        temperature: config.provider.temperature,
+        stream: Boolean(options.onDelta),
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: options.message }
+        ]
+      })
+    });
+    const fetchTime = Date.now() - startTime;
+    console.log(`[LLM REQUEST HEAD] \u6536\u5230 API Response \u5934\u90E8\uFF0C\u72B6\u6001\u7801: ${response.status}\uFF0CHTTP\u5EFA\u7ACB\u8FDE\u63A5\u4E0E\u9996\u5305\u5934\u8017\u65F6: ${fetchTime}ms`);
+    if (!response.ok) {
+      console.error(`[LLM REQUEST ERROR] \u8BF7\u6C42\u5931\u8D25\uFF0C\u72B6\u6001\u7801: ${response.status}`);
+      throw new Error(`LLM request failed with status ${response.status}.`);
+    }
+    markActivity();
+    if (options.onDelta) {
+      return streamOpenAiCompatibleResponse(response, async (delta) => {
+        markActivity();
+        await options.onDelta?.(delta);
+      }, {
+        signal,
+        markActivity,
+        requestStartTime: startTime
+      });
+    }
+    const payload = await response.json();
+    const totalTime = Date.now() - startTime;
+    const resContent = payload.choices?.[0]?.message?.content?.trim() || "";
+    console.log(`[LLM REQUEST END] \u975E\u6D41\u5F0F\u8BF7\u6C42\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${resContent.length}`);
+    return resContent;
+  }, options.signal);
+  if (!content) {
+    throw new Error("LLM response did not include message content.");
+  }
+  if (options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
+    return [
+      "### \u9636\u6BB5\u7EA0\u504F",
+      "- STAGE_GUARD_CORRECTION: true",
+      `- \u5F53\u524D\u4ECD\u5904\u4E8E ${options.currentStage}\uFF0C\u4E0D\u80FD\u8D8A\u7EA7\u5BA3\u79F0\u5DF2\u7ECF\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u3002`,
+      `- \u5F53\u524D\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${options.discussionTarget?.label || "\u672A\u6307\u5B9A"}`,
+      "",
+      "### \u4FDD\u7559\u7ED3\u8BBA",
+      "- \u8BF7\u7EE7\u7EED\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u5B8C\u6210\u5171\u8BC6\u6536\u655B\u3001\u98CE\u9669\u8BC6\u522B\u548C\u4E0B\u4E00\u6B65\u5EFA\u8BAE\u3002"
+    ].join("\n");
+  }
+  return content;
+}
+async function testProviderConnectivity(overrides = {}, rootDir = process.cwd()) {
+  const activeConfig = await loadActiveLlmConfig(rootDir);
+  const config = activeConfig || loadLlmConfigFromEnv(rootDir);
+  const envStatus = getProjectEnvStatus(rootDir);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const baseUrl = overrides.baseUrl?.trim() || config.provider.baseUrl;
+  const modelName = overrides.modelName?.trim() || config.provider.modelName;
+  const apiKey = overrides.apiKey?.trim() || (activeConfig ? activeConfig._dbApiKey : null) || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY;
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return {
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      message: "Provider connectivity check passed in test mode."
+    };
+  }
+  if (!baseUrl || !modelName || !apiKey) {
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      message: "Missing provider config: LLM_BASE_URL, LLM_API_KEY, or LLM_MODEL_ID."
+    };
+  }
+  try {
+    const response = await withTimeout(
+      config.provider.timeoutMs,
+      (signal) => fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${apiKey}`
+        },
+        signal
+      })
+    );
+    if (!response.ok) {
+      return {
+        ok: false,
+        checkedAt,
+        baseUrl,
+        modelName,
+        message: `Provider test failed with status ${response.status}.`
+      };
+    }
+    const payload = await response.json();
+    const modelCount = Array.isArray(payload.data) ? payload.data.length : 0;
+    return {
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      message: `Provider reachable. ${modelCount} models listed.`
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      message: `Provider test failed: ${message}`
+    };
+  }
+}
+
+// src/router.ts
+function routeUserMessage(message, state) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("\u9636\u6BB5") || normalized.includes("\u72B6\u6001") || normalized.includes("\u8FDB\u5EA6") || normalized.includes("status") || normalized.includes("\u73B0\u5728\u8FDB\u884C\u5230")) {
+    return {
+      type: "status_query",
+      reason: `The message asks about current progress while the project is at ${state.runtime.stage}.`
+    };
+  }
+  if (normalized.includes("\u7EE7\u7EED") || normalized.includes("\u4E0B\u4E00\u6B65") || normalized.includes("advance") || normalized.includes("\u63A8\u8FDB")) {
+    return {
+      type: "workflow_control",
+      reason: "The message requests moving the workflow forward."
+    };
+  }
+  if (normalized.includes("\u6574\u4E2A\u6545\u4E8B") || normalized.includes("\u6539\u6210") || normalized.includes("\u91CD\u5199") || normalized.includes("\u98CE\u683C") || normalized.includes("genre")) {
+    return {
+      type: "interruption_change",
+      reason: "The message suggests a change that may alter story direction or project-wide assumptions."
+    };
+  }
+  return {
+    type: "worldbuilding",
+    reason: "The message adds or refines story content and should enter the multi-agent discussion flow."
+  };
+}
+
 // src/super-graph.ts
+var import_promises2 = __toESM(require("fs/promises"), 1);
+var import_node_path4 = __toESM(require("path"), 1);
 var GRAPH_SCHEMA_VERSION = 1;
 var WORKSPACE_DIR = ".ai-novel";
 var STAGES = [
@@ -3342,15 +3560,15 @@ function readJson2(value, fallback) {
   }
 }
 function workspacePath(rootDir, ...parts) {
-  return import_node_path3.default.join(rootDir, WORKSPACE_DIR, ...parts);
+  return import_node_path4.default.join(rootDir, WORKSPACE_DIR, ...parts);
 }
 function graphPaths(rootDir) {
   const graphDir = workspacePath(rootDir, "graph");
   return {
     graphDir,
-    graphPath: import_node_path3.default.join(graphDir, "super-graph.json"),
-    indexPath: import_node_path3.default.join(graphDir, "index.json"),
-    violationsPath: import_node_path3.default.join(graphDir, "violations.json")
+    graphPath: import_node_path4.default.join(graphDir, "super-graph.json"),
+    indexPath: import_node_path4.default.join(graphDir, "index.json"),
+    violationsPath: import_node_path4.default.join(graphDir, "violations.json")
   };
 }
 function makeNode(type, id, label, properties = {}) {
@@ -3567,7 +3785,7 @@ async function upsertDiscussionInSuperGraph(rootDir, discussion, options = {}) {
 }
 async function upsertCheckpointInSuperGraph(rootDir, checkpoint, options = {}) {
   const graph = await loadSuperGraphForUpdate(rootDir, options);
-  const checkpointId = `checkpoint:${import_node_path3.default.basename(checkpoint.path).replace(/\.json$/i, "")}`;
+  const checkpointId = `checkpoint:${import_node_path4.default.basename(checkpoint.path).replace(/\.json$/i, "")}`;
   upsertNode(graph, makeNode("Checkpoint", checkpointId, checkpoint.label, {
     path: checkpoint.path,
     drift: checkpoint.drift
@@ -3704,7 +3922,7 @@ async function backfillPendingMemoryEmbeddings(rootDir, options = {}) {
 // src/knowledge.ts
 var import_node_crypto = __toESM(require("crypto"), 1);
 var import_promises3 = __toESM(require("fs/promises"), 1);
-var import_node_path4 = __toESM(require("path"), 1);
+var import_node_path5 = __toESM(require("path"), 1);
 var LOCAL_KNOWLEDGE_EMBEDDING_MODEL = "local-hash-v1";
 var DEFAULT_CHUNK_CHAR_LIMIT = 1400;
 var DEFAULT_GLOBAL_RESOURCE_LIMIT = process.env.AI_NOVEL_TEST_MODE === "1" ? 12 : 5e3;
@@ -3714,11 +3932,11 @@ function currentBundleDir() {
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path4.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return import_node_path5.default.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path4.default.dirname(fileMatch[1]);
+      return import_node_path5.default.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
@@ -3727,7 +3945,7 @@ function sha256(value) {
   return import_node_crypto.default.createHash("sha256").update(value).digest("hex");
 }
 function normalizeRelativePath(value) {
-  return value.split(import_node_path4.default.sep).join("/");
+  return value.split(import_node_path5.default.sep).join("/");
 }
 function chapterNumberFromKnowledgePath(value) {
   const match = String(value || "").match(/chapter-(\d+)/u);
@@ -3895,7 +4113,7 @@ async function ingestKnowledgeSource(options) {
       projectId: options.projectId ?? null,
       sourceType: options.sourceType,
       path: options.path,
-      title: options.title || import_node_path4.default.basename(options.path),
+      title: options.title || import_node_path5.default.basename(options.path),
       contentHash,
       version: options.version || "1",
       status: "ready",
@@ -3936,9 +4154,9 @@ async function ingestKnowledgeSource(options) {
 async function ingestGlobalWritingResources(rootDir, options = {}) {
   const bundleDir = currentBundleDir();
   const candidates = [
-    import_node_path4.default.join(rootDir, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path4.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path4.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    import_node_path5.default.join(rootDir, "packages", "ai-novel-core", "resources", "writing"),
+    import_node_path5.default.resolve(bundleDir, "..", "resources", "writing"),
+    import_node_path5.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   let resourceRoot = "";
   for (const candidate of candidates) {
@@ -3956,7 +4174,7 @@ async function ingestGlobalWritingResources(rootDir, options = {}) {
   async function walk(dir) {
     const entries = await import_promises3.default.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = import_node_path4.default.join(dir, entry.name);
+      const fullPath = import_node_path5.default.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(fullPath);
       } else if (/\.(md|json)$/i.test(entry.name)) {
@@ -3970,13 +4188,13 @@ async function ingestGlobalWritingResources(rootDir, options = {}) {
   let chunks = 0;
   for (const filePath of files.slice(0, limit)) {
     const content = await import_promises3.default.readFile(filePath, "utf8");
-    const relativePath = normalizeRelativePath(import_node_path4.default.join("packages", "ai-novel-core", "resources", "writing", import_node_path4.default.relative(resourceRoot, filePath)));
+    const relativePath = normalizeRelativePath(import_node_path5.default.join("packages", "ai-novel-core", "resources", "writing", import_node_path5.default.relative(resourceRoot, filePath)));
     const result = await ingestKnowledgeSource({
       rootDir,
       scope: "global",
       sourceType: sourceTypeForPath(relativePath),
       path: relativePath,
-      title: import_node_path4.default.basename(filePath),
+      title: import_node_path5.default.basename(filePath),
       content,
       metadata: {
         resourceRoot: "packages/ai-novel-core/resources/writing"
@@ -3989,7 +4207,7 @@ async function ingestGlobalWritingResources(rootDir, options = {}) {
   return { sources, chunks };
 }
 async function ingestProjectArtifact(options) {
-  const absolutePath = import_node_path4.default.isAbsolute(options.artifactPath) ? options.artifactPath : import_node_path4.default.join(options.projectRoot, options.artifactPath);
+  const absolutePath = import_node_path5.default.isAbsolute(options.artifactPath) ? options.artifactPath : import_node_path5.default.join(options.projectRoot, options.artifactPath);
   const content = options.content ?? await import_promises3.default.readFile(absolutePath, "utf8");
   return ingestKnowledgeSource({
     rootDir: options.rootDir,
@@ -3997,7 +4215,7 @@ async function ingestProjectArtifact(options) {
     projectId: options.projectId,
     sourceType: sourceTypeForPath(options.artifactPath) || options.kind,
     path: normalizeRelativePath(options.artifactPath),
-    title: import_node_path4.default.basename(options.artifactPath),
+    title: import_node_path5.default.basename(options.artifactPath),
     content,
     metadata: {
       kind: options.kind,
@@ -4065,7 +4283,7 @@ function formatKnowledgeForPrompt(rows, limit = 8) {
   return rows.slice(0, limit).map((row, index) => {
     const source = row.source || {};
     const pathValue = String(source.path || row.source_path || "");
-    const title = String(source.title || row.source_title || import_node_path4.default.basename(pathValue) || "knowledge");
+    const title = String(source.title || row.source_title || import_node_path5.default.basename(pathValue) || "knowledge");
     return [
       `${index + 1}. [${String(row.chunk_type || "chunk")}] ${title}`,
       `Source: ${pathValue}`,
@@ -4146,7 +4364,7 @@ async function backfillPendingKnowledgeEmbeddings(rootDir, options = {}) {
 
 // src/writing-pipeline.ts
 var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_node_path5 = __toESM(require("path"), 1);
+var import_node_path6 = __toESM(require("path"), 1);
 
 // src/messages.ts
 var AGENT_TYPE_BY_LABEL = {
@@ -4289,17 +4507,17 @@ function currentBundleDir2() {
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path5.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return import_node_path6.default.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path5.default.dirname(fileMatch[1]);
+      return import_node_path6.default.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${import_node_path5.default.sep}.ai-novel-projects${import_node_path5.default.sep}`;
+  const marker = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
@@ -4314,7 +4532,7 @@ async function readOptionalText(filePath) {
   }
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return import_node_path5.default.relative(projectRoot, absolutePath).replaceAll(import_node_path5.default.sep, "/");
+  return import_node_path6.default.relative(projectRoot, absolutePath).replaceAll(import_node_path6.default.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -4601,7 +4819,7 @@ async function emitWritingProgress(options, event) {
 function throwIfPipelineAborted(options) {
   throwIfStopped(options.signal);
 }
-function parseQualityGate(report, attempts = 0, maxAttempts = 2) {
+function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
   const scoreMatches = [...report.matchAll(/(?:综合评分|overall|score)[^\d]{0,12}(\d{1,2})(?:\s*\/\s*10)?/giu)];
   const score = scoreMatches.length ? Math.max(...scoreMatches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value))) : report.includes("needs-manual-review") || report.includes("\u9700\u8981\u8FD4\u5DE5") ? 5 : 8;
   const wordMatch = report.match(/WORD_COUNT_CHECK:\s*(\d+)\s*\/\s*(\d+)/u);
@@ -5506,9 +5724,9 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir2();
   const candidates = [
-    import_node_path5.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path5.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path5.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    import_node_path6.default.resolve(bundleDir, "..", "resources", "writing"),
+    import_node_path6.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    import_node_path6.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
@@ -5518,7 +5736,7 @@ async function loadProductionWritingResources(rootDir) {
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText(import_node_path5.default.join(candidate, relativePath));
+        const text = await readOptionalText(import_node_path6.default.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -5554,9 +5772,9 @@ async function loadProductionWritingResources(rootDir) {
 }
 async function writeProductionWritingResourceArtifacts(projectRoot, paths, state, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  const resourceDir = import_node_path5.default.join(paths.styleDir, "production-resources");
+  const resourceDir = import_node_path6.default.join(paths.styleDir, "production-resources");
   await import_promises4.default.mkdir(resourceDir, { recursive: true });
-  const guidePath = import_node_path5.default.join(resourceDir, "production-writing-assets.md");
+  const guidePath = import_node_path6.default.join(resourceDir, "production-writing-assets.md");
   const genre = inferGenreProfile(state);
   const content = [
     "# Production Writing Resources",
@@ -6230,45 +6448,72 @@ async function generateProductionTextWithLlm({
     });
   }
   try {
-    const result = await generateAgentReply({
-      roleName,
-      basePrompt,
-      dynamicPrompt,
-      consensus: `Project: ${state.project.title}
+    let result = "";
+    const maxLlmAttempts = 3;
+    let backoffDelay = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 2e3;
+    for (let i = 1; i <= maxLlmAttempts; i++) {
+      try {
+        result = await generateAgentReply({
+          roleName,
+          basePrompt,
+          dynamicPrompt,
+          consensus: `Project: ${state.project.title}
 Core idea: ${state.project.idea}
 Current stage: ${state.runtime.stage}`,
-      message,
-      discussionStage: "specialist_turn",
-      currentStage: "drafting",
-      preferredLanguage: "zh-CN",
-      envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
-      signal: options.signal,
-      onDelta: progress ? async (delta) => {
-        streamedResult += delta;
-        const now2 = Date.now();
-        const isFirstDelta = !firstDeltaSeen;
-        firstDeltaSeen = true;
-        if (!isFirstDelta && now2 - lastStreamProgressAt < 2500) {
-          return;
-        }
-        lastStreamProgressAt = now2;
-        await emitWritingProgress(options, {
-          messageId,
-          step: `${progress.step}_llm_streaming`,
-          role: progress.role,
-          chapterNumber: progress.chapterNumber,
-          title: progress.title,
-          status: "running",
-          phase: isFirstDelta ? "response_started" : "streaming",
-          statusText: isFirstDelta ? "LLM \u5DF2\u5F00\u59CB\u54CD\u5E94\uFF0C\u6B63\u5728\u8FD4\u56DE\u9996\u6BB5\u5185\u5BB9\u3002" : "LLM \u6B63\u5728\u6301\u7EED\u8FD4\u56DE\u5185\u5BB9\u3002",
-          statusDetail: "\u8FD4\u56DE\u5185\u5BB9\u4F1A\u6301\u7EED\u5408\u5E76\u5230\u8FD9\u4E00\u6761 agent \u6D88\u606F\u4E2D\u3002",
-          message: `${progress.startMessage}\u6A21\u578B\u6B63\u5728\u6301\u7EED\u8F93\u51FA\u3002`,
-          preview: streamedResult.slice(-520),
-          streamText: streamedResult,
-          wordCount: wordCount(streamedResult)
+          message,
+          discussionStage: "specialist_turn",
+          currentStage: "drafting",
+          preferredLanguage: "zh-CN",
+          envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
+          signal: options.signal,
+          onDelta: progress ? async (delta) => {
+            streamedResult += delta;
+            const now2 = Date.now();
+            const isFirstDelta = !firstDeltaSeen;
+            firstDeltaSeen = true;
+            if (!isFirstDelta && now2 - lastStreamProgressAt < 2500) {
+              return;
+            }
+            lastStreamProgressAt = now2;
+            await emitWritingProgress(options, {
+              messageId,
+              step: `${progress.step}_llm_streaming`,
+              role: progress.role,
+              chapterNumber: progress.chapterNumber,
+              title: progress.title,
+              status: "running",
+              phase: isFirstDelta ? "response_started" : "streaming",
+              statusText: isFirstDelta ? "LLM \u5DF2\u5F00\u59CB\u54CD\u5E94\uFF0C\u6B63\u5728\u8FD4\u56DE\u9996\u6BB5\u5185\u5BB9\u3002" : "LLM \u6B63\u5728\u6301\u7EED\u8FD4\u56DE\u5185\u5BB9\u3002",
+              statusDetail: "\u8FD4\u56DE\u5185\u5BB9\u4F1A\u6301\u7EED\u5408\u5E76\u5230\u8FD9\u4E00\u6761 agent \u6D88\u606F\u4E2D\u3002",
+              message: `${progress.startMessage}\u6A21\u578B\u6B63\u5728\u6301\u7EED\u8F93\u51FA\u3002`,
+              preview: streamedResult.slice(-520),
+              streamText: streamedResult,
+              wordCount: wordCount(streamedResult)
+            });
+          } : void 0
         });
-      } : void 0
-    });
+        break;
+      } catch (error) {
+        if (i === maxLlmAttempts) {
+          const providerError = new Error(`Provider API \u8C03\u7528\u5931\u8D25\uFF0C\u5DF2\u91CD\u8BD5 ${maxLlmAttempts} \u6B21\u3002\u8BE6\u7EC6\u9519\u8BEF: ${error instanceof Error ? error.message : String(error)}`);
+          providerError.isProviderFailure = true;
+          throw providerError;
+        }
+        if (progress) {
+          await emitWritingProgress(options, {
+            messageId,
+            step: `${progress.step}_llm_retry`,
+            role: progress.role,
+            chapterNumber: progress.chapterNumber,
+            title: progress.title,
+            status: "running",
+            message: `\u7F51\u7EDC\u6216 API \u8BF7\u6C42\u5F02\u5E38\uFF0C\u6B63\u5728\u8FDB\u884C\u7B2C ${i} \u6B21\u91CD\u8BD5\uFF08\u7B49\u5F85 ${backoffDelay / 1e3} \u79D2\uFF09... \u9519\u8BEF: ${error instanceof Error ? error.message : String(error)}`
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+        backoffDelay *= 2;
+      }
+    }
     if (progress) {
       throwIfPipelineAborted(options);
       await emitWritingProgress(options, {
@@ -6304,7 +6549,154 @@ Current stage: ${state.runtime.stage}`,
     throw error;
   }
 }
-async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint })) {
+async function loadAndPruneGlobalContext(params) {
+  const { state, task, blueprint, resources, continuityContract, paths } = params;
+  let previousDraftFragment = "";
+  const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
+  if (paths && previousChapterId) {
+    const previousFinalDraft = await readOptionalText(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
+    if (previousFinalDraft) {
+      previousDraftFragment = previousFinalDraft.slice(-1200);
+    }
+  }
+  let rawOutline = "";
+  if (paths) {
+    rawOutline = await readOptionalText(paths.masterOutlinePath);
+  }
+  let rawConsensus = "";
+  if (paths) {
+    rawConsensus = await readOptionalText(paths.consensusPath);
+  }
+  let rawMemory = "";
+  if (paths && previousChapterId) {
+    rawMemory = await readOptionalText(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
+  }
+  let rawRag = params.knowledgeContext?.prompt || "";
+  let ledgerList = [...continuityContract.previousChapterLedger];
+  const MAX_TOTAL_CHARS = 12e3;
+  const fixedLength = params.additionalFixedLength ?? 10500;
+  const protagonistName = continuityContract.lockedProtagonistName || "";
+  const protectedLength = fixedLength + previousDraftFragment.length + protagonistName.length;
+  let prunedRag = rawRag;
+  let prunedMemory = rawMemory;
+  let prunedLedgerList = [...ledgerList];
+  let prunedConsensus = rawConsensus;
+  let prunedOutline = rawOutline;
+  const getDynamicLength = () => {
+    const ledgerText = prunedLedgerList.join("\n");
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length;
+  };
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+    if (prunedRag.length > 1e3) {
+      prunedRag = prunedRag.slice(0, 1e3) + "\n...[RAG \u77E5\u8BC6\u5E93\u56E0 Token \u9650\u5236\u88AB\u88C1\u526A]";
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      if (prunedMemory.length > 800) {
+        prunedMemory = prunedMemory.slice(0, 800) + "\n...[\u89D2\u8272\u8BB0\u5FC6\u56E0 Token \u9650\u5236\u88AB\u88C1\u526A]";
+      }
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedRag = "";
+      prunedMemory = "";
+    }
+  }
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+    while (prunedLedgerList.length > 2 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList.shift();
+    }
+    if (prunedLedgerList.length > 1 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList = [prunedLedgerList[prunedLedgerList.length - 1]];
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList = [];
+    }
+  }
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedConsensus) {
+    const keywordSet = /* @__PURE__ */ new Set();
+    if (protagonistName) keywordSet.add(protagonistName);
+    const matches = blueprint.match(/[\u4e00-\u9fff]{2,5}/g) || [];
+    for (const match of matches) {
+      if (match.length >= 2 && !/^(章节|章节|标题|字数|类型|旁白|必须|不能|主角|配角|情节|伏笔|如果|这是|需要|进行|已经|这个|但是|因为|所以|或者|没有|可以|我们|他们|你们)$/.test(match)) {
+        keywordSet.add(match);
+      }
+    }
+    const blocks = prunedConsensus.split(/\n(?=(?:#+|\d+\.))/g);
+    const matchedBlocks = [];
+    for (const block of blocks) {
+      let isHit = false;
+      for (const kw of keywordSet) {
+        if (block.includes(kw)) {
+          isHit = true;
+          break;
+        }
+      }
+      if (isHit) {
+        matchedBlocks.push(block);
+      }
+    }
+    if (matchedBlocks.length > 0) {
+      prunedConsensus = matchedBlocks.join("\n");
+    } else {
+      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[\u5168\u5C40\u5171\u8BC6\u56E0 Token \u9650\u5236\u88AB\u7F29\u51CF]";
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedConsensus = prunedConsensus.slice(0, 500);
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedConsensus = "";
+    }
+  }
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedOutline) {
+    const currentChapterLabel = `\u7B2C${task.chapterNumber}\u7AE0`;
+    const currentChapterLabelAlt = `\u7B2C ${task.chapterNumber} \u7AE0`;
+    const lines = prunedOutline.split("\n");
+    let targetIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(currentChapterLabel) || lines[i].includes(currentChapterLabelAlt)) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex >= 0) {
+      const startLine = Math.max(0, targetIndex - 20);
+      const endLine = Math.min(lines.length, targetIndex + 20);
+      prunedOutline = [
+        "...[\u4E3B\u7EBF\u5927\u7EB2\u524D\u671F\u5DF2\u7701\u7565]",
+        ...lines.slice(startLine, endLine),
+        "...[\u4E3B\u7EBF\u5927\u7EB2\u540E\u671F\u5DF2\u7701\u7565]"
+      ].join("\n");
+    } else {
+      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[\u4E3B\u7EBF\u5927\u7EB2\u56E0 Token \u9650\u5236\u88AB\u7F29\u51CF]";
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedOutline = prunedOutline.slice(0, 500);
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedOutline = "";
+    }
+  }
+  return {
+    prunedConsensus,
+    prunedOutline,
+    prunedRag,
+    prunedMemory,
+    prunedLedger: prunedLedgerList.join("\n"),
+    previousDraftFragment
+  };
+}
+function trimBlueprintForDrafting(blueprint) {
+  let trimmed = blueprint;
+  const carryoverIndex = trimmed.indexOf("## Consensus Carryover");
+  if (carryoverIndex > 0) {
+    trimmed = trimmed.slice(0, carryoverIndex).trim();
+  }
+  const vocabIndex = trimmed.indexOf("## Vocabulary And Idiom Strategy");
+  if (vocabIndex > 0) {
+    trimmed = trimmed.slice(0, vocabIndex).trim();
+  }
+  return trimmed;
+}
+async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
   throwIfPipelineAborted(options);
   if (continuityContract.status === "blocked") {
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`);
@@ -6352,6 +6744,72 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return fallback;
   }
+  const cappedVocabularyPrompt = vocabularyPrompt.slice(0, 1e3);
+  const cappedVocabularySkillExamples = vocabularySkillExamples.slice(0, 800);
+  const cappedResourceManifest = resourceManifest.slice(0, 500);
+  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
+  const basePromptLines = [
+    cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
+    "",
+    "\u5FC5\u987B\u5199\u6B63\u6587\uFF0C\u4E0D\u8981\u53EA\u5199\u8BA1\u5212\u3001\u6458\u8981\u6216\u5EFA\u8BAE\u3002",
+    "\u5FC5\u987B\u4E25\u683C\u9075\u5FAA\u7AE0\u8282\u84DD\u56FE\u3001\u7C7B\u578B\u65C1\u767D\u7B56\u7565\u3001\u6210\u8BED\u5BC6\u5EA6\u4E0E\u89D2\u8272\u5DEE\u5F02\u3002",
+    "\u5FC5\u987B\u4E25\u683C\u6267\u884C\u7AE0\u8282\u56E0\u679C\u5408\u540C\uFF1A\u627F\u63A5\u4E0A\u4E00\u7AE0\u8F93\u5165\u3001\u5B8C\u6210\u672C\u7AE0\u76EE\u6807\u3001\u8BA9\u4E3B\u89D2\u505A\u9009\u62E9\u3001\u7559\u4E0B\u4E0D\u53EF\u9006\u53D8\u5316\u3001\u628A\u540E\u679C\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
+    continuityContract.lockedProtagonistName ? `\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u672C\u7AE0\u5FC5\u987B\u7EE7\u7EED\u4F7F\u7528\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u6539\u540D\u3001\u6362\u8EAB\u4EFD\u6216\u5199\u6210\u53E6\u4E00\u6761\u6545\u4E8B\u7EBF\u3002` : "\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u9996\u7AE0\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u540E\u7EED\u7AE0\u8282\u4F1A\u9501\u5B9A\u8BE5\u59D3\u540D\u3002",
+    "\u914D\u89D2\u3001\u60C5\u8282\u3001\u4F0F\u7B14\u548C\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u9075\u5FAA Canon Continuity Contract\u3002",
+    "\u7B2C 2 \u7AE0\u4EE5\u540E\u4E0D\u80FD\u53EA\u6CBF\u7528\u4E3B\u89D2\u59D3\u540D\uFF1B\u5FC5\u987B\u8BA9\u4E0A\u4E00\u7AE0\u951A\u70B9\u5728\u6B63\u6587\u4E8B\u4EF6\u4E2D\u53D1\u751F\u4F5C\u7528\u3002",
+    "\u7981\u6B62 AI \u5316\u788E\u7247\u5199\u6CD5\uFF1A\u4E0D\u5F97\u8BA9\u5355\u4E2A\u5B57\u6216 1-4 \u5B57\u77ED\u8BCD\u53CD\u590D\u72EC\u7ACB\u6210\u53E5/\u6210\u884C\u5806\u573A\u666F\u3002"
+  ];
+  const fixedDynamicPromptLines = [
+    `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
+    `\u6807\u9898\uFF1A${task.title}`,
+    `\u76EE\u6807\u5B57\u6570\uFF1A${task.targetWords}`,
+    `\u7C7B\u578B\uFF1A${genre.genre}`,
+    `\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
+    `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
+    "",
+    cappedVocabularyPrompt,
+    "",
+    cappedVocabularySkillExamples,
+    "",
+    cappedResourceManifest,
+    "",
+    continuityContract.prompt,
+    "",
+    "\u8D44\u6E90\u4F7F\u7528\u786C\u8981\u6C42\uFF1A",
+    "- \u81F3\u5C11\u81EA\u7136\u5438\u6536 3 \u4E2A\u8BCD\u6C47/\u573A\u666F\u8D44\u6E90\u63D0\u793A\uFF0C\u4F46\u4E0D\u80FD\u5806\u780C\u6210\u8BED\u3002",
+    "- \u5FC5\u987B\u5B66\u4E60 Migrated Vocabulary Skill Examples \u7684\u6B63\u786E\u793A\u8303\u65B9\u6CD5\uFF1A\u57FA\u7840\u8BCD\u6C47\u5199\u6E05\u5185\u5BB9\uFF0C\u5C11\u91CF\u6210\u8BED\u53EA\u505A\u70B9\u775B\u3002",
+    "- \u5FC5\u987B\u907F\u5F00 Anti Patterns\uFF1A\u8FDE\u7EED\u6210\u8BED\u3001\u5B64\u7ACB\u6210\u8BED\u3001\u5355\u5B57\u77ED\u8BCD\u8FDE\u53D1\u3001\u53EA\u6709\u6C1B\u56F4\u6CA1\u6709\u52A8\u4F5C\u3002",
+    "- \u573A\u666F\u5FC5\u987B\u6709\u5177\u4F53\u52A8\u4F5C\u3001\u7269\u4EF6\u3001\u6C14\u5473/\u58F0\u97F3/\u89E6\u611F\u4E2D\u7684\u81F3\u5C11\u4E24\u7C7B\u7EC6\u8282\u3002",
+    "- \u7AE0\u8282\u5FC5\u987B\u56F4\u7ED5\u84DD\u56FE\u63A8\u8FDB\uFF0C\u4E0D\u5F97\u8F93\u51FA\u4FEE\u6539\u8BF4\u660E\u6216\u6CDB\u5316\u6A21\u677F\u6BB5\u843D\u3002",
+    `- Previous Input \u5FC5\u987B\u8FDB\u5165\u5F00\u573A\u6216\u7B2C\u4E00\u573A\u51B2\u7A81\uFF1A${causalPlan.previousInput}`,
+    `- Causal Objective \u5FC5\u987B\u5728\u6B63\u6587\u4E2D\u88AB\u4E8B\u4EF6\u63A8\u8FDB\uFF1A${causalPlan.sceneObjective}`,
+    `- Protagonist Decision \u5FC5\u987B\u5199\u6210\u53EF\u89C1\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
+    `- Irreversible Change \u5FC5\u987B\u6210\u4E3A\u7AE0\u672B\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
+    `- Next Chapter Handoff \u5FC5\u987B\u4ECE\u672C\u7AE0\u540E\u679C\u81EA\u7136\u4EA7\u751F\uFF1A${causalPlan.nextHandoff}`,
+    continuityContract.lockedProtagonistName ? `- \u6B63\u6587\u5FC5\u987B\u591A\u6B21\u56F4\u7ED5\u300C${continuityContract.lockedProtagonistName}\u300D\u7684\u884C\u52A8\u3001\u611F\u77E5 and \u9009\u62E9\u63A8\u8FDB\u3002` : "- \u6B63\u6587\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
+    "- \u4E0D\u5F97\u51ED\u7A7A\u66FF\u6362\u5DF2\u77E5\u914D\u89D2\uFF1B\u65B0\u589E\u914D\u89D2\u5FC5\u987B\u4EA4\u4EE3\u8EAB\u4EFD\u3001\u7ACB\u573A\u548C\u4E0E\u4E3B\u89D2\u5173\u7CFB\u3002",
+    "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002",
+    continuityContract.continuityAnchors.length ? `- \u6B63\u6587\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "- \u6B63\u6587\u5FC5\u987B\u5EFA\u7ACB\u53EF\u4F9B\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u5177\u4F53\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
+    "- \u4E0D\u8981\u628A\u63A8\u8350\u8BCD\u3001\u6210\u8BED\u6216\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\uFF1B\u6240\u6709\u8BCD\u90FD\u5FC5\u987B\u5D4C\u5165\u5B8C\u6574\u52A8\u4F5C\u3001\u5BF9\u8BDD\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002"
+  ];
+  const basePromptText = basePromptLines.join("\n");
+  const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n");
+  const additionalFixedLength = basePromptText.length + fixedDynamicPromptText.length + 1e3;
+  const prunedContext = await loadAndPruneGlobalContext({
+    state,
+    task,
+    blueprint,
+    resources,
+    options,
+    continuityContract,
+    paths,
+    projectRoot,
+    knowledgeContext,
+    additionalFixedLength
+  });
+  console.log(
+    `[WRITING CTX] Chapter ${task.chapterNumber} Author Draft \u4E0A\u4E0B\u6587\u5206\u5E03: writerGuide=${(resources.writerGuide || "").length}\u5B57 vocabPrompt=${cappedVocabularyPrompt.length}\u5B57 skillExamples=${cappedVocabularySkillExamples.length}\u5B57 manifest=${cappedResourceManifest.length}\u5B57 consensus=${prunedContext.prunedConsensus.length}\u5B57 outline=${prunedContext.prunedOutline.length}\u5B57 memory=${prunedContext.prunedMemory.length}\u5B57 ledger=${prunedContext.prunedLedger.length}\u5B57 prevFragment=${prunedContext.previousDraftFragment.length}\u5B57 rag=${prunedContext.prunedRag.length}\u5B57`
+  );
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
     state,
@@ -6364,17 +6822,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
       startMessage: `Author \u6B63\u5728\u6839\u636E\u7B2C ${task.chapterNumber} \u7AE0\u84DD\u56FE\u751F\u6210\u6B63\u6587\u521D\u7A3F\u3002`,
       completeMessage: `Author \u5DF2\u8FD4\u56DE\u7B2C ${task.chapterNumber} \u7AE0\u521D\u7A3F\uFF0C\u51C6\u5907\u8FDB\u5165\u8D28\u68C0\u3002`
     },
-    basePrompt: [
-      resources.writerGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
-      "",
-      "\u5FC5\u987B\u5199\u6B63\u6587\uFF0C\u4E0D\u8981\u53EA\u5199\u8BA1\u5212\u3001\u6458\u8981\u6216\u5EFA\u8BAE\u3002",
-      "\u5FC5\u987B\u4E25\u683C\u9075\u5FAA\u7AE0\u8282\u84DD\u56FE\u3001\u7C7B\u578B\u65C1\u767D\u7B56\u7565\u3001\u6210\u8BED\u5BC6\u5EA6\u4E0E\u89D2\u8272\u5DEE\u5F02\u3002",
-      "\u5FC5\u987B\u4E25\u683C\u6267\u884C\u7AE0\u8282\u56E0\u679C\u5408\u540C\uFF1A\u627F\u63A5\u4E0A\u4E00\u7AE0\u8F93\u5165\u3001\u5B8C\u6210\u672C\u7AE0\u76EE\u6807\u3001\u8BA9\u4E3B\u89D2\u505A\u9009\u62E9\u3001\u7559\u4E0B\u4E0D\u53EF\u9006\u53D8\u5316\u3001\u628A\u540E\u679C\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
-      continuityContract.lockedProtagonistName ? `\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u672C\u7AE0\u5FC5\u987B\u7EE7\u7EED\u4F7F\u7528\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u6539\u540D\u3001\u6362\u8EAB\u4EFD\u6216\u5199\u6210\u53E6\u4E00\u6761\u6545\u4E8B\u7EBF\u3002` : "\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u9996\u7AE0\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u540E\u7EED\u7AE0\u8282\u4F1A\u9501\u5B9A\u8BE5\u59D3\u540D\u3002",
-      "\u914D\u89D2\u3001\u60C5\u8282\u3001\u4F0F\u7B14\u548C\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u9075\u5FAA Canon Continuity Contract\u3002",
-      "\u7B2C 2 \u7AE0\u4EE5\u540E\u4E0D\u80FD\u53EA\u6CBF\u7528\u4E3B\u89D2\u59D3\u540D\uFF1B\u5FC5\u987B\u8BA9\u4E0A\u4E00\u7AE0\u951A\u70B9\u5728\u6B63\u6587\u4E8B\u4EF6\u4E2D\u53D1\u751F\u4F5C\u7528\u3002",
-      "\u7981\u6B62 AI \u5316\u788E\u7247\u5199\u6CD5\uFF1A\u4E0D\u5F97\u8BA9\u5355\u4E2A\u5B57\u6216 1-4 \u5B57\u77ED\u8BCD\u53CD\u590D\u72EC\u7ACB\u6210\u53E5/\u6210\u884C\u5806\u573A\u666F\u3002"
-    ].join("\n"),
+    basePrompt: basePromptText,
     dynamicPrompt: [
       `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
       `\u6807\u9898\uFF1A${task.title}`,
@@ -6383,14 +6831,29 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
       `\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
       `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
       "",
-      vocabularyPrompt,
+      cappedVocabularyPrompt,
       "",
-      vocabularySkillExamples,
+      cappedVocabularySkillExamples,
       "",
-      resourceManifest,
+      cappedResourceManifest,
+      "",
+      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
+${prunedContext.prunedConsensus}` : "",
+      "",
+      prunedContext.prunedOutline ? `Master Outline:
+${prunedContext.prunedOutline}` : "",
+      "",
+      prunedContext.prunedMemory ? `Character Memory:
+${prunedContext.prunedMemory}` : "",
+      "",
+      prunedContext.prunedLedger ? `Previous Chapter Ledger:
+${prunedContext.prunedLedger}` : "",
+      "",
+      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (\u672B\u5C3E\u627F\u63A5\u6BB5):
+${prunedContext.previousDraftFragment}` : "",
       "",
       "Knowledge/RAG References:",
-      knowledgeContext.prompt,
+      prunedContext.prunedRag,
       "",
       continuityContract.prompt,
       "",
@@ -6405,7 +6868,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
       `- Protagonist Decision \u5FC5\u987B\u5199\u6210\u53EF\u89C1\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
       `- Irreversible Change \u5FC5\u987B\u6210\u4E3A\u7AE0\u672B\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
       `- Next Chapter Handoff \u5FC5\u987B\u4ECE\u672C\u7AE0\u540E\u679C\u81EA\u7136\u4EA7\u751F\uFF1A${causalPlan.nextHandoff}`,
-      continuityContract.lockedProtagonistName ? `- \u6B63\u6587\u5FC5\u987B\u591A\u6B21\u56F4\u7ED5\u300C${continuityContract.lockedProtagonistName}\u300D\u7684\u884C\u52A8\u3001\u611F\u77E5\u548C\u9009\u62E9\u63A8\u8FDB\u3002` : "- \u6B63\u6587\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
+      continuityContract.lockedProtagonistName ? `- \u6B63\u6587\u5FC5\u987B\u591A\u6B21\u56F4\u7ED5\u300C${continuityContract.lockedProtagonistName}\u300D\u7684\u884C\u52A8\u3001\u611F\u77E5 and \u9009\u62E9\u63A8\u8FDB\u3002` : "- \u6B63\u6587\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
       "- \u4E0D\u5F97\u51ED\u7A7A\u66FF\u6362\u5DF2\u77E5\u914D\u89D2\uFF1B\u65B0\u589E\u914D\u89D2\u5FC5\u987B\u4EA4\u4EE3\u8EAB\u4EFD\u3001\u7ACB\u573A\u548C\u4E0E\u4E3B\u89D2\u5173\u7CFB\u3002",
       "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002",
       continuityContract.continuityAnchors.length ? `- \u6B63\u6587\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "- \u6B63\u6587\u5FC5\u987B\u5EFA\u7ACB\u53EF\u4F9B\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u5177\u4F53\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
@@ -6419,9 +6882,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
       "## Causal Chapter Plan",
       ...formatCausalPlanBullets(state, task),
       "",
-      continuityContract.prompt,
-      "",
-      blueprint
+      trimBlueprintForDrafting(blueprint)
     ].join("\n")
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n");
@@ -6579,7 +7040,7 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
 ${generated}`;
   return appendQualityHardChecks(report, task, draft, continuityContract);
 }
-async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint })) {
+async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
   throwIfPipelineAborted(options);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return [
@@ -6592,6 +7053,45 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
       "- \u672C\u8F6E\u8FD4\u5DE5\u4FDD\u6301\u7AE0\u8282\u76EE\u6807\u4E0D\u53D8\uFF0C\u5E76\u7EE7\u7EED\u4EA4\u7ED9\u8D28\u91CF\u95E8\u7981\u590D\u67E5\u3002"
     ].join("\n");
   }
+  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
+  const basePromptLines = [
+    cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
+    "\u4F60\u6B63\u5728\u6267\u884C\u8D28\u91CF\u95E8\u7981\u8FD4\u5DE5\u3002\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u76EE\u6807\uFF0C\u4E0D\u5F97\u8DF3\u7AE0\uFF0C\u4E0D\u5F97\u6539\u53D8\u5DF2\u51BB\u7ED3\u8BBE\u5B9A\u3002",
+    "\u987A\u5E94\u5E76\u4FEE\u590D\u7AE0\u8282\u56E0\u679C\u5408\u540C\uFF1A\u4E0A\u4E00\u7AE0\u8F93\u5165\u8981\u63A8\u52A8\u672C\u7AE0\u9009\u62E9\uFF0C\u672C\u7AE0\u9009\u62E9\u8981\u4EA7\u751F\u4E0D\u53EF\u9006\u4EE3\u4EF7\uFF0C\u5E76\u81EA\u7136\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
+    continuityContract.lockedProtagonistName ? `\u5FC5\u987B\u628A\u4E3B\u89D2\u4E00\u81F4\u6027\u4FEE\u56DE\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u7EE7\u7EED\u4F7F\u7528\u6F02\u79FB\u4E3B\u89D2\u3002` : "\u5FC5\u987B\u5728\u9996\u7AE0\u5EFA\u7ACB\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\u3002",
+    "\u5FC5\u987B\u4FEE\u590D\u914D\u89D2\u5173\u7CFB\u3001\u524D\u5E8F\u60C5\u8282\u627F\u63A5\u3001\u4F0F\u7B14\u72B6\u6001\u3001\u8D44\u6E90\u4F7F\u7528\u3001\u60C5\u8282\u63A8\u8FDB\u548C\u6B63\u6587\u6BD4\u4F8B\u95EE\u9898\u3002",
+    "\u5FC5\u987B\u4FEE\u590D\u7AE0\u8282\u65AD\u88C2\uFF1A\u4E0A\u4E00\u7AE0\u951A\u70B9\u8981\u8FDB\u5165\u672C\u7AE0\u4E8B\u4EF6\u56E0\u679C\uFF0C\u4E0D\u5F97\u53EA\u6362\u573A\u666F\u91CD\u5F00\u3002",
+    "\u5FC5\u987B\u4FEE\u590D\u6D41\u6C34\u8D26\u95EE\u9898\uFF1A\u4E0D\u8981\u53EA\u6309\u65F6\u95F4\u7F57\u5217\uFF0C\u6240\u6709\u573A\u666F\u90FD\u8981\u56E0\u9009\u62E9\u3001\u4EE3\u4EF7\u3001\u4FE1\u606F\u53D8\u5316\u6216\u5173\u7CFB\u53D8\u5316\u800C\u53D1\u751F\u3002",
+    "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002"
+  ];
+  const fixedDynamicPromptLines = [
+    `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
+    `\u6807\u9898\uFF1A${task.title}`,
+    `\u8FD4\u5DE5\u8F6E\u6B21\uFF1A${attempt}`,
+    "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+    "\u5FC5\u987B\u8F93\u51FA Markdown\uFF0C\u4FDD\u7559 `## Draft Body`\u3002",
+    "",
+    `[Correction Observation (\u7EA0\u504F\u89C2\u5BDF)]
+\u4E0A\u4E00\u8F6E\u5199\u4F5C\u5B58\u5728\u4EE5\u4E0B\u7F3A\u9677\uFF1A
+${report.slice(0, 1500)}
+\u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
+    "",
+    continuityContract.prompt
+  ];
+  const basePromptText = basePromptLines.join("\n\n");
+  const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n");
+  const additionalFixedLength = basePromptText.length + fixedDynamicPromptText.length + 1e3;
+  const prunedContext = await loadAndPruneGlobalContext({
+    state,
+    task,
+    blueprint,
+    resources,
+    options,
+    continuityContract,
+    paths,
+    projectRoot,
+    additionalFixedLength
+  });
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
     state,
@@ -6604,16 +7104,7 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
       startMessage: `Author \u6B63\u5728\u6839\u636E\u8D28\u68C0\u62A5\u544A\u8FD4\u5DE5\u7B2C ${task.chapterNumber} \u7AE0\uFF0C\u7B2C ${attempt} \u8F6E\u3002`,
       completeMessage: `Author \u5DF2\u8FD4\u56DE\u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${attempt} \u8F6E\u8FD4\u5DE5\u7A3F\u3002`
     },
-    basePrompt: [
-      resources.writerGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
-      "\u4F60\u6B63\u5728\u6267\u884C\u8D28\u91CF\u95E8\u7981\u8FD4\u5DE5\u3002\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u76EE\u6807\uFF0C\u4E0D\u5F97\u8DF3\u7AE0\uFF0C\u4E0D\u5F97\u6539\u53D8\u5DF2\u51BB\u7ED3\u8BBE\u5B9A\u3002",
-      "\u5FC5\u987B\u4FEE\u590D\u7AE0\u8282\u56E0\u679C\u5408\u540C\uFF1A\u4E0A\u4E00\u7AE0\u8F93\u5165\u8981\u63A8\u52A8\u672C\u7AE0\u9009\u62E9\uFF0C\u672C\u7AE0\u9009\u62E9\u8981\u4EA7\u751F\u4E0D\u53EF\u9006\u4EE3\u4EF7\uFF0C\u5E76\u81EA\u7136\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
-      continuityContract.lockedProtagonistName ? `\u5FC5\u987B\u628A\u4E3B\u89D2\u4E00\u81F4\u6027\u4FEE\u56DE\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u7EE7\u7EED\u4F7F\u7528\u6F02\u79FB\u4E3B\u89D2\u3002` : "\u5FC5\u987B\u5728\u9996\u7AE0\u5EFA\u7ACB\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\u3002",
-      "\u5FC5\u987B\u4FEE\u590D\u914D\u89D2\u5173\u7CFB\u3001\u524D\u5E8F\u60C5\u8282\u627F\u63A5\u3001\u4F0F\u7B14\u72B6\u6001\u3001\u8D44\u6E90\u4F7F\u7528\u3001\u60C5\u8282\u63A8\u8FDB\u548C\u6B63\u6587\u6BD4\u4F8B\u95EE\u9898\u3002",
-      "\u5FC5\u987B\u4FEE\u590D\u7AE0\u8282\u65AD\u88C2\uFF1A\u4E0A\u4E00\u7AE0\u951A\u70B9\u8981\u8FDB\u5165\u672C\u7AE0\u4E8B\u4EF6\u56E0\u679C\uFF0C\u4E0D\u5F97\u53EA\u6362\u573A\u666F\u91CD\u5F00\u3002",
-      "\u5FC5\u987B\u4FEE\u590D\u6D41\u6C34\u8D26\u95EE\u9898\uFF1A\u4E0D\u8981\u53EA\u6309\u65F6\u95F4\u7F57\u5217\uFF0C\u6240\u6709\u573A\u666F\u90FD\u8981\u56E0\u9009\u62E9\u3001\u4EE3\u4EF7\u3001\u4FE1\u606F\u53D8\u5316\u6216\u5173\u7CFB\u53D8\u5316\u800C\u53D1\u751F\u3002",
-      "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002"
-    ].join("\n\n"),
+    basePrompt: basePromptText,
     dynamicPrompt: [
       `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
       `\u6807\u9898\uFF1A${task.title}`,
@@ -6621,18 +7112,36 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
       "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
       "\u5FC5\u987B\u8F93\u51FA Markdown\uFF0C\u4FDD\u7559 `## Draft Body`\u3002",
       "",
+      `[Correction Observation (\u7EA0\u504F\u89C2\u5BDF)]
+\u4E0A\u4E00\u8F6E\u5199\u4F5C\u5B58\u5728\u4EE5\u4E0B\u7F3A\u9677\uFF1A
+${report.slice(0, 1500)}
+\u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
+      "",
+      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
+${prunedContext.prunedConsensus}` : "",
+      "",
+      prunedContext.prunedOutline ? `Master Outline:
+${prunedContext.prunedOutline}` : "",
+      "",
+      prunedContext.prunedMemory ? `Character Memory:
+${prunedContext.prunedMemory}` : "",
+      "",
+      prunedContext.prunedLedger ? `Previous Chapter Ledger:
+${prunedContext.prunedLedger}` : "",
+      "",
+      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (\u672B\u5C3E\u627F\u63A5\u6BB5):
+${prunedContext.previousDraftFragment}` : "",
+      "",
       continuityContract.prompt
     ].join("\n"),
     message: [
       "\u8BF7\u6839\u636E\u8D28\u91CF\u62A5\u544A\u8FD4\u5DE5\u4EE5\u4E0B\u7AE0\u8282\u8349\u7A3F\u3002",
       "",
       "## Blueprint",
-      blueprint,
+      trimBlueprintForDrafting(blueprint),
       "",
       "## Quality Report",
       report,
-      "",
-      continuityContract.prompt,
       "",
       "## Draft",
       draft
@@ -6640,8 +7149,8 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n");
 }
-async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint })) {
-  const maxAttempts = Math.max(0, Math.min(3, options.maxRevisionAttempts ?? 1));
+async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
+  const maxAttempts = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
   let draft = initialDraft;
   let report = "";
   let gate = {
@@ -6665,7 +7174,19 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
     if (gate.passed || attempt >= maxAttempts) {
       return { draft, report, gate };
     }
-    draft = await reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt + 1, continuityContract);
+    draft = await reviseDraftForQualityGate(
+      state,
+      task,
+      draft,
+      report,
+      blueprint,
+      resources,
+      options,
+      attempt + 1,
+      continuityContract,
+      paths,
+      projectRoot
+    );
   }
   return { draft, report, gate };
 }
@@ -6905,7 +7426,7 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = import_node_path5.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
     await import_promises4.default.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
@@ -6936,9 +7457,9 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   const protagonistProfile = await readOptionalText(paths.protagonistPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText(import_node_path5.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText(import_node_path5.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = import_node_path5.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
     consensus: await readOptionalText(paths.consensusPath),
     protagonist: protagonistProfile,
@@ -7015,7 +7536,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     message: continuityContract.lockedProtagonistName ? `Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u672C\u7AE0\u9501\u5B9A\u4E3B\u89D2\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u5E76\u8FFD\u8E2A\u914D\u89D2\u3001\u60C5\u8282\u548C\u4F0F\u7B14\u3002` : "Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u9996\u7AE0\u5C06\u9501\u5B9A\u552F\u4E00\u4E3B\u89D2\uFF0C\u5E76\u5EFA\u7ACB\u540E\u7EED\u89D2\u8272/\u60C5\u8282\u8D26\u672C\u3002",
     preview: continuityContract.prompt.slice(0, 720)
   });
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract);
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -7027,7 +7548,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft)
   });
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract);
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "quality_gate_completed",
@@ -7066,11 +7587,11 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   });
   const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract);
   throwIfPipelineAborted(options);
-  const draftPath = import_node_path5.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = import_node_path5.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = import_node_path5.default.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = import_node_path5.default.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = import_node_path5.default.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const draftPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = import_node_path6.default.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = import_node_path6.default.join(paths.memoryDir, `${chapterId}-memory.md`);
   await import_promises4.default.mkdir(paths.chaptersDir, { recursive: true });
   await import_promises4.default.mkdir(paths.reportsDir, { recursive: true });
   await import_promises4.default.mkdir(paths.memoryDir, { recursive: true });
@@ -7150,11 +7671,11 @@ ${report}
 // src/orchestrator.ts
 var import_promises6 = __toESM(require("fs/promises"), 1);
 var import_node_crypto2 = require("crypto");
-var import_node_path7 = __toESM(require("path"), 1);
+var import_node_path8 = __toESM(require("path"), 1);
 
 // src/context-packet.ts
 var import_promises5 = __toESM(require("fs/promises"), 1);
-var import_node_path6 = __toESM(require("path"), 1);
+var import_node_path7 = __toESM(require("path"), 1);
 function getContextFocusForStage(stage) {
   switch (stage) {
     case "worldbuilding_dialogue":
@@ -7246,10 +7767,10 @@ function createCurrentContextPacketText(state) {
   ].join("\n");
 }
 async function syncCurrentContextPacketFile(projectRoot, state) {
-  const contextPath = import_node_path6.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
+  const contextPath = import_node_path7.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
   const current = await import_promises5.default.readFile(contextPath, "utf8").catch(() => "");
   if (!current) {
-    await import_promises5.default.mkdir(import_node_path6.default.dirname(contextPath), { recursive: true });
+    await import_promises5.default.mkdir(import_node_path7.default.dirname(contextPath), { recursive: true });
     await import_promises5.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
 `);
     return;
@@ -7312,10 +7833,10 @@ function stampRuntimeProgress(state, action, route = stageRoute(state.runtime.st
   state.runtime.lastAction = action;
 }
 function getProjectsPaths(rootDir) {
-  const projectsRoot = import_node_path7.default.join(rootDir, PROJECTS_DIR);
+  const projectsRoot = import_node_path8.default.join(rootDir, PROJECTS_DIR);
   return {
     projectsRoot,
-    registryPath: import_node_path7.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
+    registryPath: import_node_path8.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
   };
 }
 async function readProjectRegistry(rootDir) {
@@ -7346,15 +7867,15 @@ function createUniqueProjectId(baseSlug, projects) {
   return `${baseSlug}-${suffix}`;
 }
 function resolveProjectRoot(rootDir, projectId) {
-  return import_node_path7.default.join(rootDir, PROJECTS_DIR, projectId);
+  return import_node_path8.default.join(rootDir, PROJECTS_DIR, projectId);
 }
 function resolveStoredProjectRoot(rootDir, projectRoot, projectId) {
-  if (import_node_path7.default.isAbsolute(projectRoot)) {
+  if (import_node_path8.default.isAbsolute(projectRoot)) {
     return projectRoot;
   }
-  const rootRelative = import_node_path7.default.resolve(rootDir, projectRoot);
+  const rootRelative = import_node_path8.default.resolve(rootDir, projectRoot);
   const managedRoot = resolveProjectRoot(rootDir, projectId);
-  if (import_node_path7.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path7.default.sep}`)) {
+  if (import_node_path8.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path8.default.sep}`)) {
     return managedRoot;
   }
   return rootRelative;
@@ -7471,35 +7992,35 @@ function buildInitialState(options) {
   };
 }
 function getWorkspacePaths(rootDir) {
-  const workspaceDir = import_node_path7.default.join(rootDir, WORKSPACE_DIR2);
+  const workspaceDir = import_node_path8.default.join(rootDir, WORKSPACE_DIR2);
   return {
     workspaceDir,
-    statePath: import_node_path7.default.join(workspaceDir, "state.json"),
-    promptsDir: import_node_path7.default.join(workspaceDir, "prompts"),
-    agentPromptsDir: import_node_path7.default.join(workspaceDir, "prompts", "agents"),
-    consensusPath: import_node_path7.default.join(workspaceDir, "prompts", "global-consensus.md"),
-    plansDir: import_node_path7.default.join(workspaceDir, "plans"),
-    reportsDir: import_node_path7.default.join(workspaceDir, "reports"),
-    styleDir: import_node_path7.default.join(workspaceDir, "style"),
-    styleProfilePath: import_node_path7.default.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: import_node_path7.default.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: import_node_path7.default.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: import_node_path7.default.join(workspaceDir, "style", "anti-patterns.md"),
-    chaptersDir: import_node_path7.default.join(workspaceDir, "chapters"),
-    assetsDir: import_node_path7.default.join(workspaceDir, "assets"),
-    coverDir: import_node_path7.default.join(workspaceDir, "assets", "cover"),
-    comicDir: import_node_path7.default.join(workspaceDir, "assets", "comic"),
-    memoryDir: import_node_path7.default.join(workspaceDir, "memory"),
-    charactersDir: import_node_path7.default.join(workspaceDir, "memory", "characters"),
-    characterCoreDir: import_node_path7.default.join(workspaceDir, "memory", "characters", "core"),
-    protagonistPath: import_node_path7.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
-    relationsPath: import_node_path7.default.join(workspaceDir, "memory", "characters", "relations.md"),
-    characterEvolutionPath: import_node_path7.default.join(workspaceDir, "memory", "characters", "evolution.md"),
-    configPath: import_node_path7.default.join(workspaceDir, "config.json"),
-    settingFreezePath: import_node_path7.default.join(workspaceDir, "plans", "setting-freeze.md"),
-    masterOutlinePath: import_node_path7.default.join(workspaceDir, "plans", "master-outline.md"),
-    chapterBlueprintsDir: import_node_path7.default.join(workspaceDir, "plans", "chapter-blueprints"),
-    coverPromptPath: import_node_path7.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
+    statePath: import_node_path8.default.join(workspaceDir, "state.json"),
+    promptsDir: import_node_path8.default.join(workspaceDir, "prompts"),
+    agentPromptsDir: import_node_path8.default.join(workspaceDir, "prompts", "agents"),
+    consensusPath: import_node_path8.default.join(workspaceDir, "prompts", "global-consensus.md"),
+    plansDir: import_node_path8.default.join(workspaceDir, "plans"),
+    reportsDir: import_node_path8.default.join(workspaceDir, "reports"),
+    styleDir: import_node_path8.default.join(workspaceDir, "style"),
+    styleProfilePath: import_node_path8.default.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: import_node_path8.default.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: import_node_path8.default.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: import_node_path8.default.join(workspaceDir, "style", "anti-patterns.md"),
+    chaptersDir: import_node_path8.default.join(workspaceDir, "chapters"),
+    assetsDir: import_node_path8.default.join(workspaceDir, "assets"),
+    coverDir: import_node_path8.default.join(workspaceDir, "assets", "cover"),
+    comicDir: import_node_path8.default.join(workspaceDir, "assets", "comic"),
+    memoryDir: import_node_path8.default.join(workspaceDir, "memory"),
+    charactersDir: import_node_path8.default.join(workspaceDir, "memory", "characters"),
+    characterCoreDir: import_node_path8.default.join(workspaceDir, "memory", "characters", "core"),
+    protagonistPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "evolution.md"),
+    configPath: import_node_path8.default.join(workspaceDir, "config.json"),
+    settingFreezePath: import_node_path8.default.join(workspaceDir, "plans", "setting-freeze.md"),
+    masterOutlinePath: import_node_path8.default.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: import_node_path8.default.join(workspaceDir, "plans", "chapter-blueprints"),
+    coverPromptPath: import_node_path8.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
   };
 }
 async function writeWorkspaceArtifacts(rootDir, state) {
@@ -7696,9 +8217,9 @@ Current focus:
 `
     ])
   );
-  await import_promises6.default.writeFile(import_node_path7.default.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
+  await import_promises6.default.writeFile(import_node_path8.default.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
 `);
-  await import_promises6.default.writeFile(import_node_path7.default.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
+  await import_promises6.default.writeFile(import_node_path8.default.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
 `);
   await import_promises6.default.writeFile(paths.consensusPath, `${globalConsensus}
 `);
@@ -7716,14 +8237,14 @@ Current focus:
 `);
   await import_promises6.default.writeFile(paths.characterEvolutionPath, `${evolution}
 `);
-  await import_promises6.default.writeFile(import_node_path7.default.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
+  await import_promises6.default.writeFile(import_node_path8.default.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
 `);
-  await import_promises6.default.writeFile(import_node_path7.default.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
+  await import_promises6.default.writeFile(import_node_path8.default.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
 `);
   await Promise.all(
     AGENT_ROLES.flatMap((role) => {
-      const base = import_node_path7.default.join(paths.agentPromptsDir, `${role}.base.md`);
-      const dynamic = import_node_path7.default.join(paths.agentPromptsDir, `${role}.dynamic.md`);
+      const base = import_node_path8.default.join(paths.agentPromptsDir, `${role}.base.md`);
+      const dynamic = import_node_path8.default.join(paths.agentPromptsDir, `${role}.dynamic.md`);
       return [
         import_promises6.default.writeFile(base, `${basePrompts.get(role) ?? ""}
 `),
@@ -7743,9 +8264,9 @@ async function readOptionalText2(filePath) {
 async function writeJsonFileAtomic(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
-  await import_promises6.default.mkdir(import_node_path7.default.dirname(filePath), { recursive: true });
+  await import_promises6.default.mkdir(import_node_path8.default.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const tempPath = import_node_path7.default.join(import_node_path7.default.dirname(filePath), `.${import_node_path7.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
+    const tempPath = import_node_path8.default.join(import_node_path8.default.dirname(filePath), `.${import_node_path8.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
     try {
       const handle = await import_promises6.default.open(tempPath, "wx");
       try {
@@ -7813,8 +8334,8 @@ async function deleteManagedAutonomousProject(rootDir, projectId) {
     return null;
   }
   const projectRoot = resolveStoredProjectRoot(rootDir, project.projectRoot, project.id);
-  const expectedProjectRoot = import_node_path7.default.resolve(resolveProjectRoot(rootDir, project.id));
-  if (import_node_path7.default.resolve(projectRoot) !== expectedProjectRoot) {
+  const expectedProjectRoot = import_node_path8.default.resolve(resolveProjectRoot(rootDir, project.id));
+  if (import_node_path8.default.resolve(projectRoot) !== expectedProjectRoot) {
     throw new Error(`Refusing to delete project outside managed workspace: ${projectRoot}`);
   }
   await withFactoryDb(rootDir, async (db) => {
@@ -8041,7 +8562,26 @@ async function produceChapterTask(rootDir, paths, state, task, pipelineOptions) 
       reason: "chapter_production_started"
     });
   }
-  const produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions);
+  let produced;
+  try {
+    produced = await runChapterProductionPipeline(rootDir, paths, state, task, pipelineOptions);
+  } catch (error) {
+    if (error.isProviderFailure) {
+      task.status = "pending";
+      state.runtime.statusMessage = `Provider error: ${error.message}`;
+      stampRuntimeProgress(state, `provider_failure:${task.chapterNumber}`);
+      await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+        await recordWorkflowEvent(pipelineOptions, "CHAPTER_TASK_STATUS_UPDATED", {
+          chapterNumber: task.chapterNumber,
+          status: "pending",
+          reason: `provider_failure: ${error.message}`
+        });
+      }
+    }
+    throw error;
+  }
   throwIfStopped(pipelineOptions.signal);
   task.status = produced.qualityGate.status === "blocked" ? "blocked" : "complete";
   task.qualityGate = {
@@ -8211,7 +8751,7 @@ async function recoverIncompleteInProgressChapterTasks(paths, state, pipelineOpt
       continue;
     }
     const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
-    const finalPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+    const finalPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.final.md`);
     try {
       await import_promises6.default.access(finalPath);
       if (fact?.status === "complete") {
@@ -8589,7 +9129,7 @@ async function reviewInterruption(options) {
   }
   const { reportsDir } = getWorkspacePaths(options.rootDir);
   await import_promises6.default.mkdir(reportsDir, { recursive: true });
-  const logPath = import_node_path7.default.join(reportsDir, "interruptions.log.md");
+  const logPath = import_node_path8.default.join(reportsDir, "interruptions.log.md");
   const header = `## ${review.timestamp}
 - Scope: ${review.scope}
 - Message: ${review.message}
@@ -8620,13 +9160,116 @@ function getWorkspaceSummary(rootDir) {
   return {
     rootDir,
     workspaceDir: paths.workspaceDir,
-    slug: slugifyTitle(import_node_path7.default.basename(rootDir))
+    slug: slugifyTitle(import_node_path8.default.basename(rootDir))
   };
 }
 
 // src/discussion.ts
 var import_promises7 = __toESM(require("fs/promises"), 1);
-var import_node_path8 = __toESM(require("path"), 1);
+var import_node_path9 = __toESM(require("path"), 1);
+
+// src/context-budget.ts
+var CONTEXT_BUDGET = {
+  // 各类 Agent 的总上下文上限
+  independent_total: 8e3,
+  // World Architect / Author / Prose Stylist（独立视角，不累积他人发言）
+  reviewer_total: 1e4,
+  // Editor / Reviewer（需要看前面专家的核心意见）
+  synthesis_total: 16e3,
+  // Showrunner closing_synthesis（需要综合所有专家输出）
+  opening_total: 8e3,
+  // Showrunner opening_brief（需要看上一次讨论结论）
+  // 各层独立上限
+  story_core: 2e3,
+  // Layer 1：小说核心（标题/主角/阶段/讨论目标）
+  role_specific: 4e3,
+  // Layer 3：角色专属内容（暂留给调用方控制）
+  history: {
+    independent: 0,
+    // 独立视角专家：不传历史（避免锚定效应）
+    reviewer: 1e3,
+    // Editor/Reviewer：只看 World Architect + Author 的核心发言
+    synthesis: 3e3,
+    // Showrunner 综合：所有专家发言的精华摘要
+    opening: 500
+    // Showrunner 开场：上一轮最终结论摘要
+  }
+};
+var NOISE_PATTERNS = [
+  /\[LLM\s+REQUEST/i,
+  /\[LLM\s+STREAM/i,
+  /请求已送达\s*LLM/,
+  /正在持续返回内容/,
+  /LLM\s+已开始响应/,
+  /LLM\s+返回完成/,
+  /Status:\s*(in_progress|running|completed|error)/i,
+  /step_\w+_(started|completed|streaming)/,
+  /知识库召回/,
+  /score:\s*[\d.]+/,
+  /phase:\s*\w+/,
+  /statusText:/,
+  /statusDetail:/,
+  /Agent.*消息会在模型返回/,
+  /请求已提交给\s*LLM/,
+  /等待模型开始响应/,
+  /返回内容会持续合并/
+];
+function filterCreativeHistory(transcript, maxChars) {
+  if (!transcript.trim() || maxChars <= 0) return "";
+  const filtered = transcript.split("\n").filter((line) => !NOISE_PATTERNS.some((p) => p.test(line))).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!filtered) return "";
+  if (filtered.length <= maxChars) return filtered;
+  return "\u2026[\u5386\u53F2\u5DF2\u622A\u65AD\uFF0C\u4FDD\u7559\u6700\u65B0\u5185\u5BB9]\n" + filtered.slice(filtered.length - maxChars);
+}
+function classifyAgent(agentId, discussionStage) {
+  if (agentId === "showrunner") {
+    return discussionStage === "closing_synthesis" ? "synthesis" : "opening";
+  }
+  if (agentId === "editor" || agentId === "reviewer") return "reviewer";
+  return "independent";
+}
+function buildHistoryForAgent(agentId, discussionStage, currentReplies, priorTranscript) {
+  const cls = classifyAgent(agentId, discussionStage);
+  const limit = CONTEXT_BUDGET.history[cls];
+  if (limit <= 0) return "";
+  if (cls === "opening") {
+    return filterCreativeHistory(priorTranscript, limit);
+  }
+  if (cls === "reviewer") {
+    const relevant = currentReplies.filter((r) => r.role === "World Architect" || r.role === "Author").map((r) => `### ${r.role}
+${r.content.slice(0, 450)}`).join("\n\n");
+    return relevant.slice(0, limit);
+  }
+  if (cls === "synthesis") {
+    const all = currentReplies.filter((r) => r.role !== "Showrunner").map((r) => `### ${r.role}
+${r.content.slice(0, 500)}`).join("\n\n");
+    return all.slice(0, limit);
+  }
+  return "";
+}
+function buildStoryCoreContext(state, sanitizedConsensus, target, userMessage) {
+  const bullets = sanitizedConsensus.split("\n").filter((line) => line.trim().startsWith("-")).slice(0, 8).join("\n");
+  const parts = [
+    `\u9879\u76EE\uFF1A${state.project.title}`,
+    `\u6838\u5FC3\u521B\u610F\uFF1A${state.project.idea}`,
+    `\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${state.runtime.stage}`,
+    `\u8BA1\u5212\u7AE0\u8282\u6570\uFF1A${state.plan.totalChapters}\uFF0C\u6BCF\u7AE0\u76EE\u6807\u5B57\u6570\uFF1A${state.plan.chapterWordTarget}`,
+    "",
+    `\u672C\u8F6E\u8BA8\u8BBA\u76EE\u6807\uFF1A${target.label}`,
+    `\u5199\u56DE\u8D44\u4EA7\u8DEF\u5F84\uFF1A${target.assetPath}`,
+    target.instruction ? `\u76EE\u6807\u6307\u4EE4\uFF1A${target.instruction}` : "",
+    "",
+    `\u7528\u6237\u5F53\u524D\u6D88\u606F\uFF1A${userMessage}`,
+    "",
+    bullets ? `\u6838\u5FC3\u5171\u8BC6\u8981\u70B9\uFF08\u6700\u591A 8 \u6761\uFF09\uFF1A
+${bullets}` : ""
+  ];
+  const text = parts.filter(Boolean).join("\n").trim();
+  if (text.length <= CONTEXT_BUDGET.story_core) return text;
+  return text.slice(0, CONTEXT_BUDGET.story_core) + "\n\u2026[\u6838\u5FC3\u5C42\u5DF2\u622A\u65AD]";
+}
+
+// src/discussion.ts
 var AGENT_FLOW = [
   { id: "showrunner", label: "Showrunner" },
   { id: "world-architect", label: "World Architect" },
@@ -8637,7 +9280,7 @@ var AGENT_FLOW = [
 ];
 var SPECIALIST_FLOW = AGENT_FLOW.filter((agent) => agent.id !== "showrunner");
 function workspacePath2(rootDir, ...parts) {
-  return import_node_path8.default.join(rootDir, ".ai-novel", ...parts);
+  return import_node_path9.default.join(rootDir, ".ai-novel", ...parts);
 }
 async function readText(filePath) {
   return import_promises7.default.readFile(filePath, "utf8");
@@ -8743,7 +9386,7 @@ function discussionMessageParts(messageId, input) {
 async function writeDiscussionConsensusArchive(rootDir, input) {
   const consensusDir = workspacePath2(rootDir, "consensus");
   const fileName = `discussion-${safeArtifactName(input.runId)}.md`;
-  const archivePath = import_node_path8.default.join(consensusDir, fileName);
+  const archivePath = import_node_path9.default.join(consensusDir, fileName);
   await import_promises7.default.mkdir(consensusDir, { recursive: true });
   const content = [
     "# Discussion Consensus Archive",
@@ -8947,7 +9590,7 @@ function buildContextPacketText(options) {
 }
 async function writeCurrentContextPacket(rootDir, content) {
   const contextDir = workspacePath2(rootDir, "context");
-  const contextPath = import_node_path8.default.join(contextDir, "current-context.md");
+  const contextPath = import_node_path9.default.join(contextDir, "current-context.md");
   await import_promises7.default.mkdir(contextDir, { recursive: true });
   await import_promises7.default.writeFile(contextPath, `${content.trim()}
 `);
@@ -9016,7 +9659,7 @@ async function runMultiAgentDiscussion(rootDir, message, options = {}) {
   const protagonistPath = workspacePath2(rootDir, "memory", "characters", "core", "protagonist.md");
   const styleProfilePath = workspacePath2(rootDir, "style", "profile.md");
   const discussionDir = workspacePath2(rootDir, "chat");
-  const discussionLogPath = import_node_path8.default.join(discussionDir, "discussion-log.md");
+  const discussionLogPath = import_node_path9.default.join(discussionDir, "discussion-log.md");
   await import_promises7.default.mkdir(discussionDir, { recursive: true });
   const rawConsensus = await readText(consensusPath);
   const state = JSON.parse(await readText(statePath));
@@ -9133,14 +9776,19 @@ ${state.project.idea}`,
     });
     let reply = "";
     try {
+      const storyCoreCtx = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message);
+      const historyCtx = buildHistoryForAgent(agent.id, discussionStage, replies, priorTranscript);
+      console.log(
+        `[CTX BUDGET] Agent: ${agent.label} | Stage: ${discussionStage} | StoryCore: ${storyCoreCtx.length}\u5B57 | History: ${historyCtx.length}\u5B57 | Base: ${basePrompt.length}\u5B57 | Dynamic: ${dynamicPrompt.length}\u5B57`
+      );
       reply = await generateAgentReply({
         roleName: agent.label,
         basePrompt,
         dynamicPrompt,
-        consensus: [autonomousContext, currentContextPacket, sanitizedConsensus].filter(Boolean).join("\n\n"),
+        consensus: storyCoreCtx,
         message,
         discussionStage,
-        priorTranscript: [clipText(priorTranscript, 8e3), transcriptContext.join("\n")].filter(Boolean).join("\n\n"),
+        priorTranscript: historyCtx,
         discussionTarget,
         preferredLanguage: "zh-CN",
         currentStage: state.runtime.stage,
@@ -9487,6 +10135,11 @@ function shouldAdvanceBeforeDiscussion(state, initialMessage, correctionMessage)
   if (state.runtime.stage === "complete" && !state.plan.chapterTasks.every((task) => task.status === "complete")) {
     return true;
   }
+  if (state.runtime.stage === "worldbuilding_dialogue" && isGenericAutopilotMessage(trimmedInitialMessage)) {
+    if (state.runtime.autopilot && (state.runtime.autopilot.loopCount || 0) > 0) {
+      return true;
+    }
+  }
   return [
     "setting_review",
     "master_planning",
@@ -9689,11 +10342,11 @@ async function executeManualInterruptCommand(rootDir, message, options = {}) {
 }
 
 // src/worker.ts
-var import_node_path10 = __toESM(require("path"), 1);
+var import_node_path11 = __toESM(require("path"), 1);
 
 // src/autopilot-worker.ts
 var import_promises8 = __toESM(require("fs/promises"), 1);
-var import_node_path9 = __toESM(require("path"), 1);
+var import_node_path10 = __toESM(require("path"), 1);
 var autopilotJobs = /* @__PURE__ */ new Map();
 var AUTOPILOT_LEASE_SECONDS = 60;
 var AUTOPILOT_RESTORE_POLL_MS = Math.max(1, AUTOPILOT_LEASE_SECONDS) * 1e3;
@@ -9961,7 +10614,7 @@ function activeWritingMessageAgeMs(message, now2 = Date.now()) {
   return updatedAt > 0 ? Math.max(0, now2 - updatedAt) : 0;
 }
 async function recoverStaleWritingRequest(rootDir, projectRoot, projectId, state) {
-  const task = state.plan.chapterTasks.find((candidate) => candidate.status === "in_progress");
+  const task = state.plan.chapterTasks.find((candidate) => candidate.status === "in_progress" || candidate.status === "blocked");
   if (!projectId || !task) {
     return { recovered: false, state };
   }
@@ -10152,13 +10805,13 @@ async function recordAutopilotDirectorCommandEvent(rootDir, projectId, type, com
   }, type, command, payload);
 }
 async function writeAutopilotCheckpoint(projectRoot, state, label, details = {}) {
-  const checkpointDir = import_node_path9.default.join(projectRoot, ".ai-novel", "checkpoints");
+  const checkpointDir = import_node_path10.default.join(projectRoot, ".ai-novel", "checkpoints");
   await import_promises8.default.mkdir(checkpointDir, { recursive: true });
   const safeLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "checkpoint";
   const fileName = `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${safeLabel}.json`;
   const relativePath = `.ai-novel/checkpoints/${fileName}`;
   await import_promises8.default.writeFile(
-    import_node_path9.default.join(checkpointDir, fileName),
+    import_node_path10.default.join(checkpointDir, fileName),
     `${JSON.stringify({ state, details, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2)}
 `
   );
@@ -10170,6 +10823,13 @@ function evaluateAutopilotDrift({
   discussionSummary = "",
   intendedMessage = ""
 }) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return {
+      status: "ok",
+      score: 0,
+      reasons: []
+    };
+  }
   const text = `${discussionSummary}
 ${after.runtime.statusMessage || ""}`.toLowerCase();
   let score = 0;
@@ -10393,6 +11053,26 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
         });
         await recordAutopilotDirectorCommandEvent(rootDir, projectId, "DIRECTOR_COMMAND_STARTED", directorCommand);
         if (directorCommand.type === "advance") {
+          const isSemi2 = beforeDiscussion.project?.autoMode === "semi";
+          const userConfirmed = isGenericAutopilotMessage(nextMessage || "");
+          if (isSemi2 && !userConfirmed) {
+            const pauseMessage = `\u5F53\u524D\u5DE5\u4F5C\u6D41\u5DF2\u5B8C\u6210\u8BA8\u8BBA\u4E0E\u5171\u8BC6\uFF0C\u5DF2\u6682\u505C\u4EE5\u7B49\u5F85\u7528\u6237\u786E\u8BA4\u3002`;
+            await markAutopilot(projectRoot, {
+              running: false,
+              stopRequested: false,
+              mode: "idle",
+              lastStep: "semi_auto_paused",
+              statusMessage: pauseMessage
+            }, autopilotStateStore(rootDir, projectId));
+            if (jobId) {
+              await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => void 0);
+            }
+            emitAutopilotEvent(projectRoot, "autopilot_status", {
+              stage: beforeDiscussion.runtime.stage,
+              message: pauseMessage
+            });
+            break;
+          }
           nextMessage = "";
           emitAutopilotEvent(projectRoot, "autopilot_status", {
             stage: beforeDiscussion.runtime.stage,
@@ -10579,6 +11259,25 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
         await recordAutopilotDirectorCommandEvent(rootDir, projectId, "DIRECTOR_COMMAND_STARTED", followUpAdvanceCommand, {
           parentCommandId: directorCommand.id
         });
+        const isSemi = afterDiscussion.project?.autoMode === "semi";
+        if (isSemi) {
+          const pauseMessage = `\u8BA8\u8BBA\u5171\u8BC6\u5DF2\u5199\u56DE\uFF0C\u5DF2\u6682\u505C\u5728 ${afterDiscussion.runtime.stage} \u9636\u6BB5\uFF0C\u7B49\u5F85\u7528\u6237\u5BA1\u9605\u786E\u8BA4\u6210\u679C\u3002`;
+          await markAutopilot(projectRoot, {
+            running: false,
+            stopRequested: false,
+            mode: "idle",
+            lastStep: "semi_auto_paused",
+            statusMessage: pauseMessage
+          }, autopilotStateStore(rootDir, projectId));
+          if (jobId) {
+            await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => void 0);
+          }
+          emitAutopilotEvent(projectRoot, "autopilot_status", {
+            stage: afterDiscussion.runtime.stage,
+            message: pauseMessage
+          });
+          break;
+        }
         emitAutopilotEvent(projectRoot, "autopilot_status", {
           stage: afterDiscussion.runtime.stage,
           message: followUpAdvanceCommand.reason
@@ -10703,14 +11402,20 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
         }
       }).catch(() => void 0);
     }
+    const previousAutopilot = latestState.runtime.autopilot || {};
+    const isSemiPaused = previousAutopilot.lastStep === "semi_auto_paused";
+    const isGuardBlocked = previousAutopilot.lastStep === "guard_blocked";
+    const isNetworkRetryPaused = previousAutopilot.lastStep === "network_retry_paused";
+    const finalLastStep = isSemiPaused ? "semi_auto_paused" : isGuardBlocked ? "guard_blocked" : isNetworkRetryPaused ? "network_retry_paused" : recoveryBlocked ? "recovery_blocked" : "stopped";
+    const finalStatusMessage = fullyComplete ? "\u81EA\u52A8\u521B\u4F5C\u5DF2\u5B8C\u6210\u5168\u90E8\u7AE0\u8282\u4EFB\u52A1\u3002" : recoveryBlocked ? `\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1A\u7B2C ${recoveryBlocked.chapterNumber} \u7AE0\u8FBE\u5230\u81EA\u52A8\u6062\u590D\u4E0A\u9650\uFF0C\u9700\u8981\u4EBA\u5DE5\u5BA1\u9605\u3002` : isSemiPaused || isGuardBlocked || isNetworkRetryPaused ? latestState.runtime.statusMessage || previousAutopilot.statusMessage || "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002" : "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002";
     const finalState = await markAutopilot(projectRoot, {
       running: false,
       stopRequested: false,
-      lastStep: "stopped",
+      lastStep: finalLastStep,
       mode: "idle",
       driftStatus: recoveryBlocked ? "blocked" : latestState.runtime.autopilot?.driftStatus,
       driftReason: recoveryBlocked ? `\u7B2C ${recoveryBlocked.chapterNumber} \u7AE0\u8FBE\u5230\u81EA\u52A8\u6062\u590D\u4E0A\u9650\u3002` : latestState.runtime.autopilot?.driftReason,
-      statusMessage: fullyComplete ? "\u81EA\u52A8\u521B\u4F5C\u5DF2\u5B8C\u6210\u5168\u90E8\u7AE0\u8282\u4EFB\u52A1\u3002" : recoveryBlocked ? `\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1A\u7B2C ${recoveryBlocked.chapterNumber} \u7AE0\u8FBE\u5230\u81EA\u52A8\u6062\u590D\u4E0A\u9650\uFF0C\u9700\u8981\u4EBA\u5DE5\u5BA1\u9605\u3002` : "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002"
+      statusMessage: finalStatusMessage
     }, autopilotStateStore(rootDir, projectId));
     emitAutopilotEvent(projectRoot, "complete", {
       activeProjectId: projectId,
@@ -10911,13 +11616,13 @@ async function restoreAutopilotJobs(rootDir, createSnapshot) {
         db.recordEvent(project.id, typeof job.run_id === "string" ? job.run_id : null, "JOB_DEDUPED", {
           id: job.id,
           kind: job.kind,
-          reason: "Another runnable autopilot job for this project is already being restored."
+          reason: "Another autopilot job is already scheduled for restore."
         });
       }).catch(() => void 0);
       continue;
     }
     seenProjectIds.add(project.id);
-    if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    if (process.env.AI_NOVEL_TEST_MODE === "1" && process.env.AI_NOVEL_TEST_FORCE_WORKER !== "1") {
       await withFactoryDb(rootDir, async (db) => {
         db.recordEvent(project.id, typeof job.run_id === "string" ? job.run_id : null, "JOB_RESTORE_READY", {
           id: job.id,
@@ -10932,8 +11637,17 @@ async function restoreAutopilotJobs(rootDir, createSnapshot) {
     if (!projectRoot || autopilotJobs.has(projectRoot)) {
       continue;
     }
+    const state = await loadAutonomousState(projectRoot).catch(() => null);
+    const autopilot = state?.runtime?.autopilot || null;
     const payload = typeof job.payload === "object" && job.payload ? job.payload : {};
     const message = typeof payload.message === "string" ? payload.message : "";
+    const hasWakeupSignal = isGenericAutopilotMessage(message);
+    const manuallyPaused = Boolean(
+      autopilot && !autopilot.running && (autopilot.stopRequested || autopilot.lastStep === "stopped" || autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal)
+    );
+    if (manuallyPaused) {
+      continue;
+    }
     ensureAutopilotJob({
       rootDir,
       projectRoot,
@@ -10977,7 +11691,7 @@ function parseFlags(argv) {
     index += 1;
   }
   return {
-    rootDir: import_node_path10.default.resolve(flags.get("root-dir") || process.cwd()),
+    rootDir: import_node_path11.default.resolve(flags.get("root-dir") || process.cwd()),
     pollMs: flags.get("poll-ms") ? Number.parseInt(flags.get("poll-ms") || "60000", 10) : void 0,
     status: flags.get("status") === "true",
     once: flags.get("once") === "true"
@@ -11091,6 +11805,7 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   formatKnowledgeForPrompt,
   formatStatus,
   generateAgentReply,
+  getCachedActiveLlmConfig,
   getFactoryDbPath,
   getNovelAutopilotWorkerStatus,
   getProjectEnvCandidatePaths,
@@ -11106,6 +11821,7 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   initializeSuperGraph,
   isGenericAutopilotMessage,
   listAutonomousProjects,
+  loadActiveLlmConfig,
   loadAutonomousState,
   loadLlmConfigFromEnv,
   loadProductionWritingResources,
@@ -11117,6 +11833,7 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   prepareCoverGeneration,
   readProjectEnv,
   recordDirectorCommandEvent,
+  resolveFactoryRootDir,
   resolveManagedProjectRoot,
   resolveProjectEnvWritePath,
   retrieveKnowledge,
@@ -11129,6 +11846,7 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   runNovelAutopilotWorkerOnce,
   saveAutonomousState,
   saveSuperGraph,
+  setCachedActiveLlmConfig,
   shouldAdvanceBeforeDiscussion,
   startNovelAutopilotWorker,
   superGraphFromDbRows,

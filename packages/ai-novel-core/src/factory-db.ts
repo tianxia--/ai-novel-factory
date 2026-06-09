@@ -812,6 +812,20 @@ export class FactoryDb {
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS llm_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        temperature REAL NOT NULL DEFAULT 0.1,
+        timeout_ms INTEGER NOT NULL DEFAULT 120000,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_turns_run_started ON agent_turns(run_id, started_at);
@@ -2751,14 +2765,113 @@ export class FactoryDb {
       `).all(),
     }
   }
+
+  listLlmConfigs(): DbRecord[] {
+    return this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      ORDER BY created_at DESC
+    `).all()
+  }
+
+  addLlmConfig(config: {
+    name: string
+    baseUrl: string
+    apiKey: string
+    modelName: string
+    temperature?: number
+    timeoutMs?: number
+  }): void {
+    const id = makeId("llm")
+    const now = nowIso()
+    const temp = config.temperature ?? 0.1
+    const timeout = config.timeoutMs ?? 120000
+    this.db.prepare(`
+      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, now)
+  }
+
+  updateLlmConfig(
+    id: string,
+    config: {
+      name: string
+      baseUrl: string
+      apiKey: string
+      modelName: string
+      temperature?: number
+      timeoutMs?: number
+    }
+  ): void {
+    const now = nowIso()
+    const temp = config.temperature ?? 0.1
+    const timeout = config.timeoutMs ?? 120000
+    this.db.prepare(`
+      UPDATE llm_configs
+      SET name = ?, base_url = ?, api_key = ?, model_name = ?, temperature = ?, timeout_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, id)
+  }
+
+  deleteLlmConfig(id: string): void {
+    this.db.prepare(`
+      DELETE FROM llm_configs WHERE id = ?
+    `).run(id)
+  }
+
+  activateLlmConfig(id: string): void {
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 0
+    `).run()
+    this.db.prepare(`
+      UPDATE llm_configs SET is_active = 1 WHERE id = ?
+    `).run(id)
+  }
+
+  getActiveLlmConfig(): DbRecord | null {
+    const config = this.db.prepare(`
+      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      FROM llm_configs
+      WHERE is_active = 1
+      LIMIT 1
+    `).get()
+    return config || null
+  }
 }
 
+
+let activeDbInstance: FactoryDb | null = null
+let activeDbRootDir: string | null = null
+let activeRefCount = 0
+
 export async function withFactoryDb<T>(rootDir: string, callback: (db: FactoryDb) => T | Promise<T>) {
+  if (activeDbInstance && activeDbRootDir === rootDir) {
+    activeRefCount++
+    try {
+      return await callback(activeDbInstance)
+    } finally {
+      activeRefCount--
+      if (activeRefCount === 0) {
+        try { activeDbInstance.close(); } catch (e) {}
+        activeDbInstance = null
+        activeDbRootDir = null
+      }
+    }
+  }
+
   const db = await FactoryDb.open(rootDir)
+  activeDbInstance = db
+  activeDbRootDir = rootDir
+  activeRefCount = 1
   try {
     return await callback(db)
   } finally {
-    db.close()
+    activeRefCount--
+    if (activeRefCount === 0) {
+      try { db.close(); } catch (e) {}
+      activeDbInstance = null
+      activeDbRootDir = null
+    }
   }
 }
 

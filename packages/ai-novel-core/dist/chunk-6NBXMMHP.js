@@ -16,6 +16,11 @@ function shouldAdvanceBeforeDiscussion(state, initialMessage, correctionMessage)
   if (state.runtime.stage === "complete" && !state.plan.chapterTasks.every((task) => task.status === "complete")) {
     return true;
   }
+  if (state.runtime.stage === "worldbuilding_dialogue" && isGenericAutopilotMessage(trimmedInitialMessage)) {
+    if (state.runtime.autopilot && (state.runtime.autopilot.loopCount || 0) > 0) {
+      return true;
+    }
+  }
   return [
     "setting_review",
     "master_planning",

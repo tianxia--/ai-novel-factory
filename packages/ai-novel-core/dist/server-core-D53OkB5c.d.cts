@@ -1,6 +1,6 @@
-import { P as ProviderTestResult, A as AutonomousNovelState, d as InitProjectOptions, N as NovelProjectRecord, e as InterruptOptions, I as InterruptionReview } from './cli-types-C4ri71cJ.cjs';
+import { P as ProviderTestResult, A as AutonomousNovelState, d as InitProjectOptions, N as NovelProjectRecord, e as InterruptOptions, I as InterruptionReview } from './cli-types-B4KGI10K.cjs';
 import { ProductionPipelineOptions } from './writing-pipeline.cjs';
-import './factory-db-V9WfwecY.cjs';
+import './factory-db-DUKbLLp_.cjs';
 import './env-manager-C1eYTzhS.cjs';
 
 interface AgentReplyOptions {
@@ -44,6 +44,21 @@ declare function deleteManagedAutonomousProject(rootDir: string, projectId: stri
         createdAt: string;
         totalChapters: number;
         chapterWordTarget: number;
+        summary?: {
+            source: "db" | "state" | "empty";
+            stage: string;
+            progressPercent: number;
+            totalChapters: number;
+            completedChapters: number;
+            pendingChapters: number;
+            inProgressChapters: number;
+            blockedChapters: number;
+            activeJobs: number;
+            runnableJobs: number;
+            latestEventType: string;
+            latestEventAt: string;
+            updatedAt: string;
+        };
     };
 } | null>;
 declare function resolveManagedProjectRoot(rootDir: string, projectId: string): Promise<string>;

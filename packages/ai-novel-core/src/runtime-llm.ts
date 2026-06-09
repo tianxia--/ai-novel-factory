@@ -1,5 +1,5 @@
 import { getProjectEnvStatus } from "./env-manager"
-import { loadLlmConfigFromEnv } from "./llm-config"
+import { loadLlmConfigFromEnv, loadActiveLlmConfig } from "./llm-config"
 import { createAutopilotStopError } from "./abort"
 import type { ProviderTestResult } from "./cli-types"
 
@@ -178,16 +178,22 @@ async function streamOpenAiCompatibleResponse(
   options: {
     signal: AbortSignal
     markActivity: () => void
+    requestStartTime?: number
   },
 ) {
   if (!response.body) {
     throw new Error("LLM streaming response body was empty.")
   }
 
+  const streamStartTime = Date.now()
+  const baseTime = options.requestStartTime || streamStartTime
+  console.log(`[LLM STREAM START] 开始解析大模型返回数据流...`)
+
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
   let content = ""
+  let firstTokenReceived = false
 
   const readNextChunk = async () => {
     if (options.signal.aborted) {
@@ -247,6 +253,12 @@ async function streamOpenAiCompatibleResponse(
             continue
           }
 
+          if (!firstTokenReceived) {
+            firstTokenReceived = true
+            const elapsedMs = Date.now() - baseTime
+            console.log(`[LLM STREAM FIRST TOKEN] 收到大模型第一个有效Token! 从发起请求到首字耗时(TTFT): ${elapsedMs}ms`)
+          }
+
           content += delta
           await onDelta(delta)
         }
@@ -255,6 +267,10 @@ async function streamOpenAiCompatibleResponse(
   } finally {
     reader.releaseLock()
   }
+
+  const totalStreamTime = Date.now() - streamStartTime
+  const totalRequestTime = Date.now() - baseTime
+  console.log(`[LLM STREAM END] 数据流读取完成。流传输耗时: ${totalStreamTime}ms，从发起请求到完成总耗时: ${totalRequestTime}ms，接收字数: ${content.length}`)
 
   return content.trim()
 }
@@ -307,17 +323,25 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     return reply
   }
 
-  const config = loadLlmConfigFromEnv(options.envRootDir)
-  const envStatus = getProjectEnvStatus(options.envRootDir)
-  const apiKey =
-    process.env.LLM_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    envStatus.values.LLM_API_KEY ||
-    envStatus.values.OPENAI_API_KEY
+  let config = await loadActiveLlmConfig(options.envRootDir)
+  let apiKey = ""
+  if (config) {
+    apiKey = config._dbApiKey || ""
+  } else {
+    config = loadLlmConfigFromEnv(options.envRootDir)
+    const envStatus = getProjectEnvStatus(options.envRootDir)
+    apiKey =
+      process.env.LLM_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      envStatus.values.LLM_API_KEY ||
+      envStatus.values.OPENAI_API_KEY ||
+      ""
+  }
 
   if (!apiKey) {
-    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY.")
+    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY, or configure an active LLM in settings.")
   }
+
 
   const system = [
     AUTONOMOUS_DISCUSSION_PROTOCOL,
@@ -347,6 +371,15 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     options.priorTranscript?.trim() ? `Prior roundtable transcript:\n${options.priorTranscript.trim()}` : "",
   ].join("\n")
 
+  const startTime = Date.now()
+  console.log(`[LLM REQUEST SEND] 准备向 API 发送 chat/completions 请求...`)
+  console.log(`- BaseUrl: ${config.provider.baseUrl}`)
+  console.log(`- Model: ${config.provider.modelName}`)
+  console.log(`- Temperature: ${config.provider.temperature}`)
+  console.log(`- Messages Count: ${options.message ? 2 : 1}`)
+  console.log(`- System Prompt Length: ${system.length} chars`)
+  console.log(`- User Message Length: ${(options.message || "").length} chars`)
+
   const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
     const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -366,7 +399,11 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       }),
     })
 
+    const fetchTime = Date.now() - startTime
+    console.log(`[LLM REQUEST HEAD] 收到 API Response 头部，状态码: ${response.status}，HTTP建立连接与首包头耗时: ${fetchTime}ms`)
+
     if (!response.ok) {
+      console.error(`[LLM REQUEST ERROR] 请求失败，状态码: ${response.status}`)
       throw new Error(`LLM request failed with status ${response.status}.`)
     }
     markActivity()
@@ -378,6 +415,7 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       }, {
         signal,
         markActivity,
+        requestStartTime: startTime,
       })
     }
 
@@ -385,7 +423,11 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       choices?: Array<{ message?: { content?: string } }>
     }
 
-    return payload.choices?.[0]?.message?.content?.trim() || ""
+    const totalTime = Date.now() - startTime
+    const resContent = payload.choices?.[0]?.message?.content?.trim() || ""
+    console.log(`[LLM REQUEST END] 非流式请求完成。总耗时: ${totalTime}ms，返回内容长度: ${resContent.length}`)
+
+    return resContent
   }, options.signal)
   if (!content) {
     throw new Error("LLM response did not include message content.")
@@ -414,13 +456,15 @@ export async function testProviderConnectivity(
   overrides: ProviderOverrideOptions = {},
   rootDir = process.cwd(),
 ): Promise<ProviderTestResult> {
-  const config = loadLlmConfigFromEnv(rootDir)
+  const activeConfig = await loadActiveLlmConfig(rootDir)
+  const config = activeConfig || loadLlmConfigFromEnv(rootDir)
   const envStatus = getProjectEnvStatus(rootDir)
   const checkedAt = new Date().toISOString()
   const baseUrl = overrides.baseUrl?.trim() || config.provider.baseUrl
   const modelName = overrides.modelName?.trim() || config.provider.modelName
   const apiKey =
     overrides.apiKey?.trim() ||
+    (activeConfig ? activeConfig._dbApiKey : null) ||
     process.env.LLM_API_KEY ||
     process.env.OPENAI_API_KEY ||
     envStatus.values.LLM_API_KEY ||

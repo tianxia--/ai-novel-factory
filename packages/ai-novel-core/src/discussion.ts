@@ -10,6 +10,7 @@ import { createAgentMessage, type MessagePart } from "./messages"
 import type { AutonomousNovelState } from "./cli-types"
 import { throwIfStopped } from "./abort"
 import { formatKnowledgeForPrompt, retrieveKnowledge } from "./knowledge"
+import { buildStoryCoreContext, buildHistoryForAgent } from "./context-budget"
 
 const AGENT_FLOW = [
   { id: "showrunner", label: "Showrunner" },
@@ -659,14 +660,26 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
     })
     let reply = ""
     try {
+      // ── 分层上下文组装 ──────────────────────────────────────────────────────
+      // Layer 1：小说核心（精简版，≤2000字），所有 Agent 共享
+      const storyCoreCtx = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message)
+      // Layer 4：过滤后的历史（按角色差异化，独立视角专家为空）
+      const historyCtx = buildHistoryForAgent(agent.id, discussionStage, replies, priorTranscript)
+      console.log(
+        `[CTX BUDGET] Agent: ${agent.label} | Stage: ${discussionStage}` +
+        ` | StoryCore: ${storyCoreCtx.length}字` +
+        ` | History: ${historyCtx.length}字` +
+        ` | Base: ${basePrompt.length}字 | Dynamic: ${dynamicPrompt.length}字`,
+      )
+      // ────────────────────────────────────────────────────────────────────────
       reply = await generateAgentReply({
         roleName: agent.label,
         basePrompt,
         dynamicPrompt,
-        consensus: [autonomousContext, currentContextPacket, sanitizedConsensus].filter(Boolean).join("\n\n"),
+        consensus: storyCoreCtx,
         message,
         discussionStage,
-        priorTranscript: [clipText(priorTranscript, 8000), transcriptContext.join("\n")].filter(Boolean).join("\n\n"),
+        priorTranscript: historyCtx,
         discussionTarget,
         preferredLanguage: "zh-CN",
         currentStage: state.runtime.stage,

@@ -33,13 +33,35 @@ import {
   runMultiAgentDiscussion,
   saveAutonomousState,
   testProviderConnectivity,
-  getPublicProjectEnvStatus,
+  getPublicProjectEnvStatus as getRawPublicEnvStatus,
   upsertProjectEnvValues,
   withFactoryDb,
 } from "./server-core"
 import { syncCurrentContextPacketFile } from "./context-packet"
 import { evaluateKnowledgeBenchmark, retrieveKnowledge, type KnowledgeBenchmarkCase, type KnowledgeBenchmarkResult } from "./knowledge"
 import type { KnowledgeRecallRow, KnowledgeScope } from "./factory-db"
+import { formatStatus } from "./orchestrator"
+import { routeUserMessage } from "./router"
+import { loadActiveLlmConfig, getCachedActiveLlmConfig } from "./llm-config"
+
+function getPublicProjectEnvStatus(rootDir = process.cwd()) {
+  const status = getRawPublicEnvStatus(rootDir)
+  const activeLlm = getCachedActiveLlmConfig()
+  if (activeLlm) {
+    status.configured = true
+    status.resolved = {
+      baseUrl: activeLlm.provider.baseUrl,
+      modelName: activeLlm.provider.modelName,
+      apiKeyPresent: true,
+    }
+    status.missing = status.missing.filter(
+      (k: string) => k !== "LLM_API_KEY" && k !== "LLM_BASE_URL" && k !== "LLM_MODEL_ID"
+    )
+  }
+  return status
+}
+
+
 
 import type { ChapterTask } from "./cli-types"
 
@@ -219,6 +241,8 @@ function isJsonApiRequest(method: string | undefined, pathname: string) {
       "/api/chapters/preview",
       "/api/artifacts/preview",
       "/api/env",
+      "/api/knowledge-graph",
+      "/api/llm-configs",
     ].includes(pathname)
   }
 
@@ -236,14 +260,18 @@ function isJsonApiRequest(method: string | undefined, pathname: string) {
       "/api/stop",
       "/api/autopilot/stop",
       "/api/autopilot/start",
+      "/api/autopilot/mode",
+      "/api/mode",
       "/api/knowledge/reindex",
       "/api/knowledge/search",
       "/api/knowledge/evaluate",
+      "/api/llm-configs",
+      "/api/llm-configs/activate",
     ].includes(pathname)
   }
 
   if (method === "DELETE") {
-    return pathname.startsWith("/api/projects/")
+    return pathname.startsWith("/api/projects/") || pathname === "/api/llm-configs"
   }
 
   return false
@@ -965,7 +993,8 @@ function normalizeAutopilotRuntimeForPayload(
 ) {
   if (!state?.runtime?.autopilot) return state
   const activeJobs = Array.isArray(factorySnapshot?.activeJobs) ? factorySnapshot.activeJobs : []
-  if (activeJobs.length > 0) {
+  const hasRunningJob = activeJobs.some((job) => job && job.status !== "paused" && job.status !== "failed" && job.status !== "completed")
+  if (hasRunningJob) {
     if (state.runtime.autopilot.running) {
       return state
     }
@@ -985,7 +1014,7 @@ function normalizeAutopilotRuntimeForPayload(
       },
     }
   }
-  if (!state.runtime.autopilot.running) {
+  if (!state.runtime.autopilot.running && !state.runtime.autopilot.stopRequested) {
     return state
   }
   return {
@@ -999,7 +1028,7 @@ function normalizeAutopilotRuntimeForPayload(
         stopRequested: false,
         mode: "idle" as const,
         lastStep: "stopped",
-        statusMessage: "数据库中没有可执行的无人值守任务；当前没有后台 worker 在运行。",
+        statusMessage: state.runtime.autopilot.statusMessage || "数据库中没有可执行的无人值守任务；当前没有后台 worker 在运行。",
       },
     },
   }
@@ -1283,6 +1312,90 @@ async function stopInProcessAutopilotBeforeProjectDelete(projectRoot: string) {
   return true
 }
 
+async function buildProjectSummary(rootDir: string, project: any): Promise<any> {
+  let dbSnapshot: any = null
+  try {
+    dbSnapshot = await withFactoryDb(rootDir, async (db) => db.getSnapshot(project.id)).catch(() => null)
+  } catch (e) {}
+
+  const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null)
+  if (!state) {
+    return {
+      source: "empty",
+      stage: "worldbuilding_dialogue",
+      progressPercent: 0,
+      totalChapters: project.totalChapters || 0,
+      completedChapters: 0,
+      pendingChapters: project.totalChapters || 0,
+      inProgressChapters: 0,
+      blockedChapters: 0,
+      activeJobs: 0,
+      runnableJobs: 0,
+      latestEventType: "",
+      latestEventAt: "",
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
+  const tasks: any[] = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : []
+  const chapterFacts: any[] = Array.isArray(dbSnapshot?.chapterFacts) ? dbSnapshot.chapterFacts : []
+  const totalChapters = Number(state.plan?.totalChapters || project.totalChapters || tasks.length || 0)
+  
+  const passedChapters = chapterFacts.length > 0
+    ? chapterFacts.filter((fact: any) => fact.status === "complete").length
+    : tasks.filter((task: any) => task.status === "complete").length
+
+  let contiguousCompletedChapters = 0
+  if (chapterFacts.length > 0) {
+    const factsByChapter = new Map(chapterFacts.map((fact: any) => [Number(fact.chapterNumber), fact]))
+    for (let ch = 1; ch <= totalChapters; ch += 1) {
+      const factRecord = factsByChapter.get(ch) as any
+      if (factRecord?.status !== "complete") break
+      contiguousCompletedChapters += 1
+    }
+  } else {
+    for (const task of tasks) {
+      if (task.status !== "complete") break
+      contiguousCompletedChapters += 1
+    }
+  }
+  const completedChapters = Math.min(passedChapters, contiguousCompletedChapters)
+
+  const inProgressChapters = chapterFacts.length > 0
+    ? chapterFacts.filter((fact: any) => fact.status === "in_progress").length
+    : tasks.filter((task: any) => task.status === "in_progress").length
+
+  const blockedChapters = chapterFacts.length > 0
+    ? chapterFacts.filter((fact: any) => fact.status === "blocked").length
+    : tasks.filter((task: any) => task.status === "blocked").length
+
+  const pendingChapters = Math.max(0, totalChapters - completedChapters - inProgressChapters - blockedChapters)
+  const progressPercent = totalChapters > 0
+    ? Math.max(0, Math.min(100, Math.round((completedChapters / totalChapters) * 100)))
+    : 0
+
+  const activeJobs = Array.isArray(dbSnapshot?.activeRuns) ? dbSnapshot.activeRuns.length : 0
+  const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0
+  
+  const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null
+
+  return {
+    source: dbSnapshot ? "db" : "state",
+    stage: state.runtime?.stage || "worldbuilding_dialogue",
+    progressPercent,
+    totalChapters,
+    completedChapters,
+    pendingChapters,
+    inProgressChapters,
+    blockedChapters,
+    activeJobs,
+    runnableJobs,
+    latestEventType: latestEvent?.type || "",
+    latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
+    updatedAt: state.runtime?.lastUpdatedAt || new Date().toISOString(),
+  }
+}
+
 async function reconcileFactoryProjectsWithRegistry(rootDir: string) {
   const projects = await listAutonomousProjects(rootDir)
   await withFactoryDb(rootDir, async (db) => {
@@ -1291,6 +1404,11 @@ async function reconcileFactoryProjectsWithRegistry(rootDir: string) {
       db.recordEvent(null, null, "ORPHAN_PROJECT_PRUNED", { projectId })
     }
   }).catch(() => undefined)
+
+  for (const project of projects) {
+    project.summary = await buildProjectSummary(rootDir, project)
+  }
+
   return projects
 }
 
@@ -1351,6 +1469,104 @@ export async function handleNovelStudioApi(
 ) {
   const requestUrl = new URL(pathname, "http://local")
   const requestPathname = requestUrl.pathname
+
+  if (method === "GET" && requestPathname === "/api/llm-configs") {
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs()
+    })
+    return {
+      status: 200,
+      payload: {
+        configs,
+      },
+    }
+  }
+
+  if (method === "POST" && requestPathname === "/api/llm-configs") {
+    const name = String(body.name || "").trim()
+    const baseUrl = String(body.baseUrl || "").trim()
+    const apiKey = String(body.apiKey || "").trim()
+    const modelName = String(body.modelName || "").trim()
+    const temperature = typeof body.temperature === "number" ? body.temperature : 0.1
+    const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 120000
+
+    if (!name || !baseUrl || !apiKey || !modelName) {
+      return { status: 400, payload: { error: "missing_fields" } }
+    }
+
+    const configId = typeof body.id === "string" ? body.id.trim() : null
+    await withFactoryDb(rootDir, async (db) => {
+      if (configId) {
+        db.updateLlmConfig(configId, { name, baseUrl, apiKey, modelName, temperature, timeoutMs })
+      } else {
+        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs })
+      }
+    })
+
+    await loadActiveLlmConfig(rootDir)
+
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs()
+    })
+
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs,
+      },
+    }
+  }
+
+  if (method === "POST" && requestPathname === "/api/llm-configs/activate") {
+    const id = typeof body.id === "string" ? body.id.trim() : null
+    if (!id) {
+      return { status: 400, payload: { error: "id_required" } }
+    }
+
+    await withFactoryDb(rootDir, async (db) => {
+      db.activateLlmConfig(id)
+    })
+
+    await loadActiveLlmConfig(rootDir)
+
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs()
+    })
+
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs,
+      },
+    }
+  }
+
+  if (method === "DELETE" && requestPathname === "/api/llm-configs") {
+    const id = requestUrl.searchParams.get("id")
+    if (!id) {
+      return { status: 400, payload: { error: "id_required" } }
+    }
+
+    await withFactoryDb(rootDir, async (db) => {
+      db.deleteLlmConfig(id)
+    })
+
+    await loadActiveLlmConfig(rootDir)
+
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs()
+    })
+
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs,
+      },
+    }
+  }
 
   if (method === "GET" && requestPathname === "/api/projects") {
     return {
@@ -1475,6 +1691,74 @@ export async function handleNovelStudioApi(
         autopilotJobId: null,
         autopilotQueued: false,
         state,
+        envStatus: getPublicProjectEnvStatus(rootDir),
+      },
+    }
+  }
+
+  if (method === "GET" && requestPathname === "/api/knowledge-graph") {
+    const context = await resolveProjectContext(rootDir, options.projectId)
+    if (!context.projectRoot || !context.projectId) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+
+    let graph = { nodes: [] as any[], edges: [] as any[] }
+    try {
+      const dbGraph = await withFactoryDb(rootDir, async (db) => db.getGraph(context.projectId as string))
+      if (dbGraph && Array.isArray(dbGraph.nodes) && dbGraph.nodes.length > 0) {
+        const storyNodeTypes = new Set([
+          "Character", "Location", "Faction", "Event", "Scene", 
+          "Foreshadowing", "WorldRule", "Conflict", "Relationship", "TimelinePoint"
+        ])
+
+        const nodes = dbGraph.nodes.map(n => {
+          let properties: Record<string, any> = {}
+          try {
+            properties = typeof n.metadata_json === "string" ? JSON.parse(n.metadata_json) : (n.metadata_json || {})
+          } catch (e) {}
+          return {
+            id: n.id,
+            node_type: n.type,
+            label: n.label,
+            content: properties.description || properties.desc || n.label,
+            metadata_json: JSON.stringify({
+              importance: properties.importance || 3,
+              tags: properties.tags || [],
+              ...properties
+            })
+          }
+        })
+
+        const storyNodes = nodes.filter(n => {
+          const lowerType = String(n.node_type || "").toLowerCase()
+          return Array.from(storyNodeTypes).some(st => st.toLowerCase() === lowerType)
+        })
+
+        if (storyNodes.length > 0) {
+          const storyNodeIds = new Set(storyNodes.map(n => n.id))
+          const edges = dbGraph.edges
+            .filter(e => storyNodeIds.has(e.from_node_id) && storyNodeIds.has(e.to_node_id))
+            .map((e, index) => ({
+              id: e.id || `db-edge-${index}`,
+              source_id: e.from_node_id,
+              target_id: e.to_node_id,
+              relation_type: e.type || "关联",
+              metadata_json: e.metadata_json || "{}"
+            }))
+
+          graph = { nodes: storyNodes, edges }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to query graph from factory db:", err)
+    }
+
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        ...graph,
         envStatus: getPublicProjectEnvStatus(rootDir),
       },
     }
@@ -2203,14 +2487,47 @@ export async function handleNovelStudioApi(
       return { status: 400, payload: { error: "message_required" } }
     }
 
+    const state = await loadAutonomousState(context.projectRoot)
+    const route = routeUserMessage(message, state)
+
     const runId = makeRunId("discussion")
     await recordUserMessage(rootDir, {
       projectId: context.mode === "managed" ? context.projectId : null,
       conversationId: runId,
       runId,
       content: message,
-      metadata: { source: "api_chat_stream" },
+      metadata: { source: "api_chat_stream", route: route.type, reason: route.reason },
     })
+
+    if (route.type === "status_query") {
+      const statusText = formatStatus(state)
+      await recordStatusMessage(rootDir, {
+        projectId: context.mode === "managed" ? context.projectId : null,
+        conversationId: runId,
+        runId,
+        title: "当前项目状态",
+        content: statusText,
+        metadata: { source: "api_chat_stream_status_query" },
+      })
+
+      return {
+        status: 200,
+        payload: {
+          activeProjectId: context.projectId,
+          projects: context.projects,
+          events: [],
+          discussion: {
+            summary: `已报告当前项目状态：${state.runtime.statusMessage}`,
+            target: "status",
+            writebackSkipped: true,
+            replies: [],
+          },
+          ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
+          envStatus: getPublicProjectEnvStatus(rootDir),
+        },
+      }
+    }
+
     const streamed: Array<{ role: string; content: string }> = []
     const discussion = await runMultiAgentDiscussion(context.projectRoot, message, {
       runId,
@@ -2226,7 +2543,7 @@ export async function handleNovelStudioApi(
       },
     })
 
-    const state = await loadAutonomousState(context.projectRoot)
+    const updatedState = await loadAutonomousState(context.projectRoot)
     return {
       status: 200,
       payload: {
@@ -2234,6 +2551,48 @@ export async function handleNovelStudioApi(
         projects: context.projects,
         events: streamed,
         discussion,
+        ...(await createWorkspacePayload(context.projectRoot, updatedState, { rootDir, projectId: context.projectId, syncState: true })),
+        envStatus: getPublicProjectEnvStatus(rootDir),
+      },
+    }
+  }
+
+  if (method === "POST" && (requestPathname === "/api/mode" || requestPathname === "/api/autopilot/mode")) {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null))
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+    const autoMode = typeof body.autoMode === "string" ? body.autoMode : "full"
+    if (autoMode !== "full" && autoMode !== "semi") {
+      return { status: 400, payload: { error: "invalid_auto_mode" } }
+    }
+
+    const state = await loadAutonomousState(context.projectRoot)
+    state.project.autoMode = autoMode
+    await saveAutonomousState(context.projectRoot, state)
+
+    if (context.projectId) {
+      await withFactoryDb(rootDir, async (db) => {
+        db.updateProjectState(context.projectId as string, state)
+      }).catch(() => undefined)
+    }
+
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: "无人值守创作模式已切换",
+      content: `系统创作模式已成功切换为：${autoMode === "semi" ? "🤝 半自动共创模式" : "🤖 全自动托管模式"}。`,
+      metadata: {
+        source: "api_autopilot_mode",
+        autoMode,
+      },
+    })
+
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
         ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
         envStatus: getPublicProjectEnvStatus(rootDir),
       },
@@ -2449,6 +2808,7 @@ async function serveStatic(staticDir: string, pathname: string, response: http.S
 
 export async function startNovelStudioServer(options: ServerOptions = {}) {
   const rootDir = options.rootDir ?? process.cwd()
+  await loadActiveLlmConfig(rootDir)
   const staticDir = options.staticDir
   const embeddedWorker = shouldUseEmbeddedWorker(options.embeddedWorker)
 

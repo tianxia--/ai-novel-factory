@@ -469,7 +469,7 @@ function throwIfPipelineAborted(options: ProductionPipelineOptions) {
   throwIfStopped(options.signal)
 }
 
-export function parseQualityGate(report: string, attempts = 0, maxAttempts = 2): QualityGateResult {
+export function parseQualityGate(report: string, attempts = 0, maxAttempts = 3): QualityGateResult {
   const scoreMatches = [...report.matchAll(/(?:综合评分|overall|score)[^\d]{0,12}(\d{1,2})(?:\s*\/\s*10)?/giu)]
   const score = scoreMatches.length
     ? Math.max(...scoreMatches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value)))
@@ -2459,47 +2459,75 @@ async function generateProductionTextWithLlm({
   }
 
   try {
-    const result = await generateAgentReply({
-      roleName,
-      basePrompt,
-      dynamicPrompt,
-      consensus: `Project: ${state.project.title}\nCore idea: ${state.project.idea}\nCurrent stage: ${state.runtime.stage}`,
-      message,
-      discussionStage: "specialist_turn",
-      currentStage: "drafting",
-      preferredLanguage: "zh-CN",
-      envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
-      signal: options.signal,
-      onDelta: progress
-        ? async (delta) => {
-          streamedResult += delta
-          const now = Date.now()
-          const isFirstDelta = !firstDeltaSeen
-          firstDeltaSeen = true
-          if (!isFirstDelta && now - lastStreamProgressAt < 2500) {
-            return
+    let result = ""
+    const maxLlmAttempts = 3
+    let backoffDelay = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 2000
+
+    for (let i = 1; i <= maxLlmAttempts; i++) {
+      try {
+      result = await generateAgentReply({
+        roleName,
+        basePrompt,
+        dynamicPrompt,
+        consensus: `Project: ${state.project.title}\nCore idea: ${state.project.idea}\nCurrent stage: ${state.runtime.stage}`,
+        message,
+        discussionStage: "specialist_turn",
+        currentStage: "drafting",
+        preferredLanguage: "zh-CN",
+        envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
+        signal: options.signal,
+        onDelta: progress
+          ? async (delta) => {
+            streamedResult += delta
+            const now = Date.now()
+            const isFirstDelta = !firstDeltaSeen
+            firstDeltaSeen = true
+            if (!isFirstDelta && now - lastStreamProgressAt < 2500) {
+              return
+            }
+            lastStreamProgressAt = now
+            await emitWritingProgress(options, {
+              messageId,
+              step: `${progress.step}_llm_streaming`,
+              role: progress.role,
+              chapterNumber: progress.chapterNumber,
+              title: progress.title,
+              status: "running",
+              phase: isFirstDelta ? "response_started" : "streaming",
+              statusText: isFirstDelta
+                ? "LLM 已开始响应，正在返回首段内容。"
+                : "LLM 正在持续返回内容。",
+              statusDetail: "返回内容会持续合并到这一条 agent 消息中。",
+              message: `${progress.startMessage}模型正在持续输出。`,
+              preview: streamedResult.slice(-520),
+              streamText: streamedResult,
+              wordCount: wordCount(streamedResult),
+            })
           }
-          lastStreamProgressAt = now
-          await emitWritingProgress(options, {
-            messageId,
-            step: `${progress.step}_llm_streaming`,
-            role: progress.role,
-            chapterNumber: progress.chapterNumber,
-            title: progress.title,
-            status: "running",
-            phase: isFirstDelta ? "response_started" : "streaming",
-            statusText: isFirstDelta
-              ? "LLM 已开始响应，正在返回首段内容。"
-              : "LLM 正在持续返回内容。",
-            statusDetail: "返回内容会持续合并到这一条 agent 消息中。",
-            message: `${progress.startMessage}模型正在持续输出。`,
-            preview: streamedResult.slice(-520),
-            streamText: streamedResult,
-            wordCount: wordCount(streamedResult),
-          })
-        }
-        : undefined,
-    })
+          : undefined,
+      })
+      break
+    } catch (error) {
+      if (i === maxLlmAttempts) {
+        const providerError = new Error(`Provider API 调用失败，已重试 ${maxLlmAttempts} 次。详细错误: ${error instanceof Error ? error.message : String(error)}`)
+        ;(providerError as any).isProviderFailure = true
+        throw providerError
+      }
+      if (progress) {
+        await emitWritingProgress(options, {
+          messageId,
+          step: `${progress.step}_llm_retry`,
+          role: progress.role,
+          chapterNumber: progress.chapterNumber,
+          title: progress.title,
+          status: "running",
+          message: `网络或 API 请求异常，正在进行第 ${i} 次重试（等待 ${backoffDelay / 1000} 秒）... 错误: ${error instanceof Error ? error.message : String(error)}`,
+        })
+      }
+      await new Promise((resolve) => setTimeout(resolve, backoffDelay))
+      backoffDelay *= 2
+    }
+  }
     if (progress) {
       throwIfPipelineAborted(options)
       await emitWritingProgress(options, {
@@ -2536,6 +2564,219 @@ async function generateProductionTextWithLlm({
   }
 }
 
+interface GlobalContextResult {
+  prunedConsensus: string
+  prunedOutline: string
+  prunedRag: string
+  prunedMemory: string
+  prunedLedger: string
+  previousDraftFragment: string
+}
+
+async function loadAndPruneGlobalContext(params: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  blueprint: string
+  resources: ProductionWritingResources
+  options: ProductionPipelineOptions
+  continuityContract: ContinuityContract
+  paths?: NovelWorkspacePaths
+  projectRoot?: string
+  knowledgeContext?: { prompt: string; rows: Array<Record<string, unknown>> }
+  additionalFixedLength?: number
+}): Promise<GlobalContextResult> {
+  const { state, task, blueprint, resources, continuityContract, paths } = params
+  
+  // 1. 加载上一章正文片段
+  let previousDraftFragment = ""
+  const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : ""
+  if (paths && previousChapterId) {
+    const previousFinalDraft = await readOptionalText(path.join(paths.chaptersDir, `${previousChapterId}.final.md`))
+    if (previousFinalDraft) {
+      previousDraftFragment = previousFinalDraft.slice(-1200)
+    }
+  }
+
+  // 2. 加载大纲
+  let rawOutline = ""
+  if (paths) {
+    rawOutline = await readOptionalText(paths.masterOutlinePath)
+  }
+
+  // 3. 加载共识与设定
+  let rawConsensus = ""
+  if (paths) {
+    rawConsensus = await readOptionalText(paths.consensusPath)
+  }
+
+  // 4. 加载角色记忆
+  let rawMemory = ""
+  if (paths && previousChapterId) {
+    rawMemory = await readOptionalText(path.join(paths.memoryDir, `${previousChapterId}-memory.md`))
+  }
+
+  // 5. 组装 RAG
+  let rawRag = params.knowledgeContext?.prompt || ""
+
+  // 6. 获取 ledger list
+  let ledgerList = [...continuityContract.previousChapterLedger]
+
+  // 设定总预算（字符数）：System Prompt 目标控制在 12,000 字以内
+  // 注意：blueprint 传入的是 message（User Message），不计入 System Prompt 预算
+  const MAX_TOTAL_CHARS = 12_000
+
+  // 静态保护区：
+  // 采用调用方实测的不参与裁剪的固定内容总长度 + 动态加载的承接片段长度
+  const fixedLength = params.additionalFixedLength ?? 10_500
+  const protagonistName = continuityContract.lockedProtagonistName || ""
+
+  const protectedLength =
+    fixedLength +
+    previousDraftFragment.length +
+    protagonistName.length
+
+
+  let prunedRag = rawRag
+  let prunedMemory = rawMemory
+  let prunedLedgerList = [...ledgerList]
+  let prunedConsensus = rawConsensus
+  let prunedOutline = rawOutline
+
+  // 计算当前动态区总长
+  const getDynamicLength = () => {
+    const ledgerText = prunedLedgerList.join("\n")
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length
+  }
+
+  // 阶段 1：裁剪 RAG 与 角色记忆
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+    if (prunedRag.length > 1000) {
+      prunedRag = prunedRag.slice(0, 1000) + "\n...[RAG 知识库因 Token 限制被裁剪]"
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      if (prunedMemory.length > 800) {
+        prunedMemory = prunedMemory.slice(0, 800) + "\n...[角色记忆因 Token 限制被裁剪]"
+      }
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedRag = ""
+      prunedMemory = ""
+    }
+  }
+
+  // 阶段 2：裁剪 Chapter Ledger
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+    while (prunedLedgerList.length > 2 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList.shift()
+    }
+    if (prunedLedgerList.length > 1 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList = [prunedLedgerList[prunedLedgerList.length - 1]]
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedLedgerList = []
+    }
+  }
+
+  // 阶段 3：裁剪 Consensus & Setting Freeze
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedConsensus) {
+    const keywordSet = new Set<string>()
+    if (protagonistName) keywordSet.add(protagonistName)
+    const matches = blueprint.match(/[\u4e00-\u9fff]{2,5}/g) || []
+    for (const match of matches) {
+      if (match.length >= 2 && !/^(章节|章节|标题|字数|类型|旁白|必须|不能|主角|配角|情节|伏笔|如果|这是|需要|进行|已经|这个|但是|因为|所以|或者|没有|可以|我们|他们|你们)$/.test(match)) {
+        keywordSet.add(match)
+      }
+    }
+    
+    const blocks = prunedConsensus.split(/\n(?=(?:#+|\d+\.))/g)
+    const matchedBlocks: string[] = []
+    for (const block of blocks) {
+      let isHit = false
+      for (const kw of keywordSet) {
+        if (block.includes(kw)) {
+          isHit = true
+          break
+        }
+      }
+      if (isHit) {
+        matchedBlocks.push(block)
+      }
+    }
+
+    if (matchedBlocks.length > 0) {
+      prunedConsensus = matchedBlocks.join("\n")
+    } else {
+      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[全局共识因 Token 限制被缩减]"
+    }
+
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedConsensus = prunedConsensus.slice(0, 500)
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedConsensus = ""
+    }
+  }
+
+  // 阶段 4：裁剪 Master Outline
+  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedOutline) {
+    const currentChapterLabel = `第${task.chapterNumber}章`
+    const currentChapterLabelAlt = `第 ${task.chapterNumber} 章`
+    const lines = prunedOutline.split("\n")
+    let targetIndex = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(currentChapterLabel) || lines[i].includes(currentChapterLabelAlt)) {
+        targetIndex = i
+        break
+      }
+    }
+
+    if (targetIndex >= 0) {
+      const startLine = Math.max(0, targetIndex - 20)
+      const endLine = Math.min(lines.length, targetIndex + 20)
+      prunedOutline = [
+        "...[主线大纲前期已省略]",
+        ...lines.slice(startLine, endLine),
+        "...[主线大纲后期已省略]"
+      ].join("\n")
+    } else {
+      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[主线大纲因 Token 限制被缩减]"
+    }
+
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedOutline = prunedOutline.slice(0, 500)
+    }
+    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
+      prunedOutline = ""
+    }
+  }
+
+  return {
+    prunedConsensus,
+    prunedOutline,
+    prunedRag,
+    prunedMemory,
+    prunedLedger: prunedLedgerList.join("\n"),
+    previousDraftFragment,
+  }
+}
+
+/**
+ * 动态精简章节蓝图，仅保留写正文核心需要的情节序列和因果计划。
+ * 剔除冗余的全局共识承接和已在 System Prompt 中独立引入的成语字典释义。
+ */
+function trimBlueprintForDrafting(blueprint: string): string {
+  let trimmed = blueprint
+  const carryoverIndex = trimmed.indexOf("## Consensus Carryover")
+  if (carryoverIndex > 0) {
+    trimmed = trimmed.slice(0, carryoverIndex).trim()
+  }
+  const vocabIndex = trimmed.indexOf("## Vocabulary And Idiom Strategy")
+  if (vocabIndex > 0) {
+    trimmed = trimmed.slice(0, vocabIndex).trim()
+  }
+  return trimmed
+}
+
 async function createDraftBody(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -2543,44 +2784,46 @@ async function createDraftBody(
   resources: ProductionWritingResources,
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task, blueprint }),
+  paths?: NovelWorkspacePaths,
+  projectRoot?: string,
 ) {
   throwIfPipelineAborted(options)
   if (continuityContract.status === "blocked") {
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`)
   }
-	  const fallback = createDraftBodyFromBlueprint(state, task, blueprint, resources, continuityContract)
-	  const genre = inferGenreProfile(state)
-	  const sceneType = sceneTypeForChapter(state, task.chapterNumber)
-	  const causalPlan = getTaskCausalPlan(state, task)
-	  const knowledgeContext = await retrieveWritingKnowledgeContext({
+  const fallback = createDraftBodyFromBlueprint(state, task, blueprint, resources, continuityContract)
+  const genre = inferGenreProfile(state)
+  const sceneType = sceneTypeForChapter(state, task.chapterNumber)
+  const causalPlan = getTaskCausalPlan(state, task)
+  const knowledgeContext = await retrieveWritingKnowledgeContext({
     state,
     task,
     options,
     purpose: "draft",
     query: `正文写作 ${sceneType} 成语 词汇 场景描写 前文记忆 主角一致性`,
     sourceTypes: ["vocabulary", "example", "style_guide", "chapter", "plan", "memory", "consensus"],
-	    limit: 10,
-	  })
-	  const vocabularyPrompt = createVocabularyUsagePrompt({
-	    resources,
-	    state,
-	    task,
-	    sceneType,
-	    blueprint,
-	    continuityContract,
-	    limit: 24,
-	  })
-	  const vocabularySkillExamples = createVocabularySkillExamplePrompt(resources, sceneType)
-	  const resourceManifest = createVocabularyResourceManifest({
-	    resources,
-	    state,
-	    task,
-	    sceneType,
-	    blueprint,
-	    continuityContract,
-	    limit: 14,
-	  })
-	  await emitWritingKnowledgeRecallProgress({
+    limit: 10,
+  })
+  const vocabularyPrompt = createVocabularyUsagePrompt({
+    resources,
+    state,
+    task,
+    sceneType,
+    blueprint,
+    continuityContract,
+    limit: 24,
+  })
+  const vocabularySkillExamples = createVocabularySkillExamplePrompt(resources, sceneType)
+  const resourceManifest = createVocabularyResourceManifest({
+    resources,
+    state,
+    task,
+    sceneType,
+    blueprint,
+    continuityContract,
+    limit: 14,
+  })
+  await emitWritingKnowledgeRecallProgress({
     options,
     purpose: "draft",
     role: "Author",
@@ -2591,6 +2834,99 @@ async function createDraftBody(
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return fallback
   }
+
+  // 对词汇/示例/资源清单加硬上限，防止无限膨胀（这三项不在裁剪级联内）
+  const cappedVocabularyPrompt = vocabularyPrompt.slice(0, 1000)
+  const cappedVocabularySkillExamples = vocabularySkillExamples.slice(0, 800)
+  const cappedResourceManifest = resourceManifest.slice(0, 500)
+
+  // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
+  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
+
+  const basePromptLines = [
+    cappedWriterGuide || "你是小说正文创作执行者。",
+    "",
+    "必须写正文，不要只写计划、摘要或建议。",
+    "必须严格遵循章节蓝图、类型旁白策略、成语密度与角色差异。",
+    "必须严格执行章节因果合同：承接上一章输入、完成本章目标、让主角做选择、留下不可逆变化、把后果交给下一章。",
+    continuityContract.lockedProtagonistName
+      ? `主角一致性是硬门槛：本章必须继续使用「${continuityContract.lockedProtagonistName}」，不得改名、换身份或写成另一条故事线。`
+      : "主角一致性是硬门槛：首章必须明确唯一主角姓名，后续章节会锁定该姓名。",
+    "配角、情节、伏笔和世界规则必须遵循 Canon Continuity Contract。",
+    "第 2 章以后不能只沿用主角姓名；必须让上一章锚点在正文事件中发生作用。",
+    "禁止 AI 化碎片写法：不得让单个字或 1-4 字短词反复独立成句/成行堆场景。",
+  ]
+
+  const fixedDynamicPromptLines = [
+    `章节：第 ${task.chapterNumber} 章`,
+    `标题：${task.title}`,
+    `目标字数：${task.targetWords}`,
+    `类型：${genre.genre}`,
+    `场景类型：${sceneType}`,
+    `旁白策略：${genre.narration}`,
+    "",
+    cappedVocabularyPrompt,
+    "",
+    cappedVocabularySkillExamples,
+    "",
+    cappedResourceManifest,
+    "",
+    continuityContract.prompt,
+    "",
+    "资源使用硬要求：",
+    "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
+    "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
+    "- 必须避开 Anti Patterns：连续成语、孤立成语、单字短词连发、只有氛围没有动作。",
+    "- 场景必须有具体动作、物件、气味/声音/触感中的至少两类细节。",
+    "- 章节必须围绕蓝图推进，不得输出修改说明或泛化模板段落。",
+    `- Previous Input 必须进入开场或第一场冲突：${causalPlan.previousInput}`,
+    `- Causal Objective 必须在正文中被事件推进：${causalPlan.sceneObjective}`,
+    `- Protagonist Decision 必须写成可见行动：${causalPlan.protagonistDecision}`,
+    `- Irreversible Change 必须成为章末事实：${causalPlan.irreversibleConsequence}`,
+    `- Next Chapter Handoff 必须从本章后果自然产生：${causalPlan.nextHandoff}`,
+    continuityContract.lockedProtagonistName
+      ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知 and 选择推进。`
+      : "- 正文必须明确唯一主角姓名，并保持主视角聚焦。",
+    "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
+    "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
+    continuityContract.continuityAnchors.length
+      ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
+      : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
+    "- 不要把推荐词、成语或氛围词孤立成行；所有词都必须嵌入完整动作、对话、感官或因果句。",
+  ]
+
+  const basePromptText = basePromptLines.join("\n")
+  const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n")
+  // 增加 1000 字符代表底层协议及 Response Contract 长度
+  const additionalFixedLength = basePromptText.length + fixedDynamicPromptText.length + 1000
+
+  const prunedContext = await loadAndPruneGlobalContext({
+    state,
+    task,
+    blueprint,
+    resources,
+    options,
+    continuityContract,
+    paths,
+    projectRoot,
+    knowledgeContext,
+    additionalFixedLength,
+  })
+
+  // 打印各组件大小，便于诊断
+  console.log(
+    `[WRITING CTX] Chapter ${task.chapterNumber} Author Draft 上下文分布:` +
+    ` writerGuide=${(resources.writerGuide || "").length}字` +
+    ` vocabPrompt=${cappedVocabularyPrompt.length}字` +
+    ` skillExamples=${cappedVocabularySkillExamples.length}字` +
+    ` manifest=${cappedResourceManifest.length}字` +
+    ` consensus=${prunedContext.prunedConsensus.length}字` +
+    ` outline=${prunedContext.prunedOutline.length}字` +
+    ` memory=${prunedContext.prunedMemory.length}字` +
+    ` ledger=${prunedContext.prunedLedger.length}字` +
+    ` prevFragment=${prunedContext.previousDraftFragment.length}字` +
+    ` rag=${prunedContext.prunedRag.length}字`,
+  )
 
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
@@ -2604,70 +2940,66 @@ async function createDraftBody(
       startMessage: `Author 正在根据第 ${task.chapterNumber} 章蓝图生成正文初稿。`,
       completeMessage: `Author 已返回第 ${task.chapterNumber} 章初稿，准备进入质检。`,
     },
-    basePrompt: [
-      resources.writerGuide || "你是小说正文创作执行者。",
-      "",
-	      "必须写正文，不要只写计划、摘要或建议。",
-	      "必须严格遵循章节蓝图、类型旁白策略、成语密度与角色差异。",
-	      "必须严格执行章节因果合同：承接上一章输入、完成本章目标、让主角做选择、留下不可逆变化、把后果交给下一章。",
-	      continuityContract.lockedProtagonistName
-        ? `主角一致性是硬门槛：本章必须继续使用「${continuityContract.lockedProtagonistName}」，不得改名、换身份或写成另一条故事线。`
-        : "主角一致性是硬门槛：首章必须明确唯一主角姓名，后续章节会锁定该姓名。",
-	      "配角、情节、伏笔和世界规则必须遵循 Canon Continuity Contract。",
-	      "第 2 章以后不能只沿用主角姓名；必须让上一章锚点在正文事件中发生作用。",
-	      "禁止 AI 化碎片写法：不得让单个字或 1-4 字短词反复独立成句/成行堆场景。",
-	    ].join("\n"),
+    basePrompt: basePromptText,
     dynamicPrompt: [
       `章节：第 ${task.chapterNumber} 章`,
       `标题：${task.title}`,
       `目标字数：${task.targetWords}`,
       `类型：${genre.genre}`,
       `场景类型：${sceneType}`,
-	      `旁白策略：${genre.narration}`,
-	      "",
-	      vocabularyPrompt,
-	      "",
-	      vocabularySkillExamples,
-	      "",
-	      resourceManifest,
-	      "",
-	      "Knowledge/RAG References:",
-      knowledgeContext.prompt,
+      `旁白策略：${genre.narration}`,
+      "",
+      cappedVocabularyPrompt,
+      "",
+      cappedVocabularySkillExamples,
+      "",
+      cappedResourceManifest,
+      "",
+      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${prunedContext.prunedConsensus}` : "",
+      "",
+      prunedContext.prunedOutline ? `Master Outline:\n${prunedContext.prunedOutline}` : "",
+      "",
+      prunedContext.prunedMemory ? `Character Memory:\n${prunedContext.prunedMemory}` : "",
+      "",
+      prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${prunedContext.prunedLedger}` : "",
+      "",
+      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (末尾承接段):\n${prunedContext.previousDraftFragment}` : "",
+      "",
+      "Knowledge/RAG References:",
+      prunedContext.prunedRag,
       "",
       continuityContract.prompt,
       "",
-	      "资源使用硬要求：",
-	      "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
-	      "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
-	      "- 必须避开 Anti Patterns：连续成语、孤立成语、单字短词连发、只有氛围没有动作。",
-	      "- 场景必须有具体动作、物件、气味/声音/触感中的至少两类细节。",
-	      "- 章节必须围绕蓝图推进，不得输出修改说明或泛化模板段落。",
-	      `- Previous Input 必须进入开场或第一场冲突：${causalPlan.previousInput}`,
-	      `- Causal Objective 必须在正文中被事件推进：${causalPlan.sceneObjective}`,
-	      `- Protagonist Decision 必须写成可见行动：${causalPlan.protagonistDecision}`,
-	      `- Irreversible Change 必须成为章末事实：${causalPlan.irreversibleConsequence}`,
-	      `- Next Chapter Handoff 必须从本章后果自然产生：${causalPlan.nextHandoff}`,
-	      continuityContract.lockedProtagonistName
-	        ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知和选择推进。`
+      "资源使用硬要求：",
+      "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
+      "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
+      "- 必须避开 Anti Patterns：连续成语、孤立成语、单字短词连发、只有氛围没有动作。",
+      "- 场景必须有具体动作、物件、气味/声音/触感中的至少两类细节。",
+      "- 章节必须围绕蓝图推进，不得输出修改说明或泛化模板段落。",
+      `- Previous Input 必须进入开场或第一场冲突：${causalPlan.previousInput}`,
+      `- Causal Objective 必须在正文中被事件推进：${causalPlan.sceneObjective}`,
+      `- Protagonist Decision 必须写成可见行动：${causalPlan.protagonistDecision}`,
+      `- Irreversible Change 必须成为章末事实：${causalPlan.irreversibleConsequence}`,
+      `- Next Chapter Handoff 必须从本章后果自然产生：${causalPlan.nextHandoff}`,
+      continuityContract.lockedProtagonistName
+        ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知 and 选择推进。`
         : "- 正文必须明确唯一主角姓名，并保持主视角聚焦。",
-	      "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
-	      "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
-	      continuityContract.continuityAnchors.length
-	        ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
-	        : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
-	      "- 不要把推荐词、成语或氛围词孤立成行；所有词都必须嵌入完整动作、对话、感官或因果句。",
-	    ].join("\n"),
+      "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
+      "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
+      continuityContract.continuityAnchors.length
+        ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
+        : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
+      "- 不要把推荐词、成语或氛围词孤立成行；所有词都必须嵌入完整动作、对话、感官或因果句。",
+    ].join("\n"),
     message: [
-	      "请按以下详细章节蓝图生成本章正文草稿。",
-	      "输出 Markdown，必须包含 `# 章节标题` 和 `## Draft Body`。",
-	      "不要写解释，不要让用户选择，不要跳章。",
-	      "",
-	      "## Causal Chapter Plan",
-	      ...formatCausalPlanBullets(state, task),
-	      "",
-	      continuityContract.prompt,
-	      "",
-	      blueprint,
+      "请按以下详细章节蓝图生成本章正文草稿。",
+      "输出 Markdown，必须包含 `# 章节标题` 和 `## Draft Body`。",
+      "不要写解释，不要让用户选择，不要跳章。",
+      "",
+      "## Causal Chapter Plan",
+      ...formatCausalPlanBullets(state, task),
+      "",
+      trimBlueprintForDrafting(blueprint),
     ].join("\n"),
   })
 
@@ -2884,6 +3216,8 @@ async function reviseDraftForQualityGate(
   options: ProductionPipelineOptions,
   attempt: number,
   continuityContract = createContinuityContract({ state, task, blueprint }),
+  paths?: NovelWorkspacePaths,
+  projectRoot?: string,
 ) {
   throwIfPipelineAborted(options)
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
@@ -2898,6 +3232,50 @@ async function reviseDraftForQualityGate(
     ].join("\n")
   }
 
+  // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
+  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
+
+  const basePromptLines = [
+    cappedWriterGuide || "你是小说正文创作执行者。",
+    "你正在执行质量门禁返工。必须保留章节目标，不得跳章，不得改变已冻结设定。",
+    "顺应并修复章节因果合同：上一章输入要推动本章选择，本章选择要产生不可逆代价，并自然交给下一章。",
+    continuityContract.lockedProtagonistName
+      ? `必须把主角一致性修回「${continuityContract.lockedProtagonistName}」，不得继续使用漂移主角。`
+      : "必须在首章建立唯一主角姓名。",
+    "必须修复配角关系、前序情节承接、伏笔状态、资源使用、情节推进和正文比例问题。",
+    "必须修复章节断裂：上一章锚点要进入本章事件因果，不得只换场景重开。",
+    "必须修复流水账问题：不要只按时间罗列，所有场景都要因选择、代价、信息变化或关系变化而发生。",
+    "必须修复 AI 化碎片：把孤立短词改成完整动作、感官、对话或因果句。",
+  ]
+
+  const fixedDynamicPromptLines = [
+    `章节：第 ${task.chapterNumber} 章`,
+    `标题：${task.title}`,
+    `返工轮次：${attempt}`,
+    "必须针对质量报告中的问题重写/扩写正文。",
+    "必须输出 Markdown，保留 `## Draft Body`。",
+    "",
+    `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
+    "",
+    continuityContract.prompt,
+  ]
+
+  const basePromptText = basePromptLines.join("\n\n")
+  const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n")
+  const additionalFixedLength = basePromptText.length + fixedDynamicPromptText.length + 1000
+
+  const prunedContext = await loadAndPruneGlobalContext({
+    state,
+    task,
+    blueprint,
+    resources,
+    options,
+    continuityContract,
+    paths,
+    projectRoot,
+    additionalFixedLength,
+  })
+
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
     state,
@@ -2910,18 +3288,7 @@ async function reviseDraftForQualityGate(
       startMessage: `Author 正在根据质检报告返工第 ${task.chapterNumber} 章，第 ${attempt} 轮。`,
       completeMessage: `Author 已返回第 ${task.chapterNumber} 章第 ${attempt} 轮返工稿。`,
     },
-    basePrompt: [
-      resources.writerGuide || "你是小说正文创作执行者。",
-	      "你正在执行质量门禁返工。必须保留章节目标，不得跳章，不得改变已冻结设定。",
-	      "必须修复章节因果合同：上一章输入要推动本章选择，本章选择要产生不可逆代价，并自然交给下一章。",
-	      continuityContract.lockedProtagonistName
-	        ? `必须把主角一致性修回「${continuityContract.lockedProtagonistName}」，不得继续使用漂移主角。`
-        : "必须在首章建立唯一主角姓名。",
-		      "必须修复配角关系、前序情节承接、伏笔状态、资源使用、情节推进和正文比例问题。",
-		      "必须修复章节断裂：上一章锚点要进入本章事件因果，不得只换场景重开。",
-		      "必须修复流水账问题：不要只按时间罗列，所有场景都要因选择、代价、信息变化或关系变化而发生。",
-	      "必须修复 AI 化碎片：把孤立短词改成完整动作、感官、对话或因果句。",
-	    ].join("\n\n"),
+    basePrompt: basePromptText,
     dynamicPrompt: [
       `章节：第 ${task.chapterNumber} 章`,
       `标题：${task.title}`,
@@ -2929,18 +3296,28 @@ async function reviseDraftForQualityGate(
       "必须针对质量报告中的问题重写/扩写正文。",
       "必须输出 Markdown，保留 `## Draft Body`。",
       "",
+      `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
+      "",
+      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${prunedContext.prunedConsensus}` : "",
+      "",
+      prunedContext.prunedOutline ? `Master Outline:\n${prunedContext.prunedOutline}` : "",
+      "",
+      prunedContext.prunedMemory ? `Character Memory:\n${prunedContext.prunedMemory}` : "",
+      "",
+      prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${prunedContext.prunedLedger}` : "",
+      "",
+      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (末尾承接段):\n${prunedContext.previousDraftFragment}` : "",
+      "",
       continuityContract.prompt,
     ].join("\n"),
     message: [
       "请根据质量报告返工以下章节草稿。",
       "",
       "## Blueprint",
-      blueprint,
+      trimBlueprintForDrafting(blueprint),
       "",
       "## Quality Report",
       report,
-      "",
-      continuityContract.prompt,
       "",
       "## Draft",
       draft,
@@ -2960,8 +3337,10 @@ async function runQualityGateWithRevisions(
   resources: ProductionWritingResources,
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task, blueprint }),
+  paths?: NovelWorkspacePaths,
+  projectRoot?: string,
 ) {
-  const maxAttempts = Math.max(0, Math.min(3, options.maxRevisionAttempts ?? 1))
+  const maxAttempts = options.maxRevisionAttempts !== undefined ? options.maxRevisionAttempts : 3
   let draft = initialDraft
   let report = ""
   let gate: QualityGateResult = {
@@ -2987,7 +3366,19 @@ async function runQualityGateWithRevisions(
       return { draft, report, gate }
     }
 
-    draft = await reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt + 1, continuityContract)
+    draft = await reviseDraftForQualityGate(
+      state,
+      task,
+      draft,
+      report,
+      blueprint,
+      resources,
+      options,
+      attempt + 1,
+      continuityContract,
+      paths,
+      projectRoot
+    )
   }
 
   return { draft, report, gate }
@@ -3412,7 +3803,7 @@ export async function runChapterProductionPipeline(
       : "Canon 连续性合同已载入：首章将锁定唯一主角，并建立后续角色/情节账本。",
     preview: continuityContract.prompt.slice(0, 720),
   })
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract)
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -3426,7 +3817,7 @@ export async function runChapterProductionPipeline(
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft),
   })
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract)
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "quality_gate_completed",

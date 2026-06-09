@@ -2928,6 +2928,18 @@ test("autopilot requeues orphaned in-progress chapters before director decisions
   )
 })
 
+test("autopilot stale LLM recovery requeues blocked chapters that still have an active writing message", async () => {
+  const source = await fs.readFile(autopilotWorkerSource, "utf8")
+
+  assert.match(source, /async function recoverStaleWritingRequest/)
+  assert.match(
+    source,
+    /const task = state\.plan\.chapterTasks\.find\(\(candidate\) =>\s*candidate\.status === "in_progress" \|\| candidate\.status === "blocked"\)/,
+  )
+  assert.match(source, /stale_llm_request_recovered/)
+  assert.match(source, /task\.status = "pending"/)
+})
+
 test("novel director is the thin decision layer for unattended flow", async () => {
   const { initAutonomousProject, decideNovelDirectorCommand, createFollowUpAdvanceCommand } = await loadCore()
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-director-"))
@@ -3391,4 +3403,101 @@ test("knowledge retrieval excludes stale chapter artifacts after a chapter queue
 
   assert.equal(rows.some((row) => String(row.source?.path || "").includes("chapter-002.final.md")), false)
   assert.equal(rows.some((row) => String(row.source?.sourceType || "") === "vocabulary"), true)
+})
+
+test("production writing pipeline retry limit is 3 attempts and blocks the task", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-production-quality-block-3-"))
+  const { createManagedAutonomousProject, advanceAutonomousProject, withFactoryDb } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_TEST_MODE = "1"
+
+  try {
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "A judge investigate poems that alter verdicts",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+
+    const state = created.state
+    state.runtime.stage = "drafting"
+    await fs.writeFile(path.join(created.project.projectRoot, ".ai-novel", "state.json"), `${JSON.stringify(state, null, 2)}\n`)
+    await withFactoryDb(tempDir, async (db) => db.updateProjectState(created.project.id, state))
+
+    const advanced = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      forceQualityScoreForTest: 5,
+      maxRevisionAttempts: 3,
+    })
+
+    assert.equal(advanced.runtime.stage, "reviewing")
+    assert.equal(advanced.plan.chapterTasks[0].status, "blocked")
+    assert.equal(advanced.plan.chapterTasks[0].qualityGate.attempts, 3)
+    assert.equal(advanced.plan.chapterTasks[0].qualityGate.status, "blocked")
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
+test("production writing pipeline treats transient provider failure as resumable and does not charge recoveryAttempts", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-provider-failure-test-"))
+  const { createManagedAutonomousProject, advanceAutonomousProject, withFactoryDb } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "http://127.0.0.1:54321"
+  process.env.LLM_API_KEY = "test-key"
+  delete process.env.AI_NOVEL_TEST_MODE
+
+  try {
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "A scholar audits rainfall history",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+
+    const state = created.state
+    state.runtime.stage = "drafting"
+    await fs.writeFile(path.join(created.project.projectRoot, ".ai-novel", "state.json"), `${JSON.stringify(state, null, 2)}\n`)
+    await withFactoryDb(tempDir, async (db) => db.updateProjectState(created.project.id, state))
+
+    await assert.rejects(
+      advanceAutonomousProject(created.project.projectRoot, {
+        factoryRootDir: tempDir,
+        projectId: created.project.id,
+      }),
+      (error) => {
+        return error instanceof Error && (error.message.includes("Provider") || error.isProviderFailure);
+      }
+    )
+
+    const stateFile = await fs.readFile(path.join(created.project.projectRoot, ".ai-novel", "state.json"), "utf8")
+    const stateObj = JSON.parse(stateFile)
+    assert.equal(stateObj.plan.chapterTasks[0].status, "pending")
+    assert.equal(stateObj.plan.chapterTasks[0].recoveryAttempts || 0, 0)
+    assert.match(stateObj.runtime.statusMessage, /Provider error/)
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+    if (previousBaseUrl === undefined) {
+      delete process.env.LLM_BASE_URL
+    } else {
+      process.env.LLM_BASE_URL = previousBaseUrl
+    }
+    if (previousApiKey === undefined) {
+      delete process.env.LLM_API_KEY
+    } else {
+      process.env.LLM_API_KEY = previousApiKey
+    }
+  }
 })

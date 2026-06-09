@@ -12,6 +12,7 @@ const autopilotControlHint = document.getElementById("autopilot-control-hint")
 const consoleLogsBox = document.getElementById("console-logs-box")
 const projectManagerView = document.getElementById("project-manager-view")
 const studioView = document.getElementById("studio-view")
+const sidebarRight = document.getElementById("sidebar-right")
 const projectListContainer = document.getElementById("project-list-container")
 const projectCountBadge = document.getElementById("project-count-badge")
 const openProjectCreateButton = document.getElementById("open-project-create-button")
@@ -27,17 +28,26 @@ const providerModelInput = document.getElementById("provider-model-input")
 const providerTestButton = document.getElementById("provider-test-button")
 const providerSaveButton = document.getElementById("provider-save-button")
 const providerModalStatus = document.getElementById("provider-modal-status")
+const llmConfigsList = document.getElementById("llm-configs-list")
+const llmFormTitle = document.getElementById("llm-form-title")
+const llmConfigIdInput = document.getElementById("llm-config-id-input")
+const llmConfigNameInput = document.getElementById("llm-config-name-input")
+const llmConfigCancelEditButton = document.getElementById("llm-config-cancel-edit-button")
 const networkStatusBanner = document.getElementById("network-status-banner")
 const initPanel = document.getElementById("init-panel")
 const initIdeaInput = document.getElementById("init-idea-input")
 const initChaptersInput = document.getElementById("init-chapters-input")
 const initWordsInput = document.getElementById("init-words-input")
 const initButton = document.getElementById("init-button")
+const autopilotModeButton = document.getElementById("autopilot-mode-button")
+const cocreateReviewRegion = document.querySelector("[data-cocreate-review-region='true']")
 const projectCreateModal = document.getElementById("project-create-modal")
 const projectCreateModalCloseButton = document.getElementById("project-create-modal-close-button")
 const projectCreateTitleInput = document.getElementById("project-create-title-input")
 const projectCreateIdeaInput = document.getElementById("project-create-idea-input")
 const projectCreateChaptersInput = document.getElementById("project-create-chapters-input")
+const AUTOPILOT_RESUME_HINT = "检测到可恢复的自动创作任务，点击“继续创作”后接着上次进度运行。"
+const AUTOPILOT_RESUME_HINT_AFTER_NETWORK = "网络已恢复，检测到可继续的自动创作任务，请点击“继续创作”。"
 const projectCreateWordsInput = document.getElementById("project-create-words-input")
 const projectCreateModalStatus = document.getElementById("project-create-modal-status")
 const projectCreateSubmitButton = document.getElementById("project-create-submit-button")
@@ -46,7 +56,9 @@ const chapterPreviewCloseButton = document.getElementById("chapter-preview-close
 const chapterPreviewTitle = document.getElementById("chapter-preview-title")
 const chapterPreviewPath = document.getElementById("chapter-preview-path")
 const chapterPreviewBody = document.getElementById("chapter-preview-body")
+const chapterCopyButton = document.getElementById("chapter-copy-button")
 const ACTIVE_PROJECT_STORAGE_KEY = "ai-novel-factory.activeProjectId"
+const PANEL_LAYOUT_STORAGE_KEY = "ai-novel-factory.panelLayout"
 const NETWORK_RETRY_BASE_MS = 3000
 const NETWORK_RETRY_MAX_MS = 30000
 const DISCUSSION_PAGE_SIZE = 20
@@ -54,6 +66,8 @@ const DISCUSSION_PAGE_SIZE = 20
 const dashboardState = {
   projects: [],
   activeProjectId: null,
+  autopilotAbortController: null,
+  chatAbortController: null,
   state: null,
   transcript: "",
   discussionEntries: [],
@@ -85,6 +99,7 @@ const dashboardState = {
   currentView: "manager",
   discussionAutoStickToBottom: true,
   lastAgentDeltaStatusAt: 0,
+  currentPreviewContent: "",
   autopilotActive: false,
   autopilotStreamConnected: false,
   network: {
@@ -107,8 +122,136 @@ const dashboardState = {
   discussionStaticSignature: "",
   chapterPage: 1,
   chapterPageSize: 20,
+  panelLayout: {
+    chapterFocus: false,
+    modules: {
+      overview: true,
+      chapters: true,
+      observability: false,
+      logs: false,
+    },
+  },
   projectCreateInFlight: false,
   deletingProjectIds: new Set(),
+}
+
+function defaultPanelLayout() {
+  return {
+    chapterFocus: false,
+    modules: {
+      overview: true,
+      chapters: true,
+      observability: false,
+      logs: false,
+    },
+  }
+}
+
+function panelLayoutStorageKey(projectId = dashboardState.activeProjectId) {
+  return `${PANEL_LAYOUT_STORAGE_KEY}.${projectId || "global"}`
+}
+
+function normalizePanelLayout(layout = {}) {
+  const defaults = defaultPanelLayout()
+  const modules = layout?.modules || {}
+  return {
+    chapterFocus: Boolean(layout?.chapterFocus),
+    modules: {
+      overview: modules.overview ?? defaults.modules.overview,
+      chapters: modules.chapters ?? defaults.modules.chapters,
+      observability: modules.observability ?? defaults.modules.observability,
+      logs: modules.logs ?? defaults.modules.logs,
+    },
+  }
+}
+
+function loadPanelLayout(projectId = dashboardState.activeProjectId) {
+  if (typeof window === "undefined") {
+    dashboardState.panelLayout = defaultPanelLayout()
+    return dashboardState.panelLayout
+  }
+  try {
+    const stored = window.localStorage.getItem(panelLayoutStorageKey(projectId))
+    dashboardState.panelLayout = stored ? normalizePanelLayout(JSON.parse(stored)) : defaultPanelLayout()
+  } catch {
+    dashboardState.panelLayout = defaultPanelLayout()
+  }
+  return dashboardState.panelLayout
+}
+
+function persistPanelLayout() {
+  if (typeof window === "undefined" || !dashboardState.activeProjectId) {
+    return
+  }
+  window.localStorage.setItem(
+    panelLayoutStorageKey(),
+    JSON.stringify(normalizePanelLayout(dashboardState.panelLayout)),
+  )
+}
+
+function setPanelModuleExpanded(moduleKey, expanded, { persist = true } = {}) {
+  const nextLayout = normalizePanelLayout(dashboardState.panelLayout)
+  if (!(moduleKey in nextLayout.modules)) {
+    return
+  }
+  nextLayout.modules[moduleKey] = Boolean(expanded)
+  if (moduleKey === "chapters" && !nextLayout.modules.chapters) {
+    nextLayout.chapterFocus = false
+  }
+  dashboardState.panelLayout = nextLayout
+  if (persist) {
+    persistPanelLayout()
+  }
+  applySidebarPanelLayout()
+}
+
+function togglePanelModule(moduleKey) {
+  const current = normalizePanelLayout(dashboardState.panelLayout)
+  setPanelModuleExpanded(moduleKey, !current.modules[moduleKey])
+}
+
+function setChapterFocus(enabled) {
+  const nextLayout = normalizePanelLayout(dashboardState.panelLayout)
+  nextLayout.chapterFocus = Boolean(enabled)
+  nextLayout.modules.chapters = true
+  if (enabled) {
+    nextLayout.modules.observability = false
+    nextLayout.modules.logs = false
+  }
+  dashboardState.panelLayout = nextLayout
+  persistPanelLayout()
+  applySidebarPanelLayout()
+}
+
+function updateSidebarModuleSummary(id, value) {
+  const element = document.getElementById(id)
+  if (element) {
+    element.textContent = value
+  }
+}
+
+function applySidebarPanelLayout() {
+  if (!sidebarRight) {
+    return
+  }
+  const layout = normalizePanelLayout(dashboardState.panelLayout)
+  sidebarRight.classList.toggle("is-chapter-focus", layout.chapterFocus)
+  sidebarRight.querySelectorAll("[data-panel-module]").forEach((section) => {
+    const moduleKey = section.dataset.panelModule
+    const expanded = Boolean(layout.modules[moduleKey])
+    section.classList.toggle("is-expanded", expanded)
+    const toggle = section.querySelector("[data-panel-toggle]")
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false")
+    }
+  })
+  const focusButton = document.getElementById("chapter-focus-toggle-button")
+  if (focusButton) {
+    focusButton.classList.toggle("is-active", layout.chapterFocus)
+    focusButton.innerHTML = layout.chapterFocus
+      ? `<i class="fa-solid fa-compress"></i> 退出聚焦`
+      : `<i class="fa-solid fa-expand"></i> 聚焦章节`
+  }
 }
 
 const roleMeta = {
@@ -258,19 +401,47 @@ function renderComposerStatus() {
 }
 
 function hasRecoverableAutopilotJob() {
-  const activeJobs = Array.isArray(dashboardState.factorySnapshot?.activeJobs)
-    ? dashboardState.factorySnapshot.activeJobs
-    : []
-  const runnableJobs = Array.isArray(dashboardState.factorySnapshot?.runnableJobs)
-    ? dashboardState.factorySnapshot.runnableJobs
-    : []
-  return [...activeJobs, ...runnableJobs].some((job) => job?.kind === "autopilot" && (job.status === "running" || job.status === "paused"))
+  return snapshotJobDisplayState().recoverableJobs.some((job) => job?.kind === "autopilot")
+}
+
+function hasRunningAutopilotJob() {
+  return snapshotJobDisplayState().runningJobs.some((job) => job?.kind === "autopilot")
+}
+
+function dedupeJobs(jobs = []) {
+  const seen = new Set()
+  return jobs.filter((job) => {
+    const id = String(job?.id || "")
+    if (!id || seen.has(id)) {
+      return false
+    }
+    seen.add(id)
+    return true
+  })
+}
+
+function snapshotJobDisplayState(snapshot = dashboardState.factorySnapshot || {}) {
+  const activeJobs = Array.isArray(snapshot?.activeJobs) ? snapshot.activeJobs : []
+  const runnableJobs = Array.isArray(snapshot?.runnableJobs) ? snapshot.runnableJobs : []
+  const recoverableJobs = dedupeJobs(
+    [...activeJobs, ...runnableJobs].filter((job) => job?.status === "paused" || !job?.lease_owner),
+  )
+  const recoverableIds = new Set(recoverableJobs.map((job) => String(job.id || "")))
+  const runningJobs = activeJobs.filter((job) =>
+    job?.status === "running"
+    && job?.lease_owner
+    && !recoverableIds.has(String(job.id || "")),
+  )
+  return {
+    runningJobs,
+    recoverableJobs,
+  }
 }
 
 function autopilotControlState() {
   const runtimeAutopilot = dashboardState.state?.runtime?.autopilot || {}
-  const running = Boolean(runtimeAutopilot.running || dashboardState.autopilotActive || dashboardState.autopilotStreamConnected)
   const recoverable = hasRecoverableAutopilotJob()
+  const running = Boolean(runtimeAutopilot.running || hasRunningAutopilotJob() || dashboardState.autopilotStreamConnected)
   return {
     running,
     recoverable,
@@ -280,6 +451,32 @@ function autopilotControlState() {
   }
 }
 
+function composerStatusIsAutopilotResumeHint() {
+  const message = String(dashboardState.composerStatus?.message || "")
+  return message === AUTOPILOT_RESUME_HINT || message === AUTOPILOT_RESUME_HINT_AFTER_NETWORK
+}
+
+function syncComposerStatusFromAutopilotControl() {
+  if (dashboardState.composerStatus.busy) {
+    return
+  }
+  const control = autopilotControlState()
+  if (control.paused) {
+    if (!composerStatusIsAutopilotResumeHint()) {
+      setComposerStatus("warning", AUTOPILOT_RESUME_HINT)
+    }
+    return
+  }
+  if (!composerStatusIsAutopilotResumeHint()) {
+    return
+  }
+  if (control.running) {
+    setComposerStatus("processing", "后台 worker 正在运行；如果模型超时，会自动重试并保留进度。")
+    return
+  }
+  setComposerStatus("idle", "输入指令后会显示发送和处理状态")
+}
+
 function renderAutopilotControls() {
   if (!autopilotStartButton || !autopilotStopButton || !autopilotControlHint) {
     return
@@ -287,25 +484,185 @@ function renderAutopilotControls() {
 
   const control = autopilotControlState()
   const hasProject = Boolean(dashboardState.activeProjectId)
+
+  if (autopilotModeButton) {
+    autopilotModeButton.disabled = !hasProject || dashboardState.composerStatus.busy
+    const currentMode = dashboardState.state?.project?.autoMode || "full"
+    if (currentMode === "semi") {
+      autopilotModeButton.querySelector("span").textContent = "半自动共创"
+      autopilotModeButton.querySelector("i").className = "fa-solid fa-hands-holding-child"
+      autopilotModeButton.title = "当前模式：半自动共创。将在关键产出节点暂停等待您审阅。"
+    } else {
+      autopilotModeButton.querySelector("span").textContent = "全自动托管"
+      autopilotModeButton.querySelector("i").className = "fa-solid fa-robot"
+      autopilotModeButton.title = "当前模式：全自动托管。系统将完全自动完成创作与推进。"
+    }
+  }
+
   autopilotStartButton.disabled = !hasProject || control.running || dashboardState.composerStatus.busy
   autopilotStopButton.disabled = !hasProject || !control.running
-  autopilotStartButton.querySelector("span").textContent = control.paused ? "继续创作" : "开始创作"
-  autopilotStartButton.querySelector("i").className = control.paused ? "fa-solid fa-rotate-right" : "fa-solid fa-play"
+  autopilotStartButton.querySelector("span").textContent = control.running
+    ? "创作进行中"
+    : control.paused
+      ? "继续创作"
+      : "开始创作"
+  autopilotStartButton.querySelector("i").className = control.running
+    ? "fa-solid fa-spinner fa-spin"
+    : control.paused
+      ? "fa-solid fa-rotate-right"
+      : "fa-solid fa-play"
   autopilotStopButton.querySelector("span").textContent = control.running ? "暂停并保留进度" : "暂停"
 
   let hint = "进入项目后手动开始自动创作"
   if (!hasProject) {
     hint = "请选择项目后开始"
+    autopilotStartButton.title = "项目尚未初始化/选择，请先在左侧选择或创建小说项目"
+    autopilotStopButton.title = "请先选择小说项目"
+  } else if (dashboardState.composerStatus.busy) {
+    hint = "后台正在处理上一条指令，请稍候"
+    autopilotStartButton.title = "后台正在处理上一条指令，请稍候"
+    autopilotStopButton.title = "可暂停当前创作进程"
   } else if (control.running) {
     hint = "自动创作运行中，可随时暂停并保留进度"
-  } else if (control.paused) {
-    hint = "检测到可恢复任务，点击继续创作"
-  } else if (control.lastStep === "awaiting_user_start") {
-    hint = "项目已就绪，点击开始创作"
-  } else if (control.message) {
-    hint = control.message
+    autopilotStartButton.title = "自动创作正在运行中"
+    autopilotStopButton.title = "点击暂停自动创作，安全保留当前章节进度"
+  } else {
+    autopilotStartButton.title = "点击开始自动创作小说"
+    autopilotStopButton.title = "当前未在运行中"
+    if (control.paused) {
+      hint = "检测到可恢复任务，点击继续创作"
+    } else if (control.lastStep === "awaiting_user_start") {
+      hint = "项目已就绪，点击开始创作"
+    } else if (control.message) {
+      hint = control.message
+    }
   }
   autopilotControlHint.textContent = hint
+}
+
+async function toggleAutopilotMode() {
+  if (!dashboardState.activeProjectId || dashboardState.composerStatus.busy) {
+    return
+  }
+  
+  const currentMode = dashboardState.state?.project?.autoMode || "full"
+  const nextMode = currentMode === "semi" ? "full" : "semi"
+  
+  setComposerStatus("processing", `正在切换创作模式为 ${nextMode === "semi" ? "半自动共创" : "全自动托管"}...`)
+  renderAutopilotControls()
+  
+  try {
+    const response = await apiRequest("/api/autopilot/mode", {
+      method: "POST",
+      body: {
+        projectId: dashboardState.activeProjectId,
+        autoMode: nextMode
+      }
+    })
+    
+    if (response.ok) {
+      updateSnapshot(response.payload)
+      setComposerStatus("success", `模式已成功切换为：${nextMode === "semi" ? "🤝 半自动共创" : "🤖 全自动托管"}`)
+    } else {
+      setComposerStatus("error", `模式切换失败: ${response.payload?.error || response.status}`)
+    }
+  } catch (err) {
+    setComposerStatus("error", `模式切换请求出错: ${err.message}`)
+  } finally {
+    renderAutopilotControls()
+  }
+}
+
+async function sendCocreateFeedback(feedback) {
+  try {
+    await streamAutopilot(feedback)
+  } catch (err) {
+    console.error("Failed to send cocreate feedback:", err)
+    setComposerStatus("error", `发送修改反馈失败: ${err.message}`)
+  }
+}
+
+function renderCocreateReviewPanel(model) {
+  if (!cocreateReviewRegion) {
+    return
+  }
+
+  const control = autopilotControlState()
+  const isSemi = dashboardState.state?.project?.autoMode === "semi"
+  const isPausedForReview = isSemi && !control.running && control.lastStep === "semi_auto_paused"
+
+  if (!isPausedForReview) {
+    cocreateReviewRegion.classList.add("hidden")
+    cocreateReviewRegion.innerHTML = ""
+    return
+  }
+
+  cocreateReviewRegion.classList.remove("hidden")
+
+  const consensusText = model.storyMemory?.consensus || "（当前暂无生成的讨论共识草案）"
+  const statusMessage = control.message || "工作流已暂停，等待您的审阅。"
+
+  cocreateReviewRegion.innerHTML = `
+    <div class="cocreate-review-card">
+      <div class="review-header">
+        <i class="fa-solid fa-hands-holding-child"></i>
+        <span>人机共创审阅面板 (半自动模式)</span>
+      </div>
+      <div class="review-body">
+        <div class="review-desc">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>${escapeHtml(statusMessage)}</span>
+        </div>
+        <div class="review-consensus-box">
+          <div class="consensus-title">当前讨论共识预览：</div>
+          <pre class="consensus-content">${escapeHtml(consensusText)}</pre>
+        </div>
+      </div>
+      <div class="review-footer">
+        <div class="review-input-wrapper">
+          <input type="text" id="review-feedback-input" placeholder="输入具体的修改意见（例如：反派动机还需要加强，多写一些细节...）" autocomplete="off">
+          <button class="btn-review-action btn-review-feedback" id="btn-review-feedback" type="button">
+            <i class="fa-solid fa-comment-medical"></i> 提交修改建议
+          </button>
+        </div>
+        <button class="btn-review-action btn-review-approve" id="btn-review-approve" type="button">
+          <i class="fa-solid fa-circle-check"></i> 确认无误，继续推进
+        </button>
+      </div>
+    </div>
+  `
+
+  const approveBtn = cocreateReviewRegion.querySelector("#btn-review-approve")
+  const feedbackBtn = cocreateReviewRegion.querySelector("#btn-review-feedback")
+  const feedbackInput = cocreateReviewRegion.querySelector("#review-feedback-input")
+
+  approveBtn?.addEventListener("click", async () => {
+    approveBtn.disabled = true
+    if (feedbackBtn) feedbackBtn.disabled = true
+    if (feedbackInput) feedbackInput.disabled = true
+    setComposerStatus("processing", "正在确认推进，发送继续指令...")
+    await sendCocreateFeedback("继续")
+  })
+
+  feedbackBtn?.addEventListener("click", async () => {
+    const feedback = feedbackInput?.value?.trim()
+    if (!feedback) {
+      alert("请输入具体的修改建议内容！")
+      return
+    }
+    approveBtn.disabled = true
+    feedbackBtn.disabled = true
+    if (feedbackInput) feedbackInput.disabled = true
+    setComposerStatus("processing", "正在提交修改建议并唤醒讨论...")
+    await sendCocreateFeedback(feedback)
+  })
+  
+  feedbackInput?.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault()
+      feedbackBtn?.click()
+    }
+  })
 }
 
 function appendLiveStatusCard(message, options = {}) {
@@ -586,15 +943,18 @@ async function resumeAfterNetworkRecovery() {
     }
     addLog(error instanceof Error ? error.message : String(error))
   })
-  if (hasRecoverableAutopilotJob()) {
-    setComposerStatus("warning", "网络已恢复，检测到可继续的自动创作任务，请点击“继续创作”。")
+  if (autopilotControlState().paused) {
+    setComposerStatus("warning", AUTOPILOT_RESUME_HINT_AFTER_NETWORK)
     addLog("检测到可继续的自动创作任务，等待手动继续。")
-    renderAutopilotControls()
   }
+  renderAutopilotControls()
 }
 
 function renderLogs() {
-  consoleLogsBox.innerHTML = dashboardState.consoleLogs.map((line) => `<div class="log-line">${escapeHtml(line)}</div>`).join("")
+  consoleLogsBox.innerHTML = dashboardState.consoleLogs.length
+    ? dashboardState.consoleLogs.map((line) => `<div class="log-line">${escapeHtml(line)}</div>`).join("")
+    : `<div class="log-empty">等待创作运行日志。</div>`
+  updateSidebarModuleSummary("logs-panel-summary", dashboardState.consoleLogs.length ? `${dashboardState.consoleLogs.length} 条记录` : "等待日志")
   consoleLogsBox.scrollTop = consoleLogsBox.scrollHeight
 }
 
@@ -616,17 +976,138 @@ function setProviderModalStatus(kind, message) {
   providerModalStatus.innerHTML = `<i class="${icon}"></i><span>${escapeHtml(message)}</span>`
 }
 
-function openProviderModal() {
-  providerBaseUrlInput.value = dashboardState.envStatus?.resolved?.baseUrl || ""
+let savedLlmConfigs = []
+
+async function loadLlmConfigsList() {
+  if (!llmConfigsList) return
+  llmConfigsList.innerHTML = `<div class="modal-status is-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>正在加载已保存的配置...</span></div>`
+  try {
+    const response = await apiRequest("/api/llm-configs")
+    savedLlmConfigs = response.payload?.configs || []
+    renderLlmConfigsList()
+  } catch (error) {
+    llmConfigsList.innerHTML = `<div class="modal-status is-error"><i class="fa-solid fa-circle-exclamation"></i><span>加载失败：${escapeHtml(error.message)}</span></div>`
+  }
+}
+
+function renderLlmConfigsList() {
+  if (!llmConfigsList) return
+  if (savedLlmConfigs.length === 0) {
+    llmConfigsList.innerHTML = `
+      <div class="workflow-empty">
+        <i class="fa-solid fa-robot"></i>
+        <span>没有保存的模型配置，请在右侧表单添加。</span>
+      </div>
+    `
+    return
+  }
+
+  llmConfigsList.innerHTML = savedLlmConfigs
+    .map((config) => {
+      const isActive = config.is_active === 1
+      const activePart = isActive
+        ? `<span class="active-badge">使用中</span>`
+        : `<button class="llm-action-btn btn-activate" data-id="${escapeHtml(config.id)}" title="激活此配置"><i class="fa-solid fa-bolt"></i></button>`
+
+      return `
+        <div class="llm-config-item ${isActive ? "active" : ""}">
+          <div class="llm-config-item-info">
+            <strong>${escapeHtml(config.name)}</strong>
+            <span>${escapeHtml(config.base_url)}</span>
+            <small>${escapeHtml(config.model_name)}</small>
+          </div>
+          <div class="llm-config-item-actions">
+            ${activePart}
+            <button class="llm-action-btn btn-edit" data-id="${escapeHtml(config.id)}" title="编辑此配置"><i class="fa-solid fa-pen"></i></button>
+            <button class="llm-action-btn btn-delete" data-id="${escapeHtml(config.id)}" title="删除此配置"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+      `
+    })
+    .join("")
+}
+
+function editLlmConfig(id) {
+  const config = savedLlmConfigs.find((c) => c.id === id)
+  if (!config) return
+
+  llmConfigIdInput.value = config.id
+  llmConfigNameInput.value = config.name
+  providerBaseUrlInput.value = config.base_url
+  providerApiKeyInput.value = config.api_key
+  providerModelInput.value = config.model_name
+
+  llmFormTitle.textContent = "编辑模型配置"
+  llmConfigCancelEditButton.classList.remove("hidden")
+  setProviderModalStatus("", "正在编辑模型配置，修改后点击保存。")
+}
+
+function cancelEditLlmConfig() {
+  llmConfigIdInput.value = ""
+  llmConfigNameInput.value = ""
+  providerBaseUrlInput.value = ""
   providerApiKeyInput.value = ""
-  providerModelInput.value = dashboardState.envStatus?.resolved?.modelName || ""
-  setProviderModalStatus("", "填写后可先测试连接，再保存配置。")
+  providerModelInput.value = ""
+
+  llmFormTitle.textContent = "添加模型配置"
+  llmConfigCancelEditButton.classList.add("hidden")
+  setProviderModalStatus("", "填写后可先测试连接，再保存。")
+}
+
+async function activateLlmConfig(id) {
+  setProviderModalStatus("is-loading", "正在激活选中的模型配置...")
+  try {
+    const response = await apiRequest("/api/llm-configs/activate", {
+      method: "POST",
+      body: { id },
+    })
+    savedLlmConfigs = response.payload?.configs || []
+    renderLlmConfigsList()
+    setProviderModalStatus("is-success", "模型激活成功，已开始使用该配置。")
+    addLog("已成功激活选中的模型配置。")
+    await refreshDashboard()
+  } catch (error) {
+    setProviderModalStatus("is-error", `激活失败：${error.message}`)
+  }
+}
+
+async function deleteLlmConfig(id) {
+  if (!confirm("确定要删除这个模型配置吗？")) {
+    return
+  }
+  setProviderModalStatus("is-loading", "正在删除选中的模型配置...")
+  try {
+    const response = await apiRequest(`/api/llm-configs?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    })
+    savedLlmConfigs = response.payload?.configs || []
+    renderLlmConfigsList()
+    
+    if (llmConfigIdInput.value === id) {
+      cancelEditLlmConfig()
+    }
+    
+    setProviderModalStatus("is-success", "配置已成功删除。")
+    addLog("模型配置删除成功。")
+    await refreshDashboard()
+  } catch (error) {
+    setProviderModalStatus("is-error", `删除失败：${error.message}`)
+  }
+}
+
+function openProviderModal() {
+  cancelEditLlmConfig()
+  setProviderModalStatus("", "填写后可先测试连接，再保存。")
   providerConfigModal.classList.remove("hidden")
+  loadLlmConfigsList().catch((error) => {
+    console.error("Failed to load llm configs list:", error)
+  })
 }
 
 function closeProviderModal() {
   providerConfigModal.classList.add("hidden")
 }
+
 
 function setProjectCreateStatus(kind, message) {
   projectCreateModalStatus.classList.remove("is-success", "is-error", "is-loading")
@@ -757,16 +1238,19 @@ function updateSnapshot(payload = {}) {
   dashboardState.lastDiscussionResult = payload.discussion || dashboardState.lastDiscussionResult
   dashboardState.autopilotActive = Boolean(dashboardState.state?.runtime?.autopilot?.running)
   syncComposerStatusFromLatestEvents()
+  syncComposerStatusFromAutopilotControl()
   renderAutopilotControls()
 }
 
 function getManagerProjectProgress(project, activeModel) {
-  const summary = project?.id === dashboardState.activeProjectId ? activeModel?.productionSummary : null
+  const summary = project?.id === dashboardState.activeProjectId
+    ? activeModel?.productionSummary || project?.summary || null
+    : project?.summary || null
   if (!summary || summary.source === "empty") {
     return {
       percent: 0,
-      label: "未载入状态",
-      detail: "选择项目后同步 DB 状态",
+      label: "等待生产状态",
+      detail: "尚未从数据库快照读取到生产进度",
     }
   }
 
@@ -788,13 +1272,21 @@ function getManagerProjectProgress(project, activeModel) {
     `完成 ${summary.completedChapters}/${summary.totalChapters}`,
     `待写 ${summary.pendingChapters}`,
   ]
+  if (summary.inProgressChapters > 0) {
+    parts.push(`进行中 ${summary.inProgressChapters}`)
+  }
   if (summary.blockedChapters > 0) {
     parts.push(`阻塞 ${summary.blockedChapters}`)
+  }
+  if (summary.activeJobs > 0) {
+    parts.push(`后台 ${summary.activeJobs}`)
+  } else if (summary.runnableJobs > 0) {
+    parts.push(`可恢复 ${summary.runnableJobs}`)
   }
   return {
     percent,
     label: parts.join(" · "),
-    detail: summary.source === "db" ? "DB 主事实源" : "state 缓存",
+    detail: summary.source === "db" ? "DB 主事实源" : summary.source === "state" ? "state 缓存" : "等待状态",
   }
 }
 
@@ -815,10 +1307,18 @@ function renderManagerView() {
 
   if (dashboardState.projects.length === 0) {
     projectListContainer.innerHTML = `
-      <div class="project-list-empty" id="project-list-empty-create">
-        <i class="fa-solid fa-plus"></i>
-        <strong>新建另一部小说项目</strong>
-        <p>输入想法、总章数和单章字数后，系统会快速初始化独立工作区；进入创作台后再手动开始。</p>
+      <div class="project-hero-card" id="project-list-empty-create">
+        <div class="hero-card-glow"></div>
+        <div class="hero-card-content">
+          <div class="hero-icon-wrapper">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <h2>开启您的第一本 AI 小说</h2>
+          <p>智能小说创作工坊能够根据您的一句灵感，全自动为您构建大纲、人物设定、冲突脑图并推进高品质章节写作。仅需 1 分钟即可完成项目初始化。</p>
+          <button class="btn-hero-action" type="button">
+            <i class="fa-solid fa-plus"></i> 立即创建小说项目
+          </button>
+        </div>
       </div>
     `
     document.getElementById("project-list-empty-create")?.addEventListener("click", openProjectCreateModal)
@@ -894,6 +1394,7 @@ function renderManagerSidebar(model = null) {
   const modelName = dashboardState.envStatus?.resolved?.modelName || "待配置"
   const configured = Boolean(dashboardState.envStatus?.configured)
   const missing = dashboardState.envStatus?.missing || []
+  const continueNode = document.getElementById("manager-continue-panel")
   const modelNode = document.getElementById("manager-model-name")
   const serviceNode = document.getElementById("manager-service-status")
   const apiKeyNode = document.getElementById("manager-api-key-status")
@@ -902,6 +1403,50 @@ function renderManagerSidebar(model = null) {
   const goalFillNode = document.getElementById("manager-goal-fill")
   const goalHintNode = document.getElementById("manager-goal-hint")
   const activityNode = document.getElementById("manager-activity-list")
+  const activeProject = dashboardState.projects.find((project) => project.id === dashboardState.activeProjectId) || null
+  const summary = model?.productionSummary || null
+  const automation = model?.workflow?.automation || null
+
+  if (continueNode) {
+    if (activeProject && summary) {
+      const jobState = snapshotJobDisplayState()
+      const runningJobs = jobState.runningJobs.length
+      const recoverableJobs = jobState.recoverableJobs.length
+      const jobCopy = runningJobs > 0
+        ? `${runningJobs} 个后台任务运行中`
+        : recoverableJobs > 0
+          ? `${recoverableJobs} 个任务可恢复`
+          : "暂无后台任务"
+      continueNode.innerHTML = `
+        <div class="manager-panel-title"><span></span> 继续创作</div>
+        <div class="manager-continue-card">
+          <small>当前项目</small>
+          <strong>《${escapeHtml(activeProject.title)}》</strong>
+          <p>${escapeHtml(summary.stage || "unknown")} · ${Number(summary.progressPercent || 0)}% · 完成 ${Number(summary.completedChapters || 0)}/${Number(summary.totalChapters || 0)} 章</p>
+          <div class="manager-continue-meta">
+            <span><i class="fa-solid fa-database"></i> ${escapeHtml(summary.source === "db" ? "DB 主事实源" : "state 缓存")}</span>
+            <span><i class="fa-solid fa-rotate"></i> ${escapeHtml(jobCopy)}</span>
+          </div>
+          <button class="manager-continue-button" type="button" data-manager-continue-project="${escapeHtml(activeProject.id)}">
+            <i class="fa-solid fa-arrow-right"></i>
+            <span>进入创作指挥舱</span>
+          </button>
+        </div>
+      `
+      continueNode.querySelector("[data-manager-continue-project]")?.addEventListener("click", (event) => {
+        event.stopPropagation()
+        selectProject(activeProject.id)
+      })
+    } else {
+      continueNode.innerHTML = `
+        <div class="manager-panel-title"><span></span> 继续创作</div>
+        <div class="manager-continue-empty">
+          <strong>${dashboardState.projects.length ? "选择一部小说" : "还没有小说项目"}</strong>
+          <p>${dashboardState.projects.length ? "选择项目后，这里会显示阶段、章节进度和可恢复任务。" : "新建项目后，会在这里看到继续创作入口。"}</p>
+        </div>
+      `
+    }
+  }
 
   if (modelNode) {
     modelNode.innerHTML = `<i class="fa-solid fa-robot"></i> ${escapeHtml(modelName)}`
@@ -916,7 +1461,6 @@ function renderManagerSidebar(model = null) {
     apiKeyNode.classList.toggle("is-warning", !apiReady)
   }
 
-  const summary = model?.productionSummary || null
   const totalWords = summary?.totalChapters
     ? Math.max(1, summary.totalChapters * summary.chapterWordTarget)
     : 6000
@@ -933,21 +1477,36 @@ function renderManagerSidebar(model = null) {
   }
 
   if (activityNode) {
-    const activities = dashboardState.projects.slice(0, 4).map((project) => ({
-      text: `《${project.title}》项目已接入生产工作流`,
-      time: formatClock(project.createdAt),
-    }))
+    const activities = []
     if (summary) {
-      activities.unshift({
-        text: `生产进度 ${summary.progressPercent}%：完成 ${summary.completedChapters}/${summary.totalChapters}，待写 ${summary.pendingChapters}，阻塞 ${summary.blockedChapters}`,
-        time: summary.latestEventAt ? formatClock(summary.latestEventAt) : "刚刚",
-      })
-      activities.unshift({
-        text: `当前阶段 ${summary.stage}${summary.isComplete ? "，全书主流程已完成" : ""}`,
+      if (summary.blockedChapters > 0) {
+        activities.push({
+          text: `${summary.blockedChapters} 个章节阻塞，需要人工审阅或重试。`,
+          time: summary.latestEventAt ? formatClock(summary.latestEventAt) : "刚刚",
+        })
+      }
+      if (automation?.kind === "warning" || automation?.kind === "error") {
+        activities.push({
+          text: `${automation.label}：${automation.detail || "需要确认后继续。"}`,
+          time: dashboardState.state?.runtime?.updatedAt ? formatClock(dashboardState.state.runtime.updatedAt) : "刚刚",
+        })
+      }
+      activities.push({
+        text: `当前阶段 ${summary.stage}${summary.isComplete ? "，全书主流程已完成" : "，可进入创作台继续推进。"}`,
         time: dashboardState.state?.runtime?.updatedAt ? formatClock(dashboardState.state.runtime.updatedAt) : "刚刚",
       })
+      activities.push({
+        text: `生产进度 ${summary.progressPercent}%：完成 ${summary.completedChapters}/${summary.totalChapters}，待写 ${summary.pendingChapters}。`,
+        time: summary.latestEventAt ? formatClock(summary.latestEventAt) : "刚刚",
+      })
     }
-    activityNode.innerHTML = (activities.length ? activities : [{ text: "等待项目创建或选择", time: "刚刚" }]).map((activity) => `
+    dashboardState.projects.slice(0, Math.max(0, 4 - activities.length)).forEach((project) => {
+      activities.push({
+        text: `《${project.title}》可进入创作指挥舱。`,
+        time: formatClock(project.createdAt),
+      })
+    })
+    activityNode.innerHTML = (activities.length ? activities : [{ text: "等待项目创建或选择", time: "刚刚" }]).slice(0, 4).map((activity) => `
       <div class="manager-activity-item">
         <span></span>
         <div>
@@ -961,6 +1520,9 @@ function renderManagerSidebar(model = null) {
 
 function showManagerView() {
   dashboardState.currentView = "manager"
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("ai-novel-factory.currentView", "manager")
+  }
   projectManagerView.classList.remove("hidden")
   studioView.classList.add("hidden")
   renderManagerView()
@@ -968,12 +1530,16 @@ function showManagerView() {
 
 function showStudioView() {
   dashboardState.currentView = "studio"
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("ai-novel-factory.currentView", "studio")
+  }
   projectManagerView.classList.add("hidden")
   studioView.classList.remove("hidden")
+  applySidebarPanelLayout()
 }
 
 function renderProjectCard(model) {
-  document.getElementById("project-title-display").textContent = model.project.idea || model.project.title
+  document.getElementById("project-title-display").textContent = model.project.title || model.project.id || "未命名项目"
   document.getElementById("cover-status").innerHTML = model.project.coverStatus === "in_progress"
     ? `<i class="fa-solid fa-wand-magic-sparkles"></i> 生成中`
     : model.project.coverStatus === "complete"
@@ -996,27 +1562,24 @@ function renderWorkflow(model) {
   document.getElementById("stage-badge").textContent = model.workflow.currentStage.label
   document.getElementById("current-stage-text").textContent = model.workflow.currentStage.key
   document.getElementById("current-stage-desc").textContent = model.workflow.currentStage.description
-  const automation = model.workflow.automation || { kind: "idle", label: "等待下一步", detail: "" }
+
   const automationNode = document.getElementById("workflow-automation-status")
   if (automationNode) {
-    const icon =
-      automation.kind === "processing"
-        ? "fa-solid fa-spinner fa-spin"
-        : automation.kind === "success"
-          ? "fa-solid fa-circle-check"
-          : automation.kind === "warning"
-            ? "fa-solid fa-triangle-exclamation"
-            : automation.kind === "error"
-              ? "fa-solid fa-circle-exclamation"
-              : "fa-regular fa-circle"
-    automationNode.classList.remove("is-idle", "is-processing", "is-success", "is-warning", "is-error")
-    automationNode.classList.add(`is-${automation.kind}`)
+    const automation = model.workflow.automation || { kind: "idle", label: "后台空闲", detail: "" }
+    automationNode.className = `workflow-automation-status is-${automation.kind || "idle"}`
+    
+    let iconClass = "fa-robot"
+    if (automation.kind === "processing") iconClass = "fa-spinner fa-spin"
+    else if (automation.kind === "success") iconClass = "fa-circle-check"
+    else if (automation.kind === "warning") iconClass = "fa-triangle-exclamation"
+    else if (automation.kind === "error") iconClass = "fa-circle-xmark"
+
     automationNode.innerHTML = `
       <div class="workflow-automation-title">
-        <i class="${icon}"></i>
-        <span>${escapeHtml(automation.label)}</span>
+        <i class="fa-solid ${iconClass}"></i>
+        <span>${escapeHtml(automation.label || "无人值守自动创作")}</span>
       </div>
-      <p>${escapeHtml(automation.detail || "")}</p>
+      <p>${escapeHtml(automation.detail || "当前无正在运行的后台无人值守任务。")}</p>
     `
   }
 
@@ -1297,9 +1860,142 @@ function renderStoryMemory(model) {
   })
 }
 
+function jobDisplayLabel(job = {}) {
+  const kind = String(job.kind || "job")
+  const status = String(job.status || "unknown")
+  const lease = job.lease_owner ? "worker 执行中" : "等待领取"
+  return `${kind} · ${status} · ${lease}`
+}
+
+function eventDisplayLabel(type = "") {
+  const labels = {
+    AUTOPILOT_MESSAGE_SUBMITTED: "用户指令入队",
+    AUTOPILOT_INSTRUCTION_RECEIVED: "worker 接收指令",
+    CHAPTER_PIPELINE_COMPLETED: "章节流水线完成",
+    CHAPTER_PIPELINE_BLOCKED: "章节质量阻塞",
+    CHAPTER_PIPELINE_RECOVERY_QUEUED: "章节返工排队",
+    DIRECTOR_COMMAND_DECIDED: "Director 已决策",
+    DIRECTOR_COMMAND_STARTED: "Director 开始执行",
+    DIRECTOR_COMMAND_COMPLETED: "Director 执行完成",
+    JOB_CREATED: "后台任务创建",
+    JOB_REUSED: "复用后台任务",
+    JOB_UPDATED: "后台任务更新",
+    KNOWLEDGE_REINDEX_QUEUED: "知识库重建排队",
+    KNOWLEDGE_EVALUATION_COMPLETED: "知识库评估完成",
+    PROJECT_STATE_UPDATED: "项目状态更新",
+  }
+  return labels[type] || type || "未知事件"
+}
+
+function eventPayloadSummary(event = {}) {
+  const payload = readEventPayload(event)
+  const parts = []
+  if (payload.chapterNumber) parts.push(`第 ${payload.chapterNumber} 章`)
+  if (payload.command) parts.push(String(payload.command))
+  if (payload.action) parts.push(String(payload.action))
+  if (payload.status) parts.push(String(payload.status))
+  if (payload.qualityGate?.score != null) parts.push(`评分 ${payload.qualityGate.score}/10`)
+  if (payload.toolName) parts.push(String(payload.toolName))
+  if (payload.jobId) parts.push(`job ${String(payload.jobId).slice(0, 8)}`)
+  return parts.join(" · ")
+}
+
+function toolMessageSummary(message = {}) {
+  const data = message.data || {}
+  const parts = Array.isArray(message.parts) ? message.parts : []
+  const callPart = parts.find((part) => part.type === "tool_call") || null
+  const resultPart = parts.find((part) => part.type === "tool_result") || null
+  const toolName = data.toolName || data.name || callPart?.data?.toolName || callPart?.data?.name || "tool"
+  const status = resultPart?.data?.status || data.status || message.status || "completed"
+  const content = data.summary || data.content || resultPart?.data?.error || ""
+  return {
+    toolName: String(toolName),
+    status: String(status),
+    content: String(content || ""),
+    time: message.time || message.created_at || message.createdAt || message.updated_at || "",
+  }
+}
+
+function renderCreationObservability(model = null) {
+  const container = document.getElementById("creation-observability-panel")
+  if (!container) {
+    return
+  }
+  const snapshot = dashboardState.factorySnapshot || {}
+  const jobState = snapshotJobDisplayState(snapshot)
+  const runningJobs = jobState.runningJobs
+  const recoverableJobs = jobState.recoverableJobs
+  const latestEvents = Array.isArray(snapshot.latestEvents) ? snapshot.latestEvents : []
+  const recentMessages = Array.isArray(snapshot.recentMessages) ? snapshot.recentMessages : []
+  const toolMessages = recentMessages
+    .filter((message) => message?.type === "tool")
+    .slice(0, 3)
+    .map(toolMessageSummary)
+  const visibleEvents = latestEvents
+    .filter((event) => event?.type !== "JOB_HEARTBEAT")
+    .slice(0, 4)
+  const runningJobRows = runningJobs.slice(0, 2).map((job) => `
+    <div class="observability-job-row">
+      <span><i class="fa-solid fa-gears"></i>${escapeHtml(jobDisplayLabel(job))}</span>
+      <small>${escapeHtml(job.updated_at ? formatClock(job.updated_at) : "等待刷新")}</small>
+    </div>
+  `).join("")
+  const recoverableJobRows = recoverableJobs.slice(0, 2).map((job) => `
+    <div class="observability-job-row">
+      <span><i class="fa-solid fa-rotate-right"></i>${escapeHtml(jobDisplayLabel(job))}</span>
+      <small>${escapeHtml(job.updated_at ? formatClock(job.updated_at) : "等待刷新")}</small>
+    </div>
+  `).join("")
+  const toolRows = toolMessages.length
+    ? toolMessages.map((tool) => `
+      <div class="observability-tool-row">
+        <span><i class="fa-solid fa-screwdriver-wrench"></i>${escapeHtml(tool.toolName)}</span>
+        <strong>${escapeHtml(tool.status)}</strong>
+        ${tool.content ? `<small>${escapeHtml(tool.content).slice(0, 96)}</small>` : ""}
+      </div>
+    `).join("")
+    : `<div class="observability-empty">暂无工具调用记录。</div>`
+  const eventRows = visibleEvents.length
+    ? visibleEvents.map((event) => {
+        const summary = eventPayloadSummary(event)
+        return `
+          <div class="observability-event-row">
+            <span>${escapeHtml(eventDisplayLabel(event.type))}</span>
+            <small>${escapeHtml(event.created_at ? formatClock(event.created_at) : event.createdAt ? formatClock(event.createdAt) : "")}</small>
+            ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+          </div>
+        `
+      }).join("")
+    : `<div class="observability-empty">暂无最近事件。</div>`
+  const source = model?.productionSummary?.source === "db" ? "DB Snapshot" : "State Cache"
+  updateSidebarModuleSummary("observability-panel-summary", `${runningJobs.length} 运行 / ${recoverableJobs.length} 可恢复`)
+
+  container.innerHTML = `
+    <div class="panel-header">
+      <span><i class="fa-solid fa-tower-observation"></i> 创作过程观察</span>
+      <span class="observability-source">${escapeHtml(source)}</span>
+    </div>
+    <div class="observability-summary-grid">
+      <span><strong>${runningJobs.length}</strong><small>运行任务</small></span>
+      <span><strong>${recoverableJobs.length}</strong><small>可恢复</small></span>
+      <span><strong>${toolMessages.length}</strong><small>工具调用</small></span>
+    </div>
+    ${runningJobRows ? `<div class="observability-section"><strong>正在执行</strong><div class="observability-job-list">${runningJobRows}</div></div>` : ""}
+    ${recoverableJobRows ? `<div class="observability-section"><strong>可恢复任务</strong><div class="observability-job-list">${recoverableJobRows}</div></div>` : ""}
+    <div class="observability-section">
+      <strong>最近工具 / MCP / Skill</strong>
+      ${toolRows}
+    </div>
+    <div class="observability-section">
+      <strong>最近生产事件</strong>
+      ${eventRows}
+    </div>
+  `
+}
+
 function chapterStatusBadge(task) {
   if (task.displayStatus === "blocked_by_previous" || task.blockedByPrevious) {
-    return { klass: "badge-blocked", label: "前序阻塞", itemClass: "blocked blocked-by-previous", progress: 25 }
+    return { klass: "badge-secondary", label: "等待前序", itemClass: "blocked blocked-by-previous", progress: 0 }
   }
   if (task.status === "complete") {
     return { klass: "badge-completed", label: "已完成", itemClass: "completed", progress: 100 }
@@ -1328,6 +2024,7 @@ function renderChapters(model) {
   document.getElementById("progress-total-label").textContent = `总进度 (${total}章)`
   document.getElementById("progress-percent").textContent = `${completed} / ${total} 章`
   document.getElementById("global-progress-fill").style.width = `${percentage}%`
+  updateSidebarModuleSummary("overview-panel-summary", `${completed} / ${total} 章 · ${percentage}%`)
   const draftOnlyNotice = model.productionPipeline?.transcriptDraftOnly
     ? `
       <div class="chapter-sync-notice">
@@ -1352,6 +2049,12 @@ function renderChapters(model) {
       </div>
     `
     : ""
+  const visibleRangeLabel = visibleItems.length
+    ? `第 ${windowStart || visibleItems[0]?.chapterNumber || "?"}-${windowEnd || visibleItems.at(-1)?.chapterNumber || "?"} 章 / 共 ${total} 章`
+    : total > 0
+      ? `共 ${total} 章，等待任务窗口`
+      : "等待章节任务"
+  updateSidebarModuleSummary("chapter-panel-summary", visibleRangeLabel)
   const pagination = total > pageSize
     ? `
       <div class="chapter-pagination" aria-label="章节分页">
@@ -1366,14 +2069,24 @@ function renderChapters(model) {
       </div>
     `
     : ""
-  container.innerHTML = `${draftOnlyNotice}${pagination}${windowNotice}${visibleItems.map((task) => {
+  const emptyState = visibleItems.length === 0
+    ? `
+      <div class="chapter-list-empty">
+        <i class="fa-solid fa-list-check"></i>
+        <span>等待数据库快照同步章节任务。</span>
+        <small>这里只有正式入库的章节任务；中间讨论区里的草稿或实时输出不会直接出现在这里。</small>
+        ${total > 0 ? `<small>当前项目目标 ${total} 章；任务窗口生成后可在这里分页查看全部章节。</small>` : ""}
+      </div>
+    `
+    : ""
+  container.innerHTML = `${draftOnlyNotice}${pagination}${windowNotice}${emptyState}${visibleItems.map((task) => {
     const badge = chapterStatusBadge(task)
     const canRun = !task.blockedByPrevious && !task.recoveryBlocked && (task.status === "blocked"
       || model.workflow.currentStage.key === "drafting"
       || model.workflow.currentStage.key === "chapter_task_generation")
     const qualityGate = task.qualityGate || null
     const qualityLabel = task.blockedByPrevious
-      ? "前序章节未通过，当前章节虽有成稿文件，但需等待前序修复后重校确认"
+      ? "⚠️ 前序章节存在阻塞：请先点击上方标红章节的「重试/介入」修复问题，后续章节将自动恢复。"
       : qualityGate
       ? `${task.recoveryBlocked ? "需人工审阅 · " : ""}评分 ${qualityGate.score}/10 · 返工 ${qualityGate.attempts || 0} 次${task.recoveryAttempts ? ` · 恢复 ${task.recoveryAttempts} 次` : ""}`
       : ""
@@ -1502,7 +2215,8 @@ function renderDiscussionHistoryBar() {
 
 function ensureDiscussionShell() {
   const hasShell = Boolean(
-    chatMessagesBox.querySelector("[data-discussion-history-region]")
+    chatMessagesBox.querySelector("[data-discussion-context-region]")
+    && chatMessagesBox.querySelector("[data-discussion-history-region]")
     && chatMessagesBox.querySelector("[data-discussion-empty-region]")
     && chatMessagesBox.querySelector("[data-discussion-static-region]")
     && chatMessagesBox.querySelector("[data-discussion-result-region]")
@@ -1513,6 +2227,7 @@ function ensureDiscussionShell() {
   }
 
   chatMessagesBox.innerHTML = `
+    <div data-discussion-context-region="true"></div>
     <div data-discussion-history-region="true"></div>
     <div data-discussion-empty-region="true"></div>
     <div data-discussion-static-region="true"></div>
@@ -1520,6 +2235,29 @@ function ensureDiscussionShell() {
     <div data-live-region="true"></div>
   `
   return true
+}
+
+function renderDiscussionContextBanner(model, staticCount, hasLiveEntries) {
+  const stageLabel = model.workflow?.currentStage?.label || "等待快照"
+  const totalChapters = Number(model.project?.totalChapters || 0)
+  const chapterCount = Array.isArray(model.chapters?.items) ? model.chapters.items.length : 0
+  const page = Number(model.chapters?.window?.page || dashboardState.chapterPage || 1)
+  const pageCount = Number(model.chapters?.window?.pageCount || 1)
+  const chapterHint = chapterCount > 0
+    ? `右侧“正式章节任务”当前显示 ${chapterCount} 条，全部章节通过分页查看（第 ${page}/${pageCount} 页）。`
+    : totalChapters > 0
+      ? `右侧“正式章节任务”会在章节任务正式入库后显示；当前目标 ${totalChapters} 章。`
+      : "右侧“正式章节任务”会在数据库快照同步后显示。"
+  return `
+    <div class="discussion-context-banner">
+      <div class="discussion-context-title">
+        <i class="fa-solid fa-circle-info"></i>
+        <span>当前正式阶段：${escapeHtml(stageLabel)}</span>
+      </div>
+      <p>这里展示的是可追踪讨论记录与实时执行流${hasLiveEntries ? "（含当前流式输出）" : ""}，不等同于左侧正式阶段。</p>
+      <small>已加载 ${staticCount} 条讨论记录。${escapeHtml(chapterHint)}</small>
+    </div>
+  `
 }
 
 function patchHtmlRegion(selector, html = "") {
@@ -1732,6 +2470,10 @@ function renderDiscussion(model) {
   const shellCreated = ensureDiscussionShell()
   const shouldStickBottom = dashboardState.discussionAutoStickToBottom
 
+  patchHtmlRegion(
+    "[data-discussion-context-region]",
+    renderDiscussionContextBanner(model, staticEntries.length, hasLiveEntries),
+  )
   patchHtmlRegion("[data-discussion-history-region]", renderDiscussionHistoryBar())
   patchHtmlRegion(
     "[data-discussion-empty-region]",
@@ -1791,7 +2533,8 @@ function ensureLiveRegion() {
 }
 
 function renderInitPanel(model) {
-  initPanel.classList.toggle("hidden", model.initialized)
+  const hasActiveProject = Boolean(dashboardState.activeProjectId)
+  initPanel.classList.toggle("hidden", !hasActiveProject || model.initialized)
 }
 
 function renderDashboard() {
@@ -1809,11 +2552,14 @@ function renderDashboard() {
   renderProjectCard(model)
   renderWorkflow(model)
   renderStoryMemory(model)
+  renderCreationObservability(model)
   renderProvider(model)
   renderChapters(model)
   renderDiscussion(model)
+  renderCocreateReviewPanel(model)
   renderInitPanel(model)
   renderComposerStatus()
+  applySidebarPanelLayout()
 }
 
 function renderDiscussionOnly() {
@@ -1827,7 +2573,9 @@ function renderDiscussionOnly() {
     envStatus: dashboardState.envStatus,
     providerResult: dashboardState.providerResult,
   })
+  renderCreationObservability(model)
   renderDiscussion(model)
+  renderCocreateReviewPanel(model)
 }
 
 function scheduleDiscussionRender() {
@@ -2163,18 +2911,29 @@ async function searchKnowledge(query) {
 
 function closeChapterPreviewModal() {
   chapterPreviewModal?.classList.add("hidden")
+  dashboardState.currentPreviewContent = ""
+  if (chapterCopyButton) {
+    chapterCopyButton.disabled = true
+  }
 }
 
 function renderPreviewContent(key, role, content) {
-  return renderDiscussionEntryContentHtml({
+  let cleanedContent = (content || "").trim()
+  // 匹配并去掉各种形式的 # Final Body \n
+  cleanedContent = cleanedContent.replace(/^(#+\s+Final\s+Body\r?\n?|#+\s+final\s+body\r?\n?)/i, "")
+  cleanedContent = cleanedContent.trim()
+
+  const renderedHtml = renderDiscussionEntryContentHtml({
     key,
     role,
-    content: content || "",
+    content: cleanedContent || "（内容为空）",
     streaming: false,
   }, {
     entryKey: key,
     expandedKeys: new Set([key]),
   }).html
+
+  return `<div class="novel-reader-wrapper">${renderedHtml}</div>`
 }
 
 async function previewArtifact(path) {
@@ -2185,6 +2944,12 @@ async function previewArtifact(path) {
   chapterPreviewTitle.textContent = "产物预览"
   chapterPreviewPath.textContent = path
   chapterPreviewBody.innerHTML = `<div class="modal-status is-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>正在读取产物...</span></div>`
+  
+  if (chapterCopyButton) {
+    chapterCopyButton.disabled = true
+  }
+  dashboardState.currentPreviewContent = ""
+  
   chapterPreviewModal.classList.remove("hidden")
 
   try {
@@ -2202,10 +2967,16 @@ async function previewArtifact(path) {
       `
       return
     }
+    const content = response.payload.content || ""
     const fileName = String(response.payload.path || path).split("/").pop() || "产物"
     chapterPreviewTitle.textContent = fileName
     chapterPreviewPath.textContent = response.payload.path || path
-    chapterPreviewBody.innerHTML = renderPreviewContent(`artifact-preview-${stableTextHash(path)}`, "Showrunner", response.payload.content || "")
+    chapterPreviewBody.innerHTML = renderPreviewContent(`artifact-preview-${stableTextHash(path)}`, "Showrunner", content)
+    
+    dashboardState.currentPreviewContent = content
+    if (chapterCopyButton) {
+      chapterCopyButton.disabled = false
+    }
   } catch (error) {
     chapterPreviewBody.innerHTML = `
       <div class="modal-status is-error">
@@ -2224,6 +2995,12 @@ async function previewChapter(chapterNumber) {
   chapterPreviewTitle.textContent = `第 ${chapterNumber} 章预览`
   chapterPreviewPath.textContent = "正在读取正式章节文件..."
   chapterPreviewBody.innerHTML = `<div class="modal-status is-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>正在读取章节正文...</span></div>`
+  
+  if (chapterCopyButton) {
+    chapterCopyButton.disabled = true
+  }
+  dashboardState.currentPreviewContent = ""
+  
   chapterPreviewModal.classList.remove("hidden")
 
   try {
@@ -2242,9 +3019,15 @@ async function previewChapter(chapterNumber) {
       `
       return
     }
+    const content = response.payload.content || ""
     chapterPreviewTitle.textContent = `第 ${response.payload.chapterNumber} 章预览`
     chapterPreviewPath.textContent = response.payload.path || "正式章节文件"
-    chapterPreviewBody.innerHTML = renderPreviewContent(`chapter-preview-${chapterNumber}`, "Author", response.payload.content || "")
+    chapterPreviewBody.innerHTML = renderPreviewContent(`chapter-preview-${chapterNumber}`, "Author", content)
+    
+    dashboardState.currentPreviewContent = content
+    if (chapterCopyButton) {
+      chapterCopyButton.disabled = false
+    }
   } catch (error) {
     chapterPreviewBody.innerHTML = `
       <div class="modal-status is-error">
@@ -2346,28 +3129,40 @@ async function runModalProviderTest() {
 }
 
 async function saveProviderConfigFromModal() {
-  const payload = {
-    LLM_BASE_URL: providerBaseUrlInput.value.trim(),
-    LLM_API_KEY: providerApiKeyInput.value.trim(),
-    LLM_MODEL_ID: providerModelInput.value.trim(),
+  const id = llmConfigIdInput.value.trim()
+  const name = llmConfigNameInput.value.trim()
+  const baseUrl = providerBaseUrlInput.value.trim()
+  const apiKey = providerApiKeyInput.value.trim()
+  const modelName = providerModelInput.value.trim()
+
+  if (!name || !baseUrl || !apiKey || !modelName) {
+    setProviderModalStatus("is-error", "请填写所有必填字段（名称、URL、Key、Model ID）。")
+    return
   }
 
-  setProviderModalStatus("is-loading", "正在保存当前配置到 .env ...")
+  setProviderModalStatus("is-loading", "正在保存模型配置...")
   let response
   try {
-    response = await apiRequest("/api/env", {
+    const payload = { name, baseUrl, apiKey, modelName }
+    if (id) {
+      payload.id = id
+    }
+    response = await apiRequest("/api/llm-configs", {
       method: "POST",
       body: payload,
     })
   } catch (error) {
-    setProviderModalStatus("is-error", `配置暂时无法保存：${networkErrorMessage(error)}。`)
+    setProviderModalStatus("is-error", `配置无法保存：${networkErrorMessage(error)}。`)
     return
   }
-  dashboardState.envStatus = response.payload?.envStatus || dashboardState.envStatus
-  setProviderModalStatus("is-success", "配置已保存到当前目录的 .env。")
-  addLog("已保存 provider 配置到 .env。")
+  
+  savedLlmConfigs = response.payload?.configs || []
+  renderLlmConfigsList()
+  cancelEditLlmConfig()
+  
+  setProviderModalStatus("is-success", "模型配置已成功保存。")
+  addLog("已成功保存大模型配置。")
   await refreshDashboard()
-  window.setTimeout(() => closeProviderModal(), 500)
 }
 
 async function streamChat(message) {
@@ -2376,6 +3171,13 @@ async function streamChat(message) {
     setComposerStatus("warning", "请先选择一个小说项目。")
     return
   }
+
+  if (dashboardState.chatAbortController) {
+    dashboardState.chatAbortController.abort()
+    dashboardState.chatAbortController = null
+  }
+  const abortController = new AbortController()
+  dashboardState.chatAbortController = abortController
 
   setComposerStatus("sent", "消息已发送，正在交给编剧室 agent。", { busy: true })
   appendPendingUserMessage(message)
@@ -2390,8 +3192,12 @@ async function streamChat(message) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message, projectId: dashboardState.activeProjectId }),
+      signal: abortController.signal,
     })
   } catch (error) {
+    if (error.name === "AbortError") {
+      return
+    }
     if (isNetworkError(error)) {
       markNetworkOffline(error)
     }
@@ -2428,12 +3234,18 @@ async function streamChat(message) {
       }
     }
   } catch (error) {
+    if (error.name === "AbortError") {
+      return
+    }
     if (isNetworkError(error)) {
       markNetworkOffline(error)
     }
     setComposerStatus("warning", `讨论流已断开：${networkErrorMessage(error)}。恢复连接后会刷新记录。`)
     addLog(`讨论流已断开：${networkErrorMessage(error)}。恢复连接后会刷新最新讨论记录。`)
   } finally {
+    if (dashboardState.chatAbortController === abortController) {
+      dashboardState.chatAbortController = null
+    }
     if (dashboardState.composerStatus.busy) {
       resetComposerStatusSoon("讨论已结束或已保存。")
     }
@@ -2446,6 +3258,13 @@ async function streamAutopilot(message, options = {}) {
     setComposerStatus("warning", "请先选择一个小说项目。")
     return
   }
+
+  if (dashboardState.autopilotAbortController) {
+    dashboardState.autopilotAbortController.abort()
+    dashboardState.autopilotAbortController = null
+  }
+  const abortController = new AbortController()
+  dashboardState.autopilotAbortController = abortController
 
   if (message) {
     setComposerStatus("sent", "消息已提交，正在创建无人值守任务。", { busy: true })
@@ -2477,6 +3296,9 @@ async function streamAutopilot(message, options = {}) {
         body: { message, projectId: dashboardState.activeProjectId },
       })
     } catch (error) {
+      if (error.name === "AbortError") {
+        return
+      }
       dashboardState.autopilotStreamConnected = false
       setComposerStatus("warning", `启动请求未送达：${networkErrorMessage(error)}。网络恢复后会自动重试连接。`)
       renderDashboard()
@@ -2501,9 +3323,15 @@ async function streamAutopilot(message, options = {}) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ projectId: dashboardState.activeProjectId }),
+      signal: abortController.signal,
     })
   } catch (error) {
-    dashboardState.autopilotStreamConnected = false
+    if (error.name === "AbortError") {
+      return
+    }
+    if (dashboardState.autopilotAbortController === abortController) {
+      dashboardState.autopilotStreamConnected = false
+    }
     setComposerStatus("warning", `实时连接断开：${networkErrorMessage(error)}。后台任务会保留。`)
     renderDashboard()
     if (isNetworkError(error)) {
@@ -2518,7 +3346,9 @@ async function streamAutopilot(message, options = {}) {
     setComposerStatus("error", payload.error || `实时订阅失败 (${response.status})，后台任务仍可能继续运行。`)
     addLog(payload.error || `实时订阅失败 (${response.status})，后台任务仍可能继续运行。`)
     acknowledgePendingMessages(currentPersistedDiscussionEntries())
-    dashboardState.autopilotStreamConnected = false
+    if (dashboardState.autopilotAbortController === abortController) {
+      dashboardState.autopilotStreamConnected = false
+    }
     renderDashboard()
     return
   }
@@ -2542,13 +3372,29 @@ async function streamAutopilot(message, options = {}) {
       }
     }
   } catch (error) {
+    if (error.name === "AbortError") {
+      return
+    }
     if (isNetworkError(error)) {
       markNetworkOffline(error)
     }
-    setComposerStatus("warning", `无人值守实时连接已断开：${networkErrorMessage(error)}。恢复后会重新订阅。`)
-    addLog(`无人值守实时连接已断开：${networkErrorMessage(error)}。网络恢复后会自动重新订阅。`)
+    setComposerStatus("warning", `无人值守实时连接已断开：${networkErrorMessage(error)}。5秒后自动重新订阅...`)
+    addLog(`无人值守实时连接已断开：${networkErrorMessage(error)}。5秒后会自动重新订阅。`)
+    
+    // 只有当不是主动停止（abortController 依旧有效）时，才触发自动重连
+    if (dashboardState.autopilotAbortController === abortController) {
+      setTimeout(() => {
+        if (dashboardState.activeProjectId && !dashboardState.autopilotStreamConnected) {
+          addLog("正在自动重新连接状态流...")
+          streamAutopilot("", { skipStart: true, resume: true }).catch(() => {})
+        }
+      }, 5000)
+    }
   } finally {
-    dashboardState.autopilotStreamConnected = false
+    if (dashboardState.autopilotAbortController === abortController) {
+      dashboardState.autopilotStreamConnected = false
+      dashboardState.autopilotAbortController = null
+    }
     renderAutopilotControls()
     if (dashboardState.composerStatus.busy) {
       resetComposerStatusSoon("无人值守任务状态已同步。")
@@ -2760,16 +3606,32 @@ async function loadProjects() {
   updateSnapshot(response.payload)
   renderManagerView()
   const storedProjectId = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY)
-  if (storedProjectId && dashboardState.projects.some((project) => project.id === storedProjectId)) {
+  const currentView = window.localStorage.getItem("ai-novel-factory.currentView") || "manager"
+  if (currentView === "studio" && storedProjectId && dashboardState.projects.some((project) => project.id === storedProjectId)) {
     dashboardState.activeProjectId = storedProjectId
+    loadPanelLayout(storedProjectId)
     await refreshDashboard({ includeDiscussionHistory: true })
     maybeResumeAutopilotFromSnapshot()
+  } else {
+    showManagerView()
   }
   return response
 }
 
 async function selectProject(projectId) {
+  if (dashboardState.autopilotAbortController) {
+    dashboardState.autopilotAbortController.abort()
+    dashboardState.autopilotAbortController = null
+  }
+  if (dashboardState.chatAbortController) {
+    dashboardState.chatAbortController.abort()
+    dashboardState.chatAbortController = null
+  }
+  dashboardState.autopilotStreamConnected = false
+  dashboardState.autopilotActive = false
+
   dashboardState.activeProjectId = projectId
+  loadPanelLayout(projectId)
   dashboardState.transcript = ""
   dashboardState.discussionEntries = []
   dashboardState.discussionMeta = null
@@ -2786,15 +3648,21 @@ function maybeResumeAutopilotFromSnapshot() {
   if (!dashboardState.activeProjectId) {
     return false
   }
-  if (!hasRecoverableAutopilotJob()) {
-    renderAutopilotControls()
-    return false
+  const control = autopilotControlState()
+  syncComposerStatusFromAutopilotControl()
+  if (control.paused) {
+    addLog("检测到可恢复的自动创作任务，等待手动继续。")
   }
-
-  setComposerStatus("warning", "检测到可恢复的自动创作任务，点击“继续创作”后接着上次进度运行。")
-  addLog("检测到可恢复的自动创作任务，等待手动继续。")
+  
+  // 无论控制状态如何，如果目前没有建立长连接，都在后台静默发起订阅，以自动侦测正在运行或重试的后台任务
+  if (!dashboardState.autopilotStreamConnected) {
+    addLog("正在后台静默连接状态流...")
+    streamAutopilot("", { skipStart: true, resume: true }).catch((error) => {
+      console.warn("静默连接状态流失败:", error)
+    })
+  }
   renderAutopilotControls()
-  return true
+  return control.paused
 }
 
 async function deleteProject(projectId) {
@@ -2920,12 +3788,32 @@ window.insertCommand = (command) => {
   composerInput.focus()
 }
 
-window.simulateWrite = () => {
-  runAdvance("chapter action")
+async function runComposerAction(action) {
+  if (dashboardState.composerStatus.busy) {
+    setComposerStatus("warning", "上一条消息正在提交，请等待当前请求送达后再操作。", { busy: true })
+    return
+  }
+
+  if (action === "advance") return runAdvance("composer action")
+  if (action === "cover") return runCover()
+  if (action === "provider-test") return runProviderTest()
+  if (action === "stop") return requestStopAutopilot()
+  if (action === "interrupt") {
+    const message = composerInput.value.trim()
+    if (message) {
+      composerInput.value = ""
+      return runInterrupt(message)
+    }
+    window.insertCommand("/interrupt")
+    return
+  }
 }
 
   document.addEventListener("DOMContentLoaded", async () => {
   sendButton.addEventListener("click", handleComposerSubmit)
+  document.querySelectorAll("[data-composer-action]").forEach((button) => {
+    button.addEventListener("click", () => runComposerAction(button.dataset.composerAction || ""))
+  })
   composerInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault()
@@ -2958,11 +3846,142 @@ window.simulateWrite = () => {
       closeChapterPreviewModal()
     }
   })
+  chapterCopyButton?.addEventListener("click", async () => {
+    const textToCopy = dashboardState.currentPreviewContent || ""
+    if (!textToCopy) return
+
+    try {
+      await navigator.clipboard.writeText(textToCopy)
+      
+      const span = chapterCopyButton.querySelector("span")
+      const icon = chapterCopyButton.querySelector("i")
+      if (span && icon) {
+        const originalText = span.textContent
+        const originalIconClass = icon.className
+        
+        span.textContent = "已复制！"
+        icon.className = "fa-solid fa-circle-check"
+        chapterCopyButton.classList.add("btn-success-feedback")
+        
+        setTimeout(() => {
+          span.textContent = originalText
+          icon.className = originalIconClass
+          chapterCopyButton.classList.remove("btn-success-feedback")
+        }, 1500)
+      }
+    } catch (err) {
+      console.error("复制失败:", err)
+      alert("复制失败，请手动选择复制。")
+    }
+  })
+
+  // ── 知识图谱 Modal ────────────────────────────────────────────
+  const knowledgeGraphModal = document.getElementById("knowledge-graph-modal")
+  const knowledgeGraphIframe = document.getElementById("knowledge-graph-iframe")
+  const knowledgeGraphModalClose = document.getElementById("knowledge-graph-modal-close")
+  const openKnowledgeGraphButton = document.getElementById("open-knowledge-graph-button")
+  const kgModalProjectName = document.getElementById("kg-modal-project-name")
+
+  function openKnowledgeGraphModal() {
+    if (!knowledgeGraphModal || !knowledgeGraphIframe) return
+    // 设置项目名称标签
+    if (kgModalProjectName) {
+      const projectTitle = dashboardState.state?.project?.title || document.getElementById("project-title-display")?.textContent || ""
+      kgModalProjectName.textContent = projectTitle && projectTitle !== "等待选择小说项目" ? projectTitle : ""
+    }
+    // 每次打开图谱时，都向 iframe 发送最新数据（确保热更新和后续的数据同步）
+    const sendGraphData = async () => {
+      let graphNodes = []
+      let graphEdges = []
+      try {
+        const res = await apiRequest(`/api/knowledge-graph?projectId=${dashboardState.activeProjectId}`)
+        if (res.ok && res.payload) {
+          graphNodes = res.payload.nodes || []
+          graphEdges = res.payload.edges || []
+        }
+      } catch (err) {
+        console.error("Failed to fetch knowledge graph:", err)
+      }
+
+      knowledgeGraphIframe.contentWindow?.postMessage({
+        type: "NOVEL_GRAPH_DATA",
+        projectId: dashboardState.activeProjectId,
+        projectName: dashboardState.state?.project?.title || document.getElementById("project-title-display")?.textContent || "未命名项目",
+        snapshot: {
+          ...dashboardState.factorySnapshot,
+          graphNodes: graphNodes,
+          graphEdges: graphEdges,
+        },
+        state: dashboardState.state,
+      }, "*")
+    }
+
+    // 显示 modal
+    knowledgeGraphModal.classList.remove("hidden")
+    document.body.style.overflow = "hidden"
+
+    // 加载图谱页面（仅首次加载，避免重复刷新）
+    // 必须等待真正加载完毕才能 postMessage，否则会发给空的 iframe
+    const currentSrc = knowledgeGraphIframe.getAttribute("src");
+    if (!currentSrc || currentSrc !== "./knowledge-graph.html") {
+      knowledgeGraphIframe.addEventListener("load", sendGraphData, { once: true })
+      knowledgeGraphIframe.setAttribute("src", "./knowledge-graph.html");
+    } else {
+      sendGraphData()
+    }
+  }
+
+  function closeKnowledgeGraphModal() {
+    if (!knowledgeGraphModal) return
+    knowledgeGraphModal.classList.add("hidden")
+    document.body.style.overflow = ""
+  }
+
+  openKnowledgeGraphButton?.addEventListener("click", openKnowledgeGraphModal)
+  knowledgeGraphModalClose?.addEventListener("click", closeKnowledgeGraphModal)
+  knowledgeGraphModal?.addEventListener("click", (event) => {
+    if (event.target === knowledgeGraphModal) {
+      closeKnowledgeGraphModal()
+    }
+  })
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !knowledgeGraphModal?.classList.contains("hidden")) {
+      closeKnowledgeGraphModal()
+    }
+  })
+  // ── 知识图谱 Modal 结束 ────────────────────────────────────────
+
   providerTestButton.addEventListener("click", runModalProviderTest)
   providerSaveButton.addEventListener("click", saveProviderConfigFromModal)
+  llmConfigCancelEditButton?.addEventListener("click", cancelEditLlmConfig)
+
+  llmConfigsList?.addEventListener("click", (event) => {
+    const activateBtn = event.target.closest(".btn-activate")
+    if (activateBtn) {
+      const id = activateBtn.dataset.id
+      if (id) activateLlmConfig(id).catch(console.error)
+      return
+    }
+
+    const editBtn = event.target.closest(".btn-edit")
+    if (editBtn) {
+      const id = editBtn.dataset.id
+      if (id) editLlmConfig(id)
+      return
+    }
+
+    const deleteBtn = event.target.closest(".btn-delete")
+    if (deleteBtn) {
+      const id = deleteBtn.dataset.id
+      if (id) deleteLlmConfig(id).catch(console.error)
+      return
+    }
+  })
+
   initButton.addEventListener("click", initializeWorkspace)
   autopilotStartButton?.addEventListener("click", startAutopilotFromButton)
   autopilotStopButton?.addEventListener("click", requestStopAutopilot)
+  autopilotModeButton?.addEventListener("click", toggleAutopilotMode)
   projectCreateSubmitButton.addEventListener("click", () => createProjectFromModal({
     title: projectCreateTitleInput.value.trim(),
     idea: projectCreateIdeaInput.value.trim(),
@@ -3000,8 +4019,39 @@ window.simulateWrite = () => {
 
     renderDiscussionOnly()
   })
+  const btnScrollBottom = document.getElementById("btn-scroll-bottom")
+  if (btnScrollBottom) {
+    btnScrollBottom.addEventListener("click", () => {
+      chatMessagesBox.scrollTo({
+        top: chatMessagesBox.scrollHeight,
+        behavior: "smooth"
+      })
+      dashboardState.discussionAutoStickToBottom = true
+      btnScrollBottom.classList.add("hidden")
+    })
+  }
+
   chatMessagesBox.addEventListener("scroll", () => {
     dashboardState.discussionAutoStickToBottom = shouldAutoScrollDiscussion(chatMessagesBox)
+    if (btnScrollBottom) {
+      const isFarFromBottom = chatMessagesBox.scrollHeight - chatMessagesBox.scrollTop - chatMessagesBox.clientHeight > 300
+      btnScrollBottom.classList.toggle("hidden", !isFarFromBottom)
+    }
+  })
+  sidebarRight?.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-panel-toggle]")
+    if (toggle) {
+      const moduleKey = toggle.dataset.panelToggle
+      if (moduleKey) {
+        togglePanelModule(moduleKey)
+      }
+      return
+    }
+
+    const focusButton = event.target.closest("#chapter-focus-toggle-button")
+    if (focusButton) {
+      setChapterFocus(!normalizePanelLayout(dashboardState.panelLayout).chapterFocus)
+    }
   })
   window.addEventListener("offline", () => {
     markNetworkOffline(new Error("browser offline"))
@@ -3016,6 +4066,18 @@ window.simulateWrite = () => {
   })
 
   renderNetworkStatus()
+  loadPanelLayout()
+  applySidebarPanelLayout()
   addLog("AI Novel Factory Studio 已启动。")
   await loadProjects()
+
+  // 渐隐并隐藏首屏全屏 Loading 遮罩层
+  const appMask = document.getElementById("app-loading-mask")
+  if (appMask) {
+    appMask.style.opacity = "0"
+    appMask.style.pointerEvents = "none"
+    setTimeout(() => {
+      appMask.style.visibility = "hidden"
+    }, 500)
+  }
 })

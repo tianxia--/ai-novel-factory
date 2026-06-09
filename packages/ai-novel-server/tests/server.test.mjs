@@ -4,12 +4,17 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
+import { pathToFileURL } from "node:url"
 
 const packageRoot = path.resolve(process.cwd())
 const serverEntry = path.join(packageRoot, "dist", "index.js")
 const workerEntry = path.join(packageRoot, "dist", "worker.js")
 const desktopStaticDir = path.resolve(packageRoot, "..", "..", "apps", "desktop")
 const desktopPackageJson = path.resolve(packageRoot, "..", "..", "apps", "desktop", "package.json")
+
+async function loadServerModule() {
+  return import(`${pathToFileURL(serverEntry).href}?ts=${Date.now()}`)
+}
 
 async function waitForServer(port, child) {
   const deadline = Date.now() + 5000
@@ -132,6 +137,13 @@ test("standalone api returns persisted transcript, consensus, and context packet
     })
     assert.equal(createResponse.status, 201)
     const createPayload = await createResponse.json()
+    assert.equal(createPayload.projects.length, 1)
+    assert.equal(createPayload.projects[0].id, createPayload.projectId)
+    assert.equal(createPayload.projects[0].summary.source, "db")
+    assert.equal(createPayload.projects[0].summary.stage, "worldbuilding_dialogue")
+    assert.equal(createPayload.projects[0].summary.totalChapters, 8)
+    assert.equal(createPayload.projects[0].summary.completedChapters, 0)
+    assert.equal(createPayload.projects[0].summary.pendingChapters, 8)
 
     const reindexResponse = await fetch(`http://127.0.0.1:${port}/api/knowledge/reindex`, {
       method: "POST",
@@ -234,6 +246,80 @@ test("standalone api returns persisted transcript, consensus, and context packet
     assert.ok(statusPayload.factorySnapshot.recentMessages.some((message) => message.type === "status" && /开始创作/.test(`${message.data.title}\n${message.data.content}`)))
     assert.ok(statusPayload.factorySnapshot.graphNodes.some((node) => node.id === "mission:original"))
     assert.ok(statusPayload.graphIndex.counts.nodes >= statusPayload.factorySnapshot.graphNodes.length)
+  } finally {
+    child.kill("SIGTERM")
+    await new Promise((resolve) => child.once("exit", resolve))
+  }
+
+  assert.equal(stderr, "")
+})
+
+test("chat-stream short-circuits status queries into system status messages", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-standalone-status-query-"))
+  const port = 47839
+  const child = spawn(process.execPath, [
+    "--no-warnings",
+    serverEntry,
+    "--root-dir",
+    tempDir,
+    "--static-dir",
+    desktopStaticDir,
+    "--port",
+    String(port),
+  ], {
+    cwd: packageRoot,
+    env: { ...process.env, AI_NOVEL_TEST_MODE: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  let stderr = ""
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk)
+  })
+
+  try {
+    await waitForServer(port, child)
+
+    const createResponse = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Status Query Demo",
+        idea: "A systems novel about tracing true state",
+        chapters: 6,
+        chapterWords: 2500,
+      }),
+    })
+    assert.equal(createResponse.status, 201)
+    const createPayload = await createResponse.json()
+
+    const streamResponse = await fetch(`http://127.0.0.1:${port}/api/chat-stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "现在是什么状态了",
+        projectId: createPayload.projectId,
+      }),
+    })
+    assert.equal(streamResponse.status, 200)
+    const streamBody = await streamResponse.text()
+    assert.doesNotMatch(streamBody, /event: agent_start/)
+    assert.doesNotMatch(streamBody, /event: agent_delta/)
+    assert.doesNotMatch(streamBody, /event: agent_complete/)
+    assert.match(streamBody, /event: complete/)
+
+    const messagesResponse = await fetch(`http://127.0.0.1:${port}/api/messages?projectId=${createPayload.projectId}&limit=6`)
+    assert.equal(messagesResponse.status, 200)
+    const messagesPayload = await messagesResponse.json()
+    assert.ok(messagesPayload.messages.some((message) =>
+      message.type === "status"
+      && message.data.agentLabel === "System"
+      && /当前项目状态/.test(String(message.data.title || "")),
+    ))
+    assert.ok(!messagesPayload.messages.some((message) =>
+      message.type === "agent"
+      && /当前状态报告|项目状态报告|状态快照/.test(String(message.data?.content || "")),
+    ))
   } finally {
     child.kill("SIGTERM")
     await new Promise((resolve) => child.once("exit", resolve))
@@ -365,4 +451,78 @@ test("standalone api exposes durable autopilot jobs and worker restores them", a
   }
 
   assert.equal(secondStderr, "")
+})
+
+test("standalone api keeps paused autopilot jobs recoverable instead of normalizing them back to running", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-paused-autopilot-status-"))
+  const port = 47835
+  const child = spawn(process.execPath, [
+    "--no-warnings",
+    serverEntry,
+    "--root-dir",
+    tempDir,
+    "--static-dir",
+    desktopStaticDir,
+    "--port",
+    String(port),
+  ], {
+    cwd: packageRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  let stderr = ""
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk)
+  })
+
+  try {
+    await waitForServer(port, child)
+
+    const createResponse = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Paused Job",
+        idea: "A worker has already paused and should stay recoverable",
+        chapters: 6,
+        chapterWords: 2600,
+      }),
+    })
+    assert.equal(createResponse.status, 201)
+    const createPayload = await createResponse.json()
+    const projectId = createPayload.projectId
+
+    const startResponse = await fetch(`http://127.0.0.1:${port}/api/autopilot/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        message: "继续无人值守推进",
+      }),
+    })
+    assert.equal(startResponse.status, 200)
+
+    const stopResponse = await fetch(`http://127.0.0.1:${port}/api/autopilot/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    })
+    assert.equal(stopResponse.status, 200)
+
+    const statusResponse = await fetch(`http://127.0.0.1:${port}/api/status?projectId=${projectId}`)
+    assert.equal(statusResponse.status, 200)
+    const statusPayload = await statusResponse.json()
+    assert.equal(statusPayload.factorySnapshot.activeJobs.length, 1)
+    assert.equal(statusPayload.factorySnapshot.activeJobs[0].status, "paused")
+    assert.equal(statusPayload.factorySnapshot.runnableJobs.length, 1)
+    assert.equal(statusPayload.factorySnapshot.runnableJobs[0].status, "paused")
+    assert.equal(statusPayload.state.runtime.autopilot.running, false)
+    assert.equal(statusPayload.state.runtime.autopilot.stopRequested, false)
+    assert.match(statusPayload.state.runtime.autopilot.statusMessage, /暂停|恢复/)
+  } finally {
+    child.kill("SIGTERM")
+    await new Promise((resolve) => child.once("exit", resolve))
+  }
+
+  assert.equal(stderr, "")
 })

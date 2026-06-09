@@ -1,3 +1,6 @@
+import {
+  routeUserMessage
+} from "./chunk-NAGGUJYO.js";
 import "./chunk-SDIPDDNZ.js";
 import {
   ensureAutopilotJob,
@@ -10,12 +13,13 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-MR4WTTHR.js";
-import "./chunk-KBCA3TZL.js";
+} from "./chunk-DZVX7SK3.js";
+import "./chunk-6NBXMMHP.js";
 import {
   buildSuperGraphIndex,
   createManagedAutonomousProject,
   deleteManagedAutonomousProject,
+  formatStatus,
   initAutonomousProject,
   listAutonomousProjects,
   loadAutonomousState,
@@ -26,20 +30,22 @@ import {
   superGraphFromDbRows,
   syncCurrentContextPacketFile,
   validateSuperGraph
-} from "./chunk-AVBBWYBN.js";
+} from "./chunk-BR6DCN36.js";
 import {
+  getCachedActiveLlmConfig,
   getPublicProjectEnvStatus,
+  loadActiveLlmConfig,
   testProviderConnectivity,
   upsertProjectEnvValues
-} from "./chunk-5STCOAYV.js";
+} from "./chunk-YPZ72LHB.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-SLEOECOV.js";
+} from "./chunk-AXLXISKJ.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-LMBE7PPD.js";
+} from "./chunk-7ZCRCHQW.js";
 import {
   createStatusMessage,
   createToolMessage,
@@ -51,6 +57,22 @@ import fs from "fs/promises";
 import path from "path";
 import http from "http";
 import { createHash } from "crypto";
+function getPublicProjectEnvStatus2(rootDir = process.cwd()) {
+  const status = getPublicProjectEnvStatus(rootDir);
+  const activeLlm = getCachedActiveLlmConfig();
+  if (activeLlm) {
+    status.configured = true;
+    status.resolved = {
+      baseUrl: activeLlm.provider.baseUrl,
+      modelName: activeLlm.provider.modelName,
+      apiKeyPresent: true
+    };
+    status.missing = status.missing.filter(
+      (k) => k !== "LLM_API_KEY" && k !== "LLM_BASE_URL" && k !== "LLM_MODEL_ID"
+    );
+  }
+  return status;
+}
 function json(response, status, payload) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
@@ -190,7 +212,9 @@ function isJsonApiRequest(method, pathname) {
       "/api/messages",
       "/api/chapters/preview",
       "/api/artifacts/preview",
-      "/api/env"
+      "/api/env",
+      "/api/knowledge-graph",
+      "/api/llm-configs"
     ].includes(pathname);
   }
   if (method === "POST") {
@@ -207,13 +231,17 @@ function isJsonApiRequest(method, pathname) {
       "/api/stop",
       "/api/autopilot/stop",
       "/api/autopilot/start",
+      "/api/autopilot/mode",
+      "/api/mode",
       "/api/knowledge/reindex",
       "/api/knowledge/search",
-      "/api/knowledge/evaluate"
+      "/api/knowledge/evaluate",
+      "/api/llm-configs",
+      "/api/llm-configs/activate"
     ].includes(pathname);
   }
   if (method === "DELETE") {
-    return pathname.startsWith("/api/projects/");
+    return pathname.startsWith("/api/projects/") || pathname === "/api/llm-configs";
   }
   return false;
 }
@@ -745,7 +773,8 @@ function compactFactorySnapshotForPayload(factorySnapshot) {
 function normalizeAutopilotRuntimeForPayload(state, factorySnapshot) {
   if (!state?.runtime?.autopilot) return state;
   const activeJobs = Array.isArray(factorySnapshot?.activeJobs) ? factorySnapshot.activeJobs : [];
-  if (activeJobs.length > 0) {
+  const hasRunningJob = activeJobs.some((job) => job && job.status !== "paused" && job.status !== "failed" && job.status !== "completed");
+  if (hasRunningJob) {
     if (state.runtime.autopilot.running) {
       return state;
     }
@@ -765,7 +794,7 @@ function normalizeAutopilotRuntimeForPayload(state, factorySnapshot) {
       }
     };
   }
-  if (!state.runtime.autopilot.running) {
+  if (!state.runtime.autopilot.running && !state.runtime.autopilot.stopRequested) {
     return state;
   }
   return {
@@ -779,7 +808,7 @@ function normalizeAutopilotRuntimeForPayload(state, factorySnapshot) {
         stopRequested: false,
         mode: "idle",
         lastStep: "stopped",
-        statusMessage: "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u6267\u884C\u7684\u65E0\u4EBA\u503C\u5B88\u4EFB\u52A1\uFF1B\u5F53\u524D\u6CA1\u6709\u540E\u53F0 worker \u5728\u8FD0\u884C\u3002"
+        statusMessage: state.runtime.autopilot.statusMessage || "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u6267\u884C\u7684\u65E0\u4EBA\u503C\u5B88\u4EFB\u52A1\uFF1B\u5F53\u524D\u6CA1\u6709\u540E\u53F0 worker \u5728\u8FD0\u884C\u3002"
       }
     }
   };
@@ -979,6 +1008,72 @@ async function stopInProcessAutopilotBeforeProjectDelete(projectRoot) {
   ]);
   return true;
 }
+async function buildProjectSummary(rootDir, project) {
+  let dbSnapshot = null;
+  try {
+    dbSnapshot = await withFactoryDb(rootDir, async (db) => db.getSnapshot(project.id)).catch(() => null);
+  } catch (e) {
+  }
+  const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null);
+  if (!state) {
+    return {
+      source: "empty",
+      stage: "worldbuilding_dialogue",
+      progressPercent: 0,
+      totalChapters: project.totalChapters || 0,
+      completedChapters: 0,
+      pendingChapters: project.totalChapters || 0,
+      inProgressChapters: 0,
+      blockedChapters: 0,
+      activeJobs: 0,
+      runnableJobs: 0,
+      latestEventType: "",
+      latestEventAt: "",
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  const tasks = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : [];
+  const chapterFacts = Array.isArray(dbSnapshot?.chapterFacts) ? dbSnapshot.chapterFacts : [];
+  const totalChapters = Number(state.plan?.totalChapters || project.totalChapters || tasks.length || 0);
+  const passedChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "complete").length : tasks.filter((task) => task.status === "complete").length;
+  let contiguousCompletedChapters = 0;
+  if (chapterFacts.length > 0) {
+    const factsByChapter = new Map(chapterFacts.map((fact) => [Number(fact.chapterNumber), fact]));
+    for (let ch = 1; ch <= totalChapters; ch += 1) {
+      const factRecord = factsByChapter.get(ch);
+      if (factRecord?.status !== "complete") break;
+      contiguousCompletedChapters += 1;
+    }
+  } else {
+    for (const task of tasks) {
+      if (task.status !== "complete") break;
+      contiguousCompletedChapters += 1;
+    }
+  }
+  const completedChapters = Math.min(passedChapters, contiguousCompletedChapters);
+  const inProgressChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "in_progress").length : tasks.filter((task) => task.status === "in_progress").length;
+  const blockedChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "blocked").length : tasks.filter((task) => task.status === "blocked").length;
+  const pendingChapters = Math.max(0, totalChapters - completedChapters - inProgressChapters - blockedChapters);
+  const progressPercent = totalChapters > 0 ? Math.max(0, Math.min(100, Math.round(completedChapters / totalChapters * 100))) : 0;
+  const activeJobs = Array.isArray(dbSnapshot?.activeRuns) ? dbSnapshot.activeRuns.length : 0;
+  const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0;
+  const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null;
+  return {
+    source: dbSnapshot ? "db" : "state",
+    stage: state.runtime?.stage || "worldbuilding_dialogue",
+    progressPercent,
+    totalChapters,
+    completedChapters,
+    pendingChapters,
+    inProgressChapters,
+    blockedChapters,
+    activeJobs,
+    runnableJobs,
+    latestEventType: latestEvent?.type || "",
+    latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
+    updatedAt: state.runtime?.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 async function reconcileFactoryProjectsWithRegistry(rootDir) {
   const projects = await listAutonomousProjects(rootDir);
   await withFactoryDb(rootDir, async (db) => {
@@ -987,6 +1082,9 @@ async function reconcileFactoryProjectsWithRegistry(rootDir) {
       db.recordEvent(null, null, "ORPHAN_PROJECT_PRUNED", { projectId });
     }
   }).catch(() => void 0);
+  for (const project of projects) {
+    project.summary = await buildProjectSummary(rootDir, project);
+  }
   return projects;
 }
 async function resolveProjectContext(rootDir, projectId) {
@@ -1034,12 +1132,93 @@ async function resolveProjectContext(rootDir, projectId) {
 async function handleNovelStudioApi(rootDir, method, pathname, body = {}, options = {}) {
   const requestUrl = new URL(pathname, "http://local");
   const requestPathname = requestUrl.pathname;
+  if (method === "GET" && requestPathname === "/api/llm-configs") {
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs();
+    });
+    return {
+      status: 200,
+      payload: {
+        configs
+      }
+    };
+  }
+  if (method === "POST" && requestPathname === "/api/llm-configs") {
+    const name = String(body.name || "").trim();
+    const baseUrl = String(body.baseUrl || "").trim();
+    const apiKey = String(body.apiKey || "").trim();
+    const modelName = String(body.modelName || "").trim();
+    const temperature = typeof body.temperature === "number" ? body.temperature : 0.1;
+    const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 12e4;
+    if (!name || !baseUrl || !apiKey || !modelName) {
+      return { status: 400, payload: { error: "missing_fields" } };
+    }
+    const configId = typeof body.id === "string" ? body.id.trim() : null;
+    await withFactoryDb(rootDir, async (db) => {
+      if (configId) {
+        db.updateLlmConfig(configId, { name, baseUrl, apiKey, modelName, temperature, timeoutMs });
+      } else {
+        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs });
+      }
+    });
+    await loadActiveLlmConfig(rootDir);
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs();
+    });
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs
+      }
+    };
+  }
+  if (method === "POST" && requestPathname === "/api/llm-configs/activate") {
+    const id = typeof body.id === "string" ? body.id.trim() : null;
+    if (!id) {
+      return { status: 400, payload: { error: "id_required" } };
+    }
+    await withFactoryDb(rootDir, async (db) => {
+      db.activateLlmConfig(id);
+    });
+    await loadActiveLlmConfig(rootDir);
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs();
+    });
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs
+      }
+    };
+  }
+  if (method === "DELETE" && requestPathname === "/api/llm-configs") {
+    const id = requestUrl.searchParams.get("id");
+    if (!id) {
+      return { status: 400, payload: { error: "id_required" } };
+    }
+    await withFactoryDb(rootDir, async (db) => {
+      db.deleteLlmConfig(id);
+    });
+    await loadActiveLlmConfig(rootDir);
+    const configs = await withFactoryDb(rootDir, async (db) => {
+      return db.listLlmConfigs();
+    });
+    return {
+      status: 200,
+      payload: {
+        success: true,
+        configs
+      }
+    };
+  }
   if (method === "GET" && requestPathname === "/api/projects") {
     return {
       status: 200,
       payload: {
         projects: await reconcileFactoryProjectsWithRegistry(rootDir),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1057,7 +1236,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         payload: {
           error: "project_not_found",
           projects: await listAutonomousProjects(rootDir),
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1067,7 +1246,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         deletedProject: deleted.project,
         stoppedInProcess,
         projects: await listAutonomousProjects(rootDir),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1091,7 +1270,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           ok: true,
           service: "ai-novel-server",
           factory,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     } catch (error) {
@@ -1146,7 +1325,75 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         autopilotJobId: null,
         autopilotQueued: false,
         state,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
+      }
+    };
+  }
+  if (method === "GET" && requestPathname === "/api/knowledge-graph") {
+    const context = await resolveProjectContext(rootDir, options.projectId);
+    if (!context.projectRoot || !context.projectId) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    let graph = { nodes: [], edges: [] };
+    try {
+      const dbGraph = await withFactoryDb(rootDir, async (db) => db.getGraph(context.projectId));
+      if (dbGraph && Array.isArray(dbGraph.nodes) && dbGraph.nodes.length > 0) {
+        const storyNodeTypes = /* @__PURE__ */ new Set([
+          "Character",
+          "Location",
+          "Faction",
+          "Event",
+          "Scene",
+          "Foreshadowing",
+          "WorldRule",
+          "Conflict",
+          "Relationship",
+          "TimelinePoint"
+        ]);
+        const nodes = dbGraph.nodes.map((n) => {
+          let properties = {};
+          try {
+            properties = typeof n.metadata_json === "string" ? JSON.parse(n.metadata_json) : n.metadata_json || {};
+          } catch (e) {
+          }
+          return {
+            id: n.id,
+            node_type: n.type,
+            label: n.label,
+            content: properties.description || properties.desc || n.label,
+            metadata_json: JSON.stringify({
+              importance: properties.importance || 3,
+              tags: properties.tags || [],
+              ...properties
+            })
+          };
+        });
+        const storyNodes = nodes.filter((n) => {
+          const lowerType = String(n.node_type || "").toLowerCase();
+          return Array.from(storyNodeTypes).some((st) => st.toLowerCase() === lowerType);
+        });
+        if (storyNodes.length > 0) {
+          const storyNodeIds = new Set(storyNodes.map((n) => n.id));
+          const edges = dbGraph.edges.filter((e) => storyNodeIds.has(e.from_node_id) && storyNodeIds.has(e.to_node_id)).map((e, index) => ({
+            id: e.id || `db-edge-${index}`,
+            source_id: e.from_node_id,
+            target_id: e.to_node_id,
+            relation_type: e.type || "\u5173\u8054",
+            metadata_json: e.metadata_json || "{}"
+          }));
+          graph = { nodes: storyNodes, edges };
+        }
+      }
+    } catch (err) {
+      console.error("Failed to query graph from factory db:", err);
+    }
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        ...graph,
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1161,7 +1408,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         payload: {
           error: "project_selection_required",
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1172,7 +1419,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           error: "workspace_not_initialized",
           transcript: "",
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1186,7 +1433,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           error: "workspace_not_initialized",
           transcript: "",
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1215,14 +1462,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...workspacePayload,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "GET" && requestPathname === "/api/transcript") {
     const context = await resolveProjectContext(rootDir, options.projectId);
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const limit = Math.max(1, Math.min(200, Number.parseInt(requestUrl.searchParams.get("limit") || "80", 10)));
     const transcript = await readDiscussionTranscript(context.projectRoot);
@@ -1234,14 +1481,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         ...messageEntries ?? parseTranscriptEntries(transcript, { limit }),
         transcript,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "GET" && requestPathname === "/api/messages") {
     const context = await resolveProjectContext(rootDir, options.projectId);
     if (!context.projectRoot || !context.projectId) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const limit = Math.max(1, Math.min(500, Number.parseInt(requestUrl.searchParams.get("limit") || "80", 10)));
     const offset = Math.max(0, Number.parseInt(requestUrl.searchParams.get("offset") || "0", 10) || 0);
@@ -1270,18 +1517,18 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           nextOffset: nextOffset < totalMessages ? nextOffset : null,
           conversationId: conversationId || null
         },
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "GET" && requestPathname === "/api/chapters/preview") {
     const context = await resolveProjectContext(rootDir, options.projectId);
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const chapterNumber = Number.parseInt(String(requestUrl.searchParams.get("chapterNumber") || ""), 10);
     if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
-      return { status: 400, payload: { error: "chapter_number_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 400, payload: { error: "chapter_number_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const chapterId = `chapter-${String(chapterNumber).padStart(3, "0")}`;
     const relativePath = `.ai-novel/chapters/${chapterId}.final.md`;
@@ -1294,7 +1541,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           chapterNumber,
           path: relativePath,
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1306,18 +1553,18 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         chapterNumber,
         path: relativePath,
         content,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "GET" && requestPathname === "/api/artifacts/preview") {
     const context = await resolveProjectContext(rootDir, options.projectId);
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const artifactPath = String(requestUrl.searchParams.get("path") || "").trim();
     if (!artifactPath) {
-      return { status: 400, payload: { error: "artifact_path_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 400, payload: { error: "artifact_path_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const content = await readWorkspaceArtifactText(context.projectRoot, artifactPath);
     if (content === null) {
@@ -1327,7 +1574,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           error: "artifact_path_not_allowed",
           path: artifactPath,
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1338,7 +1585,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           error: "artifact_not_found",
           path: artifactPath,
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1349,7 +1596,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         path: artifactPath,
         content,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1372,7 +1619,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
   if (method === "POST" && requestPathname === "/api/advance") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const { state } = await executeManualAdvanceCommand(context.projectRoot, {
       factoryRootDir: rootDir,
@@ -1386,18 +1633,18 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/chapters/retry") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const chapterNumber = Number.parseInt(String(body.chapterNumber || ""), 10);
     if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
-      return { status: 400, payload: { error: "chapter_number_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 400, payload: { error: "chapter_number_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     try {
       const { state, recoveryLimited } = await executeManualRetryChapterCommand(context.projectRoot, chapterNumber, {
@@ -1446,12 +1693,12 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           projects: context.projects,
           recoveryLimited,
           ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("chapter_not_found:")) {
-        return { status: 404, payload: { error: "chapter_not_found", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+        return { status: 404, payload: { error: "chapter_not_found", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
       }
       throw error;
     }
@@ -1459,7 +1706,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
   if (method === "POST" && requestPathname === "/api/knowledge/reindex") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot || !context.projectId) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const requestedScope = String(body.scope || "all");
     const scope = requestedScope === "global" || requestedScope === "project" || requestedScope === "all" ? requestedScope : "all";
@@ -1487,14 +1734,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         queuedKnowledgeJobs,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/knowledge/search") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot || !context.projectId) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const query = String(body.query || "").trim();
     if (!query) {
@@ -1505,7 +1752,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           message: "\u8BF7\u8F93\u5165\u8981\u68C0\u7D22\u7684\u6210\u8BED\u3001\u573A\u666F\u3001\u8BBE\u5B9A\u6216\u7AE0\u8282\u7EA6\u675F\u3002",
           activeProjectId: context.projectId,
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1564,14 +1811,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         knowledgeSearch,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/knowledge/evaluate") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot || !context.projectId) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const requestedK = Number(body.k);
     const k = Number.isFinite(requestedK) && requestedK > 0 ? Math.floor(requestedK) : 8;
@@ -1611,7 +1858,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           message: "\u9700\u8981\u63D0\u4F9B\u5305\u542B query \u548C expectedChunkIds \u7684 cases\uFF0C\u6216\u5148\u4EA7\u751F\u5E26 used chunk \u7684\u77E5\u8BC6\u5E93\u5F15\u7528\u8BB0\u5F55\u3002",
           activeProjectId: context.projectId,
           projects: context.projects,
-          envStatus: getPublicProjectEnvStatus(rootDir)
+          envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
     }
@@ -1652,14 +1899,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         knowledgeEvaluation: evaluation,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/cover") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const state = await prepareCoverGeneration(context.projectRoot);
     return {
@@ -1668,7 +1915,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1722,7 +1969,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.mode === "managed" ? context.projectId : null,
         projects: context.projects,
         result,
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1730,7 +1977,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     return {
       status: 200,
       payload: {
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -1746,14 +1993,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     return {
       status: 200,
       payload: {
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/interrupt") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const message = String(body.message || "").trim();
     if (!message) {
@@ -1771,14 +2018,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/chat") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const message = String(body.message || "").trim();
     if (!message) {
@@ -1806,27 +2053,56 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         discussion,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/chat-stream") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const message = String(body.message || "").trim();
     if (!message) {
       return { status: 400, payload: { error: "message_required" } };
     }
+    const state = await loadAutonomousState(context.projectRoot);
+    const route = routeUserMessage(message, state);
     const runId = makeRunId("discussion");
     await recordUserMessage(rootDir, {
       projectId: context.mode === "managed" ? context.projectId : null,
       conversationId: runId,
       runId,
       content: message,
-      metadata: { source: "api_chat_stream" }
+      metadata: { source: "api_chat_stream", route: route.type, reason: route.reason }
     });
+    if (route.type === "status_query") {
+      const statusText = formatStatus(state);
+      await recordStatusMessage(rootDir, {
+        projectId: context.mode === "managed" ? context.projectId : null,
+        conversationId: runId,
+        runId,
+        title: "\u5F53\u524D\u9879\u76EE\u72B6\u6001",
+        content: statusText,
+        metadata: { source: "api_chat_stream_status_query" }
+      });
+      return {
+        status: 200,
+        payload: {
+          activeProjectId: context.projectId,
+          projects: context.projects,
+          events: [],
+          discussion: {
+            summary: `\u5DF2\u62A5\u544A\u5F53\u524D\u9879\u76EE\u72B6\u6001\uFF1A${state.runtime.statusMessage}`,
+            target: "status",
+            writebackSkipped: true,
+            replies: []
+          },
+          ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
+          envStatus: getPublicProjectEnvStatus2(rootDir)
+        }
+      };
+    }
     const streamed = [];
     const discussion = await runMultiAgentDiscussion(context.projectRoot, message, {
       runId,
@@ -1841,7 +2117,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         await options.onStreamEvent?.(event);
       }
     });
-    const state = await loadAutonomousState(context.projectRoot);
+    const updatedState = await loadAutonomousState(context.projectRoot);
     return {
       status: 200,
       payload: {
@@ -1849,15 +2125,52 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         projects: context.projects,
         events: streamed,
         discussion,
+        ...await createWorkspacePayload(context.projectRoot, updatedState, { rootDir, projectId: context.projectId, syncState: true }),
+        envStatus: getPublicProjectEnvStatus2(rootDir)
+      }
+    };
+  }
+  if (method === "POST" && (requestPathname === "/api/mode" || requestPathname === "/api/autopilot/mode")) {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    const autoMode = typeof body.autoMode === "string" ? body.autoMode : "full";
+    if (autoMode !== "full" && autoMode !== "semi") {
+      return { status: 400, payload: { error: "invalid_auto_mode" } };
+    }
+    const state = await loadAutonomousState(context.projectRoot);
+    state.project.autoMode = autoMode;
+    await saveAutonomousState(context.projectRoot, state);
+    if (context.projectId) {
+      await withFactoryDb(rootDir, async (db) => {
+        db.updateProjectState(context.projectId, state);
+      }).catch(() => void 0);
+    }
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: "\u65E0\u4EBA\u503C\u5B88\u521B\u4F5C\u6A21\u5F0F\u5DF2\u5207\u6362",
+      content: `\u7CFB\u7EDF\u521B\u4F5C\u6A21\u5F0F\u5DF2\u6210\u529F\u5207\u6362\u4E3A\uFF1A${autoMode === "semi" ? "\u{1F91D} \u534A\u81EA\u52A8\u5171\u521B\u6A21\u5F0F" : "\u{1F916} \u5168\u81EA\u52A8\u6258\u7BA1\u6A21\u5F0F"}\u3002`,
+      metadata: {
+        source: "api_autopilot_mode",
+        autoMode
+      }
+    });
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && (requestPathname === "/api/stop" || requestPathname === "/api/autopilot/stop")) {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     const stoppedInProcess = stopAutopilotJob(context.projectRoot);
     const stopStatusMessage = stoppedInProcess ? "\u5DF2\u6536\u5230\u6682\u505C\u8BF7\u6C42\uFF0C\u6B63\u5728\u4E2D\u65AD\u5F53\u524D\u6A21\u578B\u8BF7\u6C42\u5E76\u4FDD\u5B58\u8FDB\u5EA6\u3002" : "\u5DF2\u6536\u5230\u6682\u505C\u8BF7\u6C42\uFF0C\u5DF2\u6682\u505C\u6570\u636E\u5E93\u4E2D\u7684\u65E0\u4EBA\u503C\u5B88\u4EFB\u52A1\uFF0C\u540E\u7EED\u53EF\u7EE7\u7EED\u6062\u590D\u3002";
@@ -1910,14 +2223,14 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
   if (method === "POST" && requestPathname === "/api/autopilot/start") {
     const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
     if (!context.projectRoot) {
-      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } };
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
     }
     let message = typeof body.message === "string" ? body.message.trim() : "";
     const latestState = await tryLoadState(context.projectRoot);
@@ -2014,7 +2327,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId }),
-        envStatus: getPublicProjectEnvStatus(rootDir)
+        envStatus: getPublicProjectEnvStatus2(rootDir)
       }
     };
   }
@@ -2039,6 +2352,7 @@ async function serveStatic(staticDir, pathname, response) {
 }
 async function startNovelStudioServer(options = {}) {
   const rootDir = options.rootDir ?? process.cwd();
+  await loadActiveLlmConfig(rootDir);
   const staticDir = options.staticDir;
   const embeddedWorker = shouldUseEmbeddedWorker(options.embeddedWorker);
   const server = http.createServer(async (request, response) => {
@@ -2072,7 +2386,7 @@ async function startNovelStudioServer(options = {}) {
         const context = await resolveProjectContext(rootDir, typeof body.projectId === "string" ? body.projectId : queryProjectId);
         eventStreamHeaders(response);
         if (!context.projectRoot) {
-          writeSse(response, "error", { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) });
+          writeSse(response, "error", { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) });
           response.end();
           return;
         }
@@ -2095,7 +2409,7 @@ async function startNovelStudioServer(options = {}) {
             activeProjectId: context.projectId,
             projects: context.projects,
             ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId }),
-            envStatus: getPublicProjectEnvStatus(rootDir)
+            envStatus: getPublicProjectEnvStatus2(rootDir)
           };
           const snapshotVersion = typeof snapshotPayload.snapshotVersion === "string" ? snapshotPayload.snapshotVersion : "";
           if (!options2.force && snapshotVersion && snapshotVersion === lastStreamSnapshotVersion) {
