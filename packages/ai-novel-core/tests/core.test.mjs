@@ -635,6 +635,62 @@ test("pending memory embeddings can be backfilled and recalled by vector", async
   assert.equal(recalled[0].embedding_status, "ready")
 })
 
+test("writing context recalls character dossier memory from the factory database", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-writing-memory-"))
+  const {
+    createLocalTextEmbedding,
+    createManagedAutonomousProject,
+    retrieveFactoryMemoryContext,
+    withFactoryDb,
+  } = await loadCore()
+
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A clerk survives court intrigue by reading forbidden ledgers",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const task = {
+    chapterNumber: 2,
+    title: "Ledger Pressure",
+    status: "pending",
+    summary: "Li Yan enters the archive and must decide whether to trust the steward.",
+    targetWords: 2500,
+  }
+  const continuityContract = {
+    status: "ready",
+    lockedProtagonistName: "Li Yan",
+    knownCast: ["Li Yan", "Steward Song"],
+    continuityAnchors: ["broken seal"],
+    previousChapterLedger: ["chapter 1: Li Yan hid the forbidden ledger."],
+    prompt: "Canon Continuity Contract",
+  }
+  await withFactoryDb(tempDir, async (db) => {
+    db.recordMemory(created.project.id, {
+      source: ".ai-novel/memory/characters/dossiers.json",
+      kind: "character_dossiers",
+      content: "Factory dossier: Li Yan habit=presses the ledger corner before speaking; speech=asks clipped questions; relationship=does not trust Steward Song.",
+      importance: 9,
+      metadata: { path: ".ai-novel/memory/characters/dossiers.json" },
+      embedding: {
+        model: "local-hash-v1",
+        vector: createLocalTextEmbedding("Li Yan Steward Song character dossier ledger trust"),
+      },
+    })
+  })
+
+  const context = await retrieveFactoryMemoryContext({
+    state: created.state,
+    task,
+    options: { factoryRootDir: tempDir, projectId: created.project.id },
+    continuityContract,
+  })
+
+  assert.match(context, /Factory Memory Recall/)
+  assert.match(context, /character_dossiers/)
+  assert.match(context, /Li Yan habit=presses the ledger corner/)
+})
+
 test("discussion context packet includes recalled memory from the factory database", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-discussion-rag-"))
   const { createManagedAutonomousProject, runMultiAgentDiscussion, withFactoryDb } = await loadCore()

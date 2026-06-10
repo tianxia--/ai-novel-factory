@@ -1904,6 +1904,40 @@ async function retrieveWritingKnowledgeContext(input: {
   }
 }
 
+export async function retrieveFactoryMemoryContext(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  options: ProductionPipelineOptions
+  continuityContract: ContinuityContract
+  limit?: number
+}) {
+  if (!input.options.factoryRootDir || !input.options.projectId) {
+    return ""
+  }
+  const query = [
+    input.state.project.title,
+    input.state.project.idea,
+    `Chapter ${input.task.chapterNumber}: ${input.task.title}`,
+    input.task.summary,
+    input.continuityContract.lockedProtagonistName || "",
+    "character_dossiers chapter_summary profile signal behavior speech appearance relationship",
+  ].filter(Boolean).join("\n")
+  return withFactoryDb(input.options.factoryRootDir, async (db) => {
+    const rows = db.recallMemory(input.options.projectId as string, query, input.limit ?? 5, {
+      embedding: createLocalTextEmbedding(query),
+    })
+    const selected = rows.filter((row) => ["character_dossiers", "chapter_summary"].includes(String(row.kind)))
+    if (!selected.length) return ""
+    return [
+      "Factory Memory Recall:",
+      ...selected.slice(0, input.limit ?? 5).map((row) => [
+        `- ${row.kind}: ${row.source}`,
+        String(row.content || "").slice(0, String(row.kind) === "character_dossiers" ? 900 : 420),
+      ].join("\n")),
+    ].join("\n")
+  }).catch(() => "")
+}
+
 function getArcLabel(state: AutonomousNovelState, chapterNumber: number) {
   const arcSize = Math.max(3, Math.ceil(state.plan.totalChapters / 4))
   const arcNumber = Math.ceil(chapterNumber / arcSize)
@@ -3415,6 +3449,16 @@ async function loadAndPruneGlobalContext(params: {
   let rawMemory = ""
   if (paths && previousChapterId) {
     rawMemory = await readOptionalText(path.join(paths.memoryDir, `${previousChapterId}-memory.md`))
+  }
+  const recalledMemory = await retrieveFactoryMemoryContext({
+    state,
+    task,
+    options: params.options,
+    continuityContract,
+    limit: 5,
+  })
+  if (recalledMemory) {
+    rawMemory = [rawMemory, recalledMemory].filter(Boolean).join("\n\n")
   }
 
   // 5. 组装 RAG
