@@ -6,7 +6,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-7EEWRIAK.js";
+} from "./chunk-G7UPZFSF.js";
 import {
   retrieveKnowledge
 } from "./chunk-HL3WMSH6.js";
@@ -658,12 +658,97 @@ function buildCreativeProfile(options) {
     characterProfileRequirements: Array.isArray(input.characterProfileRequirements) && input.characterProfileRequirements.length ? input.characterProfileRequirements.map((entry) => cleanProfileValue(entry, "")).filter(Boolean) : DEFAULT_CHARACTER_PROFILE_REQUIREMENTS
   };
 }
+function buildCharacterDossierSeed(input) {
+  const { now: now2, creativeProfile, projectIdea } = input;
+  const genre = creativeProfile.genre === "auto-inferred" ? "selected genre pending" : creativeProfile.genre;
+  const readerPromise = creativeProfile.readerPromise;
+  return [
+    {
+      id: "protagonist",
+      role: "protagonist",
+      canonicalName: "pending-protagonist-name",
+      aliases: ["\u4E3B\u89D2"],
+      identityAndRole: `Primary viewpoint carrier for: ${projectIdea}`,
+      coreDesire: `Must embody the reader promise: ${readerPromise}`,
+      fearOrWound: "pending wound that makes the central conflict personal",
+      contradiction: "pending contradiction between desire, fear, and visible behavior",
+      behaviorHabits: ["pending repeated gesture", "pending pressure reaction"],
+      speechMarkers: [creativeProfile.pointOfView, "pending address habit"],
+      appearanceAndBody: "pending memorable silhouette, body marker, posture, or sensory trait",
+      skills: ["pending unique competence tied to the conflict"],
+      limitations: ["pending cost or blind spot that blocks easy victory"],
+      relationshipState: "must be tracked through trust, debt, obligation, rivalry, or intimacy",
+      relationshipEdges: [
+        { targetId: "relationship-axis", label: "pressure mirror", pressure: "pending emotional or social pressure" },
+        { targetId: "antagonist-force", label: "opposition", pressure: "pending externalized conflict pressure" }
+      ],
+      arcTrajectory: "from initial wound/desire toward the final emotional payoff",
+      currentChapterDelta: "pending first chapter delta",
+      continuityNotes: [
+        `genre: ${genre}`,
+        `tone: ${creativeProfile.tone}`,
+        "Every chapter must reveal the protagonist through choice, action, habit, speech, body detail, and relationship pressure."
+      ],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    },
+    {
+      id: "antagonist-force",
+      role: "antagonist",
+      canonicalName: "pending-antagonist-or-pressure-force",
+      aliases: ["\u5BF9\u6297\u529B\u91CF"],
+      identityAndRole: "Opposition engine that turns the protagonist's desire into escalating cost.",
+      coreDesire: "pending desire that is understandable, not only evil or obstructive",
+      fearOrWound: "pending vulnerability or ideology that explains pressure style",
+      contradiction: "pending human contradiction that prevents a flat villain shape",
+      behaviorHabits: ["pending control habit"],
+      speechMarkers: ["pending status-coded speech marker"],
+      appearanceAndBody: "pending visual or behavioral marker readable in scene",
+      skills: ["pending leverage over world, resources, secrets, or relationships"],
+      limitations: ["pending blind spot the protagonist can eventually exploit"],
+      relationshipState: "pressures the protagonist through stakes, temptation, debt, rule, or intimacy.",
+      relationshipEdges: [
+        { targetId: "protagonist", label: "opposes", pressure: "must attack the protagonist's wound, desire, or core value" }
+      ],
+      arcTrajectory: "escalates from pressure signal to active opposition to final reckoning",
+      currentChapterDelta: "pending first visible pressure",
+      continuityNotes: ["Avoid generic antagonist labeling; show power through specific choices and consequences."],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    },
+    {
+      id: "relationship-axis",
+      role: "relationship-axis",
+      canonicalName: "pending-key-relationship-character",
+      aliases: ["\u5173\u952E\u5173\u7CFB\u5BF9\u8C61"],
+      identityAndRole: "A recurring ally, rival, intimate foil, family/debt figure, or witness who keeps the protagonist socially specific.",
+      coreDesire: "pending desire that can conflict with or illuminate the protagonist",
+      fearOrWound: "pending wound that shapes the relationship pressure",
+      contradiction: "pending contradiction that gives scenes friction",
+      behaviorHabits: ["pending relational habit"],
+      speechMarkers: ["pending address or silence pattern"],
+      appearanceAndBody: "pending concrete trait that prevents interchangeable supporting roles",
+      skills: ["pending useful competence"],
+      limitations: ["pending reason they cannot solve the plot alone"],
+      relationshipState: "must carry a changing trust, debt, secret, attraction, rivalry, duty, or betrayal state.",
+      relationshipEdges: [
+        { targetId: "protagonist", label: "relationship pressure", pressure: "must change across chapters and enter the memory ledger" }
+      ],
+      arcTrajectory: "turns relationship pressure into plot pressure instead of decorative companionship",
+      currentChapterDelta: "pending first relationship signal",
+      continuityNotes: ["Do not let supporting characters disappear after serving one function."],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    }
+  ];
+}
 function buildInitialState(options) {
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const title = options.title?.trim() || inferTitleFromIdea(options.idea);
   const projectIdea = options.idea.trim();
   const chapterTasks = buildChapterTasks(options.totalChapters, options.chapterWordTarget, projectIdea);
   const creativeProfile = buildCreativeProfile(options);
+  const characterDossiers = buildCharacterDossierSeed({ now: now2, creativeProfile, projectIdea });
   return {
     project: {
       title,
@@ -714,6 +799,9 @@ function buildInitialState(options) {
       pendingChapters: chapterTasks.length,
       chapterTasks
     },
+    memory: {
+      characterDossiers
+    },
     assets: {
       cover: {
         status: "pending",
@@ -748,6 +836,8 @@ function getWorkspacePaths(rootDir) {
     memoryDir: path3.join(workspaceDir, "memory"),
     charactersDir: path3.join(workspaceDir, "memory", "characters"),
     characterCoreDir: path3.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: path3.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: path3.join(workspaceDir, "memory", "characters", "dossiers.md"),
     protagonistPath: path3.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
     relationsPath: path3.join(workspaceDir, "memory", "characters", "relations.md"),
     characterEvolutionPath: path3.join(workspaceDir, "memory", "characters", "evolution.md"),
@@ -757,6 +847,46 @@ function getWorkspacePaths(rootDir) {
     chapterBlueprintsDir: path3.join(workspaceDir, "plans", "chapter-blueprints"),
     coverPromptPath: path3.join(workspaceDir, "assets", "cover", "cover-prompt.md")
   };
+}
+function formatCharacterDossier(dossier) {
+  return [
+    `## ${dossier.canonicalName}`,
+    "",
+    `- id: ${dossier.id}`,
+    `- role: ${dossier.role}`,
+    `- aliases: ${dossier.aliases.join(", ") || "none"}`,
+    `- identity and role: ${dossier.identityAndRole}`,
+    `- core desire: ${dossier.coreDesire}`,
+    `- fear or wound: ${dossier.fearOrWound}`,
+    `- contradiction: ${dossier.contradiction}`,
+    `- behavior habits: ${dossier.behaviorHabits.join("; ") || "pending"}`,
+    `- speech markers: ${dossier.speechMarkers.join("; ") || "pending"}`,
+    `- appearance and body: ${dossier.appearanceAndBody}`,
+    `- skills: ${dossier.skills.join("; ") || "pending"}`,
+    `- limitations: ${dossier.limitations.join("; ") || "pending"}`,
+    `- relationship state: ${dossier.relationshipState}`,
+    `- arc trajectory: ${dossier.arcTrajectory}`,
+    `- current chapter delta: ${dossier.currentChapterDelta}`,
+    "",
+    "Relationship edges:",
+    ...dossier.relationshipEdges.length ? dossier.relationshipEdges.map((edge) => `- ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}`) : ["- none"],
+    "",
+    "Continuity notes:",
+    ...dossier.continuityNotes.length ? dossier.continuityNotes.map((note) => `- ${note}`) : ["- none"],
+    "",
+    "Evidence:",
+    ...dossier.evidence.length ? dossier.evidence.map((item) => `- ${item}`) : ["- none"]
+  ].join("\n");
+}
+function formatCharacterDossierSummary(dossiers) {
+  return [
+    "# Character Dossiers",
+    "",
+    "This file is generated from the structured production character dossier state.",
+    "The JSON source of truth lives at `.ai-novel/memory/characters/dossiers.json`.",
+    "",
+    ...dossiers.flatMap((dossier) => [formatCharacterDossier(dossier), ""])
+  ].join("\n").trimEnd();
 }
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
@@ -768,6 +898,16 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     chapterWordTarget: state.plan.chapterWordTarget,
     title: state.project.title
   });
+  const characterDossiers = state.memory?.characterDossiers?.length ? state.memory.characterDossiers : buildCharacterDossierSeed({
+    now: state.project.createdAt,
+    creativeProfile,
+    projectIdea: state.project.idea
+  });
+  state.memory = {
+    ...state.memory || {},
+    characterDossiers
+  };
+  const protagonistDossier = characterDossiers.find((dossier) => dossier.role === "protagonist") || characterDossiers[0];
   await fs3.mkdir(paths.promptsDir, { recursive: true });
   await fs3.mkdir(paths.agentPromptsDir, { recursive: true });
   await fs3.mkdir(paths.plansDir, { recursive: true });
@@ -781,6 +921,7 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   llmConfig.writing.chapterWordTarget = state.plan.chapterWordTarget;
   llmConfig.writing.chapterWordMinimum = MIN_CHAPTER_WORD_TARGET;
   await writeJsonFileAtomic(paths.configPath, llmConfig);
+  await writeJsonFileAtomic(paths.characterDossiersPath, characterDossiers);
   const reactPrompt = [
     "# ReAct Worldbuilding Session",
     "",
@@ -922,6 +1063,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Project: ${state.project.title}`,
     `Core idea connection: ${state.project.idea}`,
     "",
+    "Structured production dossier:",
+    protagonistDossier ? formatCharacterDossier(protagonistDossier) : "- protagonist dossier missing",
+    "",
     "Required dossier fields:",
     "- canonical name pending",
     "- identity / role function: pending",
@@ -946,6 +1090,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   const relations = [
     "# Character Relations",
     "",
+    "Structured relationship edges:",
+    ...characterDossiers.flatMap((dossier) => dossier.relationshipEdges.length ? dossier.relationshipEdges.map((edge) => `- ${dossier.id} -> ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}`) : [`- ${dossier.id}: no relationship edge yet`]),
+    "",
     "Relationship graph slots:",
     "- protagonist: pending",
     "- ally axis: pending",
@@ -959,6 +1106,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   ].join("\n");
   const evolution = [
     "# Character Evolution Log",
+    "",
+    "Seeded production dossiers:",
+    ...characterDossiers.map((dossier) => `- ${dossier.id}: ${dossier.currentChapterDelta}`),
     "",
     "No chapter-driven character changes recorded yet.",
     "",
@@ -1022,6 +1172,8 @@ Current focus:
   await fs3.writeFile(paths.styleReferencesPath, `${styleReferences}
 `);
   await fs3.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
+`);
+  await fs3.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
 `);
   await fs3.writeFile(paths.protagonistPath, `${protagonistSeed}
 `);

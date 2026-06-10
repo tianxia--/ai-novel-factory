@@ -79,6 +79,33 @@ export interface CreativeProfile {
   characterProfileRequirements: string[]
 }
 
+export interface CharacterDossier {
+  id: string
+  role: "protagonist" | "deuteragonist" | "antagonist" | "supporting" | "relationship-axis"
+  canonicalName: string
+  aliases: string[]
+  identityAndRole: string
+  coreDesire: string
+  fearOrWound: string
+  contradiction: string
+  behaviorHabits: string[]
+  speechMarkers: string[]
+  appearanceAndBody: string
+  skills: string[]
+  limitations: string[]
+  relationshipState: string
+  relationshipEdges: Array<{
+    targetId: string
+    label: string
+    pressure: string
+  }>
+  arcTrajectory: string
+  currentChapterDelta: string
+  continuityNotes: string[]
+  evidence: string[]
+  updatedAt: string
+}
+
 export interface AutopilotRuntime {
   running: boolean
   stopRequested: boolean
@@ -123,6 +150,9 @@ export interface AutonomousNovelState {
     chapterWordTarget: number
     pendingChapters: number
     chapterTasks: ChapterTask[]
+  }
+  memory?: {
+    characterDossiers: CharacterDossier[]
   }
   assets: {
     cover: {

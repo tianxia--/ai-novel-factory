@@ -159,6 +159,8 @@ test("ai-novel init creates autonomous workspace and queued chapter tasks", asyn
   const styleProfilePath = path.join(tempDir, ".ai-novel", "style", "profile.md")
   const styleRulebookPath = path.join(tempDir, ".ai-novel", "style", "rulebook.md")
   const protagonistPath = path.join(tempDir, ".ai-novel", "memory", "characters", "core", "protagonist.md")
+  const characterDossiersPath = path.join(tempDir, ".ai-novel", "memory", "characters", "dossiers.json")
+  const characterDossiersMarkdownPath = path.join(tempDir, ".ai-novel", "memory", "characters", "dossiers.md")
 
   assert.match(await fs.readFile(consensusPath, "utf8"), /Global Consensus/i)
   assert.match(await fs.readFile(authorBasePath, "utf8"), /Author Base Prompt/i)
@@ -166,6 +168,10 @@ test("ai-novel init creates autonomous workspace and queued chapter tasks", asyn
   assert.match(await fs.readFile(styleProfilePath, "utf8"), /Style Profile/i)
   assert.match(await fs.readFile(styleRulebookPath, "utf8"), /Style Rulebook/i)
   assert.match(await fs.readFile(protagonistPath, "utf8"), /Protagonist Seed/i)
+  const characterDossiers = JSON.parse(await fs.readFile(characterDossiersPath, "utf8"))
+  assert.equal(characterDossiers.length, 3)
+  assert.ok(characterDossiers.some((dossier) => dossier.role === "protagonist" && /reader promise/i.test(dossier.coreDesire)))
+  assert.match(await fs.readFile(characterDossiersMarkdownPath, "utf8"), /Structured production character dossier state/i)
 
   const superGraphPath = path.join(tempDir, ".ai-novel", "graph", "super-graph.json")
   const superGraph = JSON.parse(await fs.readFile(superGraphPath, "utf8"))
@@ -1267,6 +1273,8 @@ test("studio project api creates isolated projects and requires selection when m
   assert.equal(firstCreate.payload.state.project.creativeProfile.readerPromise, "mystery")
   assert.equal(firstCreate.payload.state.project.creativeProfile.naturalnessTarget, "strict")
   assert.ok(firstCreate.payload.state.project.creativeProfile.characterProfileRequirements.includes("speech marker"))
+  assert.equal(firstCreate.payload.state.memory.characterDossiers.length, 3)
+  assert.ok(firstCreate.payload.state.memory.characterDossiers.some((dossier) => dossier.role === "antagonist"))
 
   const firstCreateStatus = await handleNovelStudioApi(tempDir, "GET", "/api/status", {}, { projectId: firstCreate.payload.projectId })
   assert.equal(firstCreateStatus.status, 200)
@@ -1276,6 +1284,9 @@ test("studio project api creates isolated projects and requires selection when m
   assert.match(styleProfile, /genre: suspense/)
   assert.match(styleProfile, /reader promise: mystery/)
   assert.match(styleProfile, /naturalness target: strict/)
+  const managedDossiers = JSON.parse(await fs.readFile(path.join(tempDir, ".ai-novel-projects", firstCreate.payload.projectId, ".ai-novel", "memory", "characters", "dossiers.json"), "utf8"))
+  assert.equal(managedDossiers[0].id, "protagonist")
+  assert.match(managedDossiers[0].coreDesire, /mystery/)
 
   const managedChat = await handleNovelStudioApi(tempDir, "POST", "/api/chat-stream", {
     projectId: firstCreate.payload.projectId,
@@ -3883,10 +3894,12 @@ test("ai-novel advance executes real workflow steps and writes planning artifact
     "utf8",
   )
   assert.match(memory, /Memory Update/i)
+  assert.match(memory, /Structured Character Dossier Carryover/i)
 
   const state = JSON.parse(
     await fs.readFile(path.join(tempDir, ".ai-novel", "state.json"), "utf8"),
   )
+  assert.ok(state.memory.characterDossiers.some((dossier) => dossier.id === "relationship-axis"))
   assert.notEqual(state.plan.chapterTasks[0].status, "pending")
   assert.equal(state.plan.pendingChapters, state.plan.totalChapters - 1)
   assert.equal(state.runtime.lastRoute, "drafting")

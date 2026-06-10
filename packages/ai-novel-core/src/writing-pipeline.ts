@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import type { AutonomousNovelState } from "./cli-types"
+import type { AutonomousNovelState, CharacterDossier } from "./cli-types"
 import { createLocalTextEmbedding } from "./embedding"
 import { withFactoryDb } from "./factory-db"
 import { agentTypeFromLabel, createAgentMessage, createArtifactMessage, type MessagePart, type MessageStatus } from "./messages"
@@ -22,6 +22,7 @@ export interface NovelWorkspacePaths {
   styleReferencesPath: string
   styleAntiPatternsPath: string
   consensusPath: string
+  characterDossiersPath?: string
   protagonistPath: string
   relationsPath: string
   characterEvolutionPath: string
@@ -128,6 +129,7 @@ export interface CharacterProfileContract {
   requiredFields: string[]
   knownCast: string[]
   missingSignals: string[]
+  dossierBrief: string
   profileBrief: string
   prompt: string
 }
@@ -172,6 +174,38 @@ async function readOptionalText(filePath: string) {
   } catch {
     return ""
   }
+}
+
+async function readCharacterDossiers(filePath?: string): Promise<CharacterDossier[]> {
+  if (!filePath) return []
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf8"))
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is CharacterDossier => (
+      entry && typeof entry === "object" && typeof entry.id === "string"
+    )) : []
+  } catch {
+    return []
+  }
+}
+
+function compactList(values: string[] = [], limit = 3) {
+  return values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .join("; ") || "pending"
+}
+
+function summarizeCharacterDossiers(dossiers: CharacterDossier[] = [], limit = 6) {
+  return dossiers.slice(0, limit).map((dossier) => [
+    `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
+    `  identity=${dossier.identityAndRole}`,
+    `  desire=${dossier.coreDesire}; wound=${dossier.fearOrWound}`,
+    `  habits=${compactList(dossier.behaviorHabits)}; speech=${compactList(dossier.speechMarkers)}`,
+    `  body=${dossier.appearanceAndBody}`,
+    `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
+    `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`,
+  ].join("\n")).join("\n")
 }
 
 function relativeArtifactPath(projectRoot: string, absolutePath: string) {
@@ -550,6 +584,7 @@ function enforceFinalDraftQualityGate(
   state: AutonomousNovelState,
   protagonistProfile = "",
   continuityContract = createContinuityContract({ state, task, protagonistProfile }),
+  characterDossiers?: CharacterDossier[],
 ) {
   const finalWordCount = wordCount(finalDraft)
   const targetWords = task.targetWords
@@ -623,6 +658,7 @@ function enforceFinalDraftQualityGate(
     state,
     task,
     protagonistProfile,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: finalDraft,
   })
@@ -1677,12 +1713,18 @@ function buildCharacterProfileContract(input: {
   state: AutonomousNovelState
   task: AutonomousNovelState["plan"]["chapterTasks"][number]
   protagonistProfile?: string
+  characterDossiers?: CharacterDossier[]
   continuityContract: ContinuityContract
   previousMemory?: string
   previousFinalDraft?: string
   blueprint?: string
 }): CharacterProfileContract {
+  const characterDossiers = input.characterDossiers?.length
+    ? input.characterDossiers
+    : input.state.memory?.characterDossiers || []
+  const dossierBrief = summarizeCharacterDossiers(characterDossiers)
   const source = [
+    dossierBrief,
     input.protagonistProfile || "",
     input.previousMemory || "",
     input.previousFinalDraft || "",
@@ -1692,8 +1734,9 @@ function buildCharacterProfileContract(input: {
   const knownCast = uniqueStrings([
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.knownCast,
+    ...characterDossiers.flatMap((dossier) => [dossier.canonicalName, ...dossier.aliases]),
     ...extractChinesePersonNames(source, 40),
-  ].filter(Boolean)).slice(0, 24)
+  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name)))).slice(0, 24)
   const fieldPatterns: Array<[string, RegExp]> = [
     ["身份/角色功能", /身份|职业|地位|立场|角色功能|阵营|出身/u],
     ["核心欲望", /欲望|目标|想要|渴望|执念|野心|追求/u],
@@ -1747,6 +1790,9 @@ function buildCharacterProfileContract(input: {
     "### Missing Signals",
     ...(missingSignals.length ? missingSignals.map((field) => `- ${field}`) : ["- none"]),
     "",
+    "### Structured Dossier Brief",
+    dossierBrief || "- no structured dossiers available",
+    "",
     "### Profile Brief",
     profileBrief || "- 暂无角色档案正文；本章必须建立可追踪角色档案。",
   ].join("\n")
@@ -1755,6 +1801,7 @@ function buildCharacterProfileContract(input: {
     requiredFields: CHARACTER_PROFILE_REQUIRED_FIELDS,
     knownCast,
     missingSignals,
+    dossierBrief,
     profileBrief,
     prompt,
   }
@@ -3145,6 +3192,7 @@ async function createDraftBody(
   continuityContract = createContinuityContract({ state, task, blueprint }),
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
+  characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
   if (continuityContract.status === "blocked") {
@@ -3154,6 +3202,7 @@ async function createDraftBody(
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: blueprint,
     blueprint,
@@ -3393,6 +3442,7 @@ async function createDraftBody(
 	  draft: string,
 	  blueprint: string,
 	  continuityContract = createContinuityContract({ state, task, blueprint }),
+	  characterDossiers?: CharacterDossier[],
 	) {
 	  const count = wordCount(draft)
 	  const target = task.targetWords
@@ -3404,6 +3454,7 @@ async function createDraftBody(
 	  const characterProfileContract = buildCharacterProfileContract({
 	    state,
 	    task,
+	    characterDossiers,
 	    continuityContract,
 	    previousFinalDraft: draft,
 	    blueprint,
@@ -3484,6 +3535,7 @@ function appendQualityHardChecks(
   draft: string,
   continuityContract?: ContinuityContract,
   state?: AutonomousNovelState,
+  characterDossiers?: CharacterDossier[],
 ) {
   const count = wordCount(draft)
   const target = task.targetWords
@@ -3500,6 +3552,7 @@ function appendQualityHardChecks(
 	    ? buildCharacterProfileContract({
 	      state,
 	      task,
+	      characterDossiers,
 	      continuityContract,
 	      previousFinalDraft: draft,
 	    })
@@ -3552,9 +3605,18 @@ async function createProductionQualityReport(
   resources: ProductionWritingResources,
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task, blueprint }),
+  characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
-  const fallback = createQualityReport(state, task, draft, blueprint)
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: draft,
+    blueprint,
+  })
+  const fallback = createQualityReport(state, task, draft, blueprint, continuityContract, characterDossiers)
   if (process.env.AI_NOVEL_TEST_MODE === "1" || !shouldUseLlmQualityPass(options)) {
     return fallback
   }
@@ -3599,6 +3661,8 @@ async function createProductionQualityReport(
       "",
       continuityContract.prompt,
       "",
+      characterProfileContract.prompt,
+      "",
       "## Draft",
       draft,
     ].join("\n"),
@@ -3607,7 +3671,7 @@ async function createProductionQualityReport(
   const report = generated.includes("Chapter Quality Report")
     ? generated
     : `${fallback}\n\n---\n\n## LLM Editor Notes\n${generated}`
-  return appendQualityHardChecks(report, task, draft, continuityContract, state)
+  return appendQualityHardChecks(report, task, draft, continuityContract, state, characterDossiers)
 }
 
 async function reviseDraftForQualityGate(
@@ -3622,6 +3686,7 @@ async function reviseDraftForQualityGate(
   continuityContract = createContinuityContract({ state, task, blueprint }),
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
+  characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
@@ -3651,6 +3716,14 @@ async function reviseDraftForQualityGate(
     "必须修复流水账问题：不要只按时间罗列，所有场景都要因选择、代价、信息变化或关系变化而发生。",
     "必须修复 AI 化碎片：把孤立短词改成完整动作、感官、对话或因果句。",
   ]
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: draft,
+    blueprint,
+  })
 
   const fixedDynamicPromptLines = [
     `章节：第 ${task.chapterNumber} 章`,
@@ -3662,6 +3735,8 @@ async function reviseDraftForQualityGate(
     `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
     "",
     continuityContract.prompt,
+    "",
+    characterProfileContract.prompt,
   ]
 
   const basePromptText = basePromptLines.join("\n\n")
@@ -3743,6 +3818,7 @@ async function runQualityGateWithRevisions(
   continuityContract = createContinuityContract({ state, task, blueprint }),
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
+  characterDossiers?: CharacterDossier[],
 ) {
   const maxAttempts = options.maxRevisionAttempts !== undefined ? options.maxRevisionAttempts : 3
   let draft = initialDraft
@@ -3757,7 +3833,7 @@ async function runQualityGateWithRevisions(
 
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options)
-    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract)
+    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers)
     if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
       report = report.replace(/综合评分 \| \d+\/10/u, `综合评分 | ${options.forceQualityScoreForTest}/10`)
       if (options.forceQualityScoreForTest < 7 && !report.includes("需要返工")) {
@@ -3781,7 +3857,8 @@ async function runQualityGateWithRevisions(
       attempt + 1,
       continuityContract,
       paths,
-      projectRoot
+      projectRoot,
+      characterDossiers
     )
   }
 
@@ -3834,11 +3911,13 @@ async function createProductionPolishedDraft(
   resources: ProductionWritingResources,
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task }),
+  characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: draft,
   })
@@ -3931,6 +4010,7 @@ function createChapterMemoryUpdate(
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   finalDraft: string,
   continuityContract = createContinuityContract({ state, task }),
+  characterDossiers?: CharacterDossier[],
 ) {
   const nextAnchors = extractContinuityAnchors({
     text: finalDraft,
@@ -3943,6 +4023,7 @@ function createChapterMemoryUpdate(
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: finalDraft,
   })
@@ -3985,6 +4066,9 @@ function createChapterMemoryUpdate(
     `- Missing profile signals: ${characterProfileContract.missingSignals.length ? characterProfileContract.missingSignals.join("、") : "none"}`,
     "- Required fields for each important character: identity, desire, fear/wound, habit, speech style, appearance/body marker, skill/limit, relationship state, chapter delta.",
     "- Next chapter must preserve these profile signals and add missing fields through action/dialogue rather than exposition.",
+    "",
+    "## Structured Character Dossier Carryover",
+    characterProfileContract.dossierBrief || "- no structured dossier carryover available",
     "",
     "## Foreshadowing",
     ...(nextAnchors.length
@@ -4183,6 +4267,7 @@ export async function runChapterProductionPipeline(
   const writingMode = productionWritingMode(options)
   const resources = await loadProductionWritingResources(projectRoot)
   const protagonistProfile = await readOptionalText(paths.protagonistPath)
+  const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath)
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : ""
   const previousMemory = previousChapterId
@@ -4271,7 +4356,7 @@ export async function runChapterProductionPipeline(
       : "Canon 连续性合同已载入：首章将锁定唯一主角，并建立后续角色/情节账本。",
     preview: continuityContract.prompt.slice(0, 720),
   })
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot)
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -4285,7 +4370,7 @@ export async function runChapterProductionPipeline(
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft),
   })
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot)
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "quality_gate_completed",
@@ -4303,8 +4388,8 @@ export async function runChapterProductionPipeline(
   })
   const finalDraft = gate.status === "blocked"
     ? createPolishedDraft(state, task, draft, report, gate, writingMode)
-    : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract)
-  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract)
+    : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers)
+  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -4330,7 +4415,7 @@ export async function runChapterProductionPipeline(
     wordCount: wordCount(finalDraft),
     qualityGate: finalGate,
   })
-  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract)
+  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract, characterDossiers)
   throwIfPipelineAborted(options)
 
   const draftPath = path.join(paths.chaptersDir, `${chapterId}.draft.md`)

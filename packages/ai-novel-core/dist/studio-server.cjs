@@ -4414,6 +4414,29 @@ async function readOptionalText(filePath) {
     return "";
   }
 }
+async function readCharacterDossiers(filePath) {
+  if (!filePath) return [];
+  try {
+    const parsed = JSON.parse(await import_promises4.default.readFile(filePath, "utf8"));
+    return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function compactList(values = [], limit = 3) {
+  return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
+}
+function summarizeCharacterDossiers(dossiers = [], limit = 6) {
+  return dossiers.slice(0, limit).map((dossier) => [
+    `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
+    `  identity=${dossier.identityAndRole}`,
+    `  desire=${dossier.coreDesire}; wound=${dossier.fearOrWound}`,
+    `  habits=${compactList(dossier.behaviorHabits)}; speech=${compactList(dossier.speechMarkers)}`,
+    `  body=${dossier.appearanceAndBody}`,
+    `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
+    `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`
+  ].join("\n")).join("\n");
+}
 function relativeArtifactPath(projectRoot, absolutePath) {
   return import_node_path6.default.relative(projectRoot, absolutePath).replaceAll(import_node_path6.default.sep, "/");
 }
@@ -4736,7 +4759,7 @@ function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
     targetWords
   };
 }
-function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile = "", continuityContract = createContinuityContract({ state, task, protagonistProfile })) {
+function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile = "", continuityContract = createContinuityContract({ state, task, protagonistProfile }), characterDossiers) {
   const finalWordCount = wordCount(finalDraft);
   const targetWords = task.targetWords;
   const minimumPassWords = Math.floor(targetWords * 0.8);
@@ -4805,6 +4828,7 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
     state,
     task,
     protagonistProfile,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: finalDraft
   });
@@ -5600,7 +5624,10 @@ var CHARACTER_PROFILE_REQUIRED_FIELDS = [
   "\u7AE0\u8282\u72B6\u6001\u53D8\u5316"
 ];
 function buildCharacterProfileContract(input) {
+  const characterDossiers = input.characterDossiers?.length ? input.characterDossiers : input.state.memory?.characterDossiers || [];
+  const dossierBrief = summarizeCharacterDossiers(characterDossiers);
   const source = [
+    dossierBrief,
     input.protagonistProfile || "",
     input.previousMemory || "",
     input.previousFinalDraft || "",
@@ -5610,8 +5637,9 @@ function buildCharacterProfileContract(input) {
   const knownCast = uniqueStrings([
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.knownCast,
+    ...characterDossiers.flatMap((dossier) => [dossier.canonicalName, ...dossier.aliases]),
     ...extractChinesePersonNames(source, 40)
-  ].filter(Boolean)).slice(0, 24);
+  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name)))).slice(0, 24);
   const fieldPatterns = [
     ["\u8EAB\u4EFD/\u89D2\u8272\u529F\u80FD", /身份|职业|地位|立场|角色功能|阵营|出身/u],
     ["\u6838\u5FC3\u6B32\u671B", /欲望|目标|想要|渴望|执念|野心|追求/u],
@@ -5654,6 +5682,9 @@ function buildCharacterProfileContract(input) {
     "### Missing Signals",
     ...missingSignals.length ? missingSignals.map((field) => `- ${field}`) : ["- none"],
     "",
+    "### Structured Dossier Brief",
+    dossierBrief || "- no structured dossiers available",
+    "",
     "### Profile Brief",
     profileBrief || "- \u6682\u65E0\u89D2\u8272\u6863\u6848\u6B63\u6587\uFF1B\u672C\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u53EF\u8FFD\u8E2A\u89D2\u8272\u6863\u6848\u3002"
   ].join("\n");
@@ -5662,6 +5693,7 @@ function buildCharacterProfileContract(input) {
     requiredFields: CHARACTER_PROFILE_REQUIRED_FIELDS,
     knownCast,
     missingSignals,
+    dossierBrief,
     profileBrief,
     prompt
   };
@@ -6873,7 +6905,7 @@ function trimBlueprintForDrafting(blueprint) {
   }
   return trimmed;
 }
-async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
+async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
   throwIfPipelineAborted(options);
   if (continuityContract.status === "blocked") {
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`);
@@ -6882,6 +6914,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: blueprint,
     blueprint
@@ -7084,7 +7117,7 @@ ${prunedContext.previousDraftFragment}` : "",
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n");
 }
-function createQualityReport(state, task, draft, blueprint, continuityContract = createContinuityContract({ state, task, blueprint })) {
+function createQualityReport(state, task, draft, blueprint, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers) {
   const count = wordCount(draft);
   const target = task.targetWords;
   const minimumPassWords = Math.floor(target * 0.8);
@@ -7095,6 +7128,7 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: draft,
     blueprint
@@ -7157,7 +7191,7 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     ]
   ].join("\n");
 }
-function appendQualityHardChecks(report, task, draft, continuityContract, state) {
+function appendQualityHardChecks(report, task, draft, continuityContract, state, characterDossiers) {
   const count = wordCount(draft);
   const target = task.targetWords;
   const continuityFixes = continuityContract ? continuityContract.requiredNames.filter((name) => !draft.includes(name)).map((name) => `- \u9700\u8981\u8FD4\u5DE5\uFF1ACanon \u8FDE\u7EED\u6027\u5931\u8D25\uFF0C\u6B63\u6587\u672A\u51FA\u73B0\u5FC5\u9700\u4EBA\u7269\u300C${name}\u300D\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`) : [];
@@ -7166,6 +7200,7 @@ function appendQualityHardChecks(report, task, draft, continuityContract, state)
   const characterProfileContract = continuityContract && state ? buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: draft
   }) : null;
@@ -7200,9 +7235,17 @@ function appendQualityHardChecks(report, task, draft, continuityContract, state)
   ];
   return [report.trimEnd(), ...hardFixes].join("\n");
 }
-async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint })) {
+async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers) {
   throwIfPipelineAborted(options);
-  const fallback = createQualityReport(state, task, draft, blueprint);
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: draft,
+    blueprint
+  });
+  const fallback = createQualityReport(state, task, draft, blueprint, continuityContract, characterDossiers);
   if (process.env.AI_NOVEL_TEST_MODE === "1" || !shouldUseLlmQualityPass(options)) {
     return fallback;
   }
@@ -7244,6 +7287,8 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
       "",
       continuityContract.prompt,
       "",
+      characterProfileContract.prompt,
+      "",
       "## Draft",
       draft
     ].join("\n")
@@ -7254,9 +7299,9 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
 
 ## LLM Editor Notes
 ${generated}`;
-  return appendQualityHardChecks(report, task, draft, continuityContract, state);
+  return appendQualityHardChecks(report, task, draft, continuityContract, state, characterDossiers);
 }
-async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
+async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
   throwIfPipelineAborted(options);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return [
@@ -7280,6 +7325,14 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
     "\u5FC5\u987B\u4FEE\u590D\u6D41\u6C34\u8D26\u95EE\u9898\uFF1A\u4E0D\u8981\u53EA\u6309\u65F6\u95F4\u7F57\u5217\uFF0C\u6240\u6709\u573A\u666F\u90FD\u8981\u56E0\u9009\u62E9\u3001\u4EE3\u4EF7\u3001\u4FE1\u606F\u53D8\u5316\u6216\u5173\u7CFB\u53D8\u5316\u800C\u53D1\u751F\u3002",
     "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002"
   ];
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: draft,
+    blueprint
+  });
   const fixedDynamicPromptLines = [
     `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
     `\u6807\u9898\uFF1A${task.title}`,
@@ -7292,7 +7345,9 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
 ${report.slice(0, 1500)}
 \u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
     "",
-    continuityContract.prompt
+    continuityContract.prompt,
+    "",
+    characterProfileContract.prompt
   ];
   const basePromptText = basePromptLines.join("\n\n");
   const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n");
@@ -7365,7 +7420,7 @@ ${prunedContext.previousDraftFragment}` : "",
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n");
 }
-async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot) {
+async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
   const maxAttempts = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
   let draft = initialDraft;
   let report = "";
@@ -7378,7 +7433,7 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
   };
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options);
-    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract);
+    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers);
     if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
       report = report.replace(/综合评分 \| \d+\/10/u, `\u7EFC\u5408\u8BC4\u5206 | ${options.forceQualityScoreForTest}/10`);
       if (options.forceQualityScoreForTest < 7 && !report.includes("\u9700\u8981\u8FD4\u5DE5")) {
@@ -7401,7 +7456,8 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
       attempt + 1,
       continuityContract,
       paths,
-      projectRoot
+      projectRoot,
+      characterDossiers
     );
   }
   return { draft, report, gate };
@@ -7432,11 +7488,12 @@ function createPolishedDraft(state, task, draft, report, gate = parseQualityGate
     `- Chapter: ${task.chapterNumber}`
   ].join("\n");
 }
-async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task })) {
+async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: draft
   });
@@ -7520,7 +7577,7 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
 
 ${formatNaturalnessReport(naturalnessReport)}`;
 }
-function createChapterMemoryUpdate(state, task, finalDraft, continuityContract = createContinuityContract({ state, task })) {
+function createChapterMemoryUpdate(state, task, finalDraft, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
   const nextAnchors = extractContinuityAnchors({
     text: finalDraft,
     lockedProtagonistName: continuityContract.lockedProtagonistName,
@@ -7532,6 +7589,7 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
+    characterDossiers,
     continuityContract,
     previousFinalDraft: finalDraft
   });
@@ -7570,6 +7628,9 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     `- Missing profile signals: ${characterProfileContract.missingSignals.length ? characterProfileContract.missingSignals.join("\u3001") : "none"}`,
     "- Required fields for each important character: identity, desire, fear/wound, habit, speech style, appearance/body marker, skill/limit, relationship state, chapter delta.",
     "- Next chapter must preserve these profile signals and add missing fields through action/dialogue rather than exposition.",
+    "",
+    "## Structured Character Dossier Carryover",
+    characterProfileContract.dossierBrief || "- no structured dossier carryover available",
     "",
     "## Foreshadowing",
     ...nextAnchors.length ? nextAnchors.slice(0, 8).map((anchor) => `- Continuity anchor: ${anchor}`) : ["- Continuity anchor: \u672C\u7AE0\u672A\u62BD\u53D6\u5230\u660E\u786E\u951A\u70B9\uFF0C\u4E0B\u4E00\u8F6E\u5FC5\u987B\u4EBA\u5DE5/\u6A21\u578B\u8865\u8DB3\u7269\u54C1\u3001\u7EBF\u7D22\u3001\u5173\u7CFB\u6216\u4EE3\u4EF7\u3002"],
@@ -7734,6 +7795,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   const writingMode = productionWritingMode(options);
   const resources = await loadProductionWritingResources(projectRoot);
   const protagonistProfile = await readOptionalText(paths.protagonistPath);
+  const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
   const previousMemory = previousChapterId ? await readOptionalText(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
@@ -7815,7 +7877,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     message: continuityContract.lockedProtagonistName ? `Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u672C\u7AE0\u9501\u5B9A\u4E3B\u89D2\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u5E76\u8FFD\u8E2A\u914D\u89D2\u3001\u60C5\u8282\u548C\u4F0F\u7B14\u3002` : "Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u9996\u7AE0\u5C06\u9501\u5B9A\u552F\u4E00\u4E3B\u89D2\uFF0C\u5E76\u5EFA\u7ACB\u540E\u7EED\u89D2\u8272/\u60C5\u8282\u8D26\u672C\u3002",
     preview: continuityContract.prompt.slice(0, 720)
   });
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot);
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -7827,7 +7889,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft)
   });
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot);
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "quality_gate_completed",
@@ -7839,8 +7901,8 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: report.slice(0, 420),
     qualityGate: gate
   });
-  const finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract);
-  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract);
+  const finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers);
+  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -7864,7 +7926,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     wordCount: wordCount(finalDraft),
     qualityGate: finalGate
   });
-  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract);
+  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract, characterDossiers);
   throwIfPipelineAborted(options);
   const draftPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
   const reviewedPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
@@ -8234,12 +8296,97 @@ function buildCreativeProfile(options) {
     characterProfileRequirements: Array.isArray(input.characterProfileRequirements) && input.characterProfileRequirements.length ? input.characterProfileRequirements.map((entry) => cleanProfileValue(entry, "")).filter(Boolean) : DEFAULT_CHARACTER_PROFILE_REQUIREMENTS
   };
 }
+function buildCharacterDossierSeed(input) {
+  const { now: now2, creativeProfile, projectIdea } = input;
+  const genre = creativeProfile.genre === "auto-inferred" ? "selected genre pending" : creativeProfile.genre;
+  const readerPromise = creativeProfile.readerPromise;
+  return [
+    {
+      id: "protagonist",
+      role: "protagonist",
+      canonicalName: "pending-protagonist-name",
+      aliases: ["\u4E3B\u89D2"],
+      identityAndRole: `Primary viewpoint carrier for: ${projectIdea}`,
+      coreDesire: `Must embody the reader promise: ${readerPromise}`,
+      fearOrWound: "pending wound that makes the central conflict personal",
+      contradiction: "pending contradiction between desire, fear, and visible behavior",
+      behaviorHabits: ["pending repeated gesture", "pending pressure reaction"],
+      speechMarkers: [creativeProfile.pointOfView, "pending address habit"],
+      appearanceAndBody: "pending memorable silhouette, body marker, posture, or sensory trait",
+      skills: ["pending unique competence tied to the conflict"],
+      limitations: ["pending cost or blind spot that blocks easy victory"],
+      relationshipState: "must be tracked through trust, debt, obligation, rivalry, or intimacy",
+      relationshipEdges: [
+        { targetId: "relationship-axis", label: "pressure mirror", pressure: "pending emotional or social pressure" },
+        { targetId: "antagonist-force", label: "opposition", pressure: "pending externalized conflict pressure" }
+      ],
+      arcTrajectory: "from initial wound/desire toward the final emotional payoff",
+      currentChapterDelta: "pending first chapter delta",
+      continuityNotes: [
+        `genre: ${genre}`,
+        `tone: ${creativeProfile.tone}`,
+        "Every chapter must reveal the protagonist through choice, action, habit, speech, body detail, and relationship pressure."
+      ],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    },
+    {
+      id: "antagonist-force",
+      role: "antagonist",
+      canonicalName: "pending-antagonist-or-pressure-force",
+      aliases: ["\u5BF9\u6297\u529B\u91CF"],
+      identityAndRole: "Opposition engine that turns the protagonist's desire into escalating cost.",
+      coreDesire: "pending desire that is understandable, not only evil or obstructive",
+      fearOrWound: "pending vulnerability or ideology that explains pressure style",
+      contradiction: "pending human contradiction that prevents a flat villain shape",
+      behaviorHabits: ["pending control habit"],
+      speechMarkers: ["pending status-coded speech marker"],
+      appearanceAndBody: "pending visual or behavioral marker readable in scene",
+      skills: ["pending leverage over world, resources, secrets, or relationships"],
+      limitations: ["pending blind spot the protagonist can eventually exploit"],
+      relationshipState: "pressures the protagonist through stakes, temptation, debt, rule, or intimacy.",
+      relationshipEdges: [
+        { targetId: "protagonist", label: "opposes", pressure: "must attack the protagonist's wound, desire, or core value" }
+      ],
+      arcTrajectory: "escalates from pressure signal to active opposition to final reckoning",
+      currentChapterDelta: "pending first visible pressure",
+      continuityNotes: ["Avoid generic antagonist labeling; show power through specific choices and consequences."],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    },
+    {
+      id: "relationship-axis",
+      role: "relationship-axis",
+      canonicalName: "pending-key-relationship-character",
+      aliases: ["\u5173\u952E\u5173\u7CFB\u5BF9\u8C61"],
+      identityAndRole: "A recurring ally, rival, intimate foil, family/debt figure, or witness who keeps the protagonist socially specific.",
+      coreDesire: "pending desire that can conflict with or illuminate the protagonist",
+      fearOrWound: "pending wound that shapes the relationship pressure",
+      contradiction: "pending contradiction that gives scenes friction",
+      behaviorHabits: ["pending relational habit"],
+      speechMarkers: ["pending address or silence pattern"],
+      appearanceAndBody: "pending concrete trait that prevents interchangeable supporting roles",
+      skills: ["pending useful competence"],
+      limitations: ["pending reason they cannot solve the plot alone"],
+      relationshipState: "must carry a changing trust, debt, secret, attraction, rivalry, duty, or betrayal state.",
+      relationshipEdges: [
+        { targetId: "protagonist", label: "relationship pressure", pressure: "must change across chapters and enter the memory ledger" }
+      ],
+      arcTrajectory: "turns relationship pressure into plot pressure instead of decorative companionship",
+      currentChapterDelta: "pending first relationship signal",
+      continuityNotes: ["Do not let supporting characters disappear after serving one function."],
+      evidence: ["seeded at project creation"],
+      updatedAt: now2
+    }
+  ];
+}
 function buildInitialState(options) {
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const title = options.title?.trim() || inferTitleFromIdea(options.idea);
   const projectIdea = options.idea.trim();
   const chapterTasks = buildChapterTasks(options.totalChapters, options.chapterWordTarget, projectIdea);
   const creativeProfile = buildCreativeProfile(options);
+  const characterDossiers = buildCharacterDossierSeed({ now: now2, creativeProfile, projectIdea });
   return {
     project: {
       title,
@@ -8290,6 +8437,9 @@ function buildInitialState(options) {
       pendingChapters: chapterTasks.length,
       chapterTasks
     },
+    memory: {
+      characterDossiers
+    },
     assets: {
       cover: {
         status: "pending",
@@ -8324,6 +8474,8 @@ function getWorkspacePaths(rootDir) {
     memoryDir: import_node_path8.default.join(workspaceDir, "memory"),
     charactersDir: import_node_path8.default.join(workspaceDir, "memory", "characters"),
     characterCoreDir: import_node_path8.default.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
     protagonistPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
     relationsPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "relations.md"),
     characterEvolutionPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "evolution.md"),
@@ -8333,6 +8485,46 @@ function getWorkspacePaths(rootDir) {
     chapterBlueprintsDir: import_node_path8.default.join(workspaceDir, "plans", "chapter-blueprints"),
     coverPromptPath: import_node_path8.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
   };
+}
+function formatCharacterDossier(dossier) {
+  return [
+    `## ${dossier.canonicalName}`,
+    "",
+    `- id: ${dossier.id}`,
+    `- role: ${dossier.role}`,
+    `- aliases: ${dossier.aliases.join(", ") || "none"}`,
+    `- identity and role: ${dossier.identityAndRole}`,
+    `- core desire: ${dossier.coreDesire}`,
+    `- fear or wound: ${dossier.fearOrWound}`,
+    `- contradiction: ${dossier.contradiction}`,
+    `- behavior habits: ${dossier.behaviorHabits.join("; ") || "pending"}`,
+    `- speech markers: ${dossier.speechMarkers.join("; ") || "pending"}`,
+    `- appearance and body: ${dossier.appearanceAndBody}`,
+    `- skills: ${dossier.skills.join("; ") || "pending"}`,
+    `- limitations: ${dossier.limitations.join("; ") || "pending"}`,
+    `- relationship state: ${dossier.relationshipState}`,
+    `- arc trajectory: ${dossier.arcTrajectory}`,
+    `- current chapter delta: ${dossier.currentChapterDelta}`,
+    "",
+    "Relationship edges:",
+    ...dossier.relationshipEdges.length ? dossier.relationshipEdges.map((edge) => `- ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}`) : ["- none"],
+    "",
+    "Continuity notes:",
+    ...dossier.continuityNotes.length ? dossier.continuityNotes.map((note) => `- ${note}`) : ["- none"],
+    "",
+    "Evidence:",
+    ...dossier.evidence.length ? dossier.evidence.map((item) => `- ${item}`) : ["- none"]
+  ].join("\n");
+}
+function formatCharacterDossierSummary(dossiers) {
+  return [
+    "# Character Dossiers",
+    "",
+    "This file is generated from the structured production character dossier state.",
+    "The JSON source of truth lives at `.ai-novel/memory/characters/dossiers.json`.",
+    "",
+    ...dossiers.flatMap((dossier) => [formatCharacterDossier(dossier), ""])
+  ].join("\n").trimEnd();
 }
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
@@ -8344,6 +8536,16 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     chapterWordTarget: state.plan.chapterWordTarget,
     title: state.project.title
   });
+  const characterDossiers = state.memory?.characterDossiers?.length ? state.memory.characterDossiers : buildCharacterDossierSeed({
+    now: state.project.createdAt,
+    creativeProfile,
+    projectIdea: state.project.idea
+  });
+  state.memory = {
+    ...state.memory || {},
+    characterDossiers
+  };
+  const protagonistDossier = characterDossiers.find((dossier) => dossier.role === "protagonist") || characterDossiers[0];
   await import_promises6.default.mkdir(paths.promptsDir, { recursive: true });
   await import_promises6.default.mkdir(paths.agentPromptsDir, { recursive: true });
   await import_promises6.default.mkdir(paths.plansDir, { recursive: true });
@@ -8357,6 +8559,7 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   llmConfig.writing.chapterWordTarget = state.plan.chapterWordTarget;
   llmConfig.writing.chapterWordMinimum = MIN_CHAPTER_WORD_TARGET;
   await writeJsonFileAtomic(paths.configPath, llmConfig);
+  await writeJsonFileAtomic(paths.characterDossiersPath, characterDossiers);
   const reactPrompt = [
     "# ReAct Worldbuilding Session",
     "",
@@ -8498,6 +8701,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Project: ${state.project.title}`,
     `Core idea connection: ${state.project.idea}`,
     "",
+    "Structured production dossier:",
+    protagonistDossier ? formatCharacterDossier(protagonistDossier) : "- protagonist dossier missing",
+    "",
     "Required dossier fields:",
     "- canonical name pending",
     "- identity / role function: pending",
@@ -8522,6 +8728,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   const relations = [
     "# Character Relations",
     "",
+    "Structured relationship edges:",
+    ...characterDossiers.flatMap((dossier) => dossier.relationshipEdges.length ? dossier.relationshipEdges.map((edge) => `- ${dossier.id} -> ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}`) : [`- ${dossier.id}: no relationship edge yet`]),
+    "",
     "Relationship graph slots:",
     "- protagonist: pending",
     "- ally axis: pending",
@@ -8535,6 +8744,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
   ].join("\n");
   const evolution = [
     "# Character Evolution Log",
+    "",
+    "Seeded production dossiers:",
+    ...characterDossiers.map((dossier) => `- ${dossier.id}: ${dossier.currentChapterDelta}`),
     "",
     "No chapter-driven character changes recorded yet.",
     "",
@@ -8598,6 +8810,8 @@ Current focus:
   await import_promises6.default.writeFile(paths.styleReferencesPath, `${styleReferences}
 `);
   await import_promises6.default.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
+`);
+  await import_promises6.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
 `);
   await import_promises6.default.writeFile(paths.protagonistPath, `${protagonistSeed}
 `);

@@ -1,4 +1,4 @@
-import { A as AutonomousNovelState } from './cli-types-BFji0j2e.js';
+import { A as AutonomousNovelState } from './cli-types-B17O02vG.js';
 
 type NovelDirectorCommand = {
     id: string;

@@ -1,5 +1,5 @@
-import { K as KnowledgeScope, a as KnowledgeRecallRow } from './factory-db-HB5lPUCU.js';
-import './cli-types-BFji0j2e.js';
+import { K as KnowledgeScope, a as KnowledgeRecallRow } from './factory-db-D-IFvtpa.js';
+import './cli-types-B17O02vG.js';
 import './messages.js';
 
 interface KnowledgeChunkDraft {

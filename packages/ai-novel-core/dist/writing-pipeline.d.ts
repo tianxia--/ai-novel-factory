@@ -1,4 +1,4 @@
-import { A as AutonomousNovelState } from './cli-types-BFji0j2e.js';
+import { A as AutonomousNovelState } from './cli-types-B17O02vG.js';
 
 interface NovelWorkspacePaths {
     workspaceDir: string;
@@ -12,6 +12,7 @@ interface NovelWorkspacePaths {
     styleReferencesPath: string;
     styleAntiPatternsPath: string;
     consensusPath: string;
+    characterDossiersPath?: string;
     protagonistPath: string;
     relationsPath: string;
     characterEvolutionPath: string;
@@ -108,6 +109,7 @@ interface CharacterProfileContract {
     requiredFields: string[];
     knownCast: string[];
     missingSignals: string[];
+    dossierBrief: string;
     profileBrief: string;
     prompt: string;
 }

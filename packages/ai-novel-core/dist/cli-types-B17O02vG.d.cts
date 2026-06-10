@@ -63,6 +63,32 @@ interface CreativeProfile {
     styleFingerprint: string;
     characterProfileRequirements: string[];
 }
+interface CharacterDossier {
+    id: string;
+    role: "protagonist" | "deuteragonist" | "antagonist" | "supporting" | "relationship-axis";
+    canonicalName: string;
+    aliases: string[];
+    identityAndRole: string;
+    coreDesire: string;
+    fearOrWound: string;
+    contradiction: string;
+    behaviorHabits: string[];
+    speechMarkers: string[];
+    appearanceAndBody: string;
+    skills: string[];
+    limitations: string[];
+    relationshipState: string;
+    relationshipEdges: Array<{
+        targetId: string;
+        label: string;
+        pressure: string;
+    }>;
+    arcTrajectory: string;
+    currentChapterDelta: string;
+    continuityNotes: string[];
+    evidence: string[];
+    updatedAt: string;
+}
 interface AutopilotRuntime {
     running: boolean;
     stopRequested: boolean;
@@ -106,6 +132,9 @@ interface AutonomousNovelState {
         chapterWordTarget: number;
         pendingChapters: number;
         chapterTasks: ChapterTask[];
+    };
+    memory?: {
+        characterDossiers: CharacterDossier[];
     };
     assets: {
         cover: {
@@ -159,4 +188,4 @@ interface NovelProjectRecord {
     };
 }
 
-export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CausalChapterPlan as d, InitProjectOptions as e, InterruptOptions as f, InterruptionScope as g };
+export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CausalChapterPlan as d, CharacterDossier as e, InitProjectOptions as f, InterruptOptions as g, InterruptionScope as h };
