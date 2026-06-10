@@ -4005,6 +4005,10 @@ test("ai-novel chat runs visible multi-agent discussion and updates consensus", 
   const protagonistPath = path.join(tempDir, ".ai-novel", "memory", "characters", "core", "protagonist.md")
   const protagonist = await fs.readFile(protagonistPath, "utf8")
   assert.match(protagonist, /冷静克制/i)
+  const characterDossiers = JSON.parse(await fs.readFile(path.join(tempDir, ".ai-novel", "memory", "characters", "dossiers.json"), "utf8"))
+  const protagonistDossier = characterDossiers.find((dossier) => dossier.id === "protagonist")
+  assert.match(protagonistDossier.currentChapterDelta, /冷静克制/i)
+  assert.ok(protagonistDossier.evidence.some((entry) => /冷静克制/.test(entry)))
 })
 
 test("ai-novel chat routes status, workflow, and interruption style messages", async () => {

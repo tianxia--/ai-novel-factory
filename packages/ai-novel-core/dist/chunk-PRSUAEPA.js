@@ -2237,6 +2237,21 @@ async function readOptionalText2(filePath) {
     return "";
   }
 }
+async function readCharacterDossiers(filePath) {
+  try {
+    const parsed = JSON.parse(await readText(filePath));
+    return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+async function writeJsonFileAtomic2(filePath, value) {
+  await fs4.mkdir(path4.dirname(filePath), { recursive: true });
+  const tempPath = path4.join(path4.dirname(filePath), `.${path4.basename(filePath)}.${Date.now()}.tmp`);
+  await fs4.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+`);
+  await fs4.rename(tempPath, filePath);
+}
 function appendSection(current, heading, bullet) {
   if (current.includes(heading)) {
     return `${current.trimEnd()}
@@ -2248,6 +2263,55 @@ function appendSection(current, heading, bullet) {
 ${heading}
 - ${bullet}
 `;
+}
+function appendUnique(values = [], next, limit = 10) {
+  const normalized = next.trim();
+  if (!normalized) return values.slice(0, limit);
+  return [...values.filter((value) => value !== normalized), normalized].slice(-limit);
+}
+function compactList(values = [], limit = 3) {
+  return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
+}
+function formatCharacterDossiersMarkdown(dossiers) {
+  return [
+    "# Character Dossiers",
+    "",
+    "This file is generated from the structured production character dossier state.",
+    "",
+    ...dossiers.slice(0, 12).map((dossier) => [
+      `## ${dossier.canonicalName}`,
+      `- id: ${dossier.id}`,
+      `- role: ${dossier.role}`,
+      `- aliases: ${dossier.aliases.join(", ") || "none"}`,
+      `- identity and role: ${dossier.identityAndRole}`,
+      `- core desire: ${dossier.coreDesire}`,
+      `- fear or wound: ${dossier.fearOrWound}`,
+      `- habits: ${compactList(dossier.behaviorHabits)}`,
+      `- speech: ${compactList(dossier.speechMarkers)}`,
+      `- relationship state: ${dossier.relationshipState}`,
+      `- current chapter delta: ${dossier.currentChapterDelta}`,
+      `- latest evidence: ${dossier.evidence.slice(-2).join(" | ") || "none"}`
+    ].join("\n"))
+  ].join("\n\n");
+}
+function updateCharacterDossiersFromDiscussion(input) {
+  if (input.targetKind !== "character" && !/主角|角色|人物|性格|character|protagonist/i.test(input.message)) {
+    return [];
+  }
+  const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const evidence = `discussion ${input.runId}: ${input.message}`.slice(0, 240);
+  const continuityNote = `discussion ${input.runId}: ${input.summary.replace(/\s+/g, " ").slice(0, 220)}`;
+  return input.dossiers.map((dossier) => {
+    const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist";
+    if (!isProtagonist) return dossier;
+    return {
+      ...dossier,
+      currentChapterDelta: `discussion: ${input.message}`,
+      continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
+      evidence: appendUnique(dossier.evidence, evidence),
+      updatedAt
+    };
+  });
 }
 function sanitizeConsensusForDiscussion(consensus) {
   const blockedPatterns = [
@@ -2602,6 +2666,8 @@ async function runMultiAgentDiscussion(rootDir, message, options = {}) {
   const statePath = workspacePath2(rootDir, "state.json");
   const consensusPath = workspacePath2(rootDir, "prompts", "global-consensus.md");
   const protagonistPath = workspacePath2(rootDir, "memory", "characters", "core", "protagonist.md");
+  const characterDossiersPath = workspacePath2(rootDir, "memory", "characters", "dossiers.json");
+  const characterDossiersMarkdownPath = workspacePath2(rootDir, "memory", "characters", "dossiers.md");
   const styleProfilePath = workspacePath2(rootDir, "style", "profile.md");
   const discussionDir = workspacePath2(rootDir, "chat");
   const discussionLogPath = path4.join(discussionDir, "discussion-log.md");
@@ -2949,6 +3015,20 @@ Reason: ${stageGuard.reason}
   const updatedConsensus = buildCompactConsensus(state, guardedSummary);
   const currentProtagonist = await readText(protagonistPath);
   const updatedProtagonist = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate);
+  const currentDossiers = state.memory?.characterDossiers?.length ? state.memory.characterDossiers : await readCharacterDossiers(characterDossiersPath);
+  const updatedDossiers = updateCharacterDossiersFromDiscussion({
+    dossiers: currentDossiers,
+    targetKind: discussionTarget.kind,
+    message,
+    summary: guardedSummary,
+    runId
+  });
+  if (updatedDossiers.length) {
+    state.memory = {
+      ...state.memory || {},
+      characterDossiers: updatedDossiers
+    };
+  }
   const currentStyle = await readText(styleProfilePath);
   const updatedStyle = appendSection(
     currentStyle,
@@ -2971,6 +3051,11 @@ Reason: ${stageGuard.reason}
   state.runtime.statusMessage = `\u5DF2\u5B8C\u6210${discussionTarget.label}\uFF0C\u5171\u8BC6\u5DF2\u5199\u56DE ${discussionTarget.assetPath}\u3002`;
   await fs4.writeFile(consensusPath, updatedConsensus);
   await fs4.writeFile(protagonistPath, updatedProtagonist);
+  if (updatedDossiers.length) {
+    await writeJsonFileAtomic2(characterDossiersPath, updatedDossiers);
+    await fs4.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedDossiers)}
+`);
+  }
   await fs4.writeFile(styleProfilePath, updatedStyle);
   await saveAutonomousState(rootDir, state);
   if (factoryDb && options.projectId) {
@@ -2989,6 +3074,15 @@ Reason: ${stageGuard.reason}
       status: "completed",
       metadata: { runId, summary: guardedSummary, directorCommandId: options.directorCommandId ?? null }
     });
+    if (updatedDossiers.length) {
+      factoryDb.recordArtifact({
+        projectId: options.projectId,
+        kind: "memory",
+        path: ".ai-novel/memory/characters/dossiers.json",
+        status: "completed",
+        metadata: { runId, target: discussionTarget, source: "discussion_writeback", directorCommandId: options.directorCommandId ?? null }
+      });
+    }
     factoryDb.recordArtifact({
       projectId: options.projectId,
       kind: "consensus",

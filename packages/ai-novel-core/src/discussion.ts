@@ -7,7 +7,7 @@ import { upsertDiscussionInSuperGraph } from "./super-graph"
 import { FactoryDb, makeAgentTurnId, makeRunId, targetToArtifactKind } from "./factory-db"
 import { createLocalTextEmbedding } from "./embedding"
 import { createAgentMessage, type MessagePart } from "./messages"
-import type { AutonomousNovelState } from "./cli-types"
+import type { AutonomousNovelState, CharacterDossier } from "./cli-types"
 import { throwIfStopped } from "./abort"
 import { formatKnowledgeForPrompt, retrieveKnowledge } from "./knowledge"
 import { buildStoryCoreContext, buildHistoryForAgent } from "./context-budget"
@@ -39,12 +39,89 @@ async function readOptionalText(filePath: string) {
   }
 }
 
+async function readCharacterDossiers(filePath: string): Promise<CharacterDossier[]> {
+  try {
+    const parsed = JSON.parse(await readText(filePath))
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is CharacterDossier => (
+      entry && typeof entry === "object" && typeof entry.id === "string"
+    )) : []
+  } catch {
+    return []
+  }
+}
+
+async function writeJsonFileAtomic(filePath: string, value: unknown) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${Date.now()}.tmp`)
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`)
+  await fs.rename(tempPath, filePath)
+}
+
 function appendSection(current: string, heading: string, bullet: string) {
   if (current.includes(heading)) {
     return `${current.trimEnd()}\n- ${bullet}\n`
   }
 
   return `${current.trimEnd()}\n\n${heading}\n- ${bullet}\n`
+}
+
+function appendUnique(values: string[] = [], next: string, limit = 10) {
+  const normalized = next.trim()
+  if (!normalized) return values.slice(0, limit)
+  return [...values.filter((value) => value !== normalized), normalized].slice(-limit)
+}
+
+function compactList(values: string[] = [], limit = 3) {
+  return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending"
+}
+
+function formatCharacterDossiersMarkdown(dossiers: CharacterDossier[]) {
+  return [
+    "# Character Dossiers",
+    "",
+    "This file is generated from the structured production character dossier state.",
+    "",
+    ...dossiers.slice(0, 12).map((dossier) => [
+      `## ${dossier.canonicalName}`,
+      `- id: ${dossier.id}`,
+      `- role: ${dossier.role}`,
+      `- aliases: ${dossier.aliases.join(", ") || "none"}`,
+      `- identity and role: ${dossier.identityAndRole}`,
+      `- core desire: ${dossier.coreDesire}`,
+      `- fear or wound: ${dossier.fearOrWound}`,
+      `- habits: ${compactList(dossier.behaviorHabits)}`,
+      `- speech: ${compactList(dossier.speechMarkers)}`,
+      `- relationship state: ${dossier.relationshipState}`,
+      `- current chapter delta: ${dossier.currentChapterDelta}`,
+      `- latest evidence: ${dossier.evidence.slice(-2).join(" | ") || "none"}`,
+    ].join("\n")),
+  ].join("\n\n")
+}
+
+function updateCharacterDossiersFromDiscussion(input: {
+  dossiers: CharacterDossier[]
+  targetKind: string
+  message: string
+  summary: string
+  runId: string
+}) {
+  if (input.targetKind !== "character" && !/主角|角色|人物|性格|character|protagonist/i.test(input.message)) {
+    return []
+  }
+  const updatedAt = new Date().toISOString()
+  const evidence = `discussion ${input.runId}: ${input.message}`.slice(0, 240)
+  const continuityNote = `discussion ${input.runId}: ${input.summary.replace(/\s+/g, " ").slice(0, 220)}`
+  return input.dossiers.map((dossier) => {
+    const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist"
+    if (!isProtagonist) return dossier
+    return {
+      ...dossier,
+      currentChapterDelta: `discussion: ${input.message}`,
+      continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
+      evidence: appendUnique(dossier.evidence, evidence),
+      updatedAt,
+    }
+  })
 }
 
 function sanitizeConsensusForDiscussion(consensus: string) {
@@ -533,6 +610,8 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
   const statePath = workspacePath(rootDir, "state.json")
   const consensusPath = workspacePath(rootDir, "prompts", "global-consensus.md")
   const protagonistPath = workspacePath(rootDir, "memory", "characters", "core", "protagonist.md")
+  const characterDossiersPath = workspacePath(rootDir, "memory", "characters", "dossiers.json")
+  const characterDossiersMarkdownPath = workspacePath(rootDir, "memory", "characters", "dossiers.md")
   const styleProfilePath = workspacePath(rootDir, "style", "profile.md")
   const discussionDir = workspacePath(rootDir, "chat")
   const discussionLogPath = path.join(discussionDir, "discussion-log.md")
@@ -899,6 +978,22 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
   const updatedConsensus = buildCompactConsensus(state, guardedSummary)
   const currentProtagonist = await readText(protagonistPath)
   const updatedProtagonist = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate)
+  const currentDossiers = state.memory?.characterDossiers?.length
+    ? state.memory.characterDossiers
+    : await readCharacterDossiers(characterDossiersPath)
+  const updatedDossiers = updateCharacterDossiersFromDiscussion({
+    dossiers: currentDossiers,
+    targetKind: discussionTarget.kind,
+    message,
+    summary: guardedSummary,
+    runId,
+  })
+  if (updatedDossiers.length) {
+    state.memory = {
+      ...(state.memory || {}),
+      characterDossiers: updatedDossiers,
+    }
+  }
 
   const currentStyle = await readText(styleProfilePath)
   const updatedStyle = appendSection(
@@ -924,6 +1019,10 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
 
   await fs.writeFile(consensusPath, updatedConsensus)
   await fs.writeFile(protagonistPath, updatedProtagonist)
+  if (updatedDossiers.length) {
+    await writeJsonFileAtomic(characterDossiersPath, updatedDossiers)
+    await fs.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedDossiers)}\n`)
+  }
   await fs.writeFile(styleProfilePath, updatedStyle)
   await saveAutonomousState(rootDir, state)
   if (factoryDb && options.projectId) {
@@ -942,6 +1041,15 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
       status: "completed",
       metadata: { runId, summary: guardedSummary, directorCommandId: options.directorCommandId ?? null },
     })
+    if (updatedDossiers.length) {
+      factoryDb.recordArtifact({
+        projectId: options.projectId,
+        kind: "memory",
+        path: ".ai-novel/memory/characters/dossiers.json",
+        status: "completed",
+        metadata: { runId, target: discussionTarget, source: "discussion_writeback", directorCommandId: options.directorCommandId ?? null },
+      })
+    }
     factoryDb.recordArtifact({
       projectId: options.projectId,
       kind: "consensus",
