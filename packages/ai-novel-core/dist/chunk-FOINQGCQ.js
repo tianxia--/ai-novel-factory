@@ -2009,6 +2009,86 @@ function evaluateWritingResourceUsage(text = "", state, task, blueprint = "", co
 function extractNarrativeBody(text = "") {
   return text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
 }
+function extractNumberFacts(text = "", limit = 10) {
+  return uniqueStrings(text.match(/[第]?\d+(?:[.\d]*)?(?:章|年|月|日|天|夜|次|人|两|个|枚|封|件|步|里|刻|分|成|钱|两|万|千|百)?/gu) || []).filter((fact) => /[0-9]/u.test(fact)).slice(0, limit);
+}
+function extractNegatedFacts(text = "", limit = 10) {
+  return uniqueStrings(
+    text.split(/[。！？!?；;\n]+/u).map((line) => line.trim()).filter((line) => /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(line)).map((line) => conciseEvidence(line, 120))
+  ).slice(0, limit);
+}
+function chineseNgrams(value, size) {
+  const compact = value.replace(/[^\p{Script=Han}0-9]+/gu, "");
+  const grams = [];
+  for (let index = 0; index <= compact.length - size; index += 1) {
+    grams.push(compact.slice(index, index + size));
+  }
+  return grams;
+}
+function hasNegatedFactEcho(afterBody, fact) {
+  const keywords = uniqueStrings([
+    ...chineseNgrams(fact, 2),
+    ...chineseNgrams(fact, 3),
+    ...fact.match(/\d+(?:[.\d]*)?/gu) || []
+  ]).filter((word) => !/不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应|必须|只是|已经|仍然/u.test(word));
+  if (keywords.length < 3) {
+    return /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(afterBody);
+  }
+  const matchedKeywords = keywords.filter((word) => afterBody.includes(word)).length;
+  return matchedKeywords >= Math.min(5, Math.max(3, Math.floor(keywords.length * 0.18))) && /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(afterBody);
+}
+function extractSemanticFactAnchors(input) {
+  const names = uniqueStrings([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.requiredNames,
+    ...input.continuityContract.knownCast,
+    ...input.characterProfileContract.knownCast
+  ].filter(Boolean)).slice(0, 16);
+  const anchors = uniqueStrings([
+    ...input.continuityContract.continuityAnchors,
+    ...input.continuityContract.hardRules,
+    ...input.continuityContract.previousChapterLedger.filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line))
+  ]).slice(0, 18);
+  return {
+    names,
+    anchors,
+    numbers: extractNumberFacts(input.text),
+    negatedFacts: extractNegatedFacts(input.text)
+  };
+}
+function evaluateSemanticPreservation(input) {
+  const beforeBody = extractNarrativeBody(input.beforeDraft);
+  const afterBody = extractNarrativeBody(input.afterDraft);
+  const facts = extractSemanticFactAnchors({
+    text: beforeBody,
+    continuityContract: input.continuityContract,
+    characterProfileContract: input.characterProfileContract
+  });
+  const requiredFacts = uniqueStrings([
+    ...facts.names,
+    ...facts.anchors
+  ]).slice(0, 24);
+  const missingFacts = requiredFacts.filter((fact) => fact && beforeBody.includes(fact) && !afterBody.includes(fact)).slice(0, 12);
+  const missingNumbers = facts.numbers.filter((fact) => beforeBody.includes(fact) && !afterBody.includes(fact)).slice(0, 6);
+  const missingNegatedFacts = facts.negatedFacts.filter((fact) => fact.length >= 6 && !hasNegatedFactEcho(afterBody, fact)).slice(0, 6);
+  const changedFacts = uniqueStrings([
+    ...missingNumbers.map((fact) => `\u6570\u5B57/\u6570\u91CF\u4E8B\u5B9E\u4E22\u5931\uFF1A${fact}`),
+    ...missingNegatedFacts.map((fact) => `\u5426\u5B9A\u7EA6\u675F\u4E22\u5931\uFF1A${fact}`)
+  ]).slice(0, 10);
+  const preservedFacts = uniqueStrings([
+    ...requiredFacts.filter((fact) => afterBody.includes(fact)),
+    ...facts.numbers.filter((fact) => afterBody.includes(fact)).map((fact) => `number:${fact}`),
+    ...facts.negatedFacts.filter((fact) => afterBody.includes(fact)).map((fact) => `negation:${fact}`)
+  ]).slice(0, 16);
+  const status = changedFacts.length > 0 || missingFacts.length >= 2 ? "drifted" : missingFacts.length === 1 ? "at_risk" : "preserved";
+  return {
+    status,
+    missingFacts,
+    changedFacts,
+    preservedFacts,
+    reason: status === "preserved" ? "\u8BED\u4E49\u4FDD\u771F\u901A\u8FC7\uFF1A\u81EA\u7136\u5316\u540E\u4FDD\u7559\u4E86\u9501\u5B9A\u89D2\u8272\u3001\u8FDE\u7EED\u6027\u951A\u70B9\u3001\u6570\u91CF\u4E8B\u5B9E\u548C\u5426\u5B9A\u7EA6\u675F\u3002" : `\u8BED\u4E49\u4FDD\u771F${status === "drifted" ? "\u5931\u8D25" : "\u6709\u98CE\u9669"}\uFF1A${[...missingFacts, ...changedFacts].slice(0, 4).join("\uFF1B")}`
+  };
+}
 function createNaturalnessReport(input) {
   const body = extractNarrativeBody(input.afterDraft);
   const sentences = body.split(/[。！？!?；;\n]+/u).map((part) => part.trim()).filter(Boolean);
@@ -2022,15 +2102,24 @@ function createNaturalnessReport(input) {
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract);
   const styleQuality = evaluateNarrativeStyleQuality(input.afterDraft);
   const plotContinuity = evaluatePlotContinuityBridge(input.afterDraft, input.task, input.continuityContract);
+  const semanticPreservation = evaluateSemanticPreservation({
+    beforeDraft: input.beforeDraft,
+    afterDraft: input.afterDraft,
+    continuityContract: input.continuityContract,
+    characterProfileContract: input.characterProfileContract
+  });
   const preservedFacts = uniqueStrings([
+    ...semanticPreservation.preservedFacts,
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.requiredNames,
     ...input.continuityContract.continuityAnchors.filter((anchor) => input.afterDraft.includes(anchor))
-  ].filter(Boolean)).slice(0, 12);
+  ].filter(Boolean)).slice(0, 16);
   const riskFlags = [
     ...styleQuality.status === "quarantined" ? [styleQuality.reason] : [],
     ...plotContinuity.status === "quarantined" ? [plotContinuity.reason] : [],
     ...characterPresence.status === "quarantined" ? [characterPresence.reason] : [],
+    ...semanticPreservation.status === "drifted" ? [semanticPreservation.reason] : [],
+    ...semanticPreservation.status === "at_risk" ? [semanticPreservation.reason] : [],
     ...aiSummarySignals >= 3 ? [`\u603B\u7ED3\u8154/AI \u65C1\u767D\u4FE1\u53F7\u8FC7\u591A\uFF1A${aiSummarySignals}`] : [],
     ...analyticSignals >= 5 ? [`\u5206\u6790\u62A5\u544A\u8154\u4FE1\u53F7\u8FC7\u591A\uFF1A${analyticSignals}`] : [],
     ...emotionLabelSignals > Math.max(8, Math.floor(wordTotal / 450)) && actionSignals < emotionLabelSignals ? [`\u60C5\u7EEA\u6807\u7B7E\u591A\u4E8E\u52A8\u4F5C\u5916\u5316\uFF1Aemotion=${emotionLabelSignals}, action=${actionSignals}`] : [],
@@ -2039,7 +2128,7 @@ function createNaturalnessReport(input) {
   ];
   const changedBlocks = input.beforeDraft === input.afterDraft ? 0 : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length) + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)));
   const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)));
-  const status = riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag)) ? "blocked" : score >= 7 ? "passed" : "needs_revision";
+  const status = semanticPreservation.status === "drifted" ? "blocked" : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag)) ? "blocked" : score >= 7 ? "passed" : "needs_revision";
   return {
     status,
     score,
@@ -2047,9 +2136,11 @@ function createNaturalnessReport(input) {
     changedBlocks,
     riskFlags,
     preservedFacts,
+    semanticPreservation,
     patchSummary: [
       changedBlocks > 0 ? `\u6587\u672C\u53D1\u751F\u7EA6 ${changedBlocks} \u4E2A\u5757\u7EA7\u53D8\u5316\u3002` : "\u672A\u53D1\u751F\u5757\u7EA7\u53D8\u5316\u6216\u4F7F\u7528\u786E\u5B9A\u6027\u6574\u7406\u7A3F\u3002",
       `\u5BF9\u767D\u6570\uFF1A${dialogueCount}\uFF1B\u52A8\u4F5C\u4FE1\u53F7\uFF1A${actionSignals}\uFF1B\u611F\u5B98\u4FE1\u53F7\uFF1A${sensorySignals}\u3002`,
+      semanticPreservation.reason,
       characterPresence.reason
     ]
   };
@@ -2062,6 +2153,12 @@ function formatNaturalnessReport(report) {
     `- Reason: ${report.reason}`,
     `- Changed blocks: ${report.changedBlocks}`,
     `- Preserved facts: ${report.preservedFacts.length ? report.preservedFacts.join("\u3001") : "none"}`,
+    "",
+    "### Semantic Preservation",
+    `- Status: ${report.semanticPreservation.status}`,
+    `- Reason: ${report.semanticPreservation.reason}`,
+    `- Missing facts: ${report.semanticPreservation.missingFacts.length ? report.semanticPreservation.missingFacts.join("\u3001") : "none"}`,
+    `- Changed facts: ${report.semanticPreservation.changedFacts.length ? report.semanticPreservation.changedFacts.join("\u3001") : "none"}`,
     "",
     "### Risk Flags",
     ...report.riskFlags.length ? report.riskFlags.map((flag) => `- ${flag}`) : ["- none"],
@@ -4846,6 +4943,7 @@ export {
   inferGenreProfile,
   evaluateNarrativeStyleQuality,
   evaluateWritingResourceUsage,
+  evaluateSemanticPreservation,
   evaluatePlotContinuityBridge,
   retrieveFactoryMemoryContext,
   evaluateCharacterProfilePresence,

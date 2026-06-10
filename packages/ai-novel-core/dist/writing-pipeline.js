@@ -6,6 +6,7 @@ import {
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   inferGenreProfile,
   loadProductionWritingResources,
@@ -15,7 +16,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-ODXSCIZD.js";
+} from "./chunk-FOINQGCQ.js";
 import "./chunk-HL3WMSH6.js";
 import "./chunk-CRFEPMYG.js";
 import "./chunk-GZKJNHMN.js";
@@ -27,6 +28,7 @@ export {
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   inferGenreProfile,
   loadProductionWritingResources,

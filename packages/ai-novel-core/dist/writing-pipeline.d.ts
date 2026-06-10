@@ -121,7 +121,15 @@ interface NaturalnessReport {
     changedBlocks: number;
     riskFlags: string[];
     preservedFacts: string[];
+    semanticPreservation: SemanticPreservationReport;
     patchSummary: string[];
+}
+interface SemanticPreservationReport {
+    status: "preserved" | "at_risk" | "drifted";
+    missingFacts: string[];
+    changedFacts: string[];
+    preservedFacts: string[];
+    reason: string;
 }
 declare function parseQualityGate(report: string, attempts?: number, maxAttempts?: number): QualityGateResult;
 declare function inferGenreProfile(state: AutonomousNovelState): {
@@ -151,6 +159,12 @@ declare function evaluateWritingResourceUsage(text?: string, state?: AutonomousN
     reason: string;
     matchedTerms: string[];
 };
+declare function evaluateSemanticPreservation(input: {
+    beforeDraft: string;
+    afterDraft: string;
+    continuityContract: ContinuityContract;
+    characterProfileContract: CharacterProfileContract;
+}): SemanticPreservationReport;
 declare function evaluatePlotContinuityBridge(finalDraft: string, task: AutonomousNovelState["plan"]["chapterTasks"][number], continuityContract: ContinuityContract): {
     status: "eligible";
     reason: string;
@@ -238,4 +252,4 @@ declare function runChapterProductionPipeline(projectRoot: string, paths: NovelW
     writingMode: ProductionWritingMode;
 }>;
 
-export { type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateCharacterProfilePresence, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateWritingResourceUsage, inferGenreProfile, loadProductionWritingResources, parseQualityGate, retrieveFactoryMemoryContext, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };
+export { type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type SemanticPreservationReport, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateCharacterProfilePresence, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateSemanticPreservation, evaluateWritingResourceUsage, inferGenreProfile, loadProductionWritingResources, parseQualityGate, retrieveFactoryMemoryContext, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };

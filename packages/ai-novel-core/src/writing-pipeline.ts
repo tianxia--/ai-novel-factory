@@ -142,7 +142,16 @@ export interface NaturalnessReport {
   changedBlocks: number
   riskFlags: string[]
   preservedFacts: string[]
+  semanticPreservation: SemanticPreservationReport
   patchSummary: string[]
+}
+
+export interface SemanticPreservationReport {
+  status: "preserved" | "at_risk" | "drifted"
+  missingFacts: string[]
+  changedFacts: string[]
+  preservedFacts: string[]
+  reason: string
 }
 
 function currentBundleDir() {
@@ -1746,6 +1755,116 @@ function extractNarrativeBody(text = "") {
     .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
 }
 
+function extractNumberFacts(text = "", limit = 10) {
+  return uniqueStrings(text.match(/[第]?\d+(?:[.\d]*)?(?:章|年|月|日|天|夜|次|人|两|个|枚|封|件|步|里|刻|分|成|钱|两|万|千|百)?/gu) || [])
+    .filter((fact) => /[0-9]/u.test(fact))
+    .slice(0, limit)
+}
+
+function extractNegatedFacts(text = "", limit = 10) {
+  return uniqueStrings(
+    text
+      .split(/[。！？!?；;\n]+/u)
+      .map((line) => line.trim())
+      .filter((line) => /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(line))
+      .map((line) => conciseEvidence(line, 120)),
+  ).slice(0, limit)
+}
+
+function chineseNgrams(value: string, size: 2 | 3) {
+  const compact = value.replace(/[^\p{Script=Han}0-9]+/gu, "")
+  const grams: string[] = []
+  for (let index = 0; index <= compact.length - size; index += 1) {
+    grams.push(compact.slice(index, index + size))
+  }
+  return grams
+}
+
+function hasNegatedFactEcho(afterBody: string, fact: string) {
+  const keywords = uniqueStrings([
+    ...chineseNgrams(fact, 2),
+    ...chineseNgrams(fact, 3),
+    ...(fact.match(/\d+(?:[.\d]*)?/gu) || []),
+  ]).filter((word) => !/不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应|必须|只是|已经|仍然/u.test(word))
+  if (keywords.length < 3) {
+    return /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(afterBody)
+  }
+  const matchedKeywords = keywords.filter((word) => afterBody.includes(word)).length
+  return matchedKeywords >= Math.min(5, Math.max(3, Math.floor(keywords.length * 0.18)))
+    && /不能|不得|不要|没有|未曾|不会|不许|禁止|无法|不再|不应/u.test(afterBody)
+}
+
+function extractSemanticFactAnchors(input: {
+  text: string
+  continuityContract: ContinuityContract
+  characterProfileContract: CharacterProfileContract
+}) {
+  const names = uniqueStrings([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.requiredNames,
+    ...input.continuityContract.knownCast,
+    ...input.characterProfileContract.knownCast,
+  ].filter(Boolean)).slice(0, 16)
+  const anchors = uniqueStrings([
+    ...input.continuityContract.continuityAnchors,
+    ...input.continuityContract.hardRules,
+    ...input.continuityContract.previousChapterLedger.filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line)),
+  ]).slice(0, 18)
+  return {
+    names,
+    anchors,
+    numbers: extractNumberFacts(input.text),
+    negatedFacts: extractNegatedFacts(input.text),
+  }
+}
+
+export function evaluateSemanticPreservation(input: {
+  beforeDraft: string
+  afterDraft: string
+  continuityContract: ContinuityContract
+  characterProfileContract: CharacterProfileContract
+}): SemanticPreservationReport {
+  const beforeBody = extractNarrativeBody(input.beforeDraft)
+  const afterBody = extractNarrativeBody(input.afterDraft)
+  const facts = extractSemanticFactAnchors({
+    text: beforeBody,
+    continuityContract: input.continuityContract,
+    characterProfileContract: input.characterProfileContract,
+  })
+  const requiredFacts = uniqueStrings([
+    ...facts.names,
+    ...facts.anchors,
+  ]).slice(0, 24)
+  const missingFacts = requiredFacts.filter((fact) => fact && beforeBody.includes(fact) && !afterBody.includes(fact)).slice(0, 12)
+  const missingNumbers = facts.numbers.filter((fact) => beforeBody.includes(fact) && !afterBody.includes(fact)).slice(0, 6)
+  const missingNegatedFacts = facts.negatedFacts
+    .filter((fact) => fact.length >= 6 && !hasNegatedFactEcho(afterBody, fact))
+    .slice(0, 6)
+  const changedFacts = uniqueStrings([
+    ...missingNumbers.map((fact) => `数字/数量事实丢失：${fact}`),
+    ...missingNegatedFacts.map((fact) => `否定约束丢失：${fact}`),
+  ]).slice(0, 10)
+  const preservedFacts = uniqueStrings([
+    ...requiredFacts.filter((fact) => afterBody.includes(fact)),
+    ...facts.numbers.filter((fact) => afterBody.includes(fact)).map((fact) => `number:${fact}`),
+    ...facts.negatedFacts.filter((fact) => afterBody.includes(fact)).map((fact) => `negation:${fact}`),
+  ]).slice(0, 16)
+  const status = changedFacts.length > 0 || missingFacts.length >= 2
+    ? "drifted"
+    : missingFacts.length === 1
+      ? "at_risk"
+      : "preserved"
+  return {
+    status,
+    missingFacts,
+    changedFacts,
+    preservedFacts,
+    reason: status === "preserved"
+      ? "语义保真通过：自然化后保留了锁定角色、连续性锚点、数量事实和否定约束。"
+      : `语义保真${status === "drifted" ? "失败" : "有风险"}：${[...missingFacts, ...changedFacts].slice(0, 4).join("；")}`,
+  }
+}
+
 function createNaturalnessReport(input: {
   beforeDraft: string
   afterDraft: string
@@ -1766,15 +1885,24 @@ function createNaturalnessReport(input: {
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract)
   const styleQuality = evaluateNarrativeStyleQuality(input.afterDraft)
   const plotContinuity = evaluatePlotContinuityBridge(input.afterDraft, input.task, input.continuityContract)
+  const semanticPreservation = evaluateSemanticPreservation({
+    beforeDraft: input.beforeDraft,
+    afterDraft: input.afterDraft,
+    continuityContract: input.continuityContract,
+    characterProfileContract: input.characterProfileContract,
+  })
   const preservedFacts = uniqueStrings([
+    ...semanticPreservation.preservedFacts,
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.requiredNames,
     ...input.continuityContract.continuityAnchors.filter((anchor) => input.afterDraft.includes(anchor)),
-  ].filter(Boolean)).slice(0, 12)
+  ].filter(Boolean)).slice(0, 16)
   const riskFlags = [
     ...(styleQuality.status === "quarantined" ? [styleQuality.reason] : []),
     ...(plotContinuity.status === "quarantined" ? [plotContinuity.reason] : []),
     ...(characterPresence.status === "quarantined" ? [characterPresence.reason] : []),
+    ...(semanticPreservation.status === "drifted" ? [semanticPreservation.reason] : []),
+    ...(semanticPreservation.status === "at_risk" ? [semanticPreservation.reason] : []),
     ...(aiSummarySignals >= 3 ? [`总结腔/AI 旁白信号过多：${aiSummarySignals}`] : []),
     ...(analyticSignals >= 5 ? [`分析报告腔信号过多：${analyticSignals}`] : []),
     ...(emotionLabelSignals > Math.max(8, Math.floor(wordTotal / 450)) && actionSignals < emotionLabelSignals
@@ -1788,7 +1916,9 @@ function createNaturalnessReport(input: {
     : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length)
       + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)))
   const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)))
-  const status = riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag))
+  const status = semanticPreservation.status === "drifted"
+    ? "blocked"
+    : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag))
     ? "blocked"
     : score >= 7
       ? "passed"
@@ -1802,9 +1932,11 @@ function createNaturalnessReport(input: {
     changedBlocks,
     riskFlags,
     preservedFacts,
+    semanticPreservation,
     patchSummary: [
       changedBlocks > 0 ? `文本发生约 ${changedBlocks} 个块级变化。` : "未发生块级变化或使用确定性整理稿。",
       `对白数：${dialogueCount}；动作信号：${actionSignals}；感官信号：${sensorySignals}。`,
+      semanticPreservation.reason,
       characterPresence.reason,
     ],
   }
@@ -1818,6 +1950,12 @@ function formatNaturalnessReport(report: NaturalnessReport) {
     `- Reason: ${report.reason}`,
     `- Changed blocks: ${report.changedBlocks}`,
     `- Preserved facts: ${report.preservedFacts.length ? report.preservedFacts.join("、") : "none"}`,
+    "",
+    "### Semantic Preservation",
+    `- Status: ${report.semanticPreservation.status}`,
+    `- Reason: ${report.semanticPreservation.reason}`,
+    `- Missing facts: ${report.semanticPreservation.missingFacts.length ? report.semanticPreservation.missingFacts.join("、") : "none"}`,
+    `- Changed facts: ${report.semanticPreservation.changedFacts.length ? report.semanticPreservation.changedFacts.join("、") : "none"}`,
     "",
     "### Risk Flags",
     ...(report.riskFlags.length ? report.riskFlags.map((flag) => `- ${flag}`) : ["- none"]),

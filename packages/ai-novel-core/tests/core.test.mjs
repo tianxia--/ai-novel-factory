@@ -3520,6 +3520,66 @@ test("character profile gate rejects same-voice multi-character scenes", async (
   assert.match(differentiatedGate.reason, /角色差异化通过/)
 })
 
+test("semantic preservation blocks naturalness drift while allowing local prose patches", async () => {
+  const { evaluateSemanticPreservation } = await loadCore()
+  const continuityContract = {
+    lockedProtagonistName: "李延",
+    status: "ready",
+    requiredNames: ["李延", "宋管事"],
+    knownCast: ["李延", "宋管事"],
+    continuityAnchors: ["缺页田册", "半枚官印", "坊正密信"],
+    previousChapterLedger: ["李延拿到缺页田册，宋管事交出半枚官印，坊正密信不能拆，最多只能等3日。"],
+    characterLedger: "",
+    foreshadowingLedger: "",
+    hardRules: ["坊正密信不能拆"],
+    prompt: "",
+  }
+  const characterProfileContract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+  }
+  const beforeDraft = [
+    "## Draft Body",
+    "李延把缺页田册压在袖中，半枚官印硌着腕骨。",
+    "宋管事站在门边，提醒他坊正密信不能拆，最多只能等3日。",
+  ].join("\n")
+  const localPatch = [
+    "## Final Body",
+    "李延把缺页田册压进袖底，半枚官印一路硌着腕骨。",
+    "宋管事守在门边，声音压得很低：坊正密信不能拆，3日之内必须等一个回音。",
+  ].join("\n")
+  const preserved = evaluateSemanticPreservation({
+    beforeDraft,
+    afterDraft: localPatch,
+    continuityContract,
+    characterProfileContract,
+  })
+  assert.equal(preserved.status, "preserved")
+  assert.match(preserved.reason, /语义保真通过/)
+
+  const driftedPatch = [
+    "## Final Body",
+    "赵衡把账册塞进怀里，完整官印在袖口撞了一下。",
+    "门边的人催他立刻拆信，今晚就离开县衙。",
+  ].join("\n")
+  const drifted = evaluateSemanticPreservation({
+    beforeDraft,
+    afterDraft: driftedPatch,
+    continuityContract,
+    characterProfileContract,
+  })
+  assert.equal(drifted.status, "drifted")
+  assert.match(drifted.reason, /语义保真失败/)
+  assert.ok(drifted.missingFacts.includes("李延"))
+  assert.ok(drifted.changedFacts.some((fact) => /3日/.test(fact)))
+  assert.ok(drifted.changedFacts.some((fact) => /否定约束丢失/.test(fact)))
+})
+
 test("knowledge retrieval excludes stale chapter artifacts after a chapter queue reset", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-rag-reset-"))
   const {

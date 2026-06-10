@@ -7,13 +7,13 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-LK4KUFMZ.js";
+} from "./chunk-VMPBWWN7.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-AHYRR2KU.js";
+} from "./chunk-CXNWM7BT.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -50,7 +50,7 @@ import {
   upsertCheckpointInSuperGraph,
   upsertDiscussionInSuperGraph,
   validateSuperGraph
-} from "./chunk-LXQIKYVI.js";
+} from "./chunk-WUPQF76H.js";
 import {
   createContinuityContract,
   createDetailedChapterBlueprint,
@@ -59,6 +59,7 @@ import {
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   generateAgentReply,
   getCachedActiveLlmConfig,
@@ -82,7 +83,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-ODXSCIZD.js";
+} from "./chunk-FOINQGCQ.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -157,6 +158,7 @@ export {
   evaluateKnowledgeRetrieval,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
