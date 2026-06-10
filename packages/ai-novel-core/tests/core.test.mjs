@@ -1758,6 +1758,14 @@ test("production writing pipeline records detailed plans, final chapters, report
     )
     assert.match(finalChapter, /Final Body/)
     assert.match(finalChapter, /Polish Pass/)
+    assert.doesNotMatch(state.project.creativeProfile.styleFingerprint, /pending sample|first-chapter extraction/i)
+    assert.match(state.project.creativeProfile.styleFingerprint, /paragraph|dialogue|voice|choice/)
+    const styleProfile = await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "style", "profile.md"),
+      "utf8",
+    )
+    assert.match(styleProfile, /style fingerprint: /)
+    assert.doesNotMatch(styleProfile, /pending sample|first-chapter extraction/i)
 
     const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("master-outline.md")))

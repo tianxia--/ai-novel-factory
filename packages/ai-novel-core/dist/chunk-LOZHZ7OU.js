@@ -1389,6 +1389,61 @@ ${text}`.toLowerCase();
     vocabularyScenes: ["\u5BF9\u8BDD", "\u73AF\u5883\u6E32\u67D3", "\u5FC3\u7406\u6D3B\u52A8"]
   });
 }
+function extractStyleFingerprintFromDraft(finalDraft) {
+  const body = extractNarrativeBody(finalDraft);
+  const paragraphs = body.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean);
+  const averageParagraphLength = paragraphs.length ? Math.round(paragraphs.reduce((sum, paragraph) => sum + paragraph.length, 0) / paragraphs.length) : 0;
+  const dialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length;
+  const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默/gu) || []).length;
+  const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length;
+  const characterNames = uniqueStrings(extractChinesePersonNames(body, 6)).slice(0, 4);
+  const rhythm = averageParagraphLength <= 90 ? "short scene paragraphs" : averageParagraphLength <= 180 ? "medium scene paragraphs" : "long immersive paragraphs";
+  const dialogue = dialogueCount >= 4 ? "dialogue-forward" : dialogueCount > 0 ? "selective dialogue" : "low-dialogue narration";
+  const texture = sensorySignals >= actionSignals ? "sensory texture led" : "action and choice led";
+  const voice = characterNames.length >= 2 ? `distinct cast pressure around ${characterNames.join("\u3001")}` : "single-viewpoint voice lock";
+  return [
+    rhythm,
+    dialogue,
+    texture,
+    voice,
+    `avg paragraph ${averageParagraphLength || "unknown"} chars`
+  ].join("; ");
+}
+async function updateStyleFingerprintFromFirstChapter(input) {
+  if (input.task.chapterNumber !== 1 || input.finalGate.status === "blocked") return "";
+  const currentFingerprint = input.state.project.creativeProfile?.styleFingerprint?.trim() || "";
+  if (currentFingerprint && !/pending sample|first-chapter extraction/i.test(currentFingerprint)) {
+    return "";
+  }
+  const extracted = extractStyleFingerprintFromDraft(input.finalDraft);
+  input.state.project = {
+    ...input.state.project,
+    creativeProfile: {
+      ...input.state.project.creativeProfile || {
+        genre: "auto-inferred",
+        platform: "serialized web novel",
+        readerPromise: "hook-forward, scene-first, emotionally specific",
+        pointOfView: "third-person limited",
+        tone: "tense but readable",
+        naturalnessTarget: "balanced",
+        characterProfileRequirements: []
+      },
+      styleFingerprint: extracted
+    }
+  };
+  const currentStyleProfile = await readOptionalText(input.paths.styleProfilePath);
+  const updatedStyleProfile = currentStyleProfile ? currentStyleProfile.replace(/- style fingerprint: .*/i, `- style fingerprint: ${extracted}`) : [
+    "# Style Profile",
+    "",
+    `Project: ${input.state.project.title}`,
+    "",
+    "Production selection contract:",
+    `- style fingerprint: ${extracted}`
+  ].join("\n");
+  await fs2.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
+`);
+  return extracted;
+}
 function sceneTypeForChapter(state, chapterNumber) {
   const genre = inferGenreProfile(state);
   const sequence = genre.vocabularyScenes;
@@ -4462,6 +4517,13 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       characterDossiers: updatedCharacterDossiers
     };
   }
+  const extractedStyleFingerprint = await updateStyleFingerprintFromFirstChapter({
+    paths,
+    state,
+    task,
+    finalDraft,
+    finalGate
+  });
   throwIfPipelineAborted(options);
   const draftPath = path3.join(paths.chaptersDir, `${chapterId}.draft.md`);
   const reviewedPath = path3.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
@@ -4516,7 +4578,7 @@ ${report}
     chapterNumber: task.chapterNumber,
     title: task.title,
     status: finalGate.status === "blocked" ? "blocked" : "completed",
-    message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u4EA7\u7269\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u8D28\u91CF\u95E8\u7981\u4ECD\u963B\u585E\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0\u6B63\u5F0F\u6B63\u6587\u3001\u8D28\u68C0\u62A5\u544A\u548C\u8BB0\u5FC6\u66F4\u65B0\u5DF2\u4FDD\u5B58\u3002`,
+    message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u4EA7\u7269\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u8D28\u91CF\u95E8\u7981\u4ECD\u963B\u585E\u3002` : extractedStyleFingerprint ? `\u7B2C ${task.chapterNumber} \u7AE0\u6B63\u5F0F\u6B63\u6587\u3001\u8D28\u68C0\u62A5\u544A\u548C\u8BB0\u5FC6\u66F4\u65B0\u5DF2\u4FDD\u5B58\uFF0C\u5E76\u63D0\u53D6\u9996\u7AE0\u98CE\u683C\u6307\u7EB9\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0\u6B63\u5F0F\u6B63\u6587\u3001\u8D28\u68C0\u62A5\u544A\u548C\u8BB0\u5FC6\u66F4\u65B0\u5DF2\u4FDD\u5B58\u3002`,
     artifactPath: relativeArtifactPath(projectRoot, finalPath),
     preview: memoryUpdate.slice(0, 360),
     wordCount: wordCount(finalDraft),

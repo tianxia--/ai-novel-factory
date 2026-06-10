@@ -892,6 +892,78 @@ export function inferGenreProfile(state: AutonomousNovelState) {
   })
 }
 
+function extractStyleFingerprintFromDraft(finalDraft: string) {
+  const body = extractNarrativeBody(finalDraft)
+  const paragraphs = body.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean)
+  const averageParagraphLength = paragraphs.length
+    ? Math.round(paragraphs.reduce((sum, paragraph) => sum + paragraph.length, 0) / paragraphs.length)
+    : 0
+  const dialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length
+  const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默/gu) || []).length
+  const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length
+  const characterNames = uniqueStrings(extractChinesePersonNames(body, 6)).slice(0, 4)
+  const rhythm = averageParagraphLength <= 90
+    ? "short scene paragraphs"
+    : averageParagraphLength <= 180
+      ? "medium scene paragraphs"
+      : "long immersive paragraphs"
+  const dialogue = dialogueCount >= 4 ? "dialogue-forward" : dialogueCount > 0 ? "selective dialogue" : "low-dialogue narration"
+  const texture = sensorySignals >= actionSignals ? "sensory texture led" : "action and choice led"
+  const voice = characterNames.length >= 2
+    ? `distinct cast pressure around ${characterNames.join("、")}`
+    : "single-viewpoint voice lock"
+  return [
+    rhythm,
+    dialogue,
+    texture,
+    voice,
+    `avg paragraph ${averageParagraphLength || "unknown"} chars`,
+  ].join("; ")
+}
+
+async function updateStyleFingerprintFromFirstChapter(input: {
+  paths: NovelWorkspacePaths
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  finalDraft: string
+  finalGate: QualityGateResult
+}) {
+  if (input.task.chapterNumber !== 1 || input.finalGate.status === "blocked") return ""
+  const currentFingerprint = input.state.project.creativeProfile?.styleFingerprint?.trim() || ""
+  if (currentFingerprint && !/pending sample|first-chapter extraction/i.test(currentFingerprint)) {
+    return ""
+  }
+  const extracted = extractStyleFingerprintFromDraft(input.finalDraft)
+  input.state.project = {
+    ...input.state.project,
+    creativeProfile: {
+      ...(input.state.project.creativeProfile || {
+        genre: "auto-inferred",
+        platform: "serialized web novel",
+        readerPromise: "hook-forward, scene-first, emotionally specific",
+        pointOfView: "third-person limited",
+        tone: "tense but readable",
+        naturalnessTarget: "balanced",
+        characterProfileRequirements: [],
+      }),
+      styleFingerprint: extracted,
+    },
+  }
+  const currentStyleProfile = await readOptionalText(input.paths.styleProfilePath)
+  const updatedStyleProfile = currentStyleProfile
+    ? currentStyleProfile.replace(/- style fingerprint: .*/i, `- style fingerprint: ${extracted}`)
+    : [
+      "# Style Profile",
+      "",
+      `Project: ${input.state.project.title}`,
+      "",
+      "Production selection contract:",
+      `- style fingerprint: ${extracted}`,
+    ].join("\n")
+  await fs.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}\n`)
+  return extracted
+}
+
 function sceneTypeForChapter(state: AutonomousNovelState, chapterNumber: number) {
   const genre = inferGenreProfile(state)
   const sequence = genre.vocabularyScenes
@@ -4630,6 +4702,13 @@ export async function runChapterProductionPipeline(
       characterDossiers: updatedCharacterDossiers,
     }
   }
+  const extractedStyleFingerprint = await updateStyleFingerprintFromFirstChapter({
+    paths,
+    state,
+    task,
+    finalDraft,
+    finalGate,
+  })
   throwIfPipelineAborted(options)
 
   const draftPath = path.join(paths.chaptersDir, `${chapterId}.draft.md`)
@@ -4679,7 +4758,9 @@ export async function runChapterProductionPipeline(
     status: finalGate.status === "blocked" ? "blocked" : "completed",
     message: finalGate.status === "blocked"
       ? `第 ${task.chapterNumber} 章产物已保存，但质量门禁仍阻塞。`
-      : `第 ${task.chapterNumber} 章正式正文、质检报告和记忆更新已保存。`,
+      : extractedStyleFingerprint
+        ? `第 ${task.chapterNumber} 章正式正文、质检报告和记忆更新已保存，并提取首章风格指纹。`
+        : `第 ${task.chapterNumber} 章正式正文、质检报告和记忆更新已保存。`,
     artifactPath: relativeArtifactPath(projectRoot, finalPath),
     preview: memoryUpdate.slice(0, 360),
     wordCount: wordCount(finalDraft),
