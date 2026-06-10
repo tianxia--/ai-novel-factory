@@ -7,13 +7,13 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-BVAYHYB5.js";
+} from "./chunk-YKTMNL5W.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-DZVX7SK3.js";
+} from "./chunk-IRKG645L.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -50,7 +50,7 @@ import {
   upsertCheckpointInSuperGraph,
   upsertDiscussionInSuperGraph,
   validateSuperGraph
-} from "./chunk-BR6DCN36.js";
+} from "./chunk-QOZ7R7CV.js";
 import {
   createContinuityContract,
   createDetailedChapterBlueprint,
@@ -79,7 +79,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-YPZ72LHB.js";
+} from "./chunk-VRIPXJ3Y.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -90,7 +90,7 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-AXLXISKJ.js";
+} from "./chunk-HL3WMSH6.js";
 import {
   FactoryDb,
   backfillPendingMemoryEmbeddings,
@@ -103,7 +103,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-7ZCRCHQW.js";
+} from "./chunk-CRFEPMYG.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,

@@ -123,6 +123,25 @@ export interface ContinuityContract {
   prompt: string
 }
 
+export interface CharacterProfileContract {
+  status: "ready" | "needs_enrichment" | "blocked"
+  requiredFields: string[]
+  knownCast: string[]
+  missingSignals: string[]
+  profileBrief: string
+  prompt: string
+}
+
+export interface NaturalnessReport {
+  status: "passed" | "needs_revision" | "blocked"
+  score: number
+  reason: string
+  changedBlocks: number
+  riskFlags: string[]
+  preservedFacts: string[]
+  patchSummary: string[]
+}
+
 function currentBundleDir() {
   const stack = new Error().stack || ""
   for (const line of stack.split("\n")) {
@@ -600,10 +619,46 @@ function enforceFinalDraftQualityGate(
       targetWords,
     }
   }
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    protagonistProfile,
+    continuityContract,
+    previousFinalDraft: finalDraft,
+  })
+  const characterProfileQuality = evaluateCharacterProfilePresence(finalDraft, characterProfileContract)
+  if (characterProfileQuality.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: characterProfileQuality.reason,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
+  const naturalnessReport = createNaturalnessReport({
+    beforeDraft: finalDraft,
+    afterDraft: finalDraft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
+  if (naturalnessReport.status === "blocked") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: naturalnessReport.reason,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
   return {
     ...gate,
     reason: gate.passed || gate.status === "passed"
-      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason}`.trim()
+      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
       : gate.reason,
     wordCount: finalWordCount,
     targetWords,
@@ -1306,6 +1361,93 @@ export function evaluateWritingResourceUsage(
   }
 }
 
+function extractNarrativeBody(text = "") {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+}
+
+function createNaturalnessReport(input: {
+  beforeDraft: string
+  afterDraft: string
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  continuityContract: ContinuityContract
+  characterProfileContract: CharacterProfileContract
+}): NaturalnessReport {
+  const body = extractNarrativeBody(input.afterDraft)
+  const sentences = body.split(/[。！？!?；;\n]+/u).map((part) => part.trim()).filter(Boolean)
+  const wordTotal = Math.max(1, wordCount(body))
+  const dialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length
+  const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length
+  const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length
+  const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心深处|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length
+  const analyticSignals = (body.match(/第一|第二|首先|其次|最后|原因是|从.*角度|可以看出|体现了|说明了|证明了/gu) || []).length
+  const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然/gu) || []).length
+  const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract)
+  const styleQuality = evaluateNarrativeStyleQuality(input.afterDraft)
+  const plotContinuity = evaluatePlotContinuityBridge(input.afterDraft, input.task, input.continuityContract)
+  const preservedFacts = uniqueStrings([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.requiredNames,
+    ...input.continuityContract.continuityAnchors.filter((anchor) => input.afterDraft.includes(anchor)),
+  ].filter(Boolean)).slice(0, 12)
+  const riskFlags = [
+    ...(styleQuality.status === "quarantined" ? [styleQuality.reason] : []),
+    ...(plotContinuity.status === "quarantined" ? [plotContinuity.reason] : []),
+    ...(characterPresence.status === "quarantined" ? [characterPresence.reason] : []),
+    ...(aiSummarySignals >= 3 ? [`总结腔/AI 旁白信号过多：${aiSummarySignals}`] : []),
+    ...(analyticSignals >= 5 ? [`分析报告腔信号过多：${analyticSignals}`] : []),
+    ...(emotionLabelSignals > Math.max(8, Math.floor(wordTotal / 450)) && actionSignals < emotionLabelSignals
+      ? [`情绪标签多于动作外化：emotion=${emotionLabelSignals}, action=${actionSignals}`]
+      : []),
+    ...(dialogueCount === 0 && wordTotal > 900 ? ["长章节缺少对白，角色声音不够自然。"] : []),
+    ...(actionSignals + sensorySignals < Math.max(6, Math.floor(wordTotal / 350)) ? ["动作/感官信号不足，文本可能偏摘要。"] : []),
+  ]
+  const changedBlocks = input.beforeDraft === input.afterDraft
+    ? 0
+    : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length)
+      + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)))
+  const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)))
+  const status = riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag))
+    ? "blocked"
+    : score >= 7
+      ? "passed"
+      : "needs_revision"
+  return {
+    status,
+    score,
+    reason: status === "passed"
+      ? "自然度门禁通过：文本以动作、感官、对白、关系压力和具体选择呈现，未发现阻塞性 AI 味。"
+      : `自然度门禁${status === "blocked" ? "阻塞" : "需要返工"}：${riskFlags.slice(0, 4).join("；") || "自然表达信号不足。"}`,
+    changedBlocks,
+    riskFlags,
+    preservedFacts,
+    patchSummary: [
+      changedBlocks > 0 ? `文本发生约 ${changedBlocks} 个块级变化。` : "未发生块级变化或使用确定性整理稿。",
+      `对白数：${dialogueCount}；动作信号：${actionSignals}；感官信号：${sensorySignals}。`,
+      characterPresence.reason,
+    ],
+  }
+}
+
+function formatNaturalnessReport(report: NaturalnessReport) {
+  return [
+    "## Naturalness Report",
+    `- Status: ${report.status}`,
+    `- Score: ${report.score}/10`,
+    `- Reason: ${report.reason}`,
+    `- Changed blocks: ${report.changedBlocks}`,
+    `- Preserved facts: ${report.preservedFacts.length ? report.preservedFacts.join("、") : "none"}`,
+    "",
+    "### Risk Flags",
+    ...(report.riskFlags.length ? report.riskFlags.map((flag) => `- ${flag}`) : ["- none"]),
+    "",
+    "### Patch Summary",
+    ...report.patchSummary.map((line) => `- ${line}`),
+  ].join("\n")
+}
+
 export function evaluatePlotContinuityBridge(
   finalDraft: string,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -1498,6 +1640,150 @@ function lockedProtagonistFromState(state: AutonomousNovelState, protagonistProf
     .map((match) => match?.[1] || match?.[2] || "")
     .find(Boolean)
     || inferLockedProtagonistName(protagonistProfile)
+}
+
+const CHARACTER_PROFILE_REQUIRED_FIELDS = [
+  "身份/角色功能",
+  "核心欲望",
+  "恐惧/伤口",
+  "行为习惯",
+  "说话方式",
+  "外貌体态",
+  "特长/短板",
+  "关系网络",
+  "章节状态变化",
+]
+
+function buildCharacterProfileContract(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  protagonistProfile?: string
+  continuityContract: ContinuityContract
+  previousMemory?: string
+  previousFinalDraft?: string
+  blueprint?: string
+}): CharacterProfileContract {
+  const source = [
+    input.protagonistProfile || "",
+    input.previousMemory || "",
+    input.previousFinalDraft || "",
+    input.blueprint || "",
+    input.continuityContract.characterLedger,
+  ].join("\n\n")
+  const knownCast = uniqueStrings([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.knownCast,
+    ...extractChinesePersonNames(source, 40),
+  ].filter(Boolean)).slice(0, 24)
+  const fieldPatterns: Array<[string, RegExp]> = [
+    ["身份/角色功能", /身份|职业|地位|立场|角色功能|阵营|出身/u],
+    ["核心欲望", /欲望|目标|想要|渴望|执念|野心|追求/u],
+    ["恐惧/伤口", /恐惧|害怕|伤口|创伤|弱点|阴影|亏欠|羞耻/u],
+    ["行为习惯", /习惯|动作|小动作|姿态|惯常|总会|下意识/u],
+    ["说话方式", /说话|口头禅|语气|措辞|对白|声线|称呼/u],
+    ["外貌体态", /外貌|体型|身形|样貌|五官|衣着|气味|疤|眼神/u],
+    ["特长/短板", /特长|能力|擅长|短板|缺陷|边界|代价|不能/u],
+    ["关系网络", /关系|亲属|朋友|敌人|同盟|债务|信任|背叛/u],
+    ["章节状态变化", /变化|成长|状态|本章|上一章|代价|选择|转变/u],
+  ]
+  const missingSignals = fieldPatterns
+    .filter(([, pattern]) => !pattern.test(source))
+    .map(([field]) => field)
+  const hasLockedProtagonist = input.task.chapterNumber === 1 || Boolean(input.continuityContract.lockedProtagonistName)
+  const hasAnyCast = knownCast.length > 0
+  const status = !hasLockedProtagonist
+    ? "blocked"
+    : missingSignals.length > 4 || !hasAnyCast
+      ? "needs_enrichment"
+      : "ready"
+  const profileBrief = [
+    `Locked protagonist: ${input.continuityContract.lockedProtagonistName || "(first chapter pending)"}`,
+    knownCast.length ? `Known cast: ${knownCast.slice(0, 12).join("、")}` : "Known cast: none",
+    `Missing profile signals: ${missingSignals.length ? missingSignals.join("、") : "none"}`,
+    source
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && /主角|配角|人物|角色|关系|性格|习惯|外貌|体型|欲望|伤口|特长|短板|状态/u.test(line))
+      .slice(0, 14)
+      .join("\n"),
+  ].filter(Boolean).join("\n")
+  const prompt = [
+    "## Character Profile Contract",
+    "",
+    `Status: ${status}`,
+    "",
+    "### Required Character Fields",
+    ...CHARACTER_PROFILE_REQUIRED_FIELDS.map((field) => `- ${field}`),
+    "",
+    "### Production Rules",
+    "- 每个重要角色都必须有欲望、恐惧/伤口、行为习惯、说话方式、外貌体态、特长短板和关系状态。",
+    "- 新增配角必须说明身份、立场、与主角关系、可记忆特征和本章状态变化。",
+    "- 角色不能只用标签区分，例如冷酷、善良、聪明；必须通过动作、选择、话语习惯和关系压力呈现。",
+    "- 对白必须体现人物身份、关系和当前利益，不得所有角色使用同一种解释腔。",
+    "- Memory Keeper 必须把本章新增/变化的角色档案字段写入记忆更新。",
+    "",
+    "### Known Cast",
+    ...(knownCast.length ? knownCast.map((name) => `- ${name}`) : ["- 首章必须建立唯一主角和至少一个可追踪关系对象。"]),
+    "",
+    "### Missing Signals",
+    ...(missingSignals.length ? missingSignals.map((field) => `- ${field}`) : ["- none"]),
+    "",
+    "### Profile Brief",
+    profileBrief || "- 暂无角色档案正文；本章必须建立可追踪角色档案。",
+  ].join("\n")
+  return {
+    status,
+    requiredFields: CHARACTER_PROFILE_REQUIRED_FIELDS,
+    knownCast,
+    missingSignals,
+    profileBrief,
+    prompt,
+  }
+}
+
+function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract) {
+  const checks: Array<[string, RegExp]> = [
+    ["欲望/目标", /想要|必须|不能|目标|渴望|执念|为了|打算|决定/u],
+    ["行为习惯/动作", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识/u],
+    ["说话方式/关系称呼", /「|“|说|问|道|喊|低声|冷笑|称呼|先生|大人|姑娘|兄|姐|叔|娘/u],
+    ["外貌体态/可见特征", /身形|背影|眼神|眉|手指|衣|袖|肩|疤|脸色|脚步|声音/u],
+    ["特长短板/能力边界", /擅长|不会|不能|只好|代价|短板|弱点|本事|能力|失手/u],
+    ["关系状态", /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦/u],
+  ]
+  const missing = checks.filter(([, pattern]) => !pattern.test(draft)).map(([label]) => label)
+  const knownNameHits = contract.knownCast.filter((name) => name && draft.includes(name)).slice(0, 12)
+  if (contract.status === "blocked") {
+    return {
+      status: "quarantined" as const,
+      reason: "角色档案合同阻塞：后续章节缺少锁定主角，无法保证人物连续性。",
+      missing,
+      knownNameHits,
+    }
+  }
+  if (knownNameHits.length === 0 && contract.knownCast.length > 0) {
+    return {
+      status: "quarantined" as const,
+      reason: `角色档案硬门槛失败：正文未命中已知角色 ${contract.knownCast.slice(0, 6).join("、")}。`,
+      missing,
+      knownNameHits,
+    }
+  }
+  if (missing.length >= 4) {
+    return {
+      status: "quarantined" as const,
+      reason: `角色鲜明度不足：缺少 ${missing.join("、")} 等可见信号，人物容易刻板。`,
+      missing,
+      knownNameHits,
+    }
+  }
+  return {
+    status: "eligible" as const,
+    reason: missing.length
+      ? `角色档案基本可用，但还应补强：${missing.join("、")}。`
+      : "角色档案信号通过：正文包含欲望、行为、对白、关系和可见特征。",
+    missing,
+    knownNameHits,
+  }
 }
 
 function extractLedgerLines(text = "", limit = 10) {
@@ -2044,6 +2330,13 @@ export function createDetailedChapterBlueprint(
 	    continuityContract,
 	    limit: 12,
 	  })
+	  const characterProfileContract = buildCharacterProfileContract({
+	    state,
+	    task,
+	    protagonistProfile: context.protagonist,
+	    continuityContract,
+	    blueprint: context.consensus,
+	  })
 
 	  return [
 	    "# Detailed Chapter Blueprint",
@@ -2056,6 +2349,8 @@ export function createDetailedChapterBlueprint(
     `Primary scene type: ${sceneType}`,
     "",
     continuityContract.prompt,
+    "",
+    characterProfileContract.prompt,
     "",
 	    "## Chapter Position",
 	    `- 本章服务于：${state.project.idea}`,
@@ -2112,6 +2407,8 @@ export function createDetailedChapterBlueprint(
       ? `- 主角：本章必须沿用「${continuityContract.lockedProtagonistName}」的姓名、身份、欲望和行为逻辑。`
       : "- 主角：首章必须明确唯一主角姓名，且全文主视角只服务这个主角。",
     "- 配角：沿用 Canon Contract 中已登记的角色关系；新增配角必须说明身份、立场和后续状态。",
+    "- 角色档案：重要角色必须具备核心欲望、恐惧/伤口、行为习惯、说话方式、外貌体态、特长短板和关系网络。",
+    "- 角色呈现：不能只写“冷静、善良、聪明”等标签，必须通过动作、选择、停顿、称呼、视线和关系压力体现人格。",
     "- 对手/阻力：必须有合理目标，不能只是工具人。",
     "- 配角：至少一人通过行动暴露立场或关系变化。",
     "",
@@ -2153,6 +2450,7 @@ export function createDetailedChapterBlueprint(
 	      ? `- 主角一致性：正文必须出现并持续围绕「${continuityContract.lockedProtagonistName}」，不得把章节写成另一条故事线。`
 	      : "- 主角一致性：首章必须建立唯一可追踪主角姓名。",
 	    "- 配角一致性：不得把既有配角改名、改身份或无因果替换。",
+	    "- 角色鲜明度：正文必须呈现角色欲望、行为习惯、说话方式、外貌体态、特长短板和关系状态中的多数信号。",
 	    "- 情节连续性：必须承接 Canon Contract 中的前序章节账本和伏笔账本。",
 	    "- 因果推进：必须执行 Previous Inputs / Causal Objective / Irreversible Change / Next Chapter Handoff，缺一项即视为流水账。",
 	    "- 连续性锚点：第 2 章以后正文必须命中至少两个 Continuity Anchors，否则视为另起剧情。",
@@ -2183,6 +2481,12 @@ async function createChapterBlueprintContent(
 ) {
   throwIfPipelineAborted(options)
   const continuityContract = createContinuityContract({ state, task, context })
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    protagonistProfile: context.protagonist,
+    continuityContract,
+  })
   const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract)
   await emitWritingProgress(options, {
     step: "chapter_blueprint_started",
@@ -2281,11 +2585,14 @@ async function createChapterBlueprintContent(
       "",
       continuityContract.prompt,
       "",
+      characterProfileContract.prompt,
+      "",
 	      "硬性要求：",
 	      continuityContract.lockedProtagonistName
 	        ? `- 蓝图必须声明本章如何沿用「${continuityContract.lockedProtagonistName}」，禁止更换主角姓名或身份。`
 	        : "- 首章蓝图必须声明唯一主角姓名，禁止多个候选主角并行。",
 	      "- 蓝图必须声明已知配角如何沿用、新增配角是否允许以及其关系状态。",
+	      "- 蓝图必须补足重要角色的欲望、恐惧/伤口、行为习惯、说话方式、外貌体态、特长短板和关系压力。",
 	      "- 蓝图必须声明前序情节、物品、线索、伏笔的承接/推进/回收。",
 	      "- 蓝图必须逐项落实 Previous Inputs、Causal Objective、Protagonist Decision、Irreversible Change、Character State Delta、Next Chapter Handoff。",
 	      "- 第 2 章以后，如果本章只沿用主角姓名但没有让前序锚点进入事件因果，蓝图无效。",
@@ -2303,6 +2610,8 @@ async function createChapterBlueprintContent(
       context.protagonist || "(empty)",
       "",
       continuityContract.prompt,
+      "",
+      characterProfileContract.prompt,
       "",
       "## Style Context",
       context.style || "(empty)",
@@ -2792,6 +3101,13 @@ async function createDraftBody(
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`)
   }
   const fallback = createDraftBodyFromBlueprint(state, task, blueprint, resources, continuityContract)
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    continuityContract,
+    previousFinalDraft: blueprint,
+    blueprint,
+  })
   const genre = inferGenreProfile(state)
   const sceneType = sceneTypeForChapter(state, task.chapterNumber)
   const causalPlan = getTaskCausalPlan(state, task)
@@ -2853,6 +3169,7 @@ async function createDraftBody(
       ? `主角一致性是硬门槛：本章必须继续使用「${continuityContract.lockedProtagonistName}」，不得改名、换身份或写成另一条故事线。`
       : "主角一致性是硬门槛：首章必须明确唯一主角姓名，后续章节会锁定该姓名。",
     "配角、情节、伏笔和世界规则必须遵循 Canon Continuity Contract。",
+    "角色档案是生产硬约束：重要角色必须有欲望、伤口、行为习惯、说话方式、外貌体态、特长短板和关系状态。",
     "第 2 章以后不能只沿用主角姓名；必须让上一章锚点在正文事件中发生作用。",
     "禁止 AI 化碎片写法：不得让单个字或 1-4 字短词反复独立成句/成行堆场景。",
   ]
@@ -2873,6 +3190,8 @@ async function createDraftBody(
     "",
     continuityContract.prompt,
     "",
+    characterProfileContract.prompt.slice(0, 1800),
+    "",
     "资源使用硬要求：",
     "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
     "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
@@ -2888,6 +3207,8 @@ async function createDraftBody(
       ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知 and 选择推进。`
       : "- 正文必须明确唯一主角姓名，并保持主视角聚焦。",
     "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
+    "- 新增或沿用的重要角色必须通过动作、称呼、停顿、外貌体态、习惯和利益选择呈现人格，不能只贴性格标签。",
+    "- 正文必须体现至少一个角色的特长/短板或能力边界，以及至少一个关系状态变化。",
     "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
     continuityContract.continuityAnchors.length
       ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
@@ -2970,6 +3291,8 @@ async function createDraftBody(
       "",
       continuityContract.prompt,
       "",
+      characterProfileContract.prompt.slice(0, 1800),
+      "",
       "资源使用硬要求：",
       "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
       "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
@@ -2985,6 +3308,8 @@ async function createDraftBody(
         ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知 and 选择推进。`
         : "- 正文必须明确唯一主角姓名，并保持主视角聚焦。",
       "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
+      "- 新增或沿用的重要角色必须通过动作、称呼、停顿、外貌体态、习惯和利益选择呈现人格，不能只贴性格标签。",
+      "- 正文必须体现至少一个角色的特长/短板或能力边界，以及至少一个关系状态变化。",
       "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
       continuityContract.continuityAnchors.length
         ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
@@ -3022,6 +3347,14 @@ async function createDraftBody(
 	  const plotContinuity = evaluatePlotContinuityBridge(draft, task, continuityContract)
 	  const styleQuality = evaluateNarrativeStyleQuality(draft)
 	  const resourceUsage = evaluateWritingResourceUsage(draft, state, task, blueprint, continuityContract)
+	  const characterProfileContract = buildCharacterProfileContract({
+	    state,
+	    task,
+	    continuityContract,
+	    previousFinalDraft: draft,
+	    blueprint,
+	  })
+	  const characterProfileQuality = evaluateCharacterProfilePresence(draft, characterProfileContract)
 	  const wordScore = wordCountBlockingIssue ? 4 : 8
 	  const hasHook = /钩子|问题|章末|最后|门|信|名字|表情/u.test(draft)
 	  const hasConflict = /冲突|压力|选择|代价|反击|局势/u.test(draft)
@@ -3033,6 +3366,7 @@ async function createDraftBody(
 	    || plotContinuity.status === "quarantined"
 	    || styleQuality.status === "quarantined"
 	    || resourceUsage.status === "quarantined"
+	    || characterProfileQuality.status === "quarantined"
 	    || !hasCausalContract
 	    || !hasCausalExecution
 	  const score = hardBlocked
@@ -3056,6 +3390,7 @@ async function createDraftBody(
 	    `| 蓝图执行 | ${hasBlueprint ? 8 : 5}/10 | ${hasBlueprint ? "基于详细章节蓝图执行。" : "缺少详细蓝图依据。"} |`,
 	    `| 因果合同执行 | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${hasCausalContract && hasCausalExecution ? "蓝图包含因果合同，正文体现承接、选择、代价或交棒。" : "缺少清晰因果合同或正文未执行承接-选择-代价-交棒。"} |`,
 	    `| 写作资源吸收 | ${resourceUsage.status === "eligible" ? 8 : 4}/10 | ${resourceUsage.reason} |`,
+	    `| 角色鲜明度 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${characterProfileQuality.reason} |`,
 	    `| 综合评分 | ${score}/10 | ${score >= 7 ? "可进入润色。" : "需要返工。"} |`,
     "",
     `WORD_COUNT_CHECK: ${count}/${target}`,
@@ -3069,6 +3404,7 @@ async function createDraftBody(
 	    `- Plot Continuity: ${plotContinuity.reason}`,
 	    `- Style Hard Gate: ${styleQuality.reason}`,
 	    `- Resource Usage Gate: ${resourceUsage.reason}`,
+	    `- Character Profile Gate: ${characterProfileQuality.reason}`,
     "",
     "## Required Fixes",
     ...(score >= 7 && !hardBlocked
@@ -3078,6 +3414,7 @@ async function createDraftBody(
 	        ...(plotContinuity.status === "quarantined" ? [`- 需要返工：${plotContinuity.reason}`] : []),
 	        ...(styleQuality.status === "quarantined" ? [`- 需要返工：${styleQuality.reason}`] : []),
 	        ...(resourceUsage.status === "quarantined" ? [`- 需要返工：${resourceUsage.reason}`] : []),
+	        ...(characterProfileQuality.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	        ...(!hasCausalContract ? ["- 需要返工：蓝图缺少 Causal Objective / Irreversible Change / Next Chapter Handoff，不能支撑连续写作。"] : []),
 	        ...(!hasCausalExecution ? ["- 需要返工：正文没有清晰执行承接-选择-代价-交棒，容易变成流水账。"] : []),
 	        "- 扩写正文场景。",
@@ -3092,6 +3429,7 @@ function appendQualityHardChecks(
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   draft: string,
   continuityContract?: ContinuityContract,
+  state?: AutonomousNovelState,
 ) {
   const count = wordCount(draft)
   const target = task.targetWords
@@ -3104,9 +3442,21 @@ function appendQualityHardChecks(
     ? evaluatePlotContinuityBridge(draft, task, continuityContract)
     : null
 	  const styleQuality = evaluateNarrativeStyleQuality(draft)
+	  const characterProfileContract = continuityContract && state
+	    ? buildCharacterProfileContract({
+	      state,
+	      task,
+	      continuityContract,
+	      previousFinalDraft: draft,
+	    })
+	    : null
+	  const characterProfileQuality = characterProfileContract
+	    ? evaluateCharacterProfilePresence(draft, characterProfileContract)
+	    : null
 	  const narrativeFixes = [
 	    ...(plotContinuity?.status === "quarantined" ? [`- 需要返工：${plotContinuity.reason}`] : []),
 	    ...(styleQuality.status === "quarantined" ? [`- 需要返工：${styleQuality.reason}`] : []),
+	    ...(characterProfileQuality?.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	  ]
   const resourceUsage = continuityContract
     ? evaluateWritingResourceUsage(draft, undefined, task, "", continuityContract)
@@ -3203,7 +3553,7 @@ async function createProductionQualityReport(
   const report = generated.includes("Chapter Quality Report")
     ? generated
     : `${fallback}\n\n---\n\n## LLM Editor Notes\n${generated}`
-  return appendQualityHardChecks(report, task, draft, continuityContract)
+  return appendQualityHardChecks(report, task, draft, continuityContract, state)
 }
 
 async function reviseDraftForQualityGate(
@@ -3391,19 +3741,23 @@ function createPolishedDraft(
   report: string,
   gate: QualityGateResult = parseQualityGate(report),
   mode: ProductionWritingMode = "fast",
+  naturalnessReport?: NaturalnessReport,
 ) {
   return [
     draft.replace("## Draft Body", "## Final Body"),
     "",
     "---",
     "",
-    "## Polish Pass",
+    "## Naturalness Pass",
     `- Production writing mode: ${mode}.`,
     mode === "quality"
-      ? "- 已执行 Editor / Consistency Checker / Style Controller / Prose Stylist 质量链路。"
-      : "- 已执行快速生产硬门禁：字数、主角、连续性、因果合同、资源吸收和去 AI 味规则。",
-    "- 整理目标：减少解释性模板句，增强动作、感官、对话和具体选择。",
-    "- 去 AI 味策略：避免连续抽象总结，保留有体感的细节和角色差异。",
+      ? "- 已执行 Editor / Consistency Checker / Style Controller / NaturalnessAgent 质量链路。"
+      : "- 已执行快速生产硬门禁：字数、主角、角色档案、连续性、因果合同、资源吸收和自然度规则。",
+    "- NaturalnessAgent 目标：减少解释性模板句，增强动作、感官、对白、角色习惯、关系压力和具体选择。",
+    "- 去 AI 味策略：避免连续抽象总结、分析腔、情绪标签堆叠和整齐排比，保留有体感的细节和角色差异。",
+    "- Polish Pass compatibility: this Naturalness Pass replaces the legacy polish stage while preserving its artifact marker.",
+    "",
+    naturalnessReport ? formatNaturalnessReport(naturalnessReport) : "- Naturalness report: deterministic fallback not attached.",
     "",
     "## Quality Gate",
     `- Status: ${gate.status}`,
@@ -3426,7 +3780,21 @@ async function createProductionPolishedDraft(
   continuityContract = createContinuityContract({ state, task }),
 ) {
   throwIfPipelineAborted(options)
-  const fallback = createPolishedDraft(state, task, draft, report, gate, productionWritingMode(options))
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    continuityContract,
+    previousFinalDraft: draft,
+  })
+  const fallbackNaturalnessReport = createNaturalnessReport({
+    beforeDraft: draft,
+    afterDraft: draft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
+  const fallback = createPolishedDraft(state, task, draft, report, gate, productionWritingMode(options), fallbackNaturalnessReport)
   if (process.env.AI_NOVEL_TEST_MODE === "1" || !shouldUseLlmPolishPass(options, gate)) {
     return fallback
   }
@@ -3436,15 +3804,16 @@ async function createProductionPolishedDraft(
     state,
     options,
     progress: {
-      step: "polish_generation",
+      step: "naturalness_generation",
       role: "Prose Stylist",
       chapterNumber: task.chapterNumber,
       title: task.title,
-      startMessage: `Prose Stylist 正在润色第 ${task.chapterNumber} 章，执行去 AI 味和场景质感增强。`,
-      completeMessage: `Prose Stylist 已返回第 ${task.chapterNumber} 章润色稿。`,
+      startMessage: `NaturalnessAgent 正在处理第 ${task.chapterNumber} 章，执行自然化、角色声音和语义保持检查。`,
+      completeMessage: `NaturalnessAgent 已返回第 ${task.chapterNumber} 章自然化终稿。`,
     },
     basePrompt: [
-      "你是 Prose Stylist，负责润色、去 AI 味、增强场景质感。",
+      "你是 NaturalnessAgent，是生产流水线中的正式自然化 Agent，不是临时润色器。",
+      "你的职责是让文本更像自然小说，而不是改写剧情。优先做局部 patch 式改写，保留事实、人物、关系、物件、伏笔和章末后果。",
       resources.styleGuide || "",
       resources.styleControllerGuide || "",
       resources.consistencyGuide || "",
@@ -3454,6 +3823,8 @@ async function createProductionPolishedDraft(
       "必须保留章节正文结构，增强动作、感官、对白差异和具体细节。",
 	      "控制成语密度，避免堆砌和模板化情绪解释。",
 	      "必须消除单字/短词独立成行的 AI 化碎片感；推荐词只能自然嵌入句子。",
+	      "必须移除报告腔、总结腔、过度解释、整齐排比、情绪标签堆叠和万能升华结尾。",
+	      "必须让角色通过习惯动作、说话方式、外貌体态、能力边界和关系压力呈现人格。",
 	      continuityContract.lockedProtagonistName
         ? `不得在润色中更改主角姓名、身份或章节核心事件；锁定主角是「${continuityContract.lockedProtagonistName}」。`
         : "首章润色不得移除唯一主角姓名。",
@@ -3463,24 +3834,40 @@ async function createProductionPolishedDraft(
 	        : "润色后必须保留本章建立的可追踪物件、关系、线索或代价。",
       "",
       continuityContract.prompt,
+      "",
+      characterProfileContract.prompt,
     ].join("\n"),
     message: [
-      "请根据质量报告润色以下章节，输出最终稿。",
-      "输出 Markdown，必须包含 `## Final Body` 与 `## Polish Pass`。",
+      "请根据质量报告自然化以下章节，输出最终稿。",
+      "输出 Markdown，必须包含 `## Final Body` 与 `## Naturalness Pass`。",
+      "不要新增事实，不要改变人物身份，不要改变关系结论，不要跳章。",
       "",
       "## Quality Report",
       report,
       "",
       continuityContract.prompt,
       "",
+      characterProfileContract.prompt,
+      "",
       "## Draft",
       draft,
     ].join("\n"),
   })
 
-  return generated.includes("## Final Body")
+  const normalized = generated.includes("## Final Body")
     ? generated
-    : `${generated}\n\n---\n\n## Polish Pass\n- 已按质量报告进行润色和去 AI 味。`
+    : `${generated}\n\n---\n\n## Naturalness Pass\n- 已按质量报告进行自然化和去 AI 味。`
+  const naturalnessReport = createNaturalnessReport({
+    beforeDraft: draft,
+    afterDraft: normalized,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
+  return normalized.includes("## Naturalness Report")
+    ? normalized
+    : `${normalized.trimEnd()}\n\n${formatNaturalnessReport(naturalnessReport)}`
 }
 
 function createChapterMemoryUpdate(
@@ -3497,6 +3884,21 @@ function createChapterMemoryUpdate(
   const causalPlan = getTaskCausalPlan(state, task)
   const plotContinuity = evaluatePlotContinuityBridge(finalDraft, task, continuityContract)
   const styleQuality = evaluateNarrativeStyleQuality(finalDraft)
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    continuityContract,
+    previousFinalDraft: finalDraft,
+  })
+  const characterProfileQuality = evaluateCharacterProfilePresence(finalDraft, characterProfileContract)
+  const naturalnessReport = createNaturalnessReport({
+    beforeDraft: finalDraft,
+    afterDraft: finalDraft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
   return [
     `# Chapter ${task.chapterNumber} Memory Update`,
     "",
@@ -3522,6 +3924,12 @@ function createChapterMemoryUpdate(
     `- Character state delta required by blueprint: ${causalPlan.characterStateDelta}`,
     "- 新增或变化的配角必须在下一轮 Canon Contract 中继续追踪，不能无解释消失。",
     "",
+    "## Character Profile Projection",
+    `- Gate: ${characterProfileQuality.reason}`,
+    `- Missing profile signals: ${characterProfileContract.missingSignals.length ? characterProfileContract.missingSignals.join("、") : "none"}`,
+    "- Required fields for each important character: identity, desire, fear/wound, habit, speech style, appearance/body marker, skill/limit, relationship state, chapter delta.",
+    "- Next chapter must preserve these profile signals and add missing fields through action/dialogue rather than exposition.",
+    "",
     "## Foreshadowing",
     ...(nextAnchors.length
       ? nextAnchors.slice(0, 8).map((anchor) => `- Continuity anchor: ${anchor}`)
@@ -3531,6 +3939,10 @@ function createChapterMemoryUpdate(
     "## Style Notes",
     `- ${styleQuality.reason}`,
     "- 保持类型旁白策略，避免模板化情绪解释、短词碎片堆砌和孤立成语展示。",
+    "",
+    "## Naturalness Notes",
+    `- ${naturalnessReport.reason}`,
+    ...(naturalnessReport.riskFlags.length ? naturalnessReport.riskFlags.slice(0, 6).map((flag) => `- Risk: ${flag}`) : ["- Risk: none"]),
     "",
     "## Draft Excerpt",
     finalDraft.split("\n").filter(Boolean).slice(0, 8).join("\n"),
@@ -3839,14 +4251,14 @@ export async function runChapterProductionPipeline(
   const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
-    step: "polish_completed",
+    step: "naturalness_completed",
     role: "Prose Stylist",
     chapterNumber: task.chapterNumber,
     title: task.title,
     status: finalGate.status === "blocked" ? "blocked" : "completed",
     message: finalGate.status === "blocked"
-      ? `第 ${task.chapterNumber} 章已生成阻塞版整理稿，等待人工审阅或重试。`
-      : `第 ${task.chapterNumber} 章润色完成，正在写入正式产物。`,
+      ? `第 ${task.chapterNumber} 章已生成阻塞版自然化稿，等待人工审阅或重试。`
+      : `第 ${task.chapterNumber} 章 NaturalnessAgent 自然化完成，正在写入正式产物。`,
     preview: finalDraft.slice(0, 420),
     wordCount: wordCount(finalDraft),
     qualityGate: finalGate,

@@ -398,7 +398,7 @@ function isWritingEventActive(payload: Record<string, unknown>, now: Date = new 
   const eventAgeMs = Number.isFinite(eventAt) ? now.getTime() - eventAt : 0
   const maxActiveMs = 10 * 60 * 1000
   if (eventAgeMs > maxActiveMs) return false
-  if (/_completed$|_failed$|saved$|artifacts_saved|quality_gate_completed|polish_completed|memory_update_completed/.test(step)) {
+  if (/_completed$|_failed$|saved$|artifacts_saved|quality_gate_completed|polish_completed|naturalness_completed|memory_update_completed/.test(step)) {
     return false
   }
   if (status === "running") return true

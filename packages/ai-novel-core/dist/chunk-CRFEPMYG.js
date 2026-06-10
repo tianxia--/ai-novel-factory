@@ -7,6 +7,11 @@ import path from "path";
 var GENERIC_NAMES = /* @__PURE__ */ new Set([
   "\u4E3B\u89D2",
   "\u4E3B\u4EBA\u516C",
+  "\u9996\u7AE0\u4E3B\u89D2",
+  "\u5F85\u5B9A",
+  "\u5F85\u547D\u540D",
+  "\u672A\u547D\u540D",
+  "pending",
   "\u5927\u5510",
   "\u5510\u672B",
   "\u540C\u5DDE",
@@ -441,7 +446,7 @@ function isWritingEventActive(payload, now = /* @__PURE__ */ new Date()) {
   const eventAgeMs = Number.isFinite(eventAt) ? now.getTime() - eventAt : 0;
   const maxActiveMs = 10 * 60 * 1e3;
   if (eventAgeMs > maxActiveMs) return false;
-  if (/_completed$|_failed$|saved$|artifacts_saved|quality_gate_completed|polish_completed|memory_update_completed/.test(step)) {
+  if (/_completed$|_failed$|saved$|artifacts_saved|quality_gate_completed|polish_completed|naturalness_completed|memory_update_completed/.test(step)) {
     return false;
   }
   if (status === "running") return true;

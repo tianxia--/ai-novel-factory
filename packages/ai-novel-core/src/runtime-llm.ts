@@ -54,6 +54,17 @@ const STAGE_DRIFT_PATTERNS = [
   /第\s*\d+\s*章/u,
 ]
 
+function hasExplicitProviderEnvOverride() {
+  return Boolean(
+    process.env.LLM_BASE_URL?.trim()
+    || process.env.OPENAI_BASE_URL?.trim()
+    || process.env.LLM_API_KEY?.trim()
+    || process.env.OPENAI_API_KEY?.trim()
+    || process.env.LLM_MODEL_ID?.trim()
+    || process.env.OPENAI_MODEL_NAME?.trim(),
+  )
+}
+
 function buildFakeReply(options: AgentReplyOptions) {
   const normalizedRole = options.roleName.toLowerCase()
   const priorTranscript = options.priorTranscript?.trim() ?? ""
@@ -323,13 +334,14 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     return reply
   }
 
-  let config = await loadActiveLlmConfig(options.envRootDir)
+  const envStatus = getProjectEnvStatus(options.envRootDir)
+  const explicitEnvOverride = hasExplicitProviderEnvOverride()
+  let config = explicitEnvOverride ? null : await loadActiveLlmConfig(options.envRootDir)
   let apiKey = ""
   if (config) {
     apiKey = config._dbApiKey || ""
   } else {
     config = loadLlmConfigFromEnv(options.envRootDir)
-    const envStatus = getProjectEnvStatus(options.envRootDir)
     apiKey =
       process.env.LLM_API_KEY ||
       process.env.OPENAI_API_KEY ||
@@ -415,7 +427,6 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       }, {
         signal,
         markActivity,
-        requestStartTime: startTime,
       })
     }
 

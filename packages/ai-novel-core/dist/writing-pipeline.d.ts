@@ -103,6 +103,23 @@ interface ContinuityContract {
     hardRules: string[];
     prompt: string;
 }
+interface CharacterProfileContract {
+    status: "ready" | "needs_enrichment" | "blocked";
+    requiredFields: string[];
+    knownCast: string[];
+    missingSignals: string[];
+    profileBrief: string;
+    prompt: string;
+}
+interface NaturalnessReport {
+    status: "passed" | "needs_revision" | "blocked";
+    score: number;
+    reason: string;
+    changedBlocks: number;
+    riskFlags: string[];
+    preservedFacts: string[];
+    patchSummary: string[];
+}
 declare function parseQualityGate(report: string, attempts?: number, maxAttempts?: number): QualityGateResult;
 declare function evaluateNarrativeStyleQuality(text?: string): {
     status: "quarantined";
@@ -191,4 +208,4 @@ declare function runChapterProductionPipeline(projectRoot: string, paths: NovelW
     writingMode: ProductionWritingMode;
 }>;
 
-export { type ContinuityContract, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateWritingResourceUsage, loadProductionWritingResources, parseQualityGate, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };
+export { type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateWritingResourceUsage, loadProductionWritingResources, parseQualityGate, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };

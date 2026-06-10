@@ -16,6 +16,11 @@ export interface ChapterConsistencyResult {
 const GENERIC_NAMES = new Set([
   "主角",
   "主人公",
+  "首章主角",
+  "待定",
+  "待命名",
+  "未命名",
+  "pending",
   "大唐",
   "唐末",
   "同州",
