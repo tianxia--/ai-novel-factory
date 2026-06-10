@@ -4268,6 +4268,70 @@ function appendUnique(values, next, limit = 8) {
   if (!normalized) return values.slice(0, limit);
   return [...values.filter((value) => value !== normalized), normalized].slice(-limit);
 }
+function isPlaceholderProfileText(value = "") {
+  return !value.trim() || /\bpending\b|待定|暂无|requires .*enrichment|needs .*enrichment|inferred from future scenes|must be tracked|must carry|must reveal|must change/iu.test(value);
+}
+function isPlaceholderProfileList(values = []) {
+  return values.length === 0 || values.every((value) => isPlaceholderProfileText(value));
+}
+function conciseEvidence(value, limit = 140) {
+  return value.replace(/^#+\s*/u, "").replace(/^[-*]\s*/u, "").replace(/\s+/gu, " ").trim().slice(0, limit);
+}
+function extractCharacterEvidenceWindows(text, names, limit = 8) {
+  const usableNames = uniqueStrings(names.filter((name) => name && !/^pending-/iu.test(name)));
+  const lines = text.split(/\n+/u).map((line) => conciseEvidence(line, 220)).filter(Boolean).filter((line) => !/^Drafting Metadata|Naturalness Report|Character Profile Projection$/iu.test(line));
+  if (!usableNames.length) {
+    return lines.slice(0, limit);
+  }
+  const namePattern = new RegExp(usableNames.map(escapeRegExpLiteral).join("|"), "u");
+  const direct = lines.filter((line) => namePattern.test(line));
+  const profileSignals = lines.filter((line) => /主角|人物|角色|关系|选择|欲望|伤口|习惯|说话|外貌|体态|特长|短板|停顿|立场|能力|线索/u.test(line));
+  return uniqueStrings([...direct, ...profileSignals]).slice(0, limit);
+}
+function firstEvidenceMatching(windows, pattern) {
+  return windows.find((window) => pattern.test(window)) || "";
+}
+function updateProfileListFromSignal(values, signal, limit = 8) {
+  if (!signal) return values.slice(0, limit);
+  return isPlaceholderProfileList(values) ? [signal] : appendUnique(values, signal, limit);
+}
+function enrichRelationshipEdges(edges, relationshipPressure, protagonistName) {
+  if (!relationshipPressure) return edges;
+  if (!edges.length) {
+    return [{
+      targetId: "protagonist",
+      label: protagonistName ? `pressure around ${protagonistName}` : "relationship pressure",
+      pressure: relationshipPressure
+    }];
+  }
+  return edges.map((edge, index) => index === 0 && isPlaceholderProfileText(edge.pressure) ? { ...edge, pressure: relationshipPressure } : edge);
+}
+function extractCharacterProfileSignals(input) {
+  const windows = extractCharacterEvidenceWindows(input.text, [
+    input.dossier.canonicalName,
+    ...input.dossier.aliases,
+    input.dossier.role === "protagonist" ? input.protagonistName : ""
+  ]);
+  const action = firstEvidenceMatching(windows, /选择|处理|抓住|判断|反击|停顿|回避|试探|压|藏|递|推|看|听|握|抬|低|转|拦|走|拿|放/u);
+  const speech = firstEvidenceMatching(windows, /「|」|说|问|道|低声|称呼|话|停顿/u);
+  const body = firstEvidenceMatching(windows, /眼|手|腕|指|肩|背|袖|脚|身|体|体态|看见|触感|声音|反应|姿态|站|退/u);
+  const relation = firstEvidenceMatching(windows, /关系|对方|别人|有人|信任|债|债务|压力|试探|回避|立场|要求|逼|冲突|配角|主角/u);
+  const skill = firstEvidenceMatching(windows, /判断|抓住|线索|反击|处理|策略|推理|能力|规则|账|田册|官印|密信/u);
+  const limit = firstEvidenceMatching(windows, /不完美|代价|压力|逼|不能|风险|恐惧|弱点|伤口|问题/u);
+  return {
+    desire: `${input.chapterLabel}: pursues the scene objective: ${input.causalPlan.sceneObjective}`,
+    wound: limit ? `${input.chapterLabel}: pressure signal: ${conciseEvidence(limit)}` : `${input.chapterLabel}: pressure is tied to ${input.causalPlan.previousInput}`,
+    contradiction: `${input.chapterLabel}: chooses under pressure: ${input.causalPlan.protagonistDecision}`,
+    habit: `${input.chapterLabel}: ${conciseEvidence(action || input.causalPlan.protagonistDecision)}`,
+    speech: `${input.chapterLabel}: ${conciseEvidence(speech || "speech pressure must follow the character's current relationship and choice")}`,
+    body: `${input.chapterLabel}: ${conciseEvidence(body || "visible body marker must be carried through action and scene pressure")}`,
+    skill: `${input.chapterLabel}: ${conciseEvidence(skill || input.causalPlan.sceneObjective)}`,
+    limitation: `${input.chapterLabel}: ${conciseEvidence(limit || input.causalPlan.irreversibleConsequence)}`,
+    relationship: relation ? `${input.chapterLabel}: ${conciseEvidence(relation)}` : `${input.chapterLabel}: relationship pressure follows ${input.causalPlan.characterStateDelta}`,
+    arc: `${input.chapterLabel}: ${input.causalPlan.nextHandoff}`,
+    evidence: windows[0] ? `${input.chapterLabel} profile signal: ${conciseEvidence(windows[0], 180)}` : ""
+  };
+}
 function updateCharacterDossiersAfterChapter(input) {
   const updatedAt = input.updatedAt || (/* @__PURE__ */ new Date()).toISOString();
   const knownCast = uniqueStrings([
@@ -4277,7 +4341,8 @@ function updateCharacterDossiersAfterChapter(input) {
   ].filter(Boolean));
   const protagonistName = input.continuityContract.lockedProtagonistName || knownCast[0] || "";
   const chapterLabel = `chapter ${input.task.chapterNumber}`;
-  const chapterDelta = `${chapterLabel}: ${getTaskCausalPlan(input.state, input.task).characterStateDelta}`;
+  const causalPlan = getTaskCausalPlan(input.state, input.task);
+  const chapterDelta = `${chapterLabel}: ${causalPlan.characterStateDelta}`;
   const evidence = `${chapterLabel}: ${input.finalDraft.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`;
   const continuityNote = `${chapterLabel}: ${input.continuityContract.continuityAnchors.slice(0, 4).join("\u3001") || "new continuity anchors pending"}`;
   const dossiers = input.dossiers.length ? input.dossiers : [];
@@ -4285,16 +4350,38 @@ function updateCharacterDossiersAfterChapter(input) {
     const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist";
     const isKnownCast = knownCast.some((name) => name && (dossier.canonicalName === name || dossier.aliases.includes(name)));
     if (!isProtagonist && !isKnownCast) return dossier;
+    const canonicalName = isProtagonist && protagonistName && dossier.canonicalName.startsWith("pending-") ? protagonistName : dossier.canonicalName;
+    const aliases = uniqueStrings([
+      ...dossier.aliases,
+      ...isProtagonist && protagonistName ? [protagonistName] : []
+    ]).slice(0, 8);
+    const profileSignals = extractCharacterProfileSignals({
+      dossier: { ...dossier, canonicalName, aliases },
+      text: `${input.finalDraft}
+
+${input.memoryUpdate}`,
+      chapterLabel,
+      causalPlan,
+      protagonistName
+    });
     return {
       ...dossier,
-      canonicalName: isProtagonist && protagonistName && dossier.canonicalName.startsWith("pending-") ? protagonistName : dossier.canonicalName,
-      aliases: uniqueStrings([
-        ...dossier.aliases,
-        ...isProtagonist && protagonistName ? [protagonistName] : []
-      ]).slice(0, 8),
+      canonicalName,
+      aliases,
+      coreDesire: isPlaceholderProfileText(dossier.coreDesire) ? profileSignals.desire : dossier.coreDesire,
+      fearOrWound: isPlaceholderProfileText(dossier.fearOrWound) ? profileSignals.wound : dossier.fearOrWound,
+      contradiction: isPlaceholderProfileText(dossier.contradiction) ? profileSignals.contradiction : dossier.contradiction,
+      behaviorHabits: updateProfileListFromSignal(dossier.behaviorHabits, profileSignals.habit),
+      speechMarkers: updateProfileListFromSignal(dossier.speechMarkers, profileSignals.speech),
+      appearanceAndBody: isPlaceholderProfileText(dossier.appearanceAndBody) && profileSignals.body ? profileSignals.body : dossier.appearanceAndBody,
+      skills: updateProfileListFromSignal(dossier.skills, profileSignals.skill),
+      limitations: updateProfileListFromSignal(dossier.limitations, profileSignals.limitation),
+      relationshipState: isPlaceholderProfileText(dossier.relationshipState) ? profileSignals.relationship : dossier.relationshipState,
+      relationshipEdges: enrichRelationshipEdges(dossier.relationshipEdges, profileSignals.relationship, protagonistName),
+      arcTrajectory: isPlaceholderProfileText(dossier.arcTrajectory) ? profileSignals.arc : dossier.arcTrajectory,
       currentChapterDelta: chapterDelta,
       continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
-      evidence: appendUnique(dossier.evidence, evidence),
+      evidence: appendUnique(appendUnique(dossier.evidence, evidence), profileSignals.evidence),
       updatedAt
     };
   });

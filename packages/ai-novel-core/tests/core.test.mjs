@@ -1766,6 +1766,20 @@ test("production writing pipeline records detailed plans, final chapters, report
     )
     assert.match(styleProfile, /style fingerprint: /)
     assert.doesNotMatch(styleProfile, /pending sample|first-chapter extraction/i)
+    const characterDossiers = JSON.parse(await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "dossiers.json"),
+      "utf8",
+    ))
+    const protagonistDossier = characterDossiers.find((dossier) => dossier.role === "protagonist")
+    assert.ok(protagonistDossier)
+    assert.doesNotMatch(protagonistDossier.coreDesire, /pending/i)
+    assert.match(protagonistDossier.currentChapterDelta, /chapter 1/)
+    assert.ok(protagonistDossier.behaviorHabits.some((entry) => /chapter 1/.test(entry)))
+    assert.ok(protagonistDossier.speechMarkers.some((entry) => /chapter 1/.test(entry)))
+    assert.match(protagonistDossier.appearanceAndBody, /chapter 1/)
+    assert.ok(protagonistDossier.skills.some((entry) => /chapter 1/.test(entry)))
+    assert.match(protagonistDossier.relationshipState, /chapter 1/)
+    assert.ok(protagonistDossier.evidence.some((entry) => /profile signal/.test(entry)))
 
     const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("master-outline.md")))
