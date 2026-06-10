@@ -53,6 +53,16 @@ interface ProviderTestResult {
     modelName: string;
     message: string;
 }
+interface CreativeProfile {
+    genre: string;
+    platform: string;
+    readerPromise: string;
+    pointOfView: string;
+    tone: string;
+    naturalnessTarget: "light" | "balanced" | "strict";
+    styleFingerprint: string;
+    characterProfileRequirements: string[];
+}
 interface AutopilotRuntime {
     running: boolean;
     stopRequested: boolean;
@@ -75,6 +85,7 @@ interface AutonomousNovelState {
         createdAt: string;
         workspaceVersion: number;
         autoMode?: "full" | "semi";
+        creativeProfile?: CreativeProfile;
     };
     runtime: {
         stage: NovelStage;
@@ -113,6 +124,7 @@ interface InitProjectOptions {
     totalChapters: number;
     chapterWordTarget: number;
     title?: string;
+    creativeProfile?: Partial<CreativeProfile>;
 }
 interface InterruptOptions {
     rootDir: string;
@@ -147,4 +159,4 @@ interface NovelProjectRecord {
     };
 }
 
-export type { AutonomousNovelState as A, ChapterTask as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, CausalChapterPlan as c, InitProjectOptions as d, InterruptOptions as e, InterruptionScope as f };
+export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CausalChapterPlan as d, InitProjectOptions as e, InterruptOptions as f, InterruptionScope as g };

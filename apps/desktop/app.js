@@ -45,6 +45,12 @@ const projectCreateModal = document.getElementById("project-create-modal")
 const projectCreateModalCloseButton = document.getElementById("project-create-modal-close-button")
 const projectCreateTitleInput = document.getElementById("project-create-title-input")
 const projectCreateIdeaInput = document.getElementById("project-create-idea-input")
+const projectCreateGenreInput = document.getElementById("project-create-genre-input")
+const projectCreateNaturalnessInput = document.getElementById("project-create-naturalness-input")
+const projectCreateReaderPromiseInput = document.getElementById("project-create-reader-promise-input")
+const projectCreatePovInput = document.getElementById("project-create-pov-input")
+const projectCreateToneInput = document.getElementById("project-create-tone-input")
+const projectCreateStyleFingerprintInput = document.getElementById("project-create-style-fingerprint-input")
 const projectCreateChaptersInput = document.getElementById("project-create-chapters-input")
 const AUTOPILOT_RESUME_HINT = "检测到可恢复的自动创作任务，点击“继续创作”后接着上次进度运行。"
 const AUTOPILOT_RESUME_HINT_AFTER_NETWORK = "网络已恢复，检测到可继续的自动创作任务，请点击“继续创作”。"
@@ -3719,7 +3725,7 @@ async function deleteProject(projectId) {
   addLog(`项目已删除：${response.payload?.deletedProject?.title || title}`)
 }
 
-async function createProjectFromModal({ title, idea, chapters, chapterWords }) {
+async function createProjectFromModal({ title, idea, chapters, chapterWords, creativeProfile }) {
   if (dashboardState.projectCreateInFlight) return
   if (!idea) {
     setProjectCreateStatus("is-error", "请输入一句明确的小说想法。")
@@ -3732,7 +3738,7 @@ async function createProjectFromModal({ title, idea, chapters, chapterWords }) {
   try {
     response = await apiRequest("/api/projects", {
       method: "POST",
-      body: { title, idea, chapters, chapterWords },
+      body: { title, idea, chapters, chapterWords, creativeProfile },
     })
   } catch (error) {
     setProjectCreateBusy(false)
@@ -3987,6 +3993,15 @@ async function runComposerAction(action) {
     idea: projectCreateIdeaInput.value.trim(),
     chapters: Number.parseInt(projectCreateChaptersInput.value || "24", 10),
     chapterWords: Number.parseInt(projectCreateWordsInput.value || "2500", 10),
+    creativeProfile: {
+      genre: projectCreateGenreInput.value,
+      platform: "serialized web novel",
+      readerPromise: projectCreateReaderPromiseInput.value,
+      pointOfView: projectCreatePovInput.value,
+      tone: projectCreateToneInput.value,
+      naturalnessTarget: projectCreateNaturalnessInput.value,
+      styleFingerprint: projectCreateStyleFingerprintInput.value.trim(),
+    },
   }))
   chatMessagesBox.addEventListener("click", (event) => {
     const loadOlderButton = event.target.closest("[data-load-older-messages]")

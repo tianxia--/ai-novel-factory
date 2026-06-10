@@ -1663,6 +1663,9 @@ export async function handleNovelStudioApi(
       totalChapters,
       chapterWordTarget,
       title: typeof body.title === "string" ? body.title : undefined,
+      creativeProfile: body.creativeProfile && typeof body.creativeProfile === "object"
+        ? body.creativeProfile as Record<string, unknown>
+        : undefined,
     })
     await recordStatusMessage(rootDir, {
       projectId: created.project.id,

@@ -536,6 +536,67 @@
           <span>小说想法</span>
           <input type="text" id="project-create-idea-input" placeholder="输入一句核心想法，系统会自动接管创作流程">
         </label>
+        <div class="modal-field-grid">
+          <label class="modal-field">
+            <span>类型</span>
+            <select id="project-create-genre-input">
+              <option value="auto-inferred">自动识别</option>
+              <option value="xianxia">玄幻/仙侠</option>
+              <option value="court politics">权谋/宫廷</option>
+              <option value="suspense">悬疑</option>
+              <option value="romance">言情/情感</option>
+              <option value="urban">都市/现实</option>
+              <option value="science fiction">科幻</option>
+              <option value="light novel">轻小说</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>自然度</span>
+            <select id="project-create-naturalness-input">
+              <option value="balanced">均衡</option>
+              <option value="strict">严格</option>
+              <option value="light">轻量</option>
+            </select>
+          </label>
+        </div>
+        <div class="modal-field-grid">
+          <label class="modal-field">
+            <span>读者承诺</span>
+            <select id="project-create-reader-promise-input">
+              <option value="hook-forward, scene-first, emotionally specific">强钩子/场景优先</option>
+              <option value="power growth">成长爽点</option>
+              <option value="mystery">谜题推进</option>
+              <option value="romance">关系张力</option>
+              <option value="political tension">权力博弈</option>
+              <option value="slice-of-life texture">生活质感</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>视角</span>
+            <select id="project-create-pov-input">
+              <option value="third-person limited">第三人称限知</option>
+              <option value="first person">第一人称</option>
+              <option value="third-person omniscient">第三人称全知</option>
+            </select>
+          </label>
+        </div>
+        <div class="modal-field-grid">
+          <label class="modal-field">
+            <span>语气</span>
+            <select id="project-create-tone-input">
+              <option value="tense but readable">紧张但易读</option>
+              <option value="warm">温暖</option>
+              <option value="comedic">轻喜</option>
+              <option value="dark">冷峻</option>
+              <option value="restrained">克制</option>
+              <option value="passionate">热烈</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>风格指纹</span>
+            <input type="text" id="project-create-style-fingerprint-input" placeholder="可选：短句、对白密、古典感等">
+          </label>
+        </div>
         <label class="modal-field">
           <span>总章节数</span>
           <input type="number" id="project-create-chapters-input" value="24" min="1">

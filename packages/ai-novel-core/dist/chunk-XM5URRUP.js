@@ -6,7 +6,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-VRIPXJ3Y.js";
+} from "./chunk-7EEWRIAK.js";
 import {
   retrieveKnowledge
 } from "./chunk-HL3WMSH6.js";
@@ -488,6 +488,18 @@ var PROJECTS_REGISTRY_FILE = "projects.json";
 var WORKSPACE_VERSION = 1;
 var MIN_CHAPTER_WORD_TARGET = 2500;
 var DEFAULT_CHAPTER_RECOVERY_LIMIT = 3;
+var DEFAULT_CHARACTER_PROFILE_REQUIREMENTS = [
+  "canonical name",
+  "identity and role function",
+  "core desire",
+  "fear or wound",
+  "behavior habit",
+  "speech marker",
+  "appearance or body marker",
+  "skill, limitation, and cost",
+  "relationship state",
+  "current chapter delta"
+];
 var AGENT_ROLES = [
   "showrunner",
   "world-architect",
@@ -623,17 +635,42 @@ function buildChapterTasks(totalChapters, chapterWordTarget, projectIdea) {
     };
   });
 }
+function cleanProfileValue(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+function normalizeNaturalnessTarget(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "light" || normalized === "strict") {
+    return normalized;
+  }
+  return "balanced";
+}
+function buildCreativeProfile(options) {
+  const input = options.creativeProfile || {};
+  return {
+    genre: cleanProfileValue(input.genre, "auto-inferred"),
+    platform: cleanProfileValue(input.platform, "serialized web novel"),
+    readerPromise: cleanProfileValue(input.readerPromise, "hook-forward, scene-first, emotionally specific"),
+    pointOfView: cleanProfileValue(input.pointOfView, "third-person limited"),
+    tone: cleanProfileValue(input.tone, "tense but readable"),
+    naturalnessTarget: normalizeNaturalnessTarget(input.naturalnessTarget),
+    styleFingerprint: cleanProfileValue(input.styleFingerprint, "pending sample or first-chapter extraction"),
+    characterProfileRequirements: Array.isArray(input.characterProfileRequirements) && input.characterProfileRequirements.length ? input.characterProfileRequirements.map((entry) => cleanProfileValue(entry, "")).filter(Boolean) : DEFAULT_CHARACTER_PROFILE_REQUIREMENTS
+  };
+}
 function buildInitialState(options) {
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const title = options.title?.trim() || inferTitleFromIdea(options.idea);
   const projectIdea = options.idea.trim();
   const chapterTasks = buildChapterTasks(options.totalChapters, options.chapterWordTarget, projectIdea);
+  const creativeProfile = buildCreativeProfile(options);
   return {
     project: {
       title,
       idea: projectIdea,
       createdAt: now2,
-      workspaceVersion: WORKSPACE_VERSION
+      workspaceVersion: WORKSPACE_VERSION,
+      creativeProfile
     },
     runtime: {
       stage: "worldbuilding_dialogue",
@@ -724,6 +761,13 @@ function getWorkspacePaths(rootDir) {
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
   const llmConfig = loadLlmConfigFromEnv(rootDir);
+  const creativeProfile = state.project.creativeProfile || buildCreativeProfile({
+    rootDir,
+    idea: state.project.idea,
+    totalChapters: state.plan.totalChapters,
+    chapterWordTarget: state.plan.chapterWordTarget,
+    title: state.project.title
+  });
   await fs3.mkdir(paths.promptsDir, { recursive: true });
   await fs3.mkdir(paths.agentPromptsDir, { recursive: true });
   await fs3.mkdir(paths.plansDir, { recursive: true });
@@ -742,6 +786,12 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "",
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
+    `Genre: ${creativeProfile.genre}`,
+    `Platform: ${creativeProfile.platform}`,
+    `Reader promise: ${creativeProfile.readerPromise}`,
+    `Point of view: ${creativeProfile.pointOfView}`,
+    `Tone: ${creativeProfile.tone}`,
+    `Naturalness target: ${creativeProfile.naturalnessTarget}`,
     "",
     "Goals:",
     ...state.reactSetup.discussionGoals.map((goal) => `- ${goal}`),
@@ -804,6 +854,12 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Core idea: ${state.project.idea}`,
     `Target chapters: ${state.plan.totalChapters}`,
     `Chapter word target: ${state.plan.chapterWordTarget}`,
+    `Genre: ${creativeProfile.genre}`,
+    `Platform: ${creativeProfile.platform}`,
+    `Reader promise: ${creativeProfile.readerPromise}`,
+    `Point of view: ${creativeProfile.pointOfView}`,
+    `Tone: ${creativeProfile.tone}`,
+    `Naturalness target: ${creativeProfile.naturalnessTarget}`,
     "",
     "Confirmed truths:",
     "- The world, style, and character details in this file are the shared source of truth.",
@@ -818,11 +874,13 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Project: ${state.project.title}`,
     "",
     "Production selection contract:",
-    "- genre: auto-inferred until user selects",
-    "- platform: serialized web novel by default",
-    "- reader promise: hook-forward, scene-first, emotionally specific",
-    "- naturalness target: balanced",
-    "- style fingerprint: pending sample or first-chapter extraction",
+    `- genre: ${creativeProfile.genre}`,
+    `- platform: ${creativeProfile.platform}`,
+    `- reader promise: ${creativeProfile.readerPromise}`,
+    `- point of view: ${creativeProfile.pointOfView}`,
+    `- tone: ${creativeProfile.tone}`,
+    `- naturalness target: ${creativeProfile.naturalnessTarget}`,
+    `- style fingerprint: ${creativeProfile.styleFingerprint}`,
     "",
     "Target dimensions:",
     "- genre tone: to be discovered with the user",
@@ -878,6 +936,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "- relationship pressure points: pending",
     "- chapter state delta: pending",
     "",
+    "Required profile checklist:",
+    ...creativeProfile.characterProfileRequirements.map((entry) => `- ${entry}`),
+    "",
     "Production rule:",
     "- Do not let the protagonist be only a label such as cold, kind, smart, or tragic.",
     "- Every chapter should reveal personality through action, choice, habit, speech, body detail, and relationship pressure."
@@ -894,16 +955,7 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "- antagonist pressure axis: pending",
     "",
     "Per-character minimum contract:",
-    "- name",
-    "- role function",
-    "- desire",
-    "- fear or wound",
-    "- visible habit",
-    "- speech marker",
-    "- appearance/body marker",
-    "- skill and limitation",
-    "- current relationship to protagonist",
-    "- last known chapter state"
+    ...creativeProfile.characterProfileRequirements.map((entry) => `- ${entry}`)
   ].join("\n");
   const evolution = [
     "# Character Evolution Log",
@@ -1135,7 +1187,8 @@ async function createManagedAutonomousProject(options) {
     db.recordEvent(record.id, null, "PROJECT_CREATED", {
       title: record.title,
       idea: record.idea,
-      projectRoot: record.projectRoot
+      projectRoot: record.projectRoot,
+      creativeProfile: state.project.creativeProfile
     });
     db.recordArtifact({
       projectId: record.id,

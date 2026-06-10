@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-IRKG645L.js";
+} from "./chunk-MSL5YYXK.js";
 import "./chunk-6NBXMMHP.js";
 import {
   buildSuperGraphIndex,
@@ -30,14 +30,14 @@ import {
   superGraphFromDbRows,
   syncCurrentContextPacketFile,
   validateSuperGraph
-} from "./chunk-QOZ7R7CV.js";
+} from "./chunk-XM5URRUP.js";
 import {
   getCachedActiveLlmConfig,
   getPublicProjectEnvStatus,
   loadActiveLlmConfig,
   testProviderConnectivity,
   upsertProjectEnvValues
-} from "./chunk-VRIPXJ3Y.js";
+} from "./chunk-7EEWRIAK.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
@@ -1297,7 +1297,8 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       idea,
       totalChapters,
       chapterWordTarget,
-      title: typeof body.title === "string" ? body.title : void 0
+      title: typeof body.title === "string" ? body.title : void 0,
+      creativeProfile: body.creativeProfile && typeof body.creativeProfile === "object" ? body.creativeProfile : void 0
     });
     await recordStatusMessage(rootDir, {
       projectId: created.project.id,

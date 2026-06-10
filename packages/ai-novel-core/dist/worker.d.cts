@@ -1,6 +1,6 @@
 import { P as PublicProjectEnvStatus } from './env-manager-C1eYTzhS.cjs';
-import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-DUKbLLp_.cjs';
-import { A as AutonomousNovelState, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, C as ChapterTask, T as TaskStatus } from './cli-types-B4KGI10K.cjs';
+import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-DivzaUh0.cjs';
+import { A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, T as TaskStatus } from './cli-types-BFji0j2e.cjs';
 import './messages.cjs';
 
 declare function createWorkerWorkspacePayload(projectRoot: string, state?: AutonomousNovelState | null, options?: {
@@ -14,6 +14,7 @@ declare function createWorkerWorkspacePayload(projectRoot: string, state?: Auton
             createdAt: string;
             workspaceVersion: number;
             autoMode?: "full" | "semi";
+            creativeProfile?: CreativeProfile;
         };
         runtime: {
             stage: NovelStage;

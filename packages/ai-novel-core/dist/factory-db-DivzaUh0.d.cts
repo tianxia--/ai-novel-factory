@@ -1,4 +1,4 @@
-import { A as AutonomousNovelState, N as NovelProjectRecord, a as NovelStage } from './cli-types-B4KGI10K.cjs';
+import { A as AutonomousNovelState, N as NovelProjectRecord, a as NovelStage } from './cli-types-BFji0j2e.cjs';
 import { NovelMessage, MessagePart } from './messages.cjs';
 
 type SuperGraphNodeType = "Project" | "Mission" | "WorkflowStage" | "Agent" | "Artifact" | "ChapterTask" | "Character" | "Location" | "Faction" | "Event" | "Scene" | "Foreshadowing" | "WorldRule" | "Decision" | "Conflict" | "Relationship" | "TimelinePoint" | "ContextLayer" | "Memory" | "KnowledgeChunk" | "ToolResult" | "Checkpoint" | "DriftGuard" | "DiscussionTurn";

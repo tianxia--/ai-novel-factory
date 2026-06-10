@@ -4652,48 +4652,68 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
   };
 }
 function inferGenreProfile(state) {
+  const selectedGenre = state.project.creativeProfile?.genre?.trim();
+  const selectedNaturalness = state.project.creativeProfile?.naturalnessTarget || "balanced";
+  const selectedReaderPromise = state.project.creativeProfile?.readerPromise?.trim();
+  const selectedPointOfView = state.project.creativeProfile?.pointOfView?.trim();
+  const selectedTone = state.project.creativeProfile?.tone?.trim();
+  const selectedProfileText = [
+    selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "",
+    selectedReaderPromise || "",
+    selectedPointOfView || "",
+    selectedTone || ""
+  ].join("\n");
   const text = `${state.project.title}
 ${state.project.idea}`.toLowerCase();
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(text)) {
-    return {
+  const profileText = `${selectedProfileText}
+${text}`.toLowerCase();
+  const withProfile = (profile) => ({
+    ...profile,
+    naturalnessTarget: selectedNaturalness,
+    readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
+    pointOfView: selectedPointOfView || "third-person limited",
+    tone: selectedTone || "tense but readable"
+  });
+  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(profileText)) {
+    return withProfile({
       genre: "\u7384\u5E7B/\u4ED9\u4FA0",
       narration: "\u65C1\u767D\u8981\u5F3A\u8C03\u89C4\u5219\u8FB9\u754C\u3001\u4EE3\u4EF7\u3001\u5947\u89C2\u611F\u4E0E\u5883\u754C\u538B\u529B\uFF1B\u6218\u6597\u573A\u666F\u7528\u52A8\u4F5C\u52A8\u8BCD\u548C\u611F\u5B98\u7EC6\u8282\uFF0C\u4E0D\u5806\u672F\u8BED\u3002",
       vocabularyScenes: ["\u6218\u6597", "\u81EA\u7136\u73AF\u5883", "\u8BAD\u7EC3\u4FEE\u70BC", "\u5FC3\u7406\u6D3B\u52A8"]
-    };
+    });
   }
-  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(text)) {
-    return {
+  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(profileText)) {
+    return withProfile({
       genre: "\u6743\u8C0B/\u5BAB\u5EF7",
       narration: "\u65C1\u767D\u8981\u7A81\u51FA\u4FE1\u606F\u5DEE\u3001\u793C\u5236\u538B\u529B\u3001\u5BF9\u8BDD\u6F5C\u53F0\u8BCD\u4E0E\u5C40\u52BF\u53D8\u5316\uFF1B\u6B63\u5F0F\u573A\u5408\u5141\u8BB8\u8F83\u9AD8\u6587\u8A00\u6BD4\u4F8B\u3002",
       vocabularyScenes: ["\u5BAB\u5EF7", "\u6743\u8C0B\u7B97\u8BA1", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178"]
-    };
+    });
   }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(text)) {
-    return {
+  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(profileText)) {
+    return withProfile({
       genre: "\u60AC\u7591",
       narration: "\u65C1\u767D\u8981\u63A7\u5236\u7EBF\u7D22\u663E\u9690\u3001\u8BEF\u5BFC\u548C\u8282\u594F\uFF1B\u573A\u666F\u7EC6\u8282\u5FC5\u987B\u53EF\u56DE\u6536\uFF0C\u4E0D\u5199\u65E0\u610F\u4E49\u6C1B\u56F4\u3002",
       vocabularyScenes: ["\u73AF\u5883\u6E32\u67D3", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD"]
-    };
+    });
   }
-  if (/爱情|言情|恋|romance|love/i.test(text)) {
-    return {
+  if (/爱情|言情|恋|romance|love/i.test(profileText)) {
+    return withProfile({
       genre: "\u8A00\u60C5/\u60C5\u611F",
       narration: "\u65C1\u767D\u8981\u8D34\u8FD1\u60C5\u7EEA\u7EC6\u8282\u3001\u5173\u7CFB\u63A8\u8FDB\u548C\u8EAB\u4F53\u53CD\u5E94\uFF1B\u51B2\u7A81\u8981\u843D\u5728\u9009\u62E9\u3001\u8BEF\u89E3\u548C\u6B32\u671B\u4E0A\u3002",
       vocabularyScenes: ["\u611F\u60C5\u620F", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD", "\u65E5\u5E38"]
-    };
+    });
   }
-  if (/都市|职场|现实|city|urban/i.test(text)) {
-    return {
+  if (/都市|职场|现实|city|urban/i.test(profileText)) {
+    return withProfile({
       genre: "\u90FD\u5E02/\u73B0\u5B9E",
       narration: "\u65C1\u767D\u8981\u4FDD\u7559\u751F\u6D3B\u8D28\u611F\u3001\u804C\u4E1A\u7EC6\u8282\u548C\u4EBA\u7269\u5173\u7CFB\u5F20\u529B\uFF1B\u8BED\u8A00\u4EE5\u73B0\u4EE3\u81EA\u7136\u4E3A\u4E3B\u3002",
       vocabularyScenes: ["\u65E5\u5E38", "\u5BF9\u8BDD", "\u5FC3\u7406\u6D3B\u52A8"]
-    };
+    });
   }
-  return {
-    genre: "\u901A\u7528\u7C7B\u578B\u5C0F\u8BF4",
+  return withProfile({
+    genre: selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "\u901A\u7528\u7C7B\u578B\u5C0F\u8BF4",
     narration: "\u65C1\u767D\u4F18\u5148\u670D\u52A1\u573A\u666F\u63A8\u8FDB\u3001\u89D2\u8272\u9009\u62E9\u548C\u8BFB\u8005\u671F\u5F85\uFF1B\u907F\u514D\u6A21\u677F\u5316\u603B\u7ED3\u3002",
     vocabularyScenes: ["\u5BF9\u8BDD", "\u73AF\u5883\u6E32\u67D3", "\u5FC3\u7406\u6D3B\u52A8"]
-  };
+  });
 }
 function sceneTypeForChapter(state, chapterNumber) {
   const genre = inferGenreProfile(state);
@@ -5691,8 +5711,18 @@ async function writeProductionWritingResourceArtifacts(projectRoot, paths, state
     "",
     `Project: ${state.project.title}`,
     `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     "",
     ensureMarkdownSection("Genre Narration Strategy", genre.narration),
+    ensureMarkdownSection("Creation-Time Creative Profile", [
+      `- reader promise: ${genre.readerPromise}`,
+      `- point of view: ${genre.pointOfView}`,
+      `- tone: ${genre.tone}`,
+      `- naturalness target: ${genre.naturalnessTarget}`
+    ].join("\n")),
     ensureMarkdownSection("Style Guide", resources.styleGuide || "Production style guide not found."),
     ensureMarkdownSection("Chapter Planner Guide", resources.chapterPlannerGuide || "Production chapter planner guide not found."),
     ensureMarkdownSection("Writer Guide", resources.writerGuide || "Production writer guide not found."),
@@ -5769,6 +5799,10 @@ function createProductionMasterOutline(state, context, resources) {
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
     `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     `Target chapters: ${state.plan.totalChapters}`,
     `Chapter word target: ${state.plan.chapterWordTarget}`,
     "",
@@ -5868,6 +5902,10 @@ async function createMasterOutlineContent(state, context, resources, options) {
         `\u76EE\u6807\u7AE0\u8282\u6570\uFF1A${state.plan.totalChapters}`,
         `\u5355\u7AE0\u76EE\u6807\u5B57\u6570\uFF1A${state.plan.chapterWordTarget}`,
         `\u7C7B\u578B\uFF1A${genre.genre}`,
+        `\u8BFB\u8005\u627F\u8BFA\uFF1A${genre.readerPromise}`,
+        `\u89C6\u89D2\uFF1A${genre.pointOfView}`,
+        `\u8BED\u6C14\uFF1A${genre.tone}`,
+        `\u81EA\u7136\u5EA6\u76EE\u6807\uFF1A${genre.naturalnessTarget}`,
         `\u7C7B\u578B\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
         "",
         "\u5FC5\u987B\u5305\u542B\u4EE5\u4E0B Markdown \u5C0F\u8282\uFF1A",
@@ -6000,6 +6038,11 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     `Chapter: ${task.chapterNumber}`,
     `Title: ${task.title}`,
     `Arc: ${arcLabel}`,
+    `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     `Target words: ${task.targetWords}`,
     `Primary scene type: ${sceneType}`,
     "",
@@ -6074,6 +6117,10 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     "",
     "## Genre Narration",
     `- \u7C7B\u578B\uFF1A${genre.genre}`,
+    `- \u8BFB\u8005\u627F\u8BFA\uFF1A${genre.readerPromise}`,
+    `- \u89C6\u89D2\uFF1A${genre.pointOfView}`,
+    `- \u8BED\u6C14\uFF1A${genre.tone}`,
+    `- \u81EA\u7136\u5EA6\u76EE\u6807\uFF1A${genre.naturalnessTarget}`,
     `- \u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
     "",
     "## Vocabulary And Idiom Strategy",
@@ -6195,6 +6242,10 @@ async function createChapterBlueprintContent(state, task, context, resources, op
       `\u76EE\u6807\u5B57\u6570\uFF1A${task.targetWords}`,
       `\u5F27\u7EBF\uFF1A${getArcLabel(state, task.chapterNumber)}`,
       `\u7C7B\u578B\uFF1A${genre.genre}`,
+      `\u8BFB\u8005\u627F\u8BFA\uFF1A${genre.readerPromise}`,
+      `\u89C6\u89D2\uFF1A${genre.pointOfView}`,
+      `\u8BED\u6C14\uFF1A${genre.tone}`,
+      `\u81EA\u7136\u5EA6\u76EE\u6807\uFF1A${genre.naturalnessTarget}`,
       `\u4E3B\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
       `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
       "",
@@ -6703,8 +6754,12 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
   const fixedDynamicPromptLines = [
     `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
     `\u6807\u9898\uFF1A${task.title}`,
-    `\u76EE\u6807\u5B57\u6570\uFF1A${task.targetWords}`,
     `\u7C7B\u578B\uFF1A${genre.genre}`,
+    `\u8BFB\u8005\u627F\u8BFA\uFF1A${genre.readerPromise}`,
+    `\u89C6\u89D2\uFF1A${genre.pointOfView}`,
+    `\u8BED\u6C14\uFF1A${genre.tone}`,
+    `\u81EA\u7136\u5EA6\u76EE\u6807\uFF1A${genre.naturalnessTarget}`,
+    `\u76EE\u6807\u5B57\u6570\uFF1A${task.targetWords}`,
     `\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
     `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
     "",
@@ -7159,6 +7214,7 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
   return { draft, report, gate };
 }
 function createPolishedDraft(state, task, draft, report, gate = parseQualityGate(report), mode = "fast", naturalnessReport) {
+  const genre = inferGenreProfile(state);
   return [
     draft.replace("## Draft Body", "## Final Body"),
     "",
@@ -7166,6 +7222,7 @@ function createPolishedDraft(state, task, draft, report, gate = parseQualityGate
     "",
     "## Naturalness Pass",
     `- Production writing mode: ${mode}.`,
+    `- Naturalness target: ${genre.naturalnessTarget}.`,
     mode === "quality" ? "- \u5DF2\u6267\u884C Editor / Consistency Checker / Style Controller / NaturalnessAgent \u8D28\u91CF\u94FE\u8DEF\u3002" : "- \u5DF2\u6267\u884C\u5FEB\u901F\u751F\u4EA7\u786C\u95E8\u7981\uFF1A\u5B57\u6570\u3001\u4E3B\u89D2\u3001\u89D2\u8272\u6863\u6848\u3001\u8FDE\u7EED\u6027\u3001\u56E0\u679C\u5408\u540C\u3001\u8D44\u6E90\u5438\u6536\u548C\u81EA\u7136\u5EA6\u89C4\u5219\u3002",
     "- NaturalnessAgent \u76EE\u6807\uFF1A\u51CF\u5C11\u89E3\u91CA\u6027\u6A21\u677F\u53E5\uFF0C\u589E\u5F3A\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u767D\u3001\u89D2\u8272\u4E60\u60EF\u3001\u5173\u7CFB\u538B\u529B\u548C\u5177\u4F53\u9009\u62E9\u3002",
     "- \u53BB AI \u5473\u7B56\u7565\uFF1A\u907F\u514D\u8FDE\u7EED\u62BD\u8C61\u603B\u7ED3\u3001\u5206\u6790\u8154\u3001\u60C5\u7EEA\u6807\u7B7E\u5806\u53E0\u548C\u6574\u9F50\u6392\u6BD4\uFF0C\u4FDD\u7559\u6709\u4F53\u611F\u7684\u7EC6\u8282\u548C\u89D2\u8272\u5DEE\u5F02\u3002",
@@ -7814,6 +7871,18 @@ var PROJECTS_REGISTRY_FILE = "projects.json";
 var WORKSPACE_VERSION = 1;
 var MIN_CHAPTER_WORD_TARGET = 2500;
 var DEFAULT_CHAPTER_RECOVERY_LIMIT = 3;
+var DEFAULT_CHARACTER_PROFILE_REQUIREMENTS = [
+  "canonical name",
+  "identity and role function",
+  "core desire",
+  "fear or wound",
+  "behavior habit",
+  "speech marker",
+  "appearance or body marker",
+  "skill, limitation, and cost",
+  "relationship state",
+  "current chapter delta"
+];
 var AGENT_ROLES = [
   "showrunner",
   "world-architect",
@@ -7949,17 +8018,42 @@ function buildChapterTasks(totalChapters, chapterWordTarget, projectIdea) {
     };
   });
 }
+function cleanProfileValue(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+function normalizeNaturalnessTarget(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "light" || normalized === "strict") {
+    return normalized;
+  }
+  return "balanced";
+}
+function buildCreativeProfile(options) {
+  const input = options.creativeProfile || {};
+  return {
+    genre: cleanProfileValue(input.genre, "auto-inferred"),
+    platform: cleanProfileValue(input.platform, "serialized web novel"),
+    readerPromise: cleanProfileValue(input.readerPromise, "hook-forward, scene-first, emotionally specific"),
+    pointOfView: cleanProfileValue(input.pointOfView, "third-person limited"),
+    tone: cleanProfileValue(input.tone, "tense but readable"),
+    naturalnessTarget: normalizeNaturalnessTarget(input.naturalnessTarget),
+    styleFingerprint: cleanProfileValue(input.styleFingerprint, "pending sample or first-chapter extraction"),
+    characterProfileRequirements: Array.isArray(input.characterProfileRequirements) && input.characterProfileRequirements.length ? input.characterProfileRequirements.map((entry) => cleanProfileValue(entry, "")).filter(Boolean) : DEFAULT_CHARACTER_PROFILE_REQUIREMENTS
+  };
+}
 function buildInitialState(options) {
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const title = options.title?.trim() || inferTitleFromIdea(options.idea);
   const projectIdea = options.idea.trim();
   const chapterTasks = buildChapterTasks(options.totalChapters, options.chapterWordTarget, projectIdea);
+  const creativeProfile = buildCreativeProfile(options);
   return {
     project: {
       title,
       idea: projectIdea,
       createdAt: now2,
-      workspaceVersion: WORKSPACE_VERSION
+      workspaceVersion: WORKSPACE_VERSION,
+      creativeProfile
     },
     runtime: {
       stage: "worldbuilding_dialogue",
@@ -8050,6 +8144,13 @@ function getWorkspacePaths(rootDir) {
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
   const llmConfig = loadLlmConfigFromEnv(rootDir);
+  const creativeProfile = state.project.creativeProfile || buildCreativeProfile({
+    rootDir,
+    idea: state.project.idea,
+    totalChapters: state.plan.totalChapters,
+    chapterWordTarget: state.plan.chapterWordTarget,
+    title: state.project.title
+  });
   await import_promises6.default.mkdir(paths.promptsDir, { recursive: true });
   await import_promises6.default.mkdir(paths.agentPromptsDir, { recursive: true });
   await import_promises6.default.mkdir(paths.plansDir, { recursive: true });
@@ -8068,6 +8169,12 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "",
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
+    `Genre: ${creativeProfile.genre}`,
+    `Platform: ${creativeProfile.platform}`,
+    `Reader promise: ${creativeProfile.readerPromise}`,
+    `Point of view: ${creativeProfile.pointOfView}`,
+    `Tone: ${creativeProfile.tone}`,
+    `Naturalness target: ${creativeProfile.naturalnessTarget}`,
     "",
     "Goals:",
     ...state.reactSetup.discussionGoals.map((goal) => `- ${goal}`),
@@ -8130,6 +8237,12 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Core idea: ${state.project.idea}`,
     `Target chapters: ${state.plan.totalChapters}`,
     `Chapter word target: ${state.plan.chapterWordTarget}`,
+    `Genre: ${creativeProfile.genre}`,
+    `Platform: ${creativeProfile.platform}`,
+    `Reader promise: ${creativeProfile.readerPromise}`,
+    `Point of view: ${creativeProfile.pointOfView}`,
+    `Tone: ${creativeProfile.tone}`,
+    `Naturalness target: ${creativeProfile.naturalnessTarget}`,
     "",
     "Confirmed truths:",
     "- The world, style, and character details in this file are the shared source of truth.",
@@ -8144,11 +8257,13 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     `Project: ${state.project.title}`,
     "",
     "Production selection contract:",
-    "- genre: auto-inferred until user selects",
-    "- platform: serialized web novel by default",
-    "- reader promise: hook-forward, scene-first, emotionally specific",
-    "- naturalness target: balanced",
-    "- style fingerprint: pending sample or first-chapter extraction",
+    `- genre: ${creativeProfile.genre}`,
+    `- platform: ${creativeProfile.platform}`,
+    `- reader promise: ${creativeProfile.readerPromise}`,
+    `- point of view: ${creativeProfile.pointOfView}`,
+    `- tone: ${creativeProfile.tone}`,
+    `- naturalness target: ${creativeProfile.naturalnessTarget}`,
+    `- style fingerprint: ${creativeProfile.styleFingerprint}`,
     "",
     "Target dimensions:",
     "- genre tone: to be discovered with the user",
@@ -8204,6 +8319,9 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "- relationship pressure points: pending",
     "- chapter state delta: pending",
     "",
+    "Required profile checklist:",
+    ...creativeProfile.characterProfileRequirements.map((entry) => `- ${entry}`),
+    "",
     "Production rule:",
     "- Do not let the protagonist be only a label such as cold, kind, smart, or tragic.",
     "- Every chapter should reveal personality through action, choice, habit, speech, body detail, and relationship pressure."
@@ -8220,16 +8338,7 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     "- antagonist pressure axis: pending",
     "",
     "Per-character minimum contract:",
-    "- name",
-    "- role function",
-    "- desire",
-    "- fear or wound",
-    "- visible habit",
-    "- speech marker",
-    "- appearance/body marker",
-    "- skill and limitation",
-    "- current relationship to protagonist",
-    "- last known chapter state"
+    ...creativeProfile.characterProfileRequirements.map((entry) => `- ${entry}`)
   ].join("\n");
   const evolution = [
     "# Character Evolution Log",
@@ -8461,7 +8570,8 @@ async function createManagedAutonomousProject(options) {
     db.recordEvent(record.id, null, "PROJECT_CREATED", {
       title: record.title,
       idea: record.idea,
-      projectRoot: record.projectRoot
+      projectRoot: record.projectRoot,
+      creativeProfile: state.project.creativeProfile
     });
     db.recordArtifact({
       projectId: record.id,

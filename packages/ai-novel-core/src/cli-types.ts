@@ -68,6 +68,17 @@ export interface ProviderTestResult {
   message: string
 }
 
+export interface CreativeProfile {
+  genre: string
+  platform: string
+  readerPromise: string
+  pointOfView: string
+  tone: string
+  naturalnessTarget: "light" | "balanced" | "strict"
+  styleFingerprint: string
+  characterProfileRequirements: string[]
+}
+
 export interface AutopilotRuntime {
   running: boolean
   stopRequested: boolean
@@ -91,6 +102,7 @@ export interface AutonomousNovelState {
     createdAt: string
     workspaceVersion: number
     autoMode?: "full" | "semi"
+    creativeProfile?: CreativeProfile
   }
   runtime: {
     stage: NovelStage
@@ -130,6 +142,7 @@ export interface InitProjectOptions {
   totalChapters: number
   chapterWordTarget: number
   title?: string
+  creativeProfile?: Partial<CreativeProfile>
 }
 
 export interface InterruptOptions {

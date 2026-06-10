@@ -1236,6 +1236,15 @@ test("studio project api creates isolated projects and requires selection when m
     idea: "A blind stargazer hears the future in cosmic noise",
     chapters: 18,
     chapterWords: 2600,
+    creativeProfile: {
+      genre: "suspense",
+      platform: "serialized web novel",
+      readerPromise: "mystery",
+      pointOfView: "third-person limited",
+      tone: "restrained",
+      naturalnessTarget: "strict",
+      styleFingerprint: "short sensory paragraphs and distinct dialogue voices",
+    },
   })
   const secondCreate = await handleNovelStudioApi(tempDir, "POST", "/api/projects", {
     title: "Ash Kingdom",
@@ -1254,11 +1263,19 @@ test("studio project api creates isolated projects and requires selection when m
   assert.equal(Object.prototype.hasOwnProperty.call(firstCreate.payload, "entries"), false)
   assert.equal(firstCreate.payload.state.runtime.autopilot.running, false)
   assert.equal(firstCreate.payload.state.runtime.autopilot.lastStep, "awaiting_user_start")
+  assert.equal(firstCreate.payload.state.project.creativeProfile.genre, "suspense")
+  assert.equal(firstCreate.payload.state.project.creativeProfile.readerPromise, "mystery")
+  assert.equal(firstCreate.payload.state.project.creativeProfile.naturalnessTarget, "strict")
+  assert.ok(firstCreate.payload.state.project.creativeProfile.characterProfileRequirements.includes("speech marker"))
 
   const firstCreateStatus = await handleNovelStudioApi(tempDir, "GET", "/api/status", {}, { projectId: firstCreate.payload.projectId })
   assert.equal(firstCreateStatus.status, 200)
   assert.equal(firstCreateStatus.payload.factorySnapshot.activeJobs.length, 0)
   assert.ok(firstCreateStatus.payload.factorySnapshot.recentMessages.some((message) => message.type === "status" && /开始创作/.test(`${message.data.title}\n${message.data.content}`)))
+  const styleProfile = await fs.readFile(path.join(tempDir, ".ai-novel-projects", firstCreate.payload.projectId, ".ai-novel", "style", "profile.md"), "utf8")
+  assert.match(styleProfile, /genre: suspense/)
+  assert.match(styleProfile, /reader promise: mystery/)
+  assert.match(styleProfile, /naturalness target: strict/)
 
   const managedChat = await handleNovelStudioApi(tempDir, "POST", "/api/chat-stream", {
     projectId: firstCreate.payload.projectId,
@@ -3713,9 +3730,19 @@ test("desktop studio includes project manager and create-project modal scaffoldi
   assert.match(html, /id="project-create-modal"/)
   assert.match(html, /id="project-create-title-input"/)
   assert.match(html, /id="project-create-idea-input"/)
+  assert.match(html, /id="project-create-genre-input"/)
+  assert.match(html, /id="project-create-naturalness-input"/)
+  assert.match(html, /id="project-create-reader-promise-input"/)
+  assert.match(html, /id="project-create-pov-input"/)
+  assert.match(html, /id="project-create-tone-input"/)
+  assert.match(html, /id="project-create-style-fingerprint-input"/)
   assert.match(html, /id="project-create-chapters-input"/)
   assert.match(html, /id="project-create-words-input"/)
   assert.match(html, /id="project-create-submit-button"/)
+  const js = await fs.readFile(desktopAppEntry, "utf8")
+  assert.match(js, /creativeProfile:\s*\{/)
+  assert.match(js, /genre:\s*projectCreateGenreInput\.value/)
+  assert.match(js, /naturalnessTarget:\s*projectCreateNaturalnessInput\.value/)
 })
 
 test("desktop project manager supports scrolling and confirmed project deletion", async () => {

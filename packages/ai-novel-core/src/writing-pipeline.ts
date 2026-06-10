@@ -666,47 +666,66 @@ function enforceFinalDraftQualityGate(
 }
 
 function inferGenreProfile(state: AutonomousNovelState) {
+  const selectedGenre = state.project.creativeProfile?.genre?.trim()
+  const selectedNaturalness = state.project.creativeProfile?.naturalnessTarget || "balanced"
+  const selectedReaderPromise = state.project.creativeProfile?.readerPromise?.trim()
+  const selectedPointOfView = state.project.creativeProfile?.pointOfView?.trim()
+  const selectedTone = state.project.creativeProfile?.tone?.trim()
+  const selectedProfileText = [
+    selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "",
+    selectedReaderPromise || "",
+    selectedPointOfView || "",
+    selectedTone || "",
+  ].join("\n")
   const text = `${state.project.title}\n${state.project.idea}`.toLowerCase()
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(text)) {
-    return {
+  const profileText = `${selectedProfileText}\n${text}`.toLowerCase()
+  const withProfile = (profile: { genre: string; narration: string; vocabularyScenes: string[] }) => ({
+    ...profile,
+    naturalnessTarget: selectedNaturalness,
+    readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
+    pointOfView: selectedPointOfView || "third-person limited",
+    tone: selectedTone || "tense but readable",
+  })
+  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(profileText)) {
+    return withProfile({
       genre: "玄幻/仙侠",
       narration: "旁白要强调规则边界、代价、奇观感与境界压力；战斗场景用动作动词和感官细节，不堆术语。",
       vocabularyScenes: ["战斗", "自然环境", "训练修炼", "心理活动"],
-    }
+    })
   }
-  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(text)) {
-    return {
+  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(profileText)) {
+    return withProfile({
       genre: "权谋/宫廷",
       narration: "旁白要突出信息差、礼制压力、对话潜台词与局势变化；正式场合允许较高文言比例。",
       vocabularyScenes: ["宫廷", "权谋算计", "对话", "仪式庆典"],
-    }
+    })
   }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(text)) {
-    return {
+  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(profileText)) {
+    return withProfile({
       genre: "悬疑",
       narration: "旁白要控制线索显隐、误导和节奏；场景细节必须可回收，不写无意义氛围。",
       vocabularyScenes: ["环境渲染", "心理活动", "对话"],
-    }
+    })
   }
-  if (/爱情|言情|恋|romance|love/i.test(text)) {
-    return {
+  if (/爱情|言情|恋|romance|love/i.test(profileText)) {
+    return withProfile({
       genre: "言情/情感",
       narration: "旁白要贴近情绪细节、关系推进和身体反应；冲突要落在选择、误解和欲望上。",
       vocabularyScenes: ["感情戏", "心理活动", "对话", "日常"],
-    }
+    })
   }
-  if (/都市|职场|现实|city|urban/i.test(text)) {
-    return {
+  if (/都市|职场|现实|city|urban/i.test(profileText)) {
+    return withProfile({
       genre: "都市/现实",
       narration: "旁白要保留生活质感、职业细节和人物关系张力；语言以现代自然为主。",
       vocabularyScenes: ["日常", "对话", "心理活动"],
-    }
+    })
   }
-  return {
-    genre: "通用类型小说",
+  return withProfile({
+    genre: selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "通用类型小说",
     narration: "旁白优先服务场景推进、角色选择和读者期待；避免模板化总结。",
     vocabularyScenes: ["对话", "环境渲染", "心理活动"],
-  }
+  })
 }
 
 function sceneTypeForChapter(state: AutonomousNovelState, chapterNumber: number) {
@@ -2025,8 +2044,18 @@ export async function writeProductionWritingResourceArtifacts(
     "",
     `Project: ${state.project.title}`,
     `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     "",
     ensureMarkdownSection("Genre Narration Strategy", genre.narration),
+    ensureMarkdownSection("Creation-Time Creative Profile", [
+      `- reader promise: ${genre.readerPromise}`,
+      `- point of view: ${genre.pointOfView}`,
+      `- tone: ${genre.tone}`,
+      `- naturalness target: ${genre.naturalnessTarget}`,
+    ].join("\n")),
     ensureMarkdownSection("Style Guide", resources.styleGuide || "Production style guide not found."),
     ensureMarkdownSection("Chapter Planner Guide", resources.chapterPlannerGuide || "Production chapter planner guide not found."),
     ensureMarkdownSection("Writer Guide", resources.writerGuide || "Production writer guide not found."),
@@ -2106,6 +2135,10 @@ export function createProductionMasterOutline(
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
     `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     `Target chapters: ${state.plan.totalChapters}`,
     `Chapter word target: ${state.plan.chapterWordTarget}`,
     "",
@@ -2212,6 +2245,10 @@ async function createMasterOutlineContent(
         `目标章节数：${state.plan.totalChapters}`,
         `单章目标字数：${state.plan.chapterWordTarget}`,
         `类型：${genre.genre}`,
+        `读者承诺：${genre.readerPromise}`,
+        `视角：${genre.pointOfView}`,
+        `语气：${genre.tone}`,
+        `自然度目标：${genre.naturalnessTarget}`,
         `类型旁白策略：${genre.narration}`,
         "",
         "必须包含以下 Markdown 小节：",
@@ -2345,6 +2382,11 @@ export function createDetailedChapterBlueprint(
     `Chapter: ${task.chapterNumber}`,
     `Title: ${task.title}`,
     `Arc: ${arcLabel}`,
+    `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    `Naturalness target: ${genre.naturalnessTarget}`,
     `Target words: ${task.targetWords}`,
     `Primary scene type: ${sceneType}`,
     "",
@@ -2429,6 +2471,10 @@ export function createDetailedChapterBlueprint(
     "",
     "## Genre Narration",
     `- 类型：${genre.genre}`,
+    `- 读者承诺：${genre.readerPromise}`,
+    `- 视角：${genre.pointOfView}`,
+    `- 语气：${genre.tone}`,
+    `- 自然度目标：${genre.naturalnessTarget}`,
     `- 旁白策略：${genre.narration}`,
     "",
 	    "## Vocabulary And Idiom Strategy",
@@ -2554,6 +2600,10 @@ async function createChapterBlueprintContent(
       `目标字数：${task.targetWords}`,
       `弧线：${getArcLabel(state, task.chapterNumber)}`,
       `类型：${genre.genre}`,
+      `读者承诺：${genre.readerPromise}`,
+      `视角：${genre.pointOfView}`,
+      `语气：${genre.tone}`,
+      `自然度目标：${genre.naturalnessTarget}`,
       `主场景类型：${sceneType}`,
       `旁白策略：${genre.narration}`,
       "",
@@ -3177,8 +3227,12 @@ async function createDraftBody(
   const fixedDynamicPromptLines = [
     `章节：第 ${task.chapterNumber} 章`,
     `标题：${task.title}`,
-    `目标字数：${task.targetWords}`,
     `类型：${genre.genre}`,
+    `读者承诺：${genre.readerPromise}`,
+    `视角：${genre.pointOfView}`,
+    `语气：${genre.tone}`,
+    `自然度目标：${genre.naturalnessTarget}`,
+    `目标字数：${task.targetWords}`,
     `场景类型：${sceneType}`,
     `旁白策略：${genre.narration}`,
     "",
@@ -3743,6 +3797,7 @@ function createPolishedDraft(
   mode: ProductionWritingMode = "fast",
   naturalnessReport?: NaturalnessReport,
 ) {
+  const genre = inferGenreProfile(state)
   return [
     draft.replace("## Draft Body", "## Final Body"),
     "",
@@ -3750,6 +3805,7 @@ function createPolishedDraft(
     "",
     "## Naturalness Pass",
     `- Production writing mode: ${mode}.`,
+    `- Naturalness target: ${genre.naturalnessTarget}.`,
     mode === "quality"
       ? "- 已执行 Editor / Consistency Checker / Style Controller / NaturalnessAgent 质量链路。"
       : "- 已执行快速生产硬门禁：字数、主角、角色档案、连续性、因果合同、资源吸收和自然度规则。",

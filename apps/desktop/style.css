@@ -3747,6 +3747,12 @@ body.dark-mode::before {
   gap: 7px;
 }
 
+.modal-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .modal-field span {
   font-size: 11px;
   font-weight: 700;
@@ -3754,7 +3760,8 @@ body.dark-mode::before {
   color: var(--text-dark);
 }
 
-.modal-field input {
+.modal-field input,
+.modal-field select {
   min-height: 46px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -3762,6 +3769,11 @@ body.dark-mode::before {
   color: var(--text-light);
   padding: 0 14px;
   font-size: 13px;
+}
+
+.modal-field select {
+  appearance: none;
+  cursor: pointer;
 }
 
 .modal-status {
@@ -4497,6 +4509,7 @@ input[type="number"] {
 
 /* 优化输入框焦点特效 */
 .modal-field input:focus,
+.modal-field select:focus,
 .init-panel-form input:focus {
   outline: none;
   border-color: var(--primary-color);
@@ -4844,4 +4857,3 @@ input[type="number"] {
   display: flex;
   gap: 10px;
 }
-
