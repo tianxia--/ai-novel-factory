@@ -7,13 +7,13 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-TV3KISUB.js";
+} from "./chunk-EFIEMBNJ.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-4AWQRCQK.js";
+} from "./chunk-IXQJTWTR.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -50,7 +50,7 @@ import {
   upsertCheckpointInSuperGraph,
   upsertDiscussionInSuperGraph,
   validateSuperGraph
-} from "./chunk-XDNVKTHT.js";
+} from "./chunk-PO7BPTFJ.js";
 import {
   createContinuityContract,
   createDetailedChapterBlueprint,
@@ -66,6 +66,7 @@ import {
   getProjectEnvPath,
   getProjectEnvStatus,
   getPublicProjectEnvStatus,
+  inferGenreProfile,
   loadActiveLlmConfig,
   loadLlmConfigFromEnv,
   loadProductionWritingResources,
@@ -80,7 +81,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-OCZ2SK3V.js";
+} from "./chunk-22DS7NY5.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -171,6 +172,7 @@ export {
   getProjectEnvStatus,
   getPublicProjectEnvStatus,
   getWorkspaceSummary,
+  inferGenreProfile,
   inferLockedProtagonistName,
   ingestGlobalWritingResources,
   ingestKnowledgeSource,

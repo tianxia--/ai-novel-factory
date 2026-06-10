@@ -3238,6 +3238,38 @@ test("writing resource gate blocks idiom stacking and accepts concrete skill-sty
   assert.match(concrete.reason, /动作|感官|物件|资源/)
 })
 
+test("genre profile carries creation style contract into writing strategy", async () => {
+  const { inferGenreProfile } = await loadCore()
+  const state = {
+    project: {
+      title: "Blind Stargazer",
+      idea: "A blind stargazer hears the future in cosmic noise.",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      workspaceVersion: 1,
+      creativeProfile: {
+        genre: "suspense",
+        platform: "serialized web novel",
+        readerPromise: "mystery",
+        pointOfView: "third-person limited",
+        tone: "restrained",
+        naturalnessTarget: "strict",
+        styleFingerprint: "short sensory paragraphs and distinct dialogue voices",
+        characterProfileRequirements: [],
+      },
+    },
+    runtime: { stage: "drafting" },
+    plan: { totalChapters: 12, chapterWordTarget: 2600, chapterTasks: [] },
+  }
+
+  const genre = inferGenreProfile(state)
+  assert.equal(genre.genre, "悬疑")
+  assert.equal(genre.readerPromise, "mystery")
+  assert.equal(genre.naturalnessTarget, "strict")
+  assert.match(genre.narration, /生产风格合同/)
+  assert.match(genre.narration, /风格指纹：short sensory paragraphs and distinct dialogue voices/)
+  assert.match(genre.narration, /自然度=strict/)
+})
+
 test("writing pipeline hard gates plot continuity beyond matching protagonist names", async () => {
   const {
     createContinuityContract,

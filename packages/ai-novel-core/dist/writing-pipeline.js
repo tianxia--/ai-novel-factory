@@ -7,13 +7,14 @@ import {
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage,
+  inferGenreProfile,
   loadProductionWritingResources,
   parseQualityGate,
   runChapterProductionPipeline,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-OCZ2SK3V.js";
+} from "./chunk-22DS7NY5.js";
 import "./chunk-HL3WMSH6.js";
 import "./chunk-CRFEPMYG.js";
 import "./chunk-GZKJNHMN.js";
@@ -26,6 +27,7 @@ export {
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage,
+  inferGenreProfile,
   loadProductionWritingResources,
   parseQualityGate,
   runChapterProductionPipeline,

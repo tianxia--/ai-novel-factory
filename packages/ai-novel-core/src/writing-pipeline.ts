@@ -801,28 +801,35 @@ function enforceFinalDraftQualityGate(
   }
 }
 
-function inferGenreProfile(state: AutonomousNovelState) {
+export function inferGenreProfile(state: AutonomousNovelState) {
   const selectedGenre = state.project.creativeProfile?.genre?.trim()
   const selectedNaturalness = state.project.creativeProfile?.naturalnessTarget || "balanced"
   const selectedReaderPromise = state.project.creativeProfile?.readerPromise?.trim()
   const selectedPointOfView = state.project.creativeProfile?.pointOfView?.trim()
   const selectedTone = state.project.creativeProfile?.tone?.trim()
+  const selectedStyleFingerprint = state.project.creativeProfile?.styleFingerprint?.trim()
   const selectedProfileText = [
     selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "",
     selectedReaderPromise || "",
     selectedPointOfView || "",
     selectedTone || "",
+    selectedStyleFingerprint || "",
   ].join("\n")
   const text = `${state.project.title}\n${state.project.idea}`.toLowerCase()
   const profileText = `${selectedProfileText}\n${text}`.toLowerCase()
   const withProfile = (profile: { genre: string; narration: string; vocabularyScenes: string[] }) => ({
     ...profile,
+    narration: [
+      profile.narration,
+      `生产风格合同：读者承诺=${selectedReaderPromise || "hook-forward, scene-first, emotionally specific"}；视角=${selectedPointOfView || "third-person limited"}；语气=${selectedTone || "tense but readable"}；自然度=${selectedNaturalness}。`,
+      selectedStyleFingerprint ? `风格指纹：${selectedStyleFingerprint}。` : "风格指纹：首章生成后从稳定样张中提取；当前先保持场景优先、角色差异和自然对白。",
+    ].join("\n"),
     naturalnessTarget: selectedNaturalness,
     readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
     pointOfView: selectedPointOfView || "third-person limited",
     tone: selectedTone || "tense but readable",
   })
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(profileText)) {
+  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia|xuanhuan/i.test(profileText)) {
     return withProfile({
       genre: "玄幻/仙侠",
       narration: "旁白要强调规则边界、代价、奇观感与境界压力；战斗场景用动作动词和感官细节，不堆术语。",
@@ -836,7 +843,7 @@ function inferGenreProfile(state: AutonomousNovelState) {
       vocabularyScenes: ["宫廷", "权谋算计", "对话", "仪式庆典"],
     })
   }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(profileText)) {
+  if (/悬疑|谜|案|侦探|mystery|crime|thriller|suspense|detective|noir/i.test(profileText)) {
     return withProfile({
       genre: "悬疑",
       narration: "旁白要控制线索显隐、误导和节奏；场景细节必须可回收，不写无意义氛围。",
@@ -848,6 +855,27 @@ function inferGenreProfile(state: AutonomousNovelState) {
       genre: "言情/情感",
       narration: "旁白要贴近情绪细节、关系推进和身体反应；冲突要落在选择、误解和欲望上。",
       vocabularyScenes: ["感情戏", "心理活动", "对话", "日常"],
+    })
+  }
+  if (/科幻|赛博|星际|未来|机甲|science fiction|sci-fi|scifi|cyberpunk|space|mecha/i.test(profileText)) {
+    return withProfile({
+      genre: "科幻/赛博",
+      narration: "旁白要把技术规则、身体感知和社会代价绑定到场景行动；不要只堆设备名或概念解释。",
+      vocabularyScenes: ["技术现场", "城市环境", "对话", "动作"],
+    })
+  }
+  if (/历史|古代|唐|宋|明|清|historical|dynasty|period/i.test(profileText)) {
+    return withProfile({
+      genre: "历史/古代",
+      narration: "旁白要把时代制度、物件、称谓和生活细节落进人物选择；避免资料说明压过场景。",
+      vocabularyScenes: ["历史场景", "对话", "仪式庆典", "日常"],
+    })
+  }
+  if (/轻小说|轻奇幻|校园|冒险|light novel|isekai|academy|adventure/i.test(profileText)) {
+    return withProfile({
+      genre: "轻小说/冒险",
+      narration: "旁白要保持清晰节奏、角色反应和章末推进；幽默或吐槽只能服务人物关系和选择。",
+      vocabularyScenes: ["对话", "动作", "日常", "心理活动"],
     })
   }
   if (/都市|职场|现实|city|urban/i.test(profileText)) {

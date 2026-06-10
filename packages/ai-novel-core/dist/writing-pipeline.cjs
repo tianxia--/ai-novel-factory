@@ -38,6 +38,7 @@ __export(writing_pipeline_exports, {
   evaluateNarrativeStyleQuality: () => evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge: () => evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage: () => evaluateWritingResourceUsage,
+  inferGenreProfile: () => inferGenreProfile,
   loadProductionWritingResources: () => loadProductionWritingResources,
   parseQualityGate: () => parseQualityGate,
   runChapterProductionPipeline: () => runChapterProductionPipeline,
@@ -4270,11 +4271,13 @@ function inferGenreProfile(state) {
   const selectedReaderPromise = state.project.creativeProfile?.readerPromise?.trim();
   const selectedPointOfView = state.project.creativeProfile?.pointOfView?.trim();
   const selectedTone = state.project.creativeProfile?.tone?.trim();
+  const selectedStyleFingerprint = state.project.creativeProfile?.styleFingerprint?.trim();
   const selectedProfileText = [
     selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "",
     selectedReaderPromise || "",
     selectedPointOfView || "",
-    selectedTone || ""
+    selectedTone || "",
+    selectedStyleFingerprint || ""
   ].join("\n");
   const text = `${state.project.title}
 ${state.project.idea}`.toLowerCase();
@@ -4282,12 +4285,17 @@ ${state.project.idea}`.toLowerCase();
 ${text}`.toLowerCase();
   const withProfile = (profile) => ({
     ...profile,
+    narration: [
+      profile.narration,
+      `\u751F\u4EA7\u98CE\u683C\u5408\u540C\uFF1A\u8BFB\u8005\u627F\u8BFA=${selectedReaderPromise || "hook-forward, scene-first, emotionally specific"}\uFF1B\u89C6\u89D2=${selectedPointOfView || "third-person limited"}\uFF1B\u8BED\u6C14=${selectedTone || "tense but readable"}\uFF1B\u81EA\u7136\u5EA6=${selectedNaturalness}\u3002`,
+      selectedStyleFingerprint ? `\u98CE\u683C\u6307\u7EB9\uFF1A${selectedStyleFingerprint}\u3002` : "\u98CE\u683C\u6307\u7EB9\uFF1A\u9996\u7AE0\u751F\u6210\u540E\u4ECE\u7A33\u5B9A\u6837\u5F20\u4E2D\u63D0\u53D6\uFF1B\u5F53\u524D\u5148\u4FDD\u6301\u573A\u666F\u4F18\u5148\u3001\u89D2\u8272\u5DEE\u5F02\u548C\u81EA\u7136\u5BF9\u767D\u3002"
+    ].join("\n"),
     naturalnessTarget: selectedNaturalness,
     readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
     pointOfView: selectedPointOfView || "third-person limited",
     tone: selectedTone || "tense but readable"
   });
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia/i.test(profileText)) {
+  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia|xuanhuan/i.test(profileText)) {
     return withProfile({
       genre: "\u7384\u5E7B/\u4ED9\u4FA0",
       narration: "\u65C1\u767D\u8981\u5F3A\u8C03\u89C4\u5219\u8FB9\u754C\u3001\u4EE3\u4EF7\u3001\u5947\u89C2\u611F\u4E0E\u5883\u754C\u538B\u529B\uFF1B\u6218\u6597\u573A\u666F\u7528\u52A8\u4F5C\u52A8\u8BCD\u548C\u611F\u5B98\u7EC6\u8282\uFF0C\u4E0D\u5806\u672F\u8BED\u3002",
@@ -4301,7 +4309,7 @@ ${text}`.toLowerCase();
       vocabularyScenes: ["\u5BAB\u5EF7", "\u6743\u8C0B\u7B97\u8BA1", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178"]
     });
   }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller/i.test(profileText)) {
+  if (/悬疑|谜|案|侦探|mystery|crime|thriller|suspense|detective|noir/i.test(profileText)) {
     return withProfile({
       genre: "\u60AC\u7591",
       narration: "\u65C1\u767D\u8981\u63A7\u5236\u7EBF\u7D22\u663E\u9690\u3001\u8BEF\u5BFC\u548C\u8282\u594F\uFF1B\u573A\u666F\u7EC6\u8282\u5FC5\u987B\u53EF\u56DE\u6536\uFF0C\u4E0D\u5199\u65E0\u610F\u4E49\u6C1B\u56F4\u3002",
@@ -4313,6 +4321,27 @@ ${text}`.toLowerCase();
       genre: "\u8A00\u60C5/\u60C5\u611F",
       narration: "\u65C1\u767D\u8981\u8D34\u8FD1\u60C5\u7EEA\u7EC6\u8282\u3001\u5173\u7CFB\u63A8\u8FDB\u548C\u8EAB\u4F53\u53CD\u5E94\uFF1B\u51B2\u7A81\u8981\u843D\u5728\u9009\u62E9\u3001\u8BEF\u89E3\u548C\u6B32\u671B\u4E0A\u3002",
       vocabularyScenes: ["\u611F\u60C5\u620F", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD", "\u65E5\u5E38"]
+    });
+  }
+  if (/科幻|赛博|星际|未来|机甲|science fiction|sci-fi|scifi|cyberpunk|space|mecha/i.test(profileText)) {
+    return withProfile({
+      genre: "\u79D1\u5E7B/\u8D5B\u535A",
+      narration: "\u65C1\u767D\u8981\u628A\u6280\u672F\u89C4\u5219\u3001\u8EAB\u4F53\u611F\u77E5\u548C\u793E\u4F1A\u4EE3\u4EF7\u7ED1\u5B9A\u5230\u573A\u666F\u884C\u52A8\uFF1B\u4E0D\u8981\u53EA\u5806\u8BBE\u5907\u540D\u6216\u6982\u5FF5\u89E3\u91CA\u3002",
+      vocabularyScenes: ["\u6280\u672F\u73B0\u573A", "\u57CE\u5E02\u73AF\u5883", "\u5BF9\u8BDD", "\u52A8\u4F5C"]
+    });
+  }
+  if (/历史|古代|唐|宋|明|清|historical|dynasty|period/i.test(profileText)) {
+    return withProfile({
+      genre: "\u5386\u53F2/\u53E4\u4EE3",
+      narration: "\u65C1\u767D\u8981\u628A\u65F6\u4EE3\u5236\u5EA6\u3001\u7269\u4EF6\u3001\u79F0\u8C13\u548C\u751F\u6D3B\u7EC6\u8282\u843D\u8FDB\u4EBA\u7269\u9009\u62E9\uFF1B\u907F\u514D\u8D44\u6599\u8BF4\u660E\u538B\u8FC7\u573A\u666F\u3002",
+      vocabularyScenes: ["\u5386\u53F2\u573A\u666F", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178", "\u65E5\u5E38"]
+    });
+  }
+  if (/轻小说|轻奇幻|校园|冒险|light novel|isekai|academy|adventure/i.test(profileText)) {
+    return withProfile({
+      genre: "\u8F7B\u5C0F\u8BF4/\u5192\u9669",
+      narration: "\u65C1\u767D\u8981\u4FDD\u6301\u6E05\u6670\u8282\u594F\u3001\u89D2\u8272\u53CD\u5E94\u548C\u7AE0\u672B\u63A8\u8FDB\uFF1B\u5E7D\u9ED8\u6216\u5410\u69FD\u53EA\u80FD\u670D\u52A1\u4EBA\u7269\u5173\u7CFB\u548C\u9009\u62E9\u3002",
+      vocabularyScenes: ["\u5BF9\u8BDD", "\u52A8\u4F5C", "\u65E5\u5E38", "\u5FC3\u7406\u6D3B\u52A8"]
     });
   }
   if (/都市|职场|现实|city|urban/i.test(profileText)) {
@@ -7506,6 +7535,7 @@ ${report}
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage,
+  inferGenreProfile,
   loadProductionWritingResources,
   parseQualityGate,
   runChapterProductionPipeline,
