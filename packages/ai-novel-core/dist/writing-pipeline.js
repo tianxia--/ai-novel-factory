@@ -14,7 +14,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-MEAV5XKJ.js";
+} from "./chunk-BS4SDUUW.js";
 import "./chunk-HL3WMSH6.js";
 import "./chunk-CRFEPMYG.js";
 import "./chunk-GZKJNHMN.js";

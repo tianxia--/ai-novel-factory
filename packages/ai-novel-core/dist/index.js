@@ -7,13 +7,13 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-X3BBQ7PD.js";
+} from "./chunk-GGDGH3K5.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-ZZKAK27K.js";
+} from "./chunk-VJVRI3NB.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -50,7 +50,7 @@ import {
   upsertCheckpointInSuperGraph,
   upsertDiscussionInSuperGraph,
   validateSuperGraph
-} from "./chunk-IBUJ4FKK.js";
+} from "./chunk-AOZOV7DD.js";
 import {
   createContinuityContract,
   createDetailedChapterBlueprint,
@@ -81,7 +81,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-MEAV5XKJ.js";
+} from "./chunk-BS4SDUUW.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,

@@ -6,7 +6,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-MEAV5XKJ.js";
+} from "./chunk-BS4SDUUW.js";
 import {
   retrieveKnowledge
 } from "./chunk-HL3WMSH6.js";

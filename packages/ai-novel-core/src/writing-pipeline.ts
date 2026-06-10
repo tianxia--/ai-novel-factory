@@ -217,6 +217,7 @@ function summarizeCharacterDossiers(dossiers: CharacterDossier[] = [], limit = 6
     `  body=${dossier.appearanceAndBody}`,
     `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
     `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`,
+    `  evidence=${compactList(dossier.evidence.slice(-2), 2)}`,
   ].join("\n")).join("\n")
 }
 
@@ -4901,6 +4902,9 @@ export async function runChapterProductionPipeline(
 
   if (options.factoryRootDir && options.projectId) {
     const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText(paths.styleProfilePath) : ""
+    const characterDossierMemory = updatedCharacterDossiers.length
+      ? formatCharacterDossiersMarkdown(updatedCharacterDossiers)
+      : ""
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordMemory(options.projectId as string, {
         source: relativeArtifactPath(projectRoot, memoryPath),
@@ -4913,6 +4917,24 @@ export async function runChapterProductionPipeline(
           vector: createLocalTextEmbedding(memoryUpdate),
         },
       })
+      if (characterDossierMemory && paths.characterDossiersPath) {
+        const characterDossiersPath = relativeArtifactPath(projectRoot, paths.characterDossiersPath)
+        db.recordMemory(options.projectId as string, {
+          source: characterDossiersPath,
+          kind: "character_dossiers",
+          content: characterDossierMemory,
+          importance: 9,
+          metadata: {
+            path: characterDossiersPath,
+            chapterNumber: task.chapterNumber,
+            source: "chapter_memory_keeper",
+          },
+          embedding: {
+            model: "local-hash-v1",
+            vector: createLocalTextEmbedding(characterDossierMemory),
+          },
+        })
+      }
       if (extractedStyleFingerprint) {
         const styleProfilePath = relativeArtifactPath(projectRoot, paths.styleProfilePath)
         const styleMemory = [

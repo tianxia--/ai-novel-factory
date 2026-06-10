@@ -1795,6 +1795,14 @@ test("production writing pipeline records detailed plans, final chapters, report
     const qualityArtifact = snapshot.artifacts.find((artifact) => String(artifact.path).includes("chapter-001-quality.md"))
     assert.equal(JSON.parse(qualityArtifact.metadata_json).qualityGate.status, "passed")
     assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "chapter_summary"))
+    const recalledDossiers = await withFactoryDb(tempDir, async (db) =>
+      db.recallMemory(created.project.id, "character_dossiers profile signal", 4),
+    )
+    assert.ok(recalledDossiers.some((memory) =>
+      String(memory.kind) === "character_dossiers"
+      && String(memory.source).includes("memory/characters/dossiers.json")
+      && /chapter 1 profile signal/.test(String(memory.content)),
+    ))
     assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "style_profile" && /Style fingerprint from chapter 1/.test(String(memory.content))))
     const completedEvent = snapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_COMPLETED")
     assert.ok(completedEvent)
