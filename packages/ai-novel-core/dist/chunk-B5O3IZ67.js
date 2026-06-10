@@ -4572,6 +4572,15 @@ ${report}
       qualityGate: finalGate
     });
   }
+  if (extractedStyleFingerprint) {
+    await recordPipelineArtifact(projectRoot, paths.styleProfilePath, "style", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "style_profile",
+      source: "first_chapter_fingerprint",
+      styleFingerprint: extractedStyleFingerprint,
+      qualityGate: finalGate
+    });
+  }
   await emitWritingProgress(options, {
     step: "chapter_artifacts_saved",
     role: "Memory Keeper",
@@ -4585,6 +4594,7 @@ ${report}
     qualityGate: finalGate
   });
   if (options.factoryRootDir && options.projectId) {
+    const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText(paths.styleProfilePath) : "";
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordMemory(options.projectId, {
         source: relativeArtifactPath(projectRoot, memoryPath),
@@ -4597,6 +4607,29 @@ ${report}
           vector: createLocalTextEmbedding(memoryUpdate)
         }
       });
+      if (extractedStyleFingerprint) {
+        const styleProfilePath = relativeArtifactPath(projectRoot, paths.styleProfilePath);
+        const styleMemory = [
+          `Style fingerprint from chapter ${task.chapterNumber}: ${extractedStyleFingerprint}`,
+          "",
+          updatedStyleProfile
+        ].join("\n");
+        db.recordMemory(options.projectId, {
+          source: styleProfilePath,
+          kind: "style_profile",
+          content: styleMemory,
+          importance: 8,
+          metadata: {
+            path: styleProfilePath,
+            chapterNumber: task.chapterNumber,
+            source: "first_chapter_fingerprint"
+          },
+          embedding: {
+            model: "local-hash-v1",
+            vector: createLocalTextEmbedding(styleMemory)
+          }
+        });
+      }
       db.recordEvent(options.projectId, null, finalGate.status === "blocked" ? "CHAPTER_PIPELINE_BLOCKED" : "CHAPTER_PIPELINE_COMPLETED", {
         chapterNumber: task.chapterNumber,
         draftPath: relativeArtifactPath(projectRoot, draftPath),

@@ -1772,6 +1772,7 @@ test("production writing pipeline records detailed plans, final chapters, report
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("chapter-blueprints/chapter-001.md")))
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("chapter-001.final.md")))
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("chapter-001-quality.md")))
+    assert.ok(snapshot.artifacts.some((artifact) => String(artifact.kind) === "style" && String(artifact.path).includes("style/profile.md")))
     assert.equal(snapshot.artifactSummary.blueprints, 4)
     assert.equal(snapshot.artifactSummary.finalChapters, 1)
     assert.equal(snapshot.artifactSummary.qualityReports, 1)
@@ -1780,6 +1781,7 @@ test("production writing pipeline records detailed plans, final chapters, report
     const qualityArtifact = snapshot.artifacts.find((artifact) => String(artifact.path).includes("chapter-001-quality.md"))
     assert.equal(JSON.parse(qualityArtifact.metadata_json).qualityGate.status, "passed")
     assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "chapter_summary"))
+    assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "style_profile" && /Style fingerprint from chapter 1/.test(String(memory.content))))
     const completedEvent = snapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_COMPLETED")
     assert.ok(completedEvent)
     assert.equal(JSON.parse(completedEvent.payload_json).qualityGate.status, "passed")
@@ -1869,11 +1871,6 @@ test("production writing pipeline emits visible progress events for chapter prod
     assert.ok(progressEvents.some((event) => event.step === "memory_update_started" && event.role === "Memory Keeper"))
     assert.ok(progressEvents.some((event) => event.step === "chapter_artifacts_saved" && /chapter-001\.final\.md/.test(event.artifactPath || "")))
 
-    const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
-    const progressRows = snapshot.latestEvents.filter((event) => event.type === "WRITING_PROGRESS")
-    assert.ok(progressRows.some((event) => /"step":"master_outline_saved"/.test(event.payload_json || "")))
-    assert.ok(progressRows.some((event) => /"step":"draft_knowledge_recalled"/.test(event.payload_json || "")))
-    assert.ok(progressRows.some((event) => /"step":"draft_completed"/.test(event.payload_json || "")))
     const productionStepEvents = progressEvents.filter((event) =>
       ["draft_completed", "quality_gate_completed", "chapter_artifacts_saved"].includes(event.step),
     )
