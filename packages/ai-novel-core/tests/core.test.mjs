@@ -3350,6 +3350,40 @@ test("writing pipeline hard gates plot continuity beyond matching protagonist na
   assert.match(style.reason, /短词|碎片/)
 })
 
+test("character profile gate rejects same-voice multi-character scenes", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+  }
+
+  const flattened = [
+    "## Final Body",
+    "李延想要查清田册，他必须继续追问。宋管事想要保住账本，他必须继续解释。",
+    "李延说事情很复杂，宋管事也说事情很复杂。两个人都很紧张，也都很沉默。",
+    "他们的关系充满怀疑，但这一切说明局势正在变化。",
+  ].join("\n")
+  const flattenedGate = evaluateCharacterProfilePresence(flattened, contract)
+  assert.equal(flattenedGate.status, "quarantined")
+  assert.match(flattenedGate.reason, /角色差异化不足/)
+
+  const differentiated = [
+    "## Final Body",
+    "李延把缺页田册按在桌角，指腹压住纸边的泥。",
+    "「宋管事，官印少了半枚，你还要说是风吹的？」他没有抬头，只把灯芯拨低。",
+    "宋管事喉结动了一下，袖口在桌沿蹭出细响，低声道：「小李大人，我只敢保账，不敢保命。」",
+    "李延必须在天亮前决定是否把密信递进县衙，宋管事却退到门边，先替他拦住了外面的脚步声。",
+  ].join("\n")
+  const differentiatedGate = evaluateCharacterProfilePresence(differentiated, contract)
+  assert.equal(differentiatedGate.status, "eligible")
+  assert.match(differentiatedGate.reason, /角色差异化通过/)
+})
+
 test("knowledge retrieval excludes stale chapter artifacts after a chapter queue reset", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-rag-reset-"))
   const {

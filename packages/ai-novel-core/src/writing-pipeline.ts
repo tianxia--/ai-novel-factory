@@ -204,6 +204,10 @@ function compactList(values: string[] = [], limit = 3) {
     .join("; ") || "pending"
 }
 
+function escapeRegExpLiteral(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 function summarizeCharacterDossiers(dossiers: CharacterDossier[] = [], limit = 6) {
   return dossiers.slice(0, limit).map((dossier) => [
     `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
@@ -1903,7 +1907,70 @@ function buildCharacterProfileContract(input: {
   }
 }
 
-function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract) {
+function evaluateCharacterVoiceDifferentiation(draft: string, contract: CharacterProfileContract) {
+  const body = extractNarrativeBody(draft)
+  const cast = contract.knownCast
+    .map((name) => name.trim())
+    .filter((name) => name && body.includes(name))
+    .slice(0, 6)
+  if (cast.length < 2) {
+    return {
+      status: "eligible" as const,
+      reason: "角色差异化检查跳过：正文中少于两个已知角色同时出现。",
+      observedCast: cast,
+      missing: [],
+    }
+  }
+
+  const quotedDialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length
+  const homogenizedSignals = (body.match(/两个人都|二人都|他们都|也都|都很|都说|都觉得|都认为|同样|一样|事情很复杂|关系充满|局势正在变化/gu) || []).length
+  const templateVoiceSignals = cast.reduce((count, name) => {
+    const namePattern = escapeRegExpLiteral(name)
+    const matches = body.match(new RegExp(`${namePattern}.{0,18}(想要|必须|觉得|认为|说|解释|沉默|紧张)`, "gu")) || []
+    return count + matches.length
+  }, 0)
+  const scored = cast.map((name) => {
+    const pattern = new RegExp(`${escapeRegExpLiteral(name)}[\\s\\S]{0,90}|[\\s\\S]{0,70}${escapeRegExpLiteral(name)}`, "gu")
+    const windows = [...body.matchAll(pattern)].map((match) => match[0]).join("\n")
+    const dialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
+    const habit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
+    const relation = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows)
+    const agency = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
+    const score = [dialogue, habit, relation, agency].filter(Boolean).length
+    return { name, score, dialogue, habit, relation, agency }
+  })
+
+  const weak = scored.filter((entry) => entry.score < 2)
+  const dialogueCarriers = scored.filter((entry) => entry.dialogue).length
+  const habitCarriers = scored.filter((entry) => entry.habit).length
+  const agencyCarriers = scored.filter((entry) => entry.agency).length
+  const concreteCarriers = scored.filter((entry) => entry.dialogue || entry.habit || entry.relation || entry.agency).length
+  const missing = [
+    ...(dialogueCarriers < 2 ? ["多角色对白/称呼差异"] : []),
+    ...(habitCarriers < 2 ? ["多角色行为习惯差异"] : []),
+    ...(agencyCarriers < 2 ? ["多角色主动选择差异"] : []),
+    ...(weak.length ? [`弱角色信号：${weak.map((entry) => entry.name).join("、")}`] : []),
+  ]
+
+  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1)
+    && (quotedDialogueCount < 2 || concreteCarriers < 2)
+  if (clearlyFlattened) {
+    return {
+      status: "quarantined" as const,
+      reason: `角色差异化不足：${missing.join("；") || "多角色被同质化模板概括"}，检测到 ${homogenizedSignals} 个同质化概括信号和 ${templateVoiceSignals} 个模板声音信号。`,
+      observedCast: cast,
+      missing,
+    }
+  }
+  return {
+    status: "eligible" as const,
+    reason: `角色差异化通过：${cast.join("、")} 至少通过对白、习惯动作或主动选择形成区分。`,
+    observedCast: cast,
+    missing,
+  }
+}
+
+export function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract) {
   const checks: Array<[string, RegExp]> = [
     ["欲望/目标", /想要|必须|不能|目标|渴望|执念|为了|打算|决定/u],
     ["行为习惯/动作", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识/u],
@@ -1914,6 +1981,7 @@ function evaluateCharacterProfilePresence(draft: string, contract: CharacterProf
   ]
   const missing = checks.filter(([, pattern]) => !pattern.test(draft)).map(([label]) => label)
   const knownNameHits = contract.knownCast.filter((name) => name && draft.includes(name)).slice(0, 12)
+  const differentiation = evaluateCharacterVoiceDifferentiation(draft, contract)
   if (contract.status === "blocked") {
     return {
       status: "quarantined" as const,
@@ -1930,6 +1998,14 @@ function evaluateCharacterProfilePresence(draft: string, contract: CharacterProf
       knownNameHits,
     }
   }
+  if (differentiation.status === "quarantined") {
+    return {
+      status: "quarantined" as const,
+      reason: differentiation.reason,
+      missing: [...missing, ...differentiation.missing],
+      knownNameHits,
+    }
+  }
   if (missing.length >= 4) {
     return {
       status: "quarantined" as const,
@@ -1941,8 +2017,8 @@ function evaluateCharacterProfilePresence(draft: string, contract: CharacterProf
   return {
     status: "eligible" as const,
     reason: missing.length
-      ? `角色档案基本可用，但还应补强：${missing.join("、")}。`
-      : "角色档案信号通过：正文包含欲望、行为、对白、关系和可见特征。",
+      ? `角色档案基本可用，但还应补强：${missing.join("、")}。${differentiation.reason}`
+      : `角色档案信号通过：正文包含欲望、行为、对白、关系和可见特征。${differentiation.reason}`,
     missing,
     knownNameHits,
   }

@@ -4126,6 +4126,9 @@ async function writeJsonFileAtomic(filePath, value) {
 function compactList(values = [], limit = 3) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
+function escapeRegExpLiteral(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function summarizeCharacterDossiers(dossiers = [], limit = 6) {
   return dossiers.slice(0, limit).map((dossier) => [
     `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
@@ -5473,6 +5476,61 @@ function buildCharacterProfileContract(input) {
     prompt
   };
 }
+function evaluateCharacterVoiceDifferentiation(draft, contract) {
+  const body = extractNarrativeBody(draft);
+  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && body.includes(name)).slice(0, 6);
+  if (cast.length < 2) {
+    return {
+      status: "eligible",
+      reason: "\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u8DF3\u8FC7\uFF1A\u6B63\u6587\u4E2D\u5C11\u4E8E\u4E24\u4E2A\u5DF2\u77E5\u89D2\u8272\u540C\u65F6\u51FA\u73B0\u3002",
+      observedCast: cast,
+      missing: []
+    };
+  }
+  const quotedDialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length;
+  const homogenizedSignals = (body.match(/两个人都|二人都|他们都|也都|都很|都说|都觉得|都认为|同样|一样|事情很复杂|关系充满|局势正在变化/gu) || []).length;
+  const templateVoiceSignals = cast.reduce((count, name) => {
+    const namePattern = escapeRegExpLiteral(name);
+    const matches = body.match(new RegExp(`${namePattern}.{0,18}(\u60F3\u8981|\u5FC5\u987B|\u89C9\u5F97|\u8BA4\u4E3A|\u8BF4|\u89E3\u91CA|\u6C89\u9ED8|\u7D27\u5F20)`, "gu")) || [];
+    return count + matches.length;
+  }, 0);
+  const scored = cast.map((name) => {
+    const pattern = new RegExp(`${escapeRegExpLiteral(name)}[\\s\\S]{0,90}|[\\s\\S]{0,70}${escapeRegExpLiteral(name)}`, "gu");
+    const windows = [...body.matchAll(pattern)].map((match) => match[0]).join("\n");
+    const dialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
+    const habit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
+    const relation = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows);
+    const agency = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
+    const score = [dialogue, habit, relation, agency].filter(Boolean).length;
+    return { name, score, dialogue, habit, relation, agency };
+  });
+  const weak = scored.filter((entry) => entry.score < 2);
+  const dialogueCarriers = scored.filter((entry) => entry.dialogue).length;
+  const habitCarriers = scored.filter((entry) => entry.habit).length;
+  const agencyCarriers = scored.filter((entry) => entry.agency).length;
+  const concreteCarriers = scored.filter((entry) => entry.dialogue || entry.habit || entry.relation || entry.agency).length;
+  const missing = [
+    ...dialogueCarriers < 2 ? ["\u591A\u89D2\u8272\u5BF9\u767D/\u79F0\u547C\u5DEE\u5F02"] : [],
+    ...habitCarriers < 2 ? ["\u591A\u89D2\u8272\u884C\u4E3A\u4E60\u60EF\u5DEE\u5F02"] : [],
+    ...agencyCarriers < 2 ? ["\u591A\u89D2\u8272\u4E3B\u52A8\u9009\u62E9\u5DEE\u5F02"] : [],
+    ...weak.length ? [`\u5F31\u89D2\u8272\u4FE1\u53F7\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`] : []
+  ];
+  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || concreteCarriers < 2);
+  if (clearlyFlattened) {
+    return {
+      status: "quarantined",
+      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A${missing.join("\uFF1B") || "\u591A\u89D2\u8272\u88AB\u540C\u8D28\u5316\u6A21\u677F\u6982\u62EC"}\uFF0C\u68C0\u6D4B\u5230 ${homogenizedSignals} \u4E2A\u540C\u8D28\u5316\u6982\u62EC\u4FE1\u53F7\u548C ${templateVoiceSignals} \u4E2A\u6A21\u677F\u58F0\u97F3\u4FE1\u53F7\u3002`,
+      observedCast: cast,
+      missing
+    };
+  }
+  return {
+    status: "eligible",
+    reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u901A\u8FC7\uFF1A${cast.join("\u3001")} \u81F3\u5C11\u901A\u8FC7\u5BF9\u767D\u3001\u4E60\u60EF\u52A8\u4F5C\u6216\u4E3B\u52A8\u9009\u62E9\u5F62\u6210\u533A\u5206\u3002`,
+    observedCast: cast,
+    missing
+  };
+}
 function evaluateCharacterProfilePresence(draft, contract) {
   const checks = [
     ["\u6B32\u671B/\u76EE\u6807", /想要|必须|不能|目标|渴望|执念|为了|打算|决定/u],
@@ -5484,6 +5542,7 @@ function evaluateCharacterProfilePresence(draft, contract) {
   ];
   const missing = checks.filter(([, pattern]) => !pattern.test(draft)).map(([label]) => label);
   const knownNameHits = contract.knownCast.filter((name) => name && draft.includes(name)).slice(0, 12);
+  const differentiation = evaluateCharacterVoiceDifferentiation(draft, contract);
   if (contract.status === "blocked") {
     return {
       status: "quarantined",
@@ -5500,6 +5559,14 @@ function evaluateCharacterProfilePresence(draft, contract) {
       knownNameHits
     };
   }
+  if (differentiation.status === "quarantined") {
+    return {
+      status: "quarantined",
+      reason: differentiation.reason,
+      missing: [...missing, ...differentiation.missing],
+      knownNameHits
+    };
+  }
   if (missing.length >= 4) {
     return {
       status: "quarantined",
@@ -5510,7 +5577,7 @@ function evaluateCharacterProfilePresence(draft, contract) {
   }
   return {
     status: "eligible",
-    reason: missing.length ? `\u89D2\u8272\u6863\u6848\u57FA\u672C\u53EF\u7528\uFF0C\u4F46\u8FD8\u5E94\u8865\u5F3A\uFF1A${missing.join("\u3001")}\u3002` : "\u89D2\u8272\u6863\u6848\u4FE1\u53F7\u901A\u8FC7\uFF1A\u6B63\u6587\u5305\u542B\u6B32\u671B\u3001\u884C\u4E3A\u3001\u5BF9\u767D\u3001\u5173\u7CFB\u548C\u53EF\u89C1\u7279\u5F81\u3002",
+    reason: missing.length ? `\u89D2\u8272\u6863\u6848\u57FA\u672C\u53EF\u7528\uFF0C\u4F46\u8FD8\u5E94\u8865\u5F3A\uFF1A${missing.join("\u3001")}\u3002${differentiation.reason}` : `\u89D2\u8272\u6863\u6848\u4FE1\u53F7\u901A\u8FC7\uFF1A\u6B63\u6587\u5305\u542B\u6B32\u671B\u3001\u884C\u4E3A\u3001\u5BF9\u767D\u3001\u5173\u7CFB\u548C\u53EF\u89C1\u7279\u5F81\u3002${differentiation.reason}`,
     missing,
     knownNameHits
   };

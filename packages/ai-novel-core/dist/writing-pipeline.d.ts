@@ -153,6 +153,17 @@ declare function evaluatePlotContinuityBridge(finalDraft: string, task: Autonomo
     matchedAnchors: string[];
     requiredAnchors: string[];
 };
+declare function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract): {
+    status: "quarantined";
+    reason: string;
+    missing: string[];
+    knownNameHits: string[];
+} | {
+    status: "eligible";
+    reason: string;
+    missing: string[];
+    knownNameHits: string[];
+};
 declare function createContinuityContract(input: {
     state: AutonomousNovelState;
     task: AutonomousNovelState["plan"]["chapterTasks"][number];
@@ -211,4 +222,4 @@ declare function runChapterProductionPipeline(projectRoot: string, paths: NovelW
     writingMode: ProductionWritingMode;
 }>;
 
-export { type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateWritingResourceUsage, loadProductionWritingResources, parseQualityGate, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };
+export { type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createProductionMasterOutline, evaluateCharacterProfilePresence, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateWritingResourceUsage, loadProductionWritingResources, parseQualityGate, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };

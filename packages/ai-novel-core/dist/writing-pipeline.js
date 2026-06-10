@@ -3,6 +3,7 @@ import {
   createDetailedChapterBlueprint,
   createDraftBodyFromBlueprint,
   createProductionMasterOutline,
+  evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage,
@@ -12,7 +13,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-ABBHC62H.js";
+} from "./chunk-OCZ2SK3V.js";
 import "./chunk-HL3WMSH6.js";
 import "./chunk-CRFEPMYG.js";
 import "./chunk-GZKJNHMN.js";
@@ -21,6 +22,7 @@ export {
   createDetailedChapterBlueprint,
   createDraftBodyFromBlueprint,
   createProductionMasterOutline,
+  evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateWritingResourceUsage,
