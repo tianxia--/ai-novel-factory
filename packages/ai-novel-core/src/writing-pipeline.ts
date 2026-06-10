@@ -1904,6 +1904,19 @@ async function retrieveWritingKnowledgeContext(input: {
   }
 }
 
+const FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS = 5_000
+const FACTORY_MEMORY_CONTEXT_CACHE_LIMIT = 80
+const factoryMemoryContextCache = new Map<string, { value: string; expiresAt: number }>()
+
+function setFactoryMemoryContextCache(key: string, value: string, now = Date.now()) {
+  factoryMemoryContextCache.set(key, { value, expiresAt: now + FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS })
+  while (factoryMemoryContextCache.size > FACTORY_MEMORY_CONTEXT_CACHE_LIMIT) {
+    const oldestKey = factoryMemoryContextCache.keys().next().value
+    if (!oldestKey) break
+    factoryMemoryContextCache.delete(oldestKey)
+  }
+}
+
 export async function retrieveFactoryMemoryContext(input: {
   state: AutonomousNovelState
   task: AutonomousNovelState["plan"]["chapterTasks"][number]
@@ -1922,7 +1935,21 @@ export async function retrieveFactoryMemoryContext(input: {
     input.continuityContract.lockedProtagonistName || "",
     "character_dossiers chapter_summary profile signal behavior speech appearance relationship",
   ].filter(Boolean).join("\n")
-  return withFactoryDb(input.options.factoryRootDir, async (db) => {
+  const cacheKey = [
+    input.options.factoryRootDir,
+    input.options.projectId,
+    input.task.chapterNumber,
+    input.task.title,
+    input.continuityContract.lockedProtagonistName || "",
+    input.limit ?? 5,
+    query,
+  ].join("\u001f")
+  const cached = factoryMemoryContextCache.get(cacheKey)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) {
+    return cached.value
+  }
+  const context = await withFactoryDb(input.options.factoryRootDir, async (db) => {
     const rows = db.recallMemory(input.options.projectId as string, query, input.limit ?? 5, {
       embedding: createLocalTextEmbedding(query),
     })
@@ -1936,6 +1963,8 @@ export async function retrieveFactoryMemoryContext(input: {
       ].join("\n")),
     ].join("\n")
   }).catch(() => "")
+  setFactoryMemoryContextCache(cacheKey, context, now)
+  return context
 }
 
 function getArcLabel(state: AutonomousNovelState, chapterNumber: number) {

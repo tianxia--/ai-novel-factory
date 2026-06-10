@@ -689,6 +689,27 @@ test("writing context recalls character dossier memory from the factory database
   assert.match(context, /Factory Memory Recall/)
   assert.match(context, /character_dossiers/)
   assert.match(context, /Li Yan habit=presses the ledger corner/)
+
+  await withFactoryDb(tempDir, async (db) => {
+    db.recordMemory(created.project.id, {
+      source: ".ai-novel/memory/characters/dossiers.json",
+      kind: "character_dossiers",
+      content: "Factory dossier: Li Yan habit=touches the broken seal after every lie.",
+      importance: 9,
+      metadata: { path: ".ai-novel/memory/characters/dossiers.json" },
+      embedding: {
+        model: "local-hash-v1",
+        vector: createLocalTextEmbedding("Li Yan broken seal updated dossier"),
+      },
+    })
+  })
+  const cachedContext = await retrieveFactoryMemoryContext({
+    state: created.state,
+    task,
+    options: { factoryRootDir: tempDir, projectId: created.project.id },
+    continuityContract,
+  })
+  assert.equal(cachedContext, context)
 })
 
 test("discussion context packet includes recalled memory from the factory database", async () => {

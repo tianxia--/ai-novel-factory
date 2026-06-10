@@ -5482,6 +5482,17 @@ async function retrieveWritingKnowledgeContext(input) {
     prompt: formatKnowledgeForPrompt(rows, input.limit ?? 8)
   };
 }
+var FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS = 5e3;
+var FACTORY_MEMORY_CONTEXT_CACHE_LIMIT = 80;
+var factoryMemoryContextCache = /* @__PURE__ */ new Map();
+function setFactoryMemoryContextCache(key, value, now2 = Date.now()) {
+  factoryMemoryContextCache.set(key, { value, expiresAt: now2 + FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS });
+  while (factoryMemoryContextCache.size > FACTORY_MEMORY_CONTEXT_CACHE_LIMIT) {
+    const oldestKey = factoryMemoryContextCache.keys().next().value;
+    if (!oldestKey) break;
+    factoryMemoryContextCache.delete(oldestKey);
+  }
+}
 async function retrieveFactoryMemoryContext(input) {
   if (!input.options.factoryRootDir || !input.options.projectId) {
     return "";
@@ -5494,7 +5505,21 @@ async function retrieveFactoryMemoryContext(input) {
     input.continuityContract.lockedProtagonistName || "",
     "character_dossiers chapter_summary profile signal behavior speech appearance relationship"
   ].filter(Boolean).join("\n");
-  return withFactoryDb(input.options.factoryRootDir, async (db) => {
+  const cacheKey = [
+    input.options.factoryRootDir,
+    input.options.projectId,
+    input.task.chapterNumber,
+    input.task.title,
+    input.continuityContract.lockedProtagonistName || "",
+    input.limit ?? 5,
+    query
+  ].join("");
+  const cached = factoryMemoryContextCache.get(cacheKey);
+  const now2 = Date.now();
+  if (cached && cached.expiresAt > now2) {
+    return cached.value;
+  }
+  const context = await withFactoryDb(input.options.factoryRootDir, async (db) => {
     const rows = db.recallMemory(input.options.projectId, query, input.limit ?? 5, {
       embedding: createLocalTextEmbedding(query)
     });
@@ -5508,6 +5533,8 @@ async function retrieveFactoryMemoryContext(input) {
       ].join("\n"))
     ].join("\n");
   }).catch(() => "");
+  setFactoryMemoryContextCache(cacheKey, context, now2);
+  return context;
 }
 function getArcLabel(state, chapterNumber) {
   const arcSize = Math.max(3, Math.ceil(state.plan.totalChapters / 4));
