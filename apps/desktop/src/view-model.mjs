@@ -549,6 +549,84 @@ function deriveArtifactPreviews(factorySnapshot = null) {
     }))
 }
 
+function healthLabel(status = "") {
+  if (status === "ready") return "正常"
+  if (status === "watch") return "关注"
+  if (status === "warning") return "需检查"
+  if (status === "indexing") return "索引中"
+  if (status === "needs_setup") return "待建立"
+  return "未知"
+}
+
+function deriveProductionObservabilityView({ state = null, factorySnapshot = null, contextPacket = "" } = {}) {
+  const provided = factorySnapshot?.productionObservability && typeof factorySnapshot.productionObservability === "object"
+    ? factorySnapshot.productionObservability
+    : null
+  const artifacts = toArray(factorySnapshot?.artifacts)
+  const recentMemory = toArray(factorySnapshot?.recentMemory)
+  const creativeProfile = state?.project?.creativeProfile || factorySnapshot?.state?.project?.creativeProfile || {}
+  const styleArtifact = artifacts.find((artifact) => artifactPath(artifact).includes("style/profile.md")) || null
+  const dossierArtifact = artifacts.find((artifact) => artifactPath(artifact).includes("memory/characters/dossiers.json")) || null
+  const characterRows = recentMemory.filter((row) => row.kind === "character_dossiers")
+  const chapterRows = recentMemory.filter((row) => row.kind === "chapter_summary")
+  const dossierCount = toArray(state?.memory?.characterDossiers || factorySnapshot?.state?.memory?.characterDossiers).length
+  const fallback = {
+    style: {
+      status: styleArtifact || creativeProfile?.styleFingerprint ? "ready" : "needs_setup",
+      genre: creativeProfile?.genre || "",
+      readerPromise: creativeProfile?.readerPromise || "",
+      pointOfView: creativeProfile?.pointOfView || "",
+      tone: creativeProfile?.tone || "",
+      naturalnessTarget: creativeProfile?.naturalnessTarget || "",
+      styleFingerprint: creativeProfile?.styleFingerprint || "",
+      artifactPath: styleArtifact ? artifactPath(styleArtifact) : ".ai-novel/style/profile.md",
+      missing: [],
+    },
+    characterDossier: {
+      status: dossierCount > 0 || dossierArtifact ? "ready" : "needs_setup",
+      count: dossierCount,
+      artifactPath: dossierArtifact ? artifactPath(dossierArtifact) : ".ai-novel/memory/characters/dossiers.json",
+      memoryRows: characterRows.length,
+      missing: [],
+    },
+    memoryRecall: {
+      status: characterRows.length > 0 ? "ready" : recentMemory.length > 0 ? "indexing" : "needs_setup",
+      characterRows: characterRows.length,
+      chapterRows: chapterRows.length,
+      memoryLag: 0,
+      latestSource: recentMemory[0]?.source || "",
+      latestKind: recentMemory[0]?.kind || "",
+      pendingEmbeddings: recentMemory.filter((row) => row.embedding_status === "pending").length,
+    },
+    contextBudget: {
+      status: contextPacket.length > 20_000 ? "warning" : contextPacket.length > 15_000 ? "watch" : "ready",
+      estimatedChars: contextPacket.length,
+      budgetLimit: 24_000,
+      budgetPercent: Math.min(100, Math.round((contextPacket.length / 24_000) * 100)),
+      sections: [{ key: "contextPacket", label: "Context packet", chars: contextPacket.length }],
+    },
+    qualitySignals: {
+      latestNaturalnessReason: "",
+      completedChapters: 0,
+      blockedChapters: 0,
+    },
+  }
+  const merged = {
+    style: { ...fallback.style, ...(provided?.style || {}) },
+    characterDossier: { ...fallback.characterDossier, ...(provided?.characterDossier || {}) },
+    memoryRecall: { ...fallback.memoryRecall, ...(provided?.memoryRecall || {}) },
+    contextBudget: { ...fallback.contextBudget, ...(provided?.contextBudget || {}) },
+    qualitySignals: { ...fallback.qualitySignals, ...(provided?.qualitySignals || {}) },
+  }
+  return {
+    ...merged,
+    style: { ...merged.style, label: healthLabel(merged.style.status) },
+    characterDossier: { ...merged.characterDossier, label: healthLabel(merged.characterDossier.status) },
+    memoryRecall: { ...merged.memoryRecall, label: healthLabel(merged.memoryRecall.status) },
+    contextBudget: { ...merged.contextBudget, label: healthLabel(merged.contextBudget.status) },
+  }
+}
+
 function deriveProductionPipelineStatus(factorySnapshot = null) {
   const artifacts = toArray(factorySnapshot?.artifacts)
   const latestEvents = toArray(factorySnapshot?.latestEvents)
@@ -900,6 +978,11 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
   }
 
   const artifacts = deriveArtifactPreviews(factorySnapshot)
+  const productionObservability = deriveProductionObservabilityView({
+    state: safeState,
+    factorySnapshot,
+    contextPacket,
+  })
   const chapterFactsByNumber = new Map(toArray(factorySnapshot?.chapterFacts).map((fact) => [Number(fact.chapterNumber), fact]))
   const blueprintPathByChapter = new Map(
     toArray(factorySnapshot?.artifacts)
@@ -930,6 +1013,11 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
       contextPacket,
       artifacts: artifacts.filter((artifact) => ["共识", "上下文", "讨论", "规划", "写作资源", "知识库"].includes(artifact.category)),
       knowledge: deriveKnowledgeStatus(factorySnapshot),
+      style: productionObservability.style,
+      characterDossier: productionObservability.characterDossier,
+      memoryRecall: productionObservability.memoryRecall,
+      contextBudget: productionObservability.contextBudget,
+      qualitySignals: productionObservability.qualitySignals,
     },
     artifacts,
     chapters: {

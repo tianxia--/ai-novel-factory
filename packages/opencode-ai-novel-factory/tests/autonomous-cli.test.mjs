@@ -1280,6 +1280,11 @@ test("studio project api creates isolated projects and requires selection when m
   assert.equal(firstCreateStatus.status, 200)
   assert.equal(firstCreateStatus.payload.factorySnapshot.activeJobs.length, 0)
   assert.ok(firstCreateStatus.payload.factorySnapshot.recentMessages.some((message) => message.type === "status" && /开始创作/.test(`${message.data.title}\n${message.data.content}`)))
+  assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.style.status, "ready")
+  assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.style.genre, "suspense")
+  assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.characterDossier.count, 3)
+  assert.match(firstCreateStatus.payload.factorySnapshot.productionObservability.characterDossier.artifactPath, /dossiers\.json/)
+  assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.contextBudget.status, "ready")
   const styleProfile = await fs.readFile(path.join(tempDir, ".ai-novel-projects", firstCreate.payload.projectId, ".ai-novel", "style", "profile.md"), "utf8")
   assert.match(styleProfile, /genre: suspense/)
   assert.match(styleProfile, /reader promise: mystery/)
@@ -1329,6 +1334,8 @@ test("studio project api creates isolated projects and requires selection when m
   assert.ok(firstLightStatus.payload.factorySnapshot.artifacts.length <= 24)
   assert.ok(firstLightStatus.payload.factorySnapshot.artifacts.some((artifact) => artifact.path === ".ai-novel/prompts/global-consensus.md"))
   assert.ok(firstLightStatus.payload.factorySnapshot.artifacts.some((artifact) => artifact.path === ".ai-novel/context/current-context.md"))
+  assert.equal(firstLightStatus.payload.factorySnapshot.productionObservability.style.artifactPath, ".ai-novel/style/profile.md")
+  assert.equal(firstLightStatus.payload.factorySnapshot.productionObservability.characterDossier.artifactPath, ".ai-novel/memory/characters/dossiers.json")
 
   const pagedStatus = await handleNovelStudioApi(
     tempDir,
@@ -2597,6 +2604,43 @@ test("desktop story memory exposes knowledge index and recent RAG citations", as
       assets: { cover: { status: "pending" }, comic: { status: "pending" } },
     },
     factorySnapshot: {
+      productionObservability: {
+        style: {
+          status: "ready",
+          genre: "suspense",
+          readerPromise: "mystery pressure",
+          naturalnessTarget: "strict",
+          styleFingerprint: "short sensory paragraphs and distinct dialogue voices",
+          artifactPath: ".ai-novel/style/profile.md",
+          missing: [],
+        },
+        characterDossier: {
+          status: "ready",
+          count: 3,
+          artifactPath: ".ai-novel/memory/characters/dossiers.json",
+          memoryRows: 2,
+          missing: [],
+        },
+        memoryRecall: {
+          status: "ready",
+          characterRows: 2,
+          chapterRows: 4,
+          memoryLag: 0,
+          latestSource: ".ai-novel/memory/characters/dossiers.json",
+          latestKind: "character_dossiers",
+          pendingEmbeddings: 0,
+        },
+        contextBudget: {
+          status: "watch",
+          estimatedChars: 17000,
+          budgetLimit: 24000,
+          budgetPercent: 71,
+          sections: [
+            { key: "contextPacket", label: "Context packet", chars: 9000 },
+            { key: "chapterWindow", label: "Chapter window", chars: 5000 },
+          ],
+        },
+      },
       knowledge: {
         summary: {
           globalSources: 7,
@@ -2731,12 +2775,21 @@ test("desktop story memory exposes knowledge index and recent RAG citations", as
   assert.match(viewModel.storyMemory.knowledge.jobStatus.detail, /3 个知识库后台任务/)
   assert.equal(viewModel.storyMemory.knowledge.latestEvaluation.summary.totalCases, 2)
   assert.equal(viewModel.storyMemory.knowledge.latestEvaluation.summary.hitRateAtK, 0.5)
+  assert.equal(viewModel.storyMemory.style.status, "ready")
+  assert.equal(viewModel.storyMemory.style.label, "正常")
+  assert.equal(viewModel.storyMemory.style.genre, "suspense")
+  assert.equal(viewModel.storyMemory.characterDossier.count, 3)
+  assert.equal(viewModel.storyMemory.memoryRecall.characterRows, 2)
+  assert.equal(viewModel.storyMemory.contextBudget.budgetPercent, 71)
   assert.ok(viewModel.storyMemory.artifacts.some((artifact) =>
     artifact.path === ".ai-novel/knowledge/evaluation-latest.md"
     && artifact.label === "知识库召回评估"
     && artifact.category === "知识库",
   ))
   assert.match(js, /知识库 \/ RAG/)
+  assert.match(js, /生产记忆健康/)
+  assert.match(js, /observability-grid/)
+  assert.match(js, /context-budget-bars/)
   assert.match(js, /data-knowledge-reindex/)
   assert.match(js, /data-knowledge-evaluate/)
   assert.match(js, /data-knowledge-search-form/)
@@ -2761,6 +2814,8 @@ test("desktop story memory exposes knowledge index and recent RAG citations", as
   assert.match(css, /\.knowledge-search-form/)
   assert.match(css, /\.knowledge-search-result/)
   assert.match(css, /\.knowledge-evaluation-card/)
+  assert.match(css, /\.observability-card/)
+  assert.match(css, /\.context-budget-row/)
 })
 
 test("desktop view model can render server-provided discussion entries without transcript parsing", async () => {

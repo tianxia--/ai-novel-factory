@@ -1687,6 +1687,55 @@ function renderStoryMemory(model) {
   const evaluationSummary = knowledgeEvaluation?.summary || null
   const knowledgeSearch = dashboardState.knowledgeSearch || { query: "", status: "idle", message: "", result: null }
   const knowledgeSearchRows = Array.isArray(knowledgeSearch.result?.rows) ? knowledgeSearch.result.rows : []
+  const style = model.storyMemory.style || {}
+  const characterDossier = model.storyMemory.characterDossier || {}
+  const memoryRecall = model.storyMemory.memoryRecall || {}
+  const contextBudget = model.storyMemory.contextBudget || {}
+  const budgetSections = Array.isArray(contextBudget.sections) ? contextBudget.sections : []
+  const statusClass = (status = "") => ["ready", "watch", "warning", "indexing", "needs_setup"].includes(status) ? status : "unknown"
+  const chipList = (items = [], empty = "无缺口") => items.length
+    ? items.slice(0, 5).map((item) => `<span class="knowledge-chip is-muted">${escapeHtml(item)}</span>`).join("")
+    : `<span class="knowledge-chip">${escapeHtml(empty)}</span>`
+  const productionHealth = `
+    <div class="observability-grid">
+      <div class="observability-card is-${escapeHtml(statusClass(style.status))}">
+        <span><i class="fa-solid fa-pen-nib"></i> 风格合同</span>
+        <strong>${escapeHtml(style.label || "未知")}</strong>
+        <small>${escapeHtml([style.genre, style.naturalnessTarget].filter(Boolean).join(" · ") || "等待风格档案")}</small>
+      </div>
+      <div class="observability-card is-${escapeHtml(statusClass(characterDossier.status))}">
+        <span><i class="fa-solid fa-id-card"></i> 角色档案</span>
+        <strong>${Number(characterDossier.count || 0)}</strong>
+        <small>${escapeHtml(characterDossier.label || "未知")} · memory ${Number(characterDossier.memoryRows || 0)}</small>
+      </div>
+      <div class="observability-card is-${escapeHtml(statusClass(memoryRecall.status))}">
+        <span><i class="fa-solid fa-brain"></i> 记忆召回</span>
+        <strong>${Number(memoryRecall.characterRows || 0) + Number(memoryRecall.chapterRows || 0)}</strong>
+        <small>${escapeHtml(memoryRecall.label || "未知")} · lag ${Number(memoryRecall.memoryLag || 0)}</small>
+      </div>
+      <div class="observability-card is-${escapeHtml(statusClass(contextBudget.status))}">
+        <span><i class="fa-solid fa-gauge-high"></i> 上下文预算</span>
+        <strong>${Number(contextBudget.budgetPercent || 0)}%</strong>
+        <small>${Number(contextBudget.estimatedChars || 0)} / ${Number(contextBudget.budgetLimit || 0)} chars</small>
+      </div>
+    </div>
+    <div class="observability-detail">
+      <span>${escapeHtml(style.styleFingerprint || "等待风格指纹")}</span>
+      <div class="knowledge-chip-row">${chipList([...(style.missing || []), ...(characterDossier.missing || [])], "档案完整")}</div>
+      <div class="context-budget-bars">
+        ${budgetSections.slice(0, 4).map((section) => {
+          const percent = Math.min(100, Math.round((Number(section.chars || 0) / Math.max(1, Number(contextBudget.budgetLimit || 24000))) * 100))
+          return `
+            <div class="context-budget-row">
+              <span>${escapeHtml(section.label || section.key || "section")}</span>
+              <div><i style="width:${percent}%"></i></div>
+              <small>${Number(section.chars || 0)}</small>
+            </div>
+          `
+        }).join("")}
+      </div>
+    </div>
+  `
   const artifactIcon = (category) => {
     if (category === "共识") return "fa-clipboard-check"
     if (category === "上下文") return "fa-layer-group"
@@ -1779,6 +1828,10 @@ function renderStoryMemory(model) {
     <div class="memory-section">
       <span class="memory-title"><i class="fa-solid fa-lightbulb"></i> 核心 Idea</span>
       <p class="memory-text">${escapeHtml(model.storyMemory.idea)}</p>
+    </div>
+    <div class="memory-section">
+      <span class="memory-title"><i class="fa-solid fa-heart-pulse"></i> 生产记忆健康</span>
+      ${productionHealth}
     </div>
     <div class="memory-section">
       <span class="memory-title"><i class="fa-solid fa-clipboard-check"></i> 最新共识</span>

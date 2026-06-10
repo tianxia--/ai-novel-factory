@@ -680,6 +680,113 @@ body.dark-mode::before {
   max-height: 240px;
 }
 
+.observability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.observability-card {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 74px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.observability-card span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.observability-card strong {
+  color: var(--text-light);
+  font-size: 15px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-card small {
+  color: var(--text-dark);
+  font-size: 9.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-card.is-ready {
+  border-color: rgba(52, 211, 153, 0.18);
+}
+
+.observability-card.is-watch,
+.observability-card.is-indexing {
+  border-color: rgba(250, 204, 21, 0.2);
+}
+
+.observability-card.is-warning,
+.observability-card.is-needs_setup {
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
+.observability-detail {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.context-budget-bars {
+  display: grid;
+  gap: 5px;
+}
+
+.context-budget-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(64px, 1fr) 42px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-budget-row span,
+.context-budget-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-budget-row small {
+  color: var(--text-dark);
+  text-align: right;
+}
+
+.context-budget-row div {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.context-budget-row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #34d399, #60a5fa);
+}
+
 .memory-action-group {
   display: inline-flex;
   align-items: center;

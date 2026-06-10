@@ -874,6 +874,7 @@ function semanticFactorySnapshotForVersion(factorySnapshot: Record<string, unkno
     project: factorySnapshot.project,
     state: factorySnapshot.state,
     artifactSummary: factorySnapshot.artifactSummary,
+    productionObservability: factorySnapshot.productionObservability,
     chapterFacts: factorySnapshot.chapterFacts,
     activeJobs: jobRows(factorySnapshot.activeJobs),
     runnableJobs: jobRows(factorySnapshot.runnableJobs),
@@ -945,6 +946,8 @@ function compactFactorySnapshotForPayload(factorySnapshot: Record<string, unknow
     return artifactPath.includes("global-consensus.md")
       || artifactPath.includes("/consensus/")
       || artifactPath.includes("current-context.md")
+      || artifactPath.includes("style/profile.md")
+      || artifactPath.includes("memory/characters/dossiers.json")
       || artifactPath.includes("discussion-log.md")
       || artifactPath.includes("setting-freeze.md")
       || artifactPath.includes("master-outline.md")
@@ -961,6 +964,8 @@ function compactFactorySnapshotForPayload(factorySnapshot: Record<string, unknow
       || artifactPath.includes("global-consensus.md")
       || artifactPath.includes("/consensus/")
       || artifactPath.includes("current-context.md")
+      || artifactPath.includes("style/profile.md")
+      || artifactPath.includes("memory/characters/dossiers.json")
       || artifactPath.includes("discussion-log.md")
       || artifactPath.includes("production-resources/")
       || artifact.kind === "transcript"
@@ -984,6 +989,120 @@ function compactFactorySnapshotForPayload(factorySnapshot: Record<string, unknow
     checkpoints: Array.isArray(snapshot.checkpoints) ? snapshot.checkpoints.slice(0, 6).map((row) => compactSnapshotRow(row as Record<string, unknown>)) : [],
     graphNodes: Array.isArray(snapshot.graphNodes) ? snapshot.graphNodes.slice(0, 60).map((row) => compactSnapshotRow(row as Record<string, unknown>, { metadata: 500 })) : [],
     graphEdges: Array.isArray(snapshot.graphEdges) ? snapshot.graphEdges.slice(0, 80).map((row) => compactSnapshotRow(row as Record<string, unknown>, { metadata: 500 })) : [],
+  }
+}
+
+function parseMetadataRow(row: Record<string, unknown> | null | undefined) {
+  if (!row || typeof row !== "object") return null
+  const metadata = row.metadata
+  if (metadata && typeof metadata === "object") return metadata as Record<string, unknown>
+  const metadataJson = row.metadata_json
+  if (typeof metadataJson !== "string" || !metadataJson.trim()) return null
+  try {
+    const parsed = JSON.parse(metadataJson)
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function deriveProductionObservability(
+  factorySnapshot: Record<string, unknown> | null,
+  resolvedState: Awaited<ReturnType<typeof loadAutonomousState>> | null,
+  contextPacket: string,
+) {
+  const snapshot = factorySnapshot || {}
+  const state = (resolvedState || snapshot.state || null) as Awaited<ReturnType<typeof loadAutonomousState>> | null
+  const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts as Array<Record<string, unknown>> : []
+  const recentMemory = Array.isArray(snapshot.recentMemory) ? snapshot.recentMemory as Array<Record<string, unknown>> : []
+  const chapterFacts = Array.isArray(snapshot.chapterFacts) ? snapshot.chapterFacts as Array<Record<string, unknown>> : []
+  const creativeProfile = state?.project?.creativeProfile || null
+  const artifactPath = (row: Record<string, unknown>) => String(row.path || row.source || "")
+  const styleArtifact = artifacts.find((row) => artifactPath(row).includes("style/profile.md")) || null
+  const dossierArtifact = artifacts.find((row) => artifactPath(row).includes("memory/characters/dossiers.json")) || null
+  const characterMemoryRows = recentMemory.filter((row) => String(row.kind || "") === "character_dossiers")
+  const chapterMemoryRows = recentMemory.filter((row) => String(row.kind || "") === "chapter_summary")
+  const latestQuality = chapterFacts.find((fact) => fact.qualityGate)
+  const latestNaturalness = latestQuality?.qualityGate && typeof latestQuality.qualityGate === "object"
+    ? (latestQuality.qualityGate as Record<string, unknown>).reason || ""
+    : ""
+  const estimatedChars = [
+    contextPacket,
+    state?.project?.idea || "",
+    state?.project?.title || "",
+    ...(state?.plan?.chapterTasks || []).slice(0, 20).map((task) => `${task.title} ${task.summary}`),
+  ].join("\n").length
+  const budgetLimit = 24_000
+  const budgetPercent = budgetLimit > 0 ? Math.min(100, Math.round((estimatedChars / budgetLimit) * 100)) : 0
+  const contextSections = [
+    { key: "contextPacket", label: "Context packet", chars: contextPacket.length },
+    { key: "chapterWindow", label: "Chapter window", chars: (state?.plan?.chapterTasks || []).slice(0, 20).map((task) => `${task.title} ${task.summary}`).join("\n").length },
+    { key: "creativeProfile", label: "Creative profile", chars: JSON.stringify(creativeProfile || {}).length },
+  ]
+  const missingStyle = [
+    !creativeProfile?.genre ? "genre" : "",
+    !creativeProfile?.readerPromise ? "reader promise" : "",
+    !creativeProfile?.styleFingerprint || /pending sample|first-chapter extraction/i.test(String(creativeProfile.styleFingerprint)) ? "style fingerprint" : "",
+    !creativeProfile?.naturalnessTarget ? "naturalness target" : "",
+  ].filter(Boolean)
+  const dossierCount = Array.isArray(state?.memory?.characterDossiers) ? state.memory.characterDossiers.length : 0
+  const incompleteDossierFields = (state?.memory?.characterDossiers || []).flatMap((dossier) => {
+    const missing = [
+      !dossier.coreDesire ? "desire" : "",
+      !dossier.behaviorHabits?.length ? "habit" : "",
+      !dossier.speechMarkers?.length ? "speech" : "",
+      !dossier.relationshipState ? "relationship" : "",
+    ].filter(Boolean)
+    return missing.length ? [`${dossier.canonicalName || dossier.id}: ${missing.join(", ")}`] : []
+  }).slice(0, 6)
+  const memoryLag = Math.max(0, chapterFacts.filter((fact) => fact.status === "complete").length - chapterMemoryRows.length)
+
+  return {
+    style: {
+      status: missingStyle.length === 0 ? "ready" : missingStyle.length <= 1 ? "warning" : "needs_setup",
+      genre: creativeProfile?.genre || "",
+      readerPromise: creativeProfile?.readerPromise || "",
+      pointOfView: creativeProfile?.pointOfView || "",
+      tone: creativeProfile?.tone || "",
+      naturalnessTarget: creativeProfile?.naturalnessTarget || "",
+      styleFingerprint: creativeProfile?.styleFingerprint || "",
+      artifactPath: styleArtifact ? artifactPath(styleArtifact) : ".ai-novel/style/profile.md",
+      updatedAt: styleArtifact?.updated_at || styleArtifact?.created_at || "",
+      missing: missingStyle,
+    },
+    characterDossier: {
+      status: dossierCount > 0 && incompleteDossierFields.length === 0 ? "ready" : dossierCount > 0 ? "warning" : "needs_setup",
+      count: dossierCount,
+      artifactPath: dossierArtifact ? artifactPath(dossierArtifact) : ".ai-novel/memory/characters/dossiers.json",
+      updatedAt: dossierArtifact?.updated_at || dossierArtifact?.created_at || "",
+      memoryRows: characterMemoryRows.length,
+      missing: incompleteDossierFields,
+    },
+    memoryRecall: {
+      status: characterMemoryRows.length > 0 && memoryLag <= 1 ? "ready" : memoryLag > 2 ? "warning" : "indexing",
+      characterRows: characterMemoryRows.length,
+      chapterRows: chapterMemoryRows.length,
+      memoryLag,
+      latestSource: String(recentMemory[0]?.source || ""),
+      latestKind: String(recentMemory[0]?.kind || ""),
+      pendingEmbeddings: recentMemory.filter((row) => String(row.embedding_status || "") === "pending").length,
+    },
+    contextBudget: {
+      status: budgetPercent >= 90 ? "warning" : budgetPercent >= 70 ? "watch" : "ready",
+      estimatedChars,
+      budgetLimit,
+      budgetPercent,
+      sections: contextSections,
+    },
+    qualitySignals: {
+      latestNaturalnessReason: String(latestNaturalness || ""),
+      completedChapters: chapterFacts.filter((fact) => fact.status === "complete").length,
+      blockedChapters: chapterFacts.filter((fact) => fact.status === "blocked").length,
+    },
+    metadata: {
+      styleMetadata: parseMetadataRow(styleArtifact),
+      dossierMetadata: parseMetadataRow(dossierArtifact),
+    },
   }
 }
 
@@ -1101,18 +1220,24 @@ async function createWorkspacePayload(
       chapterPageSize: options.chapterPageSize,
     })
     : resolvedState ? serializeState(resolvedState) : null
+  const consensus = await readWorkspaceText(projectRoot, "prompts", "global-consensus.md")
+  const contextPacket = await readWorkspaceText(projectRoot, "context", "current-context.md")
+  const productionObservability = deriveProductionObservability(
+    factorySnapshot as Record<string, unknown> | null,
+    resolvedState,
+    contextPacket,
+  )
   const compactFactorySnapshot = factorySnapshot
     ? {
       ...factorySnapshot,
       state: compactState,
+      productionObservability,
     }
     : null
   const responseFactorySnapshot = useCompactPayload
     ? compactFactorySnapshotForPayload(compactFactorySnapshot)
     : compactFactorySnapshot
 
-  const consensus = await readWorkspaceText(projectRoot, "prompts", "global-consensus.md")
-  const contextPacket = await readWorkspaceText(projectRoot, "context", "current-context.md")
   const payload = {
     state: compactState,
     consensus,
