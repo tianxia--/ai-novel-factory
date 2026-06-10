@@ -13,6 +13,7 @@ interface NovelWorkspacePaths {
     styleAntiPatternsPath: string;
     consensusPath: string;
     characterDossiersPath?: string;
+    characterDossiersMarkdownPath?: string;
     protagonistPath: string;
     relationsPath: string;
     characterEvolutionPath: string;

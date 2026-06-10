@@ -3900,6 +3900,10 @@ test("ai-novel advance executes real workflow steps and writes planning artifact
     await fs.readFile(path.join(tempDir, ".ai-novel", "state.json"), "utf8"),
   )
   assert.ok(state.memory.characterDossiers.some((dossier) => dossier.id === "relationship-axis"))
+  const updatedDossiers = JSON.parse(await fs.readFile(path.join(tempDir, ".ai-novel", "memory", "characters", "dossiers.json"), "utf8"))
+  const updatedProtagonist = updatedDossiers.find((dossier) => dossier.id === "protagonist")
+  assert.match(updatedProtagonist.currentChapterDelta, /chapter 1/)
+  assert.ok(updatedProtagonist.evidence.some((entry) => /chapter 1/.test(entry)))
   assert.notEqual(state.plan.chapterTasks[0].status, "pending")
   assert.equal(state.plan.pendingChapters, state.plan.totalChapters - 1)
   assert.equal(state.runtime.lastRoute, "drafting")

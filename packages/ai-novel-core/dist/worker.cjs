@@ -4116,6 +4116,13 @@ async function readCharacterDossiers(filePath) {
     return [];
   }
 }
+async function writeJsonFileAtomic(filePath, value) {
+  await import_promises4.default.mkdir(import_node_path6.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path6.default.join(import_node_path6.default.dirname(filePath), `.${import_node_path6.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises4.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+`);
+  await import_promises4.default.rename(tempPath, filePath);
+}
 function compactList(values = [], limit = 3) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
@@ -4129,6 +4136,81 @@ function summarizeCharacterDossiers(dossiers = [], limit = 6) {
     `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
     `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`
   ].join("\n")).join("\n");
+}
+function formatCharacterDossiersMarkdown(dossiers) {
+  return [
+    "# Character Dossiers",
+    "",
+    "This file is generated from the structured production character dossier state.",
+    "",
+    summarizeCharacterDossiers(dossiers, 12) || "- no structured dossiers available"
+  ].join("\n");
+}
+function appendUnique(values, next, limit = 8) {
+  const normalized = next.trim();
+  if (!normalized) return values.slice(0, limit);
+  return [...values.filter((value) => value !== normalized), normalized].slice(-limit);
+}
+function updateCharacterDossiersAfterChapter(input) {
+  const updatedAt = input.updatedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const knownCast = uniqueStrings([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.knownCast,
+    ...extractChinesePersonNames(input.finalDraft, 12)
+  ].filter(Boolean));
+  const protagonistName = input.continuityContract.lockedProtagonistName || knownCast[0] || "";
+  const chapterLabel = `chapter ${input.task.chapterNumber}`;
+  const chapterDelta = `${chapterLabel}: ${getTaskCausalPlan(input.state, input.task).characterStateDelta}`;
+  const evidence = `${chapterLabel}: ${input.finalDraft.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`;
+  const continuityNote = `${chapterLabel}: ${input.continuityContract.continuityAnchors.slice(0, 4).join("\u3001") || "new continuity anchors pending"}`;
+  const dossiers = input.dossiers.length ? input.dossiers : [];
+  const nextDossiers = dossiers.map((dossier) => {
+    const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist";
+    const isKnownCast = knownCast.some((name) => name && (dossier.canonicalName === name || dossier.aliases.includes(name)));
+    if (!isProtagonist && !isKnownCast) return dossier;
+    return {
+      ...dossier,
+      canonicalName: isProtagonist && protagonistName && dossier.canonicalName.startsWith("pending-") ? protagonistName : dossier.canonicalName,
+      aliases: uniqueStrings([
+        ...dossier.aliases,
+        ...isProtagonist && protagonistName ? [protagonistName] : []
+      ]).slice(0, 8),
+      currentChapterDelta: chapterDelta,
+      continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
+      evidence: appendUnique(dossier.evidence, evidence),
+      updatedAt
+    };
+  });
+  const existingIds = new Set(nextDossiers.map((dossier) => dossier.id));
+  for (const name of knownCast.slice(0, 8)) {
+    if (!name || nextDossiers.some((dossier) => dossier.canonicalName === name || dossier.aliases.includes(name))) continue;
+    const id = `supporting-${name.replace(/[^\p{Script=Han}A-Za-z0-9_-]+/gu, "-").replace(/^-+|-+$/g, "") || nextDossiers.length + 1}`;
+    if (existingIds.has(id)) continue;
+    existingIds.add(id);
+    nextDossiers.push({
+      id,
+      role: "supporting",
+      canonicalName: name,
+      aliases: [name],
+      identityAndRole: `Supporting cast member observed in ${chapterLabel}; role function requires Memory Keeper enrichment.`,
+      coreDesire: "pending desire inferred from future scenes",
+      fearOrWound: "pending wound inferred from future scenes",
+      contradiction: "pending contradiction inferred from future scenes",
+      behaviorHabits: ["pending observed habit"],
+      speechMarkers: ["pending speech marker"],
+      appearanceAndBody: "pending visible marker",
+      skills: ["pending competence"],
+      limitations: ["pending limitation"],
+      relationshipState: `Observed around ${input.continuityContract.lockedProtagonistName || "the protagonist"} in ${chapterLabel}; relationship pressure pending.`,
+      relationshipEdges: [{ targetId: "protagonist", label: "observed with", pressure: "needs relationship pressure enrichment" }],
+      arcTrajectory: "pending recurring function",
+      currentChapterDelta: chapterDelta,
+      continuityNotes: [continuityNote],
+      evidence: [evidence],
+      updatedAt
+    });
+  }
+  return nextDossiers;
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
   return import_node_path6.default.relative(projectRoot, absolutePath).replaceAll(import_node_path6.default.sep, "/");
@@ -7620,6 +7702,20 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     qualityGate: finalGate
   });
   const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract, characterDossiers);
+  const updatedCharacterDossiers = updateCharacterDossiersAfterChapter({
+    dossiers: characterDossiers,
+    state,
+    task,
+    finalDraft,
+    memoryUpdate,
+    continuityContract
+  });
+  if (updatedCharacterDossiers.length) {
+    state.memory = {
+      ...state.memory || {},
+      characterDossiers: updatedCharacterDossiers
+    };
+  }
   throwIfPipelineAborted(options);
   const draftPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
   const reviewedPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
@@ -7643,6 +7739,13 @@ ${report}
 `);
   await import_promises4.default.writeFile(memoryPath, `${memoryUpdate}
 `);
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
+  }
+  if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
+    await import_promises4.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+`);
+  }
   await recordPipelineArtifact(projectRoot, draftPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "draft" });
   await recordPipelineArtifact(projectRoot, reviewedPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "reviewed", qualityGate: finalGate });
   await recordPipelineArtifact(projectRoot, finalPath, "chapter", options, {
@@ -7654,6 +7757,13 @@ ${report}
   });
   await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate });
   await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate });
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_dossiers",
+      qualityGate: finalGate
+    });
+  }
   await emitWritingProgress(options, {
     step: "chapter_artifacts_saved",
     role: "Memory Keeper",
@@ -7915,7 +8025,7 @@ async function readOptionalText2(filePath) {
     return "";
   }
 }
-async function writeJsonFileAtomic(filePath, value) {
+async function writeJsonFileAtomic2(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
   await import_promises6.default.mkdir(import_node_path8.default.dirname(filePath), { recursive: true });
@@ -7986,7 +8096,7 @@ async function loadAutonomousState(rootDir) {
 async function saveAutonomousState(rootDir, state) {
   const { statePath } = getWorkspacePaths(rootDir);
   state.runtime.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
-  await writeJsonFileAtomic(statePath, state);
+  await writeJsonFileAtomic2(statePath, state);
   await syncCurrentContextPacketFile(rootDir, state).catch(() => void 0);
 }
 async function syncManagedProjectState(rootDir, projectId, state) {
