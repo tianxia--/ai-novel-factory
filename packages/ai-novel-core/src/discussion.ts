@@ -10,7 +10,7 @@ import { createAgentMessage, type MessagePart } from "./messages"
 import type { AutonomousNovelState, CharacterDossier } from "./cli-types"
 import { throwIfStopped } from "./abort"
 import { formatKnowledgeForPrompt, retrieveKnowledge } from "./knowledge"
-import { buildStoryCoreContext, buildHistoryForAgent } from "./context-budget"
+import { buildStoryCoreContext, buildHistoryForAgent, CONTEXT_BUDGET } from "./context-budget"
 
 const AGENT_FLOW = [
   { id: "showrunner", label: "Showrunner" },
@@ -96,6 +96,20 @@ function formatCharacterDossiersMarkdown(dossiers: CharacterDossier[]) {
       `- latest evidence: ${dossier.evidence.slice(-2).join(" | ") || "none"}`,
     ].join("\n")),
   ].join("\n\n")
+}
+
+function summarizeDossiersForContext(dossiers: CharacterDossier[] = [], limit = 3) {
+  const selected = [
+    ...dossiers.filter((dossier) => dossier.role === "protagonist"),
+    ...dossiers.filter((dossier) => dossier.role !== "protagonist"),
+  ].slice(0, limit)
+  return selected.map((dossier) => [
+    `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
+    `  desire=${clipText(dossier.coreDesire, 90)}; wound=${clipText(dossier.fearOrWound, 90)}`,
+    `  habit=${compactList(dossier.behaviorHabits, 2)}; speech=${compactList(dossier.speechMarkers, 2)}`,
+    `  relation=${clipText(dossier.relationshipState, 120)}`,
+    `  delta=${clipText(dossier.currentChapterDelta, 120)}`,
+  ].join("\n")).join("\n")
 }
 
 function updateCharacterDossiersFromDiscussion(input: {
@@ -392,6 +406,7 @@ function buildStageGuardSummary(state: AutonomousNovelState, target: DiscussionT
 }
 
 function buildAutonomousContext(state: AutonomousNovelState, target: DiscussionTarget) {
+  const dossierBrief = summarizeDossiersForContext(state.memory?.characterDossiers || [])
   return [
     "# Autonomous Creation Mode",
     "",
@@ -400,6 +415,9 @@ function buildAutonomousContext(state: AutonomousNovelState, target: DiscussionT
     `Current workflow stage: ${state.runtime.stage}`,
     `Scoped target: ${target.label}`,
     `Write-back asset: ${target.assetPath}`,
+    "",
+    "Structured character dossier snapshot:",
+    dossierBrief || "- no structured character dossiers available yet",
     "",
     "Autonomy rules:",
     "- Do not wait for the user to choose paths or options.",
@@ -457,6 +475,7 @@ function buildContextPacketText(options: {
 }) {
   const recentTranscript = extractRecentTranscript(options.priorTranscript)
   const consensusBullets = extractSummaryBullets(options.consensus, 8)
+  const dossierBrief = summarizeDossiersForContext(options.state.memory?.characterDossiers || [])
   const recalledMemory = options.recalledMemory?.length
     ? options.recalledMemory.map((item) => `- [${String(item.kind || "memory")}] ${clipText(String(item.content || ""), 360)} (score: ${Number(item.score || 0)})`)
     : ["- No database memory recall matched this turn yet."]
@@ -497,6 +516,9 @@ function buildContextPacketText(options: {
     "",
     "Consensus carryover:",
     ...(consensusBullets.length > 0 ? consensusBullets : ["- No compact consensus has been recorded yet."]),
+    "",
+    "Structured character dossier carryover:",
+    dossierBrief || "- No structured character dossiers have been recorded yet.",
     "",
     "Memory/RAG recall:",
     ...recalledMemory,
@@ -663,6 +685,7 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
     `Target: ${discussionTarget.label} -> ${discussionTarget.assetPath}`,
     `User: ${message}`,
   ]
+  const storyCoreDossierBrief = summarizeDossiersForContext(state.memory?.characterDossiers || [])
   const transcriptStartedAt = new Date().toISOString()
   if (factoryDb && options.projectId) {
     factoryDb.createRun({
@@ -741,7 +764,16 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
     try {
       // ── 分层上下文组装 ──────────────────────────────────────────────────────
       // Layer 1：小说核心（精简版，≤2000字），所有 Agent 共享
-      const storyCoreCtx = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message)
+      const storyCoreBase = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message)
+      const dossierSection = storyCoreDossierBrief ? `\n\n结构化角色档案摘要：\n${storyCoreDossierBrief}` : ""
+      const dossierBudget = Math.min(500, Math.floor(CONTEXT_BUDGET.story_core * 0.25))
+      const baseBudget = CONTEXT_BUDGET.story_core - dossierBudget
+      const compactStoryCoreBase = storyCoreBase.length > baseBudget
+        ? `${storyCoreBase.slice(0, baseBudget)}\n…[核心层已截断]`
+        : storyCoreBase
+      const storyCoreCtx = dossierSection
+        ? `${compactStoryCoreBase}${dossierSection.slice(0, dossierBudget)}`.slice(0, CONTEXT_BUDGET.story_core)
+        : storyCoreBase
       // Layer 4：过滤后的历史（按角色差异化，独立视角专家为空）
       const historyCtx = buildHistoryForAgent(agent.id, discussionStage, replies, priorTranscript)
       console.log(

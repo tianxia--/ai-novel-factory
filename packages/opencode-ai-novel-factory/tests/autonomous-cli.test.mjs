@@ -3916,6 +3916,7 @@ test("ai-novel advance executes real workflow steps and writes planning artifact
   assert.match(contextPacket, /- Stage: drafting/)
   assert.match(contextPacket, /- Target: chapter drafting/)
   assert.match(contextPacket, /- Asset: \.ai-novel\/chapters\//)
+  assert.match(contextPacket, /Structured character dossier carryover/)
 })
 
 test("ai-novel cover prepares a concrete cover prompt artifact", async () => {
@@ -4009,6 +4010,9 @@ test("ai-novel chat runs visible multi-agent discussion and updates consensus", 
   const protagonistDossier = characterDossiers.find((dossier) => dossier.id === "protagonist")
   assert.match(protagonistDossier.currentChapterDelta, /冷静克制/i)
   assert.ok(protagonistDossier.evidence.some((entry) => /冷静克制/.test(entry)))
+  const contextPacket = await fs.readFile(path.join(tempDir, ".ai-novel", "context", "current-context.md"), "utf8")
+  assert.match(contextPacket, /Structured character dossier carryover/)
+  assert.match(contextPacket, /protagonist/)
 })
 
 test("ai-novel chat routes status, workflow, and interruption style messages", async () => {

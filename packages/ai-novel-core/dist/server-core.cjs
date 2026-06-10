@@ -7929,6 +7929,21 @@ ${report}
 // src/context-packet.ts
 var import_promises5 = __toESM(require("fs/promises"), 1);
 var import_node_path7 = __toESM(require("path"), 1);
+function compactList2(values = [], limit = 2) {
+  return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
+}
+function clipText(value = "", maxLength = 100) {
+  const normalized = value.trim();
+  return normalized.length > maxLength ? normalized.slice(0, maxLength).trim() : normalized;
+}
+function summarizeCharacterDossiers2(state, limit = 3) {
+  const dossiers = state.memory?.characterDossiers || [];
+  const selected = [
+    ...dossiers.filter((dossier) => dossier.role === "protagonist"),
+    ...dossiers.filter((dossier) => dossier.role !== "protagonist")
+  ].slice(0, limit);
+  return selected.length ? selected.map((dossier) => `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}; desire=${clipText(dossier.coreDesire)}; habit=${compactList2(dossier.behaviorHabits)}; delta=${clipText(dossier.currentChapterDelta)}`) : ["- No structured character dossiers have been recorded yet."];
+}
 function getContextFocusForStage(stage) {
   switch (stage) {
     case "worldbuilding_dialogue":
@@ -7983,7 +7998,19 @@ function syncContextPacketStateText(current, state) {
     return current;
   }
   const focus = getContextFocusForStage(state.runtime.stage);
-  return current.replace(/^- Stage: .*$/m, `- Stage: ${state.runtime.stage}`).replace(/^- Last action: .*$/m, `- Last action: ${state.runtime.lastAction}`).replace(/^- Last route: .*$/m, `- Last route: ${state.runtime.lastRoute}`).replace(/^- Autopilot running: .*$/m, `- Autopilot running: ${Boolean(state.runtime.autopilot?.running)}`).replace(/^- Target: .*$/m, `- Target: ${focus.target}`).replace(/^- Asset: .*$/m, `- Asset: ${focus.asset}`);
+  const withWorkflow = current.replace(/^- Stage: .*$/m, `- Stage: ${state.runtime.stage}`).replace(/^- Last action: .*$/m, `- Last action: ${state.runtime.lastAction}`).replace(/^- Last route: .*$/m, `- Last route: ${state.runtime.lastRoute}`).replace(/^- Autopilot running: .*$/m, `- Autopilot running: ${Boolean(state.runtime.autopilot?.running)}`).replace(/^- Target: .*$/m, `- Target: ${focus.target}`).replace(/^- Asset: .*$/m, `- Asset: ${focus.asset}`);
+  const characterSection = [
+    "Structured character dossier carryover:",
+    ...summarizeCharacterDossiers2(state)
+  ].join("\n");
+  if (/Structured character dossier carryover:\n(?:- .*\n?)*/m.test(withWorkflow)) {
+    return withWorkflow.replace(/Structured character dossier carryover:\n(?:- .*\n?)*/m, `${characterSection}
+`);
+  }
+  return withWorkflow.replace(/Consensus carryover:\n/m, `${characterSection}
+
+Consensus carryover:
+`);
 }
 function createCurrentContextPacketText(state) {
   const focus = getContextFocusForStage(state.runtime.stage);
@@ -8014,6 +8041,9 @@ function createCurrentContextPacketText(state) {
     "",
     "Consensus carryover:",
     "- No compact consensus has been recorded yet.",
+    "",
+    "Structured character dossier carryover:",
+    ...summarizeCharacterDossiers2(state),
     "",
     "Memory/RAG recall:",
     "- No database memory recall matched this turn yet."
@@ -9800,7 +9830,7 @@ function appendUnique2(values = [], next, limit = 10) {
   if (!normalized) return values.slice(0, limit);
   return [...values.filter((value) => value !== normalized), normalized].slice(-limit);
 }
-function compactList2(values = [], limit = 3) {
+function compactList3(values = [], limit = 3) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
 function formatCharacterDossiersMarkdown2(dossiers) {
@@ -9817,13 +9847,26 @@ function formatCharacterDossiersMarkdown2(dossiers) {
       `- identity and role: ${dossier.identityAndRole}`,
       `- core desire: ${dossier.coreDesire}`,
       `- fear or wound: ${dossier.fearOrWound}`,
-      `- habits: ${compactList2(dossier.behaviorHabits)}`,
-      `- speech: ${compactList2(dossier.speechMarkers)}`,
+      `- habits: ${compactList3(dossier.behaviorHabits)}`,
+      `- speech: ${compactList3(dossier.speechMarkers)}`,
       `- relationship state: ${dossier.relationshipState}`,
       `- current chapter delta: ${dossier.currentChapterDelta}`,
       `- latest evidence: ${dossier.evidence.slice(-2).join(" | ") || "none"}`
     ].join("\n"))
   ].join("\n\n");
+}
+function summarizeDossiersForContext(dossiers = [], limit = 3) {
+  const selected = [
+    ...dossiers.filter((dossier) => dossier.role === "protagonist"),
+    ...dossiers.filter((dossier) => dossier.role !== "protagonist")
+  ].slice(0, limit);
+  return selected.map((dossier) => [
+    `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
+    `  desire=${clipText2(dossier.coreDesire, 90)}; wound=${clipText2(dossier.fearOrWound, 90)}`,
+    `  habit=${compactList3(dossier.behaviorHabits, 2)}; speech=${compactList3(dossier.speechMarkers, 2)}`,
+    `  relation=${clipText2(dossier.relationshipState, 120)}`,
+    `  delta=${clipText2(dossier.currentChapterDelta, 120)}`
+  ].join("\n")).join("\n");
 }
 function updateCharacterDossiersFromDiscussion(input) {
   if (input.targetKind !== "character" && !/主角|角色|人物|性格|character|protagonist/i.test(input.message)) {
@@ -10037,6 +10080,7 @@ function buildStageGuardSummary(state, target, reason) {
   ].join("\n");
 }
 function buildAutonomousContext(state, target) {
+  const dossierBrief = summarizeDossiersForContext(state.memory?.characterDossiers || []);
   return [
     "# Autonomous Creation Mode",
     "",
@@ -10045,6 +10089,9 @@ function buildAutonomousContext(state, target) {
     `Current workflow stage: ${state.runtime.stage}`,
     `Scoped target: ${target.label}`,
     `Write-back asset: ${target.assetPath}`,
+    "",
+    "Structured character dossier snapshot:",
+    dossierBrief || "- no structured character dossiers available yet",
     "",
     "Autonomy rules:",
     "- Do not wait for the user to choose paths or options.",
@@ -10056,7 +10103,7 @@ function buildAutonomousContext(state, target) {
     `- Stage guardrail: ${stageInstructionFor(state, target)}`
   ].join("\n");
 }
-function clipText(value, maxLength) {
+function clipText2(value, maxLength) {
   const normalized = value.trim();
   if (normalized.length <= maxLength) {
     return normalized;
@@ -10082,10 +10129,11 @@ function extractRecentTranscript(transcript, blockLimit = 3) {
 function buildContextPacketText(options) {
   const recentTranscript = extractRecentTranscript(options.priorTranscript);
   const consensusBullets = extractSummaryBullets(options.consensus, 8);
-  const recalledMemory = options.recalledMemory?.length ? options.recalledMemory.map((item) => `- [${String(item.kind || "memory")}] ${clipText(String(item.content || ""), 360)} (score: ${Number(item.score || 0)})`) : ["- No database memory recall matched this turn yet."];
+  const dossierBrief = summarizeDossiersForContext(options.state.memory?.characterDossiers || []);
+  const recalledMemory = options.recalledMemory?.length ? options.recalledMemory.map((item) => `- [${String(item.kind || "memory")}] ${clipText2(String(item.content || ""), 360)} (score: ${Number(item.score || 0)})`) : ["- No database memory recall matched this turn yet."];
   const recalledKnowledge = options.recalledKnowledge?.length ? options.recalledKnowledge.map((item) => {
     const source = item.source && typeof item.source === "object" ? item.source : {};
-    return `- [${String(item.chunk_type || "knowledge")}] ${clipText(String(item.content || ""), 360)} (source: ${String(source.path || "")}, score: ${Number(item.score || 0).toFixed(2)})`;
+    return `- [${String(item.chunk_type || "knowledge")}] ${clipText2(String(item.content || ""), 360)} (source: ${String(source.path || "")}, score: ${Number(item.score || 0).toFixed(2)})`;
   }) : ["- No writing knowledge resources matched this turn yet."];
   return [
     "# Current Context Packet",
@@ -10117,6 +10165,9 @@ function buildContextPacketText(options) {
     "",
     "Consensus carryover:",
     ...consensusBullets.length > 0 ? consensusBullets : ["- No compact consensus has been recorded yet."],
+    "",
+    "Structured character dossier carryover:",
+    dossierBrief || "- No structured character dossiers have been recorded yet.",
     "",
     "Memory/RAG recall:",
     ...recalledMemory,
@@ -10246,6 +10297,7 @@ ${state.project.idea}`,
     `Target: ${discussionTarget.label} -> ${discussionTarget.assetPath}`,
     `User: ${message}`
   ];
+  const storyCoreDossierBrief = summarizeDossiersForContext(state.memory?.characterDossiers || []);
   const transcriptStartedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (factoryDb && options.projectId) {
     factoryDb.createRun({
@@ -10302,7 +10354,7 @@ ${state.project.idea}`,
         message,
         discussionTarget,
         currentStage: state.runtime.stage,
-        priorTranscript: clipText(priorTranscript, 8e3),
+        priorTranscript: clipText2(priorTranscript, 8e3),
         contextPacketPath
       }
     });
@@ -10318,7 +10370,16 @@ ${state.project.idea}`,
     });
     let reply = "";
     try {
-      const storyCoreCtx = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message);
+      const storyCoreBase = buildStoryCoreContext(state, sanitizedConsensus, discussionTarget, message);
+      const dossierSection = storyCoreDossierBrief ? `
+
+\u7ED3\u6784\u5316\u89D2\u8272\u6863\u6848\u6458\u8981\uFF1A
+${storyCoreDossierBrief}` : "";
+      const dossierBudget = Math.min(500, Math.floor(CONTEXT_BUDGET.story_core * 0.25));
+      const baseBudget = CONTEXT_BUDGET.story_core - dossierBudget;
+      const compactStoryCoreBase = storyCoreBase.length > baseBudget ? `${storyCoreBase.slice(0, baseBudget)}
+\u2026[\u6838\u5FC3\u5C42\u5DF2\u622A\u65AD]` : storyCoreBase;
+      const storyCoreCtx = dossierSection ? `${compactStoryCoreBase}${dossierSection.slice(0, dossierBudget)}`.slice(0, CONTEXT_BUDGET.story_core) : storyCoreBase;
       const historyCtx = buildHistoryForAgent(agent.id, discussionStage, replies, priorTranscript);
       console.log(
         `[CTX BUDGET] Agent: ${agent.label} | Stage: ${discussionStage} | StoryCore: ${storyCoreCtx.length}\u5B57 | History: ${historyCtx.length}\u5B57 | Base: ${basePrompt.length}\u5B57 | Dynamic: ${dynamicPrompt.length}\u5B57`
