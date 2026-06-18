@@ -1,5 +1,5 @@
-import { A as AutonomousNovelState, N as NovelProjectRecord, a as NovelStage } from './cli-types-B17O02vG.cjs';
-import { NovelMessage, MessagePart } from './messages.cjs';
+import { A as AutonomousNovelState, N as NovelProjectRecord, a as NovelStage } from './cli-types-sWRA2Cw2.js';
+import { NovelMessage, MessagePart } from './messages.js';
 
 type SuperGraphNodeType = "Project" | "Mission" | "WorkflowStage" | "Agent" | "Artifact" | "ChapterTask" | "Character" | "Location" | "Faction" | "Event" | "Scene" | "Foreshadowing" | "WorldRule" | "Decision" | "Conflict" | "Relationship" | "TimelinePoint" | "ContextLayer" | "Memory" | "KnowledgeChunk" | "ToolResult" | "Checkpoint" | "DriftGuard" | "DiscussionTurn";
 type SuperGraphEdgeType = "HAS_MISSION" | "HAS_STAGE" | "HAS_AGENT" | "HAS_ARTIFACT" | "HAS_CHAPTER_TASK" | "CURRENT_STAGE" | "NEXT_STAGE" | "WRITES" | "READS" | "UPDATES" | "DERIVES_FROM" | "DECIDED_BY" | "CHECKS" | "VIOLATES" | "SUPPORTS" | "APPEARS_IN" | "BELONGS_TO" | "KNOWS" | "CAUSES" | "CONFLICTS_WITH" | "FORESHADOWS" | "PAYS_OFF" | "HAPPENS_BEFORE" | "HAPPENS_AFTER" | "RECALLS" | "USES_CONTEXT_LAYER" | "PRODUCED_TOOL_RESULT" | "SNAPSHOTTED";
@@ -563,7 +563,8 @@ declare class FactoryDb {
         modelName: string;
         temperature?: number;
         timeoutMs?: number;
-    }): void;
+        isActive?: boolean;
+    }): string;
     updateLlmConfig(id: string, config: {
         name: string;
         baseUrl: string;

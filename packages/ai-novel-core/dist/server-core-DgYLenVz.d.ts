@@ -1,7 +1,7 @@
-import { P as ProviderTestResult, A as AutonomousNovelState, f as InitProjectOptions, N as NovelProjectRecord, g as InterruptOptions, I as InterruptionReview } from './cli-types-B17O02vG.js';
+import { P as ProviderTestResult, A as AutonomousNovelState, f as InitProjectOptions, N as NovelProjectRecord, g as InterruptOptions, I as InterruptionReview } from './cli-types-sWRA2Cw2.js';
 import { ProductionPipelineOptions } from './writing-pipeline.js';
-import './factory-db-D-IFvtpa.js';
-import './env-manager-C1eYTzhS.js';
+import './factory-db-am8z7hMk.js';
+import './env-manager-BY-bHMi5.js';
 
 interface AgentReplyOptions {
     roleName: string;
@@ -23,6 +23,7 @@ interface AgentReplyOptions {
     currentStage?: string;
     stageInstruction?: string;
     envRootDir?: string;
+    temperature?: number;
 }
 interface ProviderOverrideOptions {
     baseUrl?: string;

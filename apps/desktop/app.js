@@ -33,6 +33,7 @@ const llmFormTitle = document.getElementById("llm-form-title")
 const llmConfigIdInput = document.getElementById("llm-config-id-input")
 const llmConfigNameInput = document.getElementById("llm-config-name-input")
 const llmConfigCancelEditButton = document.getElementById("llm-config-cancel-edit-button")
+const CONFIGURED_SECRET_PLACEHOLDER = "[configured]"
 const networkStatusBanner = document.getElementById("network-status-banner")
 const initPanel = document.getElementById("init-panel")
 const initIdeaInput = document.getElementById("init-idea-input")
@@ -83,6 +84,7 @@ const dashboardState = {
   consensus: "",
   contextPacket: "",
   factorySnapshot: null,
+  projectRuntime: null,
   knowledgeEvaluation: null,
   knowledgeSearch: {
     query: "",
@@ -414,6 +416,38 @@ function hasRunningAutopilotJob() {
   return snapshotJobDisplayState().runningJobs.some((job) => job?.kind === "autopilot")
 }
 
+function currentProjectRuntime() {
+  return dashboardState.projectRuntime
+    || dashboardState.factorySnapshot?.projectRuntime
+    || dashboardState.projects.find((project) => project.id === dashboardState.activeProjectId)?.summary?.projectRuntime
+    || null
+}
+
+function hasStartedProductionWorkflow() {
+  const projectRuntime = currentProjectRuntime()
+  if (projectRuntime?.primaryAction === "continue"
+    || projectRuntime?.primaryAction === "resume"
+    || projectRuntime?.primaryAction === "pause"
+    || projectRuntime?.productionStatus === "drafting"
+    || projectRuntime?.productionStatus === "reviewing"
+    || projectRuntime?.productionStatus === "blocked"
+    || projectRuntime?.productionStatus === "replanning"
+    || projectRuntime?.nextTarget?.type === "chapter") {
+    return true
+  }
+  const stage = dashboardState.state?.runtime?.stage || ""
+  const productionStages = new Set(["setting_review", "master_planning", "chapter_task_generation", "drafting", "reviewing", "replanning"])
+  if (!productionStages.has(stage)) {
+    return false
+  }
+  const summary = dashboardState.factorySnapshot?.productionSummary || dashboardState.projects.find((project) => project.id === dashboardState.activeProjectId)?.summary || {}
+  const completed = Number(summary.completedChapters ?? dashboardState.state?.plan?.chapterTaskSummary?.complete ?? 0)
+  const pending = Number(summary.pendingChapters ?? dashboardState.state?.plan?.pendingChapters ?? 0)
+  const blocked = Number(summary.blockedChapters ?? dashboardState.state?.plan?.chapterTaskSummary?.blocked ?? 0)
+  const inProgress = Number(summary.inProgressChapters ?? dashboardState.state?.plan?.chapterTaskSummary?.inProgress ?? 0)
+  return completed > 0 || pending > 0 || blocked > 0 || inProgress > 0 || stage === "drafting" || stage === "reviewing"
+}
+
 function dedupeJobs(jobs = []) {
   const seen = new Set()
   return jobs.filter((job) => {
@@ -446,12 +480,23 @@ function snapshotJobDisplayState(snapshot = dashboardState.factorySnapshot || {}
 
 function autopilotControlState() {
   const runtimeAutopilot = dashboardState.state?.runtime?.autopilot || {}
+  const projectRuntime = currentProjectRuntime()
   const recoverable = hasRecoverableAutopilotJob()
-  const running = Boolean(runtimeAutopilot.running || hasRunningAutopilotJob() || dashboardState.autopilotStreamConnected)
+  const workflowStarted = hasStartedProductionWorkflow()
+  const running = Boolean(
+    projectRuntime?.executionStatus === "running"
+    || runtimeAutopilot.running
+    || hasRunningAutopilotJob()
+    || (dashboardState.autopilotActive && dashboardState.autopilotStreamConnected),
+  )
   return {
     running,
-    recoverable,
-    paused: recoverable && !running,
+    recoverable: recoverable || projectRuntime?.executionStatus === "paused" || projectRuntime?.executionStatus === "queued",
+    workflowStarted,
+    paused: (recoverable || projectRuntime?.executionStatus === "paused" || projectRuntime?.executionStatus === "queued") && !running,
+    primaryAction: projectRuntime?.primaryAction || "",
+    primaryActionLabel: projectRuntime?.primaryActionLabel || "",
+    reason: projectRuntime?.reason || "",
     lastStep: runtimeAutopilot.lastStep || "",
     message: runtimeAutopilot.statusMessage || "",
   }
@@ -509,12 +554,14 @@ function renderAutopilotControls() {
   autopilotStopButton.disabled = !hasProject || !control.running
   autopilotStartButton.querySelector("span").textContent = control.running
     ? "创作进行中"
-    : control.paused
+    : control.primaryActionLabel && control.primaryAction !== "pause" && control.primaryAction !== "none"
+      ? control.primaryActionLabel
+      : control.paused || control.workflowStarted
       ? "继续创作"
       : "开始创作"
   autopilotStartButton.querySelector("i").className = control.running
     ? "fa-solid fa-spinner fa-spin"
-    : control.paused
+    : control.paused || control.workflowStarted
       ? "fa-solid fa-rotate-right"
       : "fa-solid fa-play"
   autopilotStopButton.querySelector("span").textContent = control.running ? "暂停并保留进度" : "暂停"
@@ -533,14 +580,21 @@ function renderAutopilotControls() {
     autopilotStartButton.title = "自动创作正在运行中"
     autopilotStopButton.title = "点击暂停自动创作，安全保留当前章节进度"
   } else {
-    autopilotStartButton.title = "点击开始自动创作小说"
     autopilotStopButton.title = "当前未在运行中"
     if (control.paused) {
+      autopilotStartButton.title = "点击继续可恢复的自动创作任务"
       hint = "检测到可恢复任务，点击继续创作"
+    } else if (control.workflowStarted) {
+      autopilotStartButton.title = "点击继续现有章节生产流程"
+      hint = control.reason || "项目已进入生产流程，点击继续创作"
     } else if (control.lastStep === "awaiting_user_start") {
+      autopilotStartButton.title = "点击开始自动创作小说"
       hint = "项目已就绪，点击开始创作"
     } else if (control.message) {
+      autopilotStartButton.title = "点击继续自动创作小说"
       hint = control.message
+    } else {
+      autopilotStartButton.title = "点击开始自动创作小说"
     }
   }
   autopilotControlHint.textContent = hint
@@ -713,7 +767,7 @@ function acknowledgePendingMessages(persistedEntries = []) {
   if (persistedIds.size > 0) {
     dashboardState.liveDiscussion = dashboardState.liveDiscussion.filter((entry) => {
       const identity = entryIdentity(entry)
-      return !identity || !persistedIds.has(identity) || !isTransientOperationalStatus(entry)
+      return !identity || !persistedIds.has(identity)
     })
   }
 }
@@ -1040,7 +1094,7 @@ function editLlmConfig(id) {
   llmConfigIdInput.value = config.id
   llmConfigNameInput.value = config.name
   providerBaseUrlInput.value = config.base_url
-  providerApiKeyInput.value = config.api_key
+  providerApiKeyInput.value = config.api_key_configured ? CONFIGURED_SECRET_PLACEHOLDER : ""
   providerModelInput.value = config.model_name
 
   llmFormTitle.textContent = "编辑模型配置"
@@ -1220,6 +1274,14 @@ function updateSnapshot(payload = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(payload, "factorySnapshot")) {
     dashboardState.factorySnapshot = payload.factorySnapshot || null
+    if (!Object.prototype.hasOwnProperty.call(payload, "projectRuntime")) {
+      dashboardState.projectRuntime = dashboardState.factorySnapshot?.projectRuntime || null
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "projectRuntime")) {
+    dashboardState.projectRuntime = payload.projectRuntime || payload.factorySnapshot?.projectRuntime || null
+  } else if (payload.factorySnapshot?.projectRuntime) {
+    dashboardState.projectRuntime = payload.factorySnapshot.projectRuntime
   }
   if (Object.prototype.hasOwnProperty.call(payload, "knowledgeEvaluation")) {
     dashboardState.knowledgeEvaluation = payload.knowledgeEvaluation || null
@@ -1696,6 +1758,77 @@ function renderStoryMemory(model) {
   const chipList = (items = [], empty = "无缺口") => items.length
     ? items.slice(0, 5).map((item) => `<span class="knowledge-chip is-muted">${escapeHtml(item)}</span>`).join("")
     : `<span class="knowledge-chip">${escapeHtml(empty)}</span>`
+
+  const diagnostics = model.storyMemory.diagnostics || {}
+  let diagnosticsHtml = ""
+  if (diagnostics) {
+    const blockedChapters = Array.isArray(diagnostics.blockedChapters) ? diagnostics.blockedChapters : []
+    const dossierGaps = Array.isArray(diagnostics.characterDossierGaps) ? diagnostics.characterDossierGaps : []
+    const overages = diagnostics.contextBudgetOverages || {}
+    const rag = diagnostics.ragRecall || {}
+    const lease = diagnostics.workerLeaseIssues || {}
+    
+    const blockedRows = blockedChapters.length
+      ? blockedChapters.map(chap => `
+          <div class="diagnostic-row is-error">
+            <span>#${chap.chapterNumber} ${escapeHtml(chap.title)} (重试 ${chap.recoveryAttempts} 次${chap.recoveryBlocked ? " · 已锁" : ""})</span>
+            <p>${escapeHtml(chap.blockReason)}</p>
+          </div>
+        `).join("")
+      : `<div class="diagnostic-row is-success"><span><i class="fa-solid fa-circle-check"></i> 无阻塞章节</span></div>`
+
+    const gapChips = dossierGaps.length
+      ? dossierGaps.map(gap => `<span class="knowledge-chip is-muted">${escapeHtml(gap)}</span>`).join("")
+      : `<span class="knowledge-chip is-success"><i class="fa-solid fa-check"></i> 档案字段完整</span>`
+
+    const overagesHtml = overages.isOverages
+      ? `<div class="diagnostic-row is-warning"><span>⚠️ 上下文预算超限！当前 ${overages.estimatedChars} / 限制 ${overages.budgetLimit} 字符（超 ${overages.overageChars}）</span></div>`
+      : `<div class="diagnostic-row is-success"><span><i class="fa-solid fa-circle-check"></i> 上下文容量正常：${overages.estimatedChars} / ${overages.budgetLimit}</span></div>`
+
+    const leaseHtml = lease.hasIssues
+      ? lease.staleJobs.map(job => `
+          <div class="diagnostic-row is-warning">
+            <span>⚠️ 租约超时任务：job ${job.id.slice(0, 8)} (${job.kind})</span>
+            <small>占用者 ${job.leaseOwner} · 过期 ${formatClock(job.leaseExpiresAt)}</small>
+          </div>
+        `).join("")
+      : `<div class="diagnostic-row is-success"><span><i class="fa-solid fa-circle-check"></i> Worker 租约心跳均正常</span></div>`
+
+    diagnosticsHtml = `
+      <div class="diagnostics-panel">
+        <div class="diagnostic-section">
+          <strong><i class="fa-solid fa-ban"></i> 阻塞原因及质检门禁</strong>
+          <div class="diagnostic-list">${blockedRows}</div>
+        </div>
+        <div class="diagnostic-section">
+          <strong><i class="fa-solid fa-gauge-high"></i> 上下文越界状态</strong>
+          <div class="diagnostic-list">${overagesHtml}</div>
+        </div>
+        <div class="diagnostic-section">
+          <strong><i class="fa-solid fa-circle-exclamation"></i> 角色档案空白字段 (Gaps)</strong>
+          <div class="knowledge-chip-row">${gapChips}</div>
+        </div>
+        <div class="diagnostic-section">
+          <strong><i class="fa-solid fa-database"></i> 知识库 RAG 与向量积压</strong>
+          <div class="diagnostic-list">
+            <div class="diagnostic-row">
+              <span>项目资源: ${rag.projectSources} · 全局资源: ${rag.globalSources}</span>
+            </div>
+            <div class="diagnostic-row">
+              <span>最近一轮 RAG 召回数量: ${rag.recentRecallCount}</span>
+            </div>
+            <div class="diagnostic-row">
+              <span>记忆向量积压排队数: ${Number(diagnostics.memoryEmbeddingBacklog || 0)}</span>
+            </div>
+          </div>
+        </div>
+        <div class="diagnostic-section">
+          <strong><i class="fa-solid fa-microchip"></i> Worker 状态与租约异常</strong>
+          <div class="diagnostic-list">${leaseHtml}</div>
+        </div>
+      </div>
+    `
+  }
   const productionHealth = `
     <div class="observability-grid">
       <div class="observability-card is-${escapeHtml(statusClass(style.status))}">
@@ -1832,6 +1965,10 @@ function renderStoryMemory(model) {
     <div class="memory-section">
       <span class="memory-title"><i class="fa-solid fa-heart-pulse"></i> 生产记忆健康</span>
       ${productionHealth}
+    </div>
+    <div class="memory-section">
+      <span class="memory-title"><i class="fa-solid fa-chart-pie"></i> 生产质量与诊断观察</span>
+      ${diagnosticsHtml}
     </div>
     <div class="memory-section">
       <span class="memory-title"><i class="fa-solid fa-clipboard-check"></i> 最新共识</span>
@@ -3159,10 +3296,13 @@ function parseEnvAssignments(text) {
 }
 
 async function runModalProviderTest() {
+  const apiKey = providerApiKeyInput.value.trim()
   const payload = {
     LLM_BASE_URL: providerBaseUrlInput.value.trim(),
-    LLM_API_KEY: providerApiKeyInput.value.trim(),
     LLM_MODEL_ID: providerModelInput.value.trim(),
+  }
+  if (apiKey && apiKey !== CONFIGURED_SECRET_PLACEHOLDER) {
+    payload.LLM_API_KEY = apiKey
   }
 
   setProviderModalStatus("is-loading", "正在测试当前输入的模型配置...")
@@ -3327,10 +3467,12 @@ async function streamAutopilot(message, options = {}) {
 
   if (message) {
     setComposerStatus("sent", "消息已提交，正在创建无人值守任务。", { busy: true })
-  } else if (options.resume) {
+  } else if (options.resume && !options.silent) {
     setComposerStatus("processing", "正在恢复无人值守任务监听。", { busy: true })
   }
-  dashboardState.autopilotActive = true
+  if (!options.silent) {
+    dashboardState.autopilotActive = true
+  }
   dashboardState.autopilotStreamConnected = true
   if (message) {
     appendPendingUserMessage(message)
@@ -3340,11 +3482,13 @@ async function streamAutopilot(message, options = {}) {
   if (message) {
     appendLiveStatusCard("你的指令已显示在聊天区，正在提交到无人值守后台任务。")
   }
-  addLog(message
-    ? `无人值守自动创作开始：${message}`
-    : options.resume
-      ? "正在手动继续无人值守自动创作。"
-      : "无人值守自动创作继续运行。")
+  if (!options.silent) {
+    addLog(message
+      ? `无人值守自动创作开始：${message}`
+      : options.resume
+        ? "正在手动继续无人值守自动创作。"
+        : "无人值守自动创作继续运行。")
+  }
 
   if (!options.skipStart && (message || !dashboardState.state?.runtime?.autopilot?.running)) {
     let startResponse
@@ -3368,14 +3512,14 @@ async function streamAutopilot(message, options = {}) {
     setComposerStatus("processing", "任务已写入数据库，后台 agent/worker 正在处理。")
     appendLiveStatusCard("指令已写入数据库任务队列；如果已有后台任务，会复用原任务继续处理。")
     renderDashboard()
-  } else if (options.skipStart) {
+  } else if (options.skipStart && !options.silent) {
     setComposerStatus("processing", "已发现数据库中的无人值守任务，正在连接状态流。", { busy: true })
     appendLiveStatusCard("检测到数据库中已有无人值守任务，正在连接统一管理者的状态流。")
   }
 
   let response
   try {
-    if (dashboardState.composerStatus.busy) {
+    if (dashboardState.composerStatus.busy && !options.silent) {
       setComposerStatus("processing", "正在连接无人值守状态流。", { busy: true })
     }
     response = await fetch("/api/autopilot-stream", {
@@ -3487,9 +3631,15 @@ async function requestStopAutopilot() {
 }
 
 function startAutopilotFromButton() {
-  if (dashboardState.autopilotStreamConnected) {
+  if (dashboardState.autopilotActive && dashboardState.autopilotStreamConnected) {
     setComposerStatus("warning", "自动创作状态流已经连接。")
     return
+  }
+  // 如果存在静默后台长连，先关闭它，再启动正式创作
+  if (dashboardState.autopilotAbortController) {
+    dashboardState.autopilotAbortController.abort()
+    dashboardState.autopilotAbortController = null
+    dashboardState.autopilotStreamConnected = false
   }
   setComposerStatus("processing", "正在手动开始自动创作。", { busy: true })
   streamAutopilot("", { resume: true }).catch((error) => {
@@ -3715,8 +3865,13 @@ function maybeResumeAutopilotFromSnapshot() {
   
   // 无论控制状态如何，如果目前没有建立长连接，都在后台静默发起订阅，以自动侦测正在运行或重试的后台任务
   if (!dashboardState.autopilotStreamConnected) {
+    const hasActiveOrPausedJob = Boolean(control.running || control.recoverable)
     addLog("正在后台静默连接状态流...")
-    streamAutopilot("", { skipStart: true, resume: true }).catch((error) => {
+    streamAutopilot("", {
+      skipStart: true,
+      resume: hasActiveOrPausedJob,
+      silent: !hasActiveOrPausedJob,
+    }).catch((error) => {
       console.warn("静默连接状态流失败:", error)
     })
   }

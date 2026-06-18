@@ -14,6 +14,7 @@ interface ProjectEnvValues {
 interface ProjectEnvStatus {
     envPath: string;
     exists: boolean;
+    sourcePaths: string[];
     configured: boolean;
     missing: string[];
     values: ProjectEnvValues;
@@ -31,6 +32,7 @@ declare function getProjectEnvCandidatePaths(rootDir?: string): string[];
 declare function readProjectEnv(rootDir?: string): {
     envPath: string;
     exists: boolean;
+    sourcePaths: string[];
     values: ProjectEnvValues;
 };
 declare function resolveProjectEnvWritePath(rootDir?: string): string;

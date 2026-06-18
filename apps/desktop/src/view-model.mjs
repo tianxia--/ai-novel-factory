@@ -618,12 +618,36 @@ function deriveProductionObservabilityView({ state = null, factorySnapshot = nul
     contextBudget: { ...fallback.contextBudget, ...(provided?.contextBudget || {}) },
     qualitySignals: { ...fallback.qualitySignals, ...(provided?.qualitySignals || {}) },
   }
+
+  const defaultDiagnostics = {
+    blockedChapters: [],
+    latestGateReason: "",
+    contextBudgetOverages: {
+      isOverages: false,
+      estimatedChars: contextPacket.length,
+      budgetLimit: 24_000,
+      overageChars: 0,
+    },
+    ragRecall: {
+      projectSources: 0,
+      globalSources: 0,
+      recentRecallCount: 0,
+    },
+    characterDossierGaps: [],
+    workerLeaseIssues: {
+      hasIssues: false,
+      staleJobs: [],
+    },
+    memoryEmbeddingBacklog: 0,
+  }
+
   return {
     ...merged,
     style: { ...merged.style, label: healthLabel(merged.style.status) },
     characterDossier: { ...merged.characterDossier, label: healthLabel(merged.characterDossier.status) },
     memoryRecall: { ...merged.memoryRecall, label: healthLabel(merged.memoryRecall.status) },
     contextBudget: { ...merged.contextBudget, label: healthLabel(merged.contextBudget.status) },
+    diagnostics: provided?.diagnostics || defaultDiagnostics,
   }
 }
 
@@ -940,9 +964,10 @@ function extractConsensusSummary(consensus = "") {
 
 export function deriveStudioViewModel({ state, transcript = "", discussionEntries = null, consensus = "", contextPacket = "", envStatus = null, providerResult = null, factorySnapshot = null } = {}) {
   const safeState = factorySnapshot?.state || state || null
+  const projectRuntime = factorySnapshot?.projectRuntime || null
   const productionPipeline = deriveProductionPipelineStatus(factorySnapshot)
   const productionSummary = deriveProductionSummary(safeState, factorySnapshot, productionPipeline)
-  const stageKey = productionSummary.stage || safeState?.runtime?.stage || "worldbuilding_dialogue"
+  const stageKey = projectRuntime?.workflowStage || productionSummary.stage || safeState?.runtime?.stage || "worldbuilding_dialogue"
   const currentStage = STAGE_METADATA[stageKey] || {
     label: stageKey,
     description: safeState?.runtime?.statusMessage || "等待初始化。",
@@ -1002,6 +1027,7 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
       comicStatus: safeState?.assets?.comic?.status || "pending",
     },
     workflow,
+    projectRuntime,
     productionPipeline,
     productionSummary,
     provider,

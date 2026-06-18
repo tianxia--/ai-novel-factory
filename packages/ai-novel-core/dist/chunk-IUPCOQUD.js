@@ -6,10 +6,10 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-FOINQGCQ.js";
+} from "./chunk-TI62PTKZ.js";
 import {
   retrieveKnowledge
-} from "./chunk-HL3WMSH6.js";
+} from "./chunk-M45WOEFA.js";
 import {
   FactoryDb,
   createLocalTextEmbedding,
@@ -17,7 +17,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-CRFEPMYG.js";
+} from "./chunk-4PMKQQNV.js";
 import {
   createAgentMessage
 } from "./chunk-GZKJNHMN.js";
@@ -1621,7 +1621,7 @@ function applyChapterFactsToState(state, facts) {
     }
     if (fact.qualityGate) {
       task.qualityGate = {
-        status: fact.qualityGate.status,
+        status: fact.status === "complete" && taskInstructionIsNewer ? "passed" : fact.qualityGate.status,
         score: Number(fact.qualityGate.score || 0),
         attempts: Number(fact.qualityGate.attempts || 0),
         reason: fact.qualityGate.reason || "",

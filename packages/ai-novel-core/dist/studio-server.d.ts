@@ -1,6 +1,8 @@
-import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-D-IFvtpa.js';
-import { P as PublicProjectEnvStatus } from './env-manager-C1eYTzhS.js';
-import { N as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, T as TaskStatus } from './cli-types-B17O02vG.js';
+import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-am8z7hMk.js';
+import { P as ProjectRuntimeState } from './project-runtime-state-CAsBit1w.js';
+import { P as PublicProjectEnvStatus } from './env-manager-BY-bHMi5.js';
+import { N as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, T as TaskStatus } from './cli-types-sWRA2Cw2.js';
+import { AigcDetectionResult, AigcBatchDetectionResult } from './aigc-detector.js';
 import http from 'node:http';
 import { KnowledgeBenchmarkResult } from './knowledge.js';
 import './messages.js';
@@ -55,38 +57,8 @@ declare function writeServerErrorResponse(response: Pick<http.ServerResponse, "h
 declare function handleNovelStudioApi(rootDir: string, method: string, pathname: string, body?: Record<string, unknown>, options?: ApiCallOptions): Promise<{
     status: number;
     payload: {
-        configs: {
-            [x: string]: unknown;
-        }[];
-        error?: undefined;
-        success?: undefined;
-        projects?: undefined;
-        envStatus?: undefined;
-        deletedProject?: undefined;
-        stoppedInProcess?: undefined;
-        ok?: undefined;
-        service?: undefined;
-        checkedAt?: undefined;
-        factory?: undefined;
-        activeProjectId?: undefined;
-        projectId?: undefined;
-        kickoffQueued?: undefined;
-        autopilotJobId?: undefined;
-        autopilotQueued?: undefined;
-        state?: undefined;
-        transcript?: undefined;
-        notModified?: undefined;
-        snapshotVersion?: undefined;
-        chapterNumber?: undefined;
-        path?: undefined;
-        content?: undefined;
-        message?: undefined;
-        result?: undefined;
-    };
-} | {
-    status: number;
-    payload: {
         error: string;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         projects?: undefined;
@@ -110,16 +82,78 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        result: AigcDetectionResult | AigcBatchDetectionResult;
+        error?: undefined;
+        configs?: undefined;
+        success?: undefined;
+        projects?: undefined;
+        envStatus?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        activeProjectId?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        state?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        snapshotVersion?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        message?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        configs: {
+            api_key: string;
+            api_key_configured: boolean;
+        }[];
+        error?: undefined;
         result?: undefined;
+        success?: undefined;
+        projects?: undefined;
+        envStatus?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        activeProjectId?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        state?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        snapshotVersion?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        message?: undefined;
     };
 } | {
     status: number;
     payload: {
         success: boolean;
         configs: {
-            [x: string]: unknown;
+            api_key: string;
+            api_key_configured: boolean;
         }[];
         error?: undefined;
+        result?: undefined;
         projects?: undefined;
         envStatus?: undefined;
         deletedProject?: undefined;
@@ -141,15 +175,15 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
     payload: {
         projects: NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -170,7 +204,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -178,6 +211,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         error: string;
         projects: NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
@@ -199,7 +233,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -232,8 +265,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         stoppedInProcess: boolean;
         projects: NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         ok?: undefined;
         service?: undefined;
@@ -252,7 +286,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -260,8 +293,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         ok: boolean;
         service: string;
         checkedAt: string;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         projects?: undefined;
         envStatus?: undefined;
@@ -281,7 +315,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -290,8 +323,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         service: string;
         factory: FactoryOperationalStatus;
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         projects?: undefined;
         deletedProject?: undefined;
@@ -310,7 +344,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -319,6 +352,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         service: string;
         error: string;
         checkedAt: string;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         projects?: undefined;
@@ -339,7 +373,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -352,8 +385,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued: boolean;
         state: AutonomousNovelState;
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -368,7 +402,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -378,8 +411,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         edges: any[];
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -399,7 +433,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -408,6 +441,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         transcript: string;
         projects: never[] | NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
@@ -428,7 +462,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -436,8 +469,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         notModified: boolean;
         snapshotVersion: string;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         projects?: undefined;
         envStatus?: undefined;
@@ -457,7 +491,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -516,6 +549,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -545,8 +579,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         } | null;
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -563,7 +598,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -607,6 +641,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -636,8 +671,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         } | null;
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -655,7 +691,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -675,8 +710,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         };
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -695,7 +731,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -750,8 +785,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 data: {};
             }[];
         }[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -771,7 +807,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -781,6 +816,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path: string;
         projects: never[] | NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
@@ -800,7 +836,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         snapshotVersion?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -811,8 +846,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path: string;
         content: string;
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -829,7 +865,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         notModified?: undefined;
         snapshotVersion?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -838,6 +873,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path: string;
         projects: never[] | NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
@@ -858,7 +894,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         chapterNumber?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -868,8 +903,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path: string;
         content: string;
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -887,7 +923,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         snapshotVersion?: undefined;
         chapterNumber?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -945,6 +980,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1014,6 +1050,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1099,6 +1136,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1129,8 +1167,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         recoveryLimited: boolean;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1147,7 +1186,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -1191,6 +1229,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1221,8 +1260,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         recoveryLimited: boolean;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1240,7 +1280,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -1299,6 +1338,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1333,8 +1373,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             kind: string;
             artifactPath?: string;
         }[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1351,7 +1392,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -1395,6 +1435,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1429,8 +1470,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             kind: string;
             artifactPath?: string;
         }[];
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1448,7 +1490,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -1458,6 +1499,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         envStatus: PublicProjectEnvStatus;
+        result?: undefined;
         configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
@@ -1477,7 +1519,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         chapterNumber?: undefined;
         path?: undefined;
         content?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -1536,6 +1577,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1592,8 +1634,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             }[];
             searchedAt: string;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1610,7 +1653,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -1654,6 +1696,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1710,8 +1753,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             }[];
             searchedAt: string;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1729,7 +1773,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -1788,6 +1831,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1818,8 +1862,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         knowledgeEvaluation: KnowledgeBenchmarkResult;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1836,7 +1881,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -1880,6 +1924,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -1910,8 +1955,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         knowledgeEvaluation: KnowledgeBenchmarkResult;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1929,7 +1975,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -1938,8 +1983,8 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         projects: never[] | NovelProjectRecord[];
         result: ProviderTestResult;
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -1964,8 +2009,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
     status: number;
     payload: {
         envStatus: PublicProjectEnvStatus;
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         projects?: undefined;
         deletedProject?: undefined;
@@ -1987,7 +2033,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -2046,6 +2091,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2110,8 +2156,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             };
             writebackSkipped: boolean;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2128,7 +2175,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -2172,6 +2218,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2236,8 +2283,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             };
             writebackSkipped: boolean;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2255,7 +2303,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -2314,6 +2361,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2350,8 +2398,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             writebackSkipped: boolean;
             replies: never[];
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2368,7 +2417,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -2412,6 +2460,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2448,8 +2497,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             writebackSkipped: boolean;
             replies: never[];
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2467,7 +2517,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 } | {
     status: number;
@@ -2526,6 +2575,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2594,8 +2644,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             };
             writebackSkipped: boolean;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2612,7 +2663,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     } | {
         envStatus: PublicProjectEnvStatus;
         snapshotVersion: string;
@@ -2656,6 +2706,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 };
             };
         } | null;
+        projectRuntime: ProjectRuntimeState;
         consensus: string;
         contextPacket: string;
         graphIndex: any;
@@ -2724,8 +2775,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             };
             writebackSkipped: boolean;
         };
-        configs?: undefined;
         error?: undefined;
+        result?: undefined;
+        configs?: undefined;
         success?: undefined;
         deletedProject?: undefined;
         stoppedInProcess?: undefined;
@@ -2743,7 +2795,6 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         message?: undefined;
-        result?: undefined;
     };
 }>;
 declare function startNovelStudioServer(options?: ServerOptions): Promise<{

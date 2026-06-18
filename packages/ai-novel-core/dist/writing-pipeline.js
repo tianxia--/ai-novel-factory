@@ -2,6 +2,7 @@ import {
   createContinuityContract,
   createDetailedChapterBlueprint,
   createDraftBodyFromBlueprint,
+  createNaturalnessReport,
   createProductionMasterOutline,
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
@@ -9,21 +10,29 @@ import {
   evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   inferGenreProfile,
+  invalidateAllCaches,
+  invalidateProjectCache,
+  invalidateWritingResourcesCache,
+  loadAndPruneGlobalContext,
   loadProductionWritingResources,
+  memoryCacheTracker,
   parseQualityGate,
+  resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runChapterProductionPipeline,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-FOINQGCQ.js";
-import "./chunk-HL3WMSH6.js";
-import "./chunk-CRFEPMYG.js";
+} from "./chunk-TI62PTKZ.js";
+import "./chunk-VNSQH63L.js";
+import "./chunk-M45WOEFA.js";
+import "./chunk-4PMKQQNV.js";
 import "./chunk-GZKJNHMN.js";
 export {
   createContinuityContract,
   createDetailedChapterBlueprint,
   createDraftBodyFromBlueprint,
+  createNaturalnessReport,
   createProductionMasterOutline,
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
@@ -31,8 +40,14 @@ export {
   evaluateSemanticPreservation,
   evaluateWritingResourceUsage,
   inferGenreProfile,
+  invalidateAllCaches,
+  invalidateProjectCache,
+  invalidateWritingResourcesCache,
+  loadAndPruneGlobalContext,
   loadProductionWritingResources,
+  memoryCacheTracker,
   parseQualityGate,
+  resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runChapterProductionPipeline,
   writeAllDetailedChapterBlueprints,

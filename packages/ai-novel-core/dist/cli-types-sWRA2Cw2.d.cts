@@ -188,4 +188,4 @@ interface NovelProjectRecord {
     };
 }
 
-export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CausalChapterPlan as d, CharacterDossier as e, InitProjectOptions as f, InterruptOptions as g, InterruptionScope as h };
+export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CharacterDossier as d, CausalChapterPlan as e, InitProjectOptions as f, InterruptOptions as g, InterruptionScope as h };

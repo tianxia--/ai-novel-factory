@@ -1871,6 +1871,12 @@ test("production writing pipeline records detailed plans, final chapters, report
     assert.match(snapshot.artifactSummary.latestFinalPath, /chapter-001\.final\.md/)
     const qualityArtifact = snapshot.artifacts.find((artifact) => String(artifact.path).includes("chapter-001-quality.md"))
     assert.equal(JSON.parse(qualityArtifact.metadata_json).qualityGate.status, "passed")
+    const qualityReport = await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "reports", "chapter-001-quality.md"),
+      "utf8",
+    )
+    assert.match(qualityReport, /## AIGC Detection/)
+    assert.match(qualityReport, /Status: skipped/)
     assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "chapter_summary"))
     const recalledDossiers = await withFactoryDb(tempDir, async (db) =>
       db.recallMemory(created.project.id, "character_dossiers profile signal", 4),
@@ -2002,6 +2008,11 @@ test("production writing pipeline emits visible progress events for chapter prod
     assert.equal(new Set(durableProductionMessages.map((message) => message.id)).size, durableProductionMessages.length)
     assert.ok(durableProductionMessages.every((message) => message.metadata?.directorCommandId))
     assert.ok(durableProductionMessages.every((message) => String(message.id || "").includes(message.metadata.directorCommandId)))
+    assert.equal(progressMessagesByStep.get("chapter_started")?.status, "completed")
+    assert.equal(progressMessagesByStep.get("memory_update_started")?.status, "completed")
+    assert.ok(writingMessages.every((message) =>
+      message.status !== "streaming" || /_llm_(started|streaming)$/u.test(String(message.metadata?.step || "")),
+    ))
     assert.ok(writingMessages.some((message) => /chapter_artifacts_saved/.test(String(message.data.content || ""))))
     assert.ok(writingMessages.some((message) =>
       message.metadata?.step === "draft_knowledge_recalled"
@@ -2722,6 +2733,74 @@ test("production writing pipeline blocks low quality chapters after automatic re
   }
 })
 
+test("production writing pipeline blocks chapters that fail AIGC detection after final naturalness", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-aigc-quality-block-"))
+  const { createManagedAutonomousProject, advanceAutonomousProject, withFactoryDb } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+
+  const server = http.createServer(async (request, response) => {
+    response.writeHead(200, { "content-type": "application/json" })
+    response.end(JSON.stringify({ aiProbability: 0.97, label: "AI", confidence: 0.97 }))
+  })
+  await new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", resolve)
+    server.once("error", reject)
+  })
+  const address = server.address()
+  assert.ok(address && typeof address === "object")
+
+  process.env.AI_NOVEL_TEST_MODE = "1"
+  await fs.writeFile(path.join(tempDir, ".env"), [
+    "AIGC_DETECTOR_PROVIDER=generic-json",
+    `AIGC_DETECTOR_URL=http://127.0.0.1:${address.port}/detect`,
+    "AIGC_DETECTOR_THRESHOLD=0.8",
+    "AIGC_DETECTOR_SEGMENT_MAX_CHARS=600",
+    "",
+  ].join("\n"))
+
+  try {
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "A clerk records unnatural edicts in a collapsing dynasty",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+
+    const state = created.state
+    state.runtime.stage = "drafting"
+    await fs.writeFile(path.join(created.project.projectRoot, ".ai-novel", "state.json"), `${JSON.stringify(state, null, 2)}\n`)
+    await withFactoryDb(tempDir, async (db) => db.updateProjectState(created.project.id, state))
+
+    const advanced = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      maxRevisionAttempts: 0,
+    })
+
+    assert.equal(advanced.runtime.stage, "reviewing")
+    assert.equal(advanced.plan.chapterTasks[0].status, "blocked")
+    assert.equal(advanced.plan.chapterTasks[0].qualityGate.status, "blocked")
+    assert.match(advanced.plan.chapterTasks[0].qualityGate.reason, /AIGC 检测阻塞/)
+
+    const report = await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "reports", "chapter-001-quality.md"),
+      "utf8",
+    )
+    assert.match(report, /## AIGC Detection/)
+    assert.match(report, /Status: blocked/)
+    assert.match(report, /High Risk Segment Previews/)
+
+    const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
+    const blockedEvent = snapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_BLOCKED")
+    assert.ok(blockedEvent)
+    assert.equal(JSON.parse(blockedEvent.payload_json).qualityGate.status, "blocked")
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    if (previousTestMode === undefined) delete process.env.AI_NOVEL_TEST_MODE
+    else process.env.AI_NOVEL_TEST_MODE = previousTestMode
+  }
+})
+
 test("production writing pipeline keeps quality LLM roles while defaulting long-form drafting to fast gates", async () => {
   const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
 
@@ -3077,6 +3156,12 @@ test("novel director is the thin decision layer for unattended flow", async () =
     "discuss",
   )
   assert.equal(
+    decideNovelDirectorCommand(state, {
+      userMessage: "继续小说《Ghost Ledger》的章节正文生产流程。当前阶段：drafting。不要重新构思世界观、主角核心或主线方向。从第 2 章「Chapter 2」继续，按既有章节队列、角色档案、记忆和质量门禁推进。优先执行正文写作、质量修订、自然度/AIGC 检测与记忆写回，不要回到首轮设定讨论。",
+    }).type,
+    "advance",
+  )
+  assert.equal(
     decideNovelDirectorCommand(state, { userMessage: "继续", correctionMessage: "上一轮跑偏，请纠偏。" }).type,
     "discuss",
   )
@@ -3329,9 +3414,13 @@ test("writing resource gate blocks idiom stacking and accepts concrete skill-sty
     evaluateWritingResourceUsage,
   } = await loadCore()
 
-  const stacked = evaluateWritingResourceUsage("他深思熟虑，忠心耿耿，义愤填膺，千钧一发。")
-  assert.equal(stacked.status, "quarantined")
+  const stacked = evaluateWritingResourceUsage("他走到门前，听见风声，深思熟虑，忠心耿耿，义愤填膺，千钧一发。")
+  assert.equal(stacked.status, "warning")
   assert.match(stacked.reason, /成语|堆/)
+
+  const extremeStacked = evaluateWritingResourceUsage("他深思熟虑，忠心耿耿，义愤填膺，千钧一发。")
+  assert.equal(extremeStacked.status, "quarantined")
+  assert.match(extremeStacked.reason, /极端反模式|堆叠/)
 
   const concrete = evaluateWritingResourceUsage([
     "李延把账册按在桌上，指腹蹭到纸边的泥。",
@@ -3518,6 +3607,138 @@ test("character profile gate rejects same-voice multi-character scenes", async (
   const differentiatedGate = evaluateCharacterProfilePresence(differentiated, contract)
   assert.equal(differentiatedGate.status, "eligible")
   assert.match(differentiatedGate.reason, /角色差异化通过/)
+})
+
+test("character profile gate requires per-character evidence windows", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["习惯揉搓衣角"],
+        speechMarkers: ["的确如此"],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["不停拨弄算盘"],
+        speechMarkers: ["小人知罪"],
+      }
+    ]
+  }
+
+  const mismatched = [
+    "## Final Body",
+    "李延走了进来，他站在案前一言不发，神色冷漠。",
+    "宋管事感到极其不安，习惯揉搓衣角，低头说：小人知罪。",
+  ].join("\n")
+  
+  const gateResult = evaluateCharacterProfilePresence(mismatched, contract)
+  assert.equal(gateResult.status, "quarantined")
+  assert.match(gateResult.reason, /角色差异化不足|弱角色信号/)
+})
+
+test("character voice gate uses dossier speech markers", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["拨弄算盘"],
+        speechMarkers: ["的确如此"],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["揉搓衣角"],
+        speechMarkers: ["老奴知罪"],
+      }
+    ]
+  }
+
+  const genericVoice = [
+    "## Final Body",
+    "李延拨弄算盘，冷声说道：「的确如此，账目不对。」",
+    "宋管事揉搓衣角，小声回答：「这件事情很复杂，他们都说账没问题。」",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(genericVoice, contract)
+  assert.equal(gateResult.status, "quarantined")
+  assert.match(gateResult.reason, /角色差异化不足|弱角色信号/)
+})
+
+test("naturalness report flags flattened dialogue voices", async () => {
+  const { createNaturalnessReport } = await loadCore()
+  const task = { chapterNumber: 2, title: "Chapter 2", targetWords: 2500 }
+  const state = {
+    project: { title: "Test", idea: "Test idea" },
+    runtime: { stage: "drafting" },
+    plan: { chapterTasks: [task] }
+  }
+  const continuityContract = {
+    lockedProtagonistName: "李延",
+    requiredNames: ["李延", "宋管事"],
+    knownCast: ["李延", "宋管事"],
+    continuityAnchors: [],
+    previousChapterLedger: []
+  }
+  const characterProfileContract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["的确"],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["退到门边"],
+        speechMarkers: ["知罪"],
+      }
+    ]
+  }
+
+  const flattened = [
+    "## Final Body",
+    "李延说事情很复杂，宋管事也说事情很复杂。两个人都很紧张，也都很沉默。",
+    "他们都觉得局势正在变化。",
+  ].join("\n")
+
+  const report = createNaturalnessReport({
+    beforeDraft: flattened,
+    afterDraft: flattened,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract
+  })
+
+  assert.equal(report.status, "blocked")
+  assert.match(report.reason, /同质化|角色差异化不足/)
 })
 
 test("semantic preservation blocks naturalness drift while allowing local prose patches", async () => {
@@ -3730,4 +3951,206 @@ test("production writing pipeline treats transient provider failure as resumable
       process.env.LLM_API_KEY = previousApiKey
     }
   }
+})
+
+test("inferGenreProfile matches genre presets dynamically", async () => {
+  const { inferGenreProfile } = await loadCore()
+  
+  // 1. 测试仙侠/修仙匹配
+  const xianxiaState = {
+    project: {
+      title: "凡人逆天",
+      idea: "一个普通的少年机缘巧合踏上修行之路，历经心魔雷劫最终成仙"
+    }
+  }
+  const xianxiaProfile = inferGenreProfile(xianxiaState)
+  assert.equal(xianxiaProfile.genre, "修仙/仙侠")
+  assert.match(xianxiaProfile.narration, /天道寿元大限|雷劫临头|道心/)
+  assert.equal(xianxiaProfile.naturalnessRules.length, 3)
+  assert.equal(xianxiaProfile.contextPriority.includes("天道规则与修行代价"), true)
+
+  // 2. 测试悬疑匹配
+  const suspenseState = {
+    project: {
+      title: "深渊凝视",
+      idea: "一个侦探在偏远小镇调查连环凶杀案，发现身边的人都在说谎"
+    }
+  }
+  const suspenseProfile = inferGenreProfile(suspenseState)
+  assert.equal(suspenseProfile.genre, "悬疑")
+  assert.match(suspenseProfile.narration, /追猎者的迫近|信息挤压式/)
+  
+  // 3. 测试兜底匹配
+  const defaultState = {
+    project: {
+      title: "日常故事",
+      idea: "随笔记录"
+    }
+  }
+  const defaultProfile = inferGenreProfile(defaultState)
+  assert.equal(defaultProfile.genre, "通用类型小说")
+})
+
+test("loadAndPruneGlobalContext prunes massive context to fit budget limits", async () => {
+  const { loadAndPruneGlobalContext } = await loadCore()
+  
+  const state = {
+    project: {
+      title: "长线史诗",
+      idea: "这是一个宏大的世界观设定",
+      creativeProfile: {
+        genre: "修仙/仙侠",
+        naturalnessTarget: "balanced",
+      }
+    },
+    plan: {
+      chapterTasks: [
+        { chapterNumber: 2, title: "第二章", targetWords: 2000 }
+      ]
+    },
+    runtime: { stage: "drafting" }
+  }
+
+  const task = state.plan.chapterTasks[0]
+  const continuityContract = {
+    lockedProtagonistName: "沈玄",
+    continuityAnchors: Array(100).fill("伏笔：神秘石碑的裂纹在扩大"),
+    hardRules: Array(100).fill("规则：修士在使用灵力时必须忍受神魂灼烧之痛"),
+    previousChapterLedger: Array(100).fill("账本：沈玄在荒原上偶然拾得了一枚缺角的青铜古印，内部刻有暗金色符文")
+  }
+
+  const resources = {
+    writerGuide: "A".repeat(8000),
+    chapterPlannerGuide: "B".repeat(2000),
+  }
+
+  const options = {
+    factoryRootDir: "./",
+    signal: null,
+  }
+
+  const knowledgeContext = {
+    prompt: "C".repeat(5000),
+    rows: []
+  }
+
+  const result = await loadAndPruneGlobalContext({
+    state,
+    task,
+    blueprint: "沈玄进入了遗迹，神魂灼烧，石碑开裂",
+    resources,
+    options,
+    continuityContract,
+    knowledgeContext,
+    additionalFixedLength: 5000,
+  })
+
+  // 验证 RAG 和 Ledger 在超出预算时已被裁剪
+  assert.ok(result.prunedRag.length < 1500)
+})
+
+test("loadProductionWritingResources correctly loads distilled anti-hallucination and conflict strategies", async () => {
+  const { loadProductionWritingResources } = await loadCore()
+  
+  const loaded = await loadProductionWritingResources(process.cwd())
+  
+  assert.ok(loaded.antiHallucinationGuide)
+  assert.ok(loaded.evidenceConflictStrategy)
+  assert.ok(loaded.antiHallucinationGuide.includes("反幻觉"))
+  assert.ok(loaded.evidenceConflictStrategy.includes("多源事实冲突"))
+})
+
+test("project runtime state continues drafting from the next incomplete chapter", async () => {
+  const { deriveProjectRuntimeState } = await loadCore()
+  const state = {
+    runtime: { stage: "drafting", statusMessage: "", autopilot: { running: false } },
+    plan: {
+      totalChapters: 500,
+      pendingChapters: 485,
+      chapterTasks: [],
+      chapterTaskSummary: { total: 500, complete: 15, pending: 485, inProgress: 0, blocked: 0 },
+    },
+  }
+  const factorySnapshot = {
+    state,
+    chapterFacts: Array.from({ length: 15 }, (_, index) => ({
+      chapterNumber: index + 1,
+      status: "complete",
+    })),
+    activeJobs: [],
+    runnableJobs: [],
+  }
+
+  const runtime = deriveProjectRuntimeState({ state, factorySnapshot, now: "2026-06-11T00:00:00.000Z" })
+
+  assert.equal(runtime.workflowStage, "drafting")
+  assert.equal(runtime.productionStatus, "drafting")
+  assert.equal(runtime.executionStatus, "idle")
+  assert.equal(runtime.primaryAction, "continue")
+  assert.equal(runtime.primaryActionLabel, "继续创作")
+  assert.deepEqual(runtime.nextTarget, { type: "chapter", chapterNumber: 16 })
+  assert.equal(runtime.chapterProgress.completedChapters, 15)
+  assert.equal(runtime.chapterProgress.pendingChapters, 485)
+})
+
+test("project runtime state corrects stale complete stage when chapters remain", async () => {
+  const { deriveProjectRuntimeState } = await loadCore()
+  const state = {
+    runtime: { stage: "complete", statusMessage: "" },
+    plan: {
+      totalChapters: 3,
+      pendingChapters: 1,
+      chapterTasks: [
+        { chapterNumber: 1, status: "complete" },
+        { chapterNumber: 2, status: "blocked" },
+        { chapterNumber: 3, status: "pending" },
+      ],
+    },
+  }
+
+  const runtime = deriveProjectRuntimeState({ state, factorySnapshot: { state, activeJobs: [], runnableJobs: [] } })
+
+  assert.equal(runtime.rawWorkflowStage, "complete")
+  assert.equal(runtime.workflowStage, "reviewing")
+  assert.equal(runtime.productionStatus, "blocked")
+  assert.equal(runtime.primaryAction, "retry_blocked")
+  assert.deepEqual(runtime.nextTarget, { type: "chapter", chapterNumber: 2 })
+})
+
+test("project runtime state maps job execution to primary actions", async () => {
+  const { deriveProjectRuntimeState } = await loadCore()
+  const state = {
+    runtime: { stage: "drafting", statusMessage: "", autopilot: { running: false } },
+    plan: {
+      totalChapters: 2,
+      pendingChapters: 1,
+      chapterTasks: [
+        { chapterNumber: 1, status: "complete" },
+        { chapterNumber: 2, status: "pending" },
+      ],
+    },
+  }
+
+  const running = deriveProjectRuntimeState({
+    state,
+    factorySnapshot: {
+      state,
+      activeJobs: [{ id: "job-1", kind: "autopilot", status: "running", lease_owner: "worker-1" }],
+      runnableJobs: [],
+    },
+  })
+  assert.equal(running.executionStatus, "running")
+  assert.equal(running.primaryAction, "pause")
+
+  const paused = deriveProjectRuntimeState({
+    state,
+    factorySnapshot: {
+      state,
+      activeJobs: [{ id: "job-2", kind: "autopilot", status: "paused", lease_owner: null }],
+      runnableJobs: [{ id: "job-2", kind: "autopilot", status: "paused", lease_owner: null }],
+    },
+  })
+  assert.equal(paused.executionStatus, "paused")
+  assert.equal(paused.primaryAction, "resume")
+  assert.equal(paused.primaryActionLabel, "继续创作")
 })

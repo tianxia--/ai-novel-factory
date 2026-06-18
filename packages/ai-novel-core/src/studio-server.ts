@@ -42,7 +42,9 @@ import { evaluateKnowledgeBenchmark, retrieveKnowledge, type KnowledgeBenchmarkC
 import type { KnowledgeRecallRow, KnowledgeScope } from "./factory-db"
 import { formatStatus } from "./orchestrator"
 import { routeUserMessage } from "./router"
-import { loadActiveLlmConfig, getCachedActiveLlmConfig } from "./llm-config"
+import { ensureEnvLlmConfigImported, loadActiveLlmConfig, getCachedActiveLlmConfig } from "./llm-config"
+import { detectAigcSegments, detectAigcText, getAigcDetectorConfig, type AigcDetectionConfig, type AigcTextSegment } from "./aigc-detector"
+import { deriveProjectRuntimeState } from "./project-runtime-state"
 
 function getPublicProjectEnvStatus(rootDir = process.cwd()) {
   const status = getRawPublicEnvStatus(rootDir)
@@ -59,6 +61,18 @@ function getPublicProjectEnvStatus(rootDir = process.cwd()) {
     )
   }
   return status
+}
+
+function redactLlmConfig(config: Record<string, unknown>) {
+  return {
+    ...config,
+    api_key: config.api_key ? "[configured]" : "",
+    api_key_configured: Boolean(config.api_key),
+  }
+}
+
+function redactLlmConfigs(configs: Record<string, unknown>[]) {
+  return configs.map((config) => redactLlmConfig(config))
 }
 
 
@@ -117,8 +131,13 @@ function eventStreamHeaders(response: http.ServerResponse) {
 }
 
 function writeSse(response: http.ServerResponse, eventName: string, data: unknown) {
-  response.write(`event: ${eventName}\n`)
-  response.write(`data: ${JSON.stringify(data)}\n\n`)
+  if (response.writableEnded || response.destroyed || !response.writable) {
+    return
+  }
+  try {
+    response.write(`event: ${eventName}\n`)
+    response.write(`data: ${JSON.stringify(data)}\n\n`)
+  } catch {}
 }
 
 function pct(value: number) {
@@ -267,6 +286,7 @@ function isJsonApiRequest(method: string | undefined, pathname: string) {
       "/api/knowledge/evaluate",
       "/api/llm-configs",
       "/api/llm-configs/activate",
+      "/api/aigc-detect",
     ].includes(pathname)
   }
 
@@ -294,6 +314,56 @@ async function forwardJsonApiRequest(
     embeddedWorker: options.embeddedWorker,
   })
   json(response, result.status, result.payload)
+}
+
+function mergeApiAigcDetectorConfig(base: AigcDetectionConfig, value: unknown): AigcDetectionConfig {
+  if (!value || typeof value !== "object") {
+    return base
+  }
+  const input = value as Record<string, unknown>
+  const provider = input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled"
+    ? input.provider
+    : base.provider
+  return {
+    ...base,
+    provider,
+    url: typeof input.url === "string" ? input.url : base.url,
+    token: typeof input.token === "string" ? input.token : base.token,
+    timeoutMs: typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : base.timeoutMs,
+    threshold: typeof input.threshold === "number" ? input.threshold : base.threshold,
+    requestTextField: typeof input.requestTextField === "string" ? input.requestTextField : base.requestTextField,
+    segment: {
+      ...base.segment,
+      ...(typeof input.segment === "object" && input.segment !== null ? input.segment as AigcDetectionConfig["segment"] : {}),
+    },
+    gradio: {
+      ...base.gradio,
+      ...(typeof input.gradio === "object" && input.gradio !== null ? input.gradio as AigcDetectionConfig["gradio"] : {}),
+    },
+  }
+}
+
+function readApiAigcSegments(value: unknown[]): AigcTextSegment[] {
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") {
+      return []
+    }
+    const segment = item as Record<string, unknown>
+    const text = typeof segment.text === "string" ? segment.text : ""
+    if (!text.trim()) {
+      return []
+    }
+    const startOffset = typeof segment.startOffset === "number" ? segment.startOffset : 0
+    const endOffset = typeof segment.endOffset === "number" ? segment.endOffset : startOffset + text.length
+    return [{
+      id: typeof segment.id === "string" ? segment.id : `segment-${index + 1}`,
+      index: typeof segment.index === "number" ? segment.index : index,
+      text,
+      startOffset,
+      endOffset,
+      metadata: typeof segment.metadata === "object" && segment.metadata !== null ? segment.metadata as Record<string, unknown> : undefined,
+    }]
+  })
 }
 
 function serializeState(state: Awaited<ReturnType<typeof loadAutonomousState>>) {
@@ -873,6 +943,7 @@ function semanticFactorySnapshotForVersion(factorySnapshot: Record<string, unkno
   return {
     project: factorySnapshot.project,
     state: factorySnapshot.state,
+    projectRuntime: factorySnapshot.projectRuntime,
     artifactSummary: factorySnapshot.artifactSummary,
     productionObservability: factorySnapshot.productionObservability,
     chapterFacts: factorySnapshot.chapterFacts,
@@ -1057,6 +1128,58 @@ function deriveProductionObservability(
   }).slice(0, 6)
   const memoryLag = Math.max(0, chapterFacts.filter((fact) => fact.status === "complete").length - chapterMemoryRows.length)
 
+  const now = new Date()
+  const activeJobs = Array.isArray(snapshot.activeJobs) ? snapshot.activeJobs as Array<Record<string, unknown>> : []
+  const staleJobsList = activeJobs.filter((job) => {
+    if (!job.lease_expires_at) return false
+    return new Date(String(job.lease_expires_at)) < now
+  }).map((job) => ({
+    id: String(job.id || ""),
+    kind: String(job.kind || ""),
+    leaseOwner: String(job.lease_owner || ""),
+    leaseExpiresAt: String(job.lease_expires_at || ""),
+  }))
+
+  const blockedChaptersList = (state?.plan?.chapterTasks || [])
+    .filter((task) => task.status === "blocked")
+    .map((task) => {
+      const fact = chapterFacts.find((f) => Number(f.chapterNumber) === task.chapterNumber)
+      return {
+        chapterNumber: task.chapterNumber,
+        title: task.title,
+        recoveryAttempts: task.recoveryAttempts || 0,
+        recoveryBlocked: Boolean(task.recoveryBlocked),
+        blockReason: fact?.qualityGate && typeof fact.qualityGate === "object"
+          ? (fact.qualityGate as Record<string, unknown>).reason || "未知门禁拦截"
+          : "未知门禁拦截",
+      }
+    })
+
+  const knowledgeObj = (snapshot.knowledge || {}) as Record<string, any>
+  const summaryObj = (knowledgeObj.summary || {}) as Record<string, any>
+
+  const diagnostics = {
+    blockedChapters: blockedChaptersList,
+    latestGateReason: blockedChaptersList[0]?.blockReason || "",
+    contextBudgetOverages: {
+      isOverages: estimatedChars > budgetLimit,
+      estimatedChars,
+      budgetLimit,
+      overageChars: Math.max(0, estimatedChars - budgetLimit),
+    },
+    ragRecall: {
+      projectSources: Number(summaryObj.projectSources || 0),
+      globalSources: Number(summaryObj.globalSources || 0),
+      recentRecallCount: recentMemory.filter((row) => String(row.kind || "") === "rag").length,
+    },
+    characterDossierGaps: incompleteDossierFields,
+    workerLeaseIssues: {
+      hasIssues: staleJobsList.length > 0,
+      staleJobs: staleJobsList,
+    },
+    memoryEmbeddingBacklog: recentMemory.filter((row) => String(row.embedding_status || "") === "pending").length,
+  }
+
   return {
     style: {
       status: missingStyle.length === 0 ? "ready" : missingStyle.length <= 1 ? "warning" : "needs_setup",
@@ -1103,6 +1226,7 @@ function deriveProductionObservability(
       styleMetadata: parseMetadataRow(styleArtifact),
       dossierMetadata: parseMetadataRow(dossierArtifact),
     },
+    diagnostics,
   }
 }
 
@@ -1227,11 +1351,16 @@ async function createWorkspacePayload(
     resolvedState,
     contextPacket,
   )
+  const projectRuntime = deriveProjectRuntimeState({
+    state: resolvedState as Record<string, unknown> | null,
+    factorySnapshot: factorySnapshot as Record<string, unknown> | null,
+  })
   const compactFactorySnapshot = factorySnapshot
     ? {
       ...factorySnapshot,
       state: compactState,
       productionObservability,
+      projectRuntime,
     }
     : null
   const responseFactorySnapshot = useCompactPayload
@@ -1240,6 +1369,7 @@ async function createWorkspacePayload(
 
   const payload = {
     state: compactState,
+    projectRuntime,
     consensus,
     contextPacket,
     graphIndex,
@@ -1248,6 +1378,7 @@ async function createWorkspacePayload(
   }
   const snapshotVersion = createSnapshotVersion({
     state: compactState,
+    projectRuntime,
     consensus,
     contextPacket,
     graphViolations,
@@ -1344,6 +1475,20 @@ async function ensureDurableAutopilotJob(
 }
 
 function createAutopilotKickoffMessage(state: Awaited<ReturnType<typeof loadAutonomousState>>) {
+  const chapterTasks = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : []
+  const nextTask = chapterTasks.find((task) => task.status !== "complete")
+  if (state.runtime?.stage === "drafting" || state.runtime?.stage === "reviewing" || state.runtime?.stage === "chapter_task_generation") {
+    return [
+      `继续小说《${state.project.title || state.project.idea}》的章节正文生产流程。`,
+      `当前阶段：${state.runtime.stage}。不要重新构思世界观、主角核心或主线方向。`,
+      nextTask
+        ? `从第 ${nextTask.chapterNumber} 章「${nextTask.title || `Chapter ${nextTask.chapterNumber}`}」继续，按既有章节队列、角色档案、记忆和质量门禁推进。`
+        : "检查章节队列，继续处理下一个 pending、blocked 或可恢复的章节任务。",
+      `目标总章数：${state.plan.totalChapters}，单章字数：${state.plan.chapterWordTarget}。`,
+      "优先执行正文写作、质量修订、自然度/AIGC 检测与记忆写回，不要回到首轮设定讨论。",
+    ].join("")
+  }
+
   return [
     `请基于小说想法“${state.project.idea}”接管创作流程。`,
     "先完成世界观基线、主角核心、主线方向的首轮统一讨论。",
@@ -1445,9 +1590,13 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
 
   const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null)
   if (!state) {
+    const projectRuntime = deriveProjectRuntimeState({
+      state: null,
+      factorySnapshot: dbSnapshot,
+    })
     return {
       source: "empty",
-      stage: "worldbuilding_dialogue",
+      stage: projectRuntime.workflowStage === "empty" ? "worldbuilding_dialogue" : projectRuntime.workflowStage,
       progressPercent: 0,
       totalChapters: project.totalChapters || 0,
       completedChapters: 0,
@@ -1459,6 +1608,7 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
       latestEventType: "",
       latestEventAt: "",
       updatedAt: new Date().toISOString(),
+      projectRuntime,
     }
   }
 
@@ -1503,21 +1653,27 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
   const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0
   
   const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null
+  const projectRuntime = deriveProjectRuntimeState({
+    state,
+    factorySnapshot: dbSnapshot,
+  })
+  const progress = projectRuntime.chapterProgress
 
   return {
     source: dbSnapshot ? "db" : "state",
-    stage: state.runtime?.stage || "worldbuilding_dialogue",
-    progressPercent,
-    totalChapters,
-    completedChapters,
-    pendingChapters,
-    inProgressChapters,
-    blockedChapters,
+    stage: projectRuntime.workflowStage,
+    progressPercent: progress.progressPercent || progressPercent,
+    totalChapters: progress.totalChapters || totalChapters,
+    completedChapters: progress.completedChapters,
+    pendingChapters: progress.pendingChapters,
+    inProgressChapters: progress.inProgressChapters,
+    blockedChapters: progress.blockedChapters,
     activeJobs,
     runnableJobs,
     latestEventType: latestEvent?.type || "",
     latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
     updatedAt: state.runtime?.lastUpdatedAt || new Date().toISOString(),
+    projectRuntime,
   }
 }
 
@@ -1595,14 +1751,37 @@ export async function handleNovelStudioApi(
   const requestUrl = new URL(pathname, "http://local")
   const requestPathname = requestUrl.pathname
 
+  if (method === "POST" && requestPathname === "/api/aigc-detect") {
+    const text = typeof body.text === "string" ? body.text : ""
+    const mode = body.mode === "text" ? "text" : "segments"
+    const detectorConfig = mergeApiAigcDetectorConfig(getAigcDetectorConfig(rootDir), body.config)
+    const segments = Array.isArray(body.segments) ? readApiAigcSegments(body.segments) : null
+
+    if (!text.trim() && (!segments || segments.length === 0)) {
+      return { status: 400, payload: { error: "text_required" } }
+    }
+
+    const result = mode === "text" && !segments
+      ? await detectAigcText(text, detectorConfig)
+      : await detectAigcSegments(segments ?? text, detectorConfig)
+
+    return {
+      status: 200,
+      payload: {
+        result,
+      },
+    }
+  }
+
   if (method === "GET" && requestPathname === "/api/llm-configs") {
+    await ensureEnvLlmConfigImported(rootDir)
     const configs = await withFactoryDb(rootDir, async (db) => {
       return db.listLlmConfigs()
     })
     return {
       status: 200,
       payload: {
-        configs,
+        configs: redactLlmConfigs(configs),
       },
     }
   }
@@ -1614,17 +1793,30 @@ export async function handleNovelStudioApi(
     const modelName = String(body.modelName || "").trim()
     const temperature = typeof body.temperature === "number" ? body.temperature : 0.1
     const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 120000
+    const configId = typeof body.id === "string" ? body.id.trim() : null
+    const isConfiguredPlaceholder = apiKey === "[configured]"
 
-    if (!name || !baseUrl || !apiKey || !modelName) {
+    if (!name || !baseUrl || (!apiKey && !configId) || !modelName) {
       return { status: 400, payload: { error: "missing_fields" } }
     }
 
-    const configId = typeof body.id === "string" ? body.id.trim() : null
     await withFactoryDb(rootDir, async (db) => {
       if (configId) {
-        db.updateLlmConfig(configId, { name, baseUrl, apiKey, modelName, temperature, timeoutMs })
+        const currentConfig = db.listLlmConfigs().find((config) => config.id === configId)
+        if (!currentConfig) {
+          throw new Error("llm_config_not_found")
+        }
+        const nextApiKey = isConfiguredPlaceholder && typeof currentConfig?.api_key === "string"
+          ? currentConfig.api_key
+          : apiKey
+        if (!nextApiKey) {
+          throw new Error("missing_api_key")
+        }
+        db.updateLlmConfig(configId, { name, baseUrl, apiKey: nextApiKey, modelName, temperature, timeoutMs })
       } else {
-        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs })
+        const existingConfigs = db.listLlmConfigs()
+        const hasActiveConfig = existingConfigs.some((config) => Number(config.is_active) === 1)
+        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs, isActive: !hasActiveConfig })
       }
     })
 
@@ -1638,7 +1830,7 @@ export async function handleNovelStudioApi(
       status: 200,
       payload: {
         success: true,
-        configs,
+        configs: redactLlmConfigs(configs),
       },
     }
   }
@@ -1663,7 +1855,7 @@ export async function handleNovelStudioApi(
       status: 200,
       payload: {
         success: true,
-        configs,
+        configs: redactLlmConfigs(configs),
       },
     }
   }
@@ -1688,7 +1880,7 @@ export async function handleNovelStudioApi(
       status: 200,
       payload: {
         success: true,
-        configs,
+        configs: redactLlmConfigs(configs),
       },
     }
   }
@@ -2977,10 +3169,12 @@ export async function startNovelStudioServer(options: ServerOptions = {}) {
         const job = embeddedWorker ? getAutopilotJob(context.projectRoot) : null
         const listener = job
           ? (event: AutopilotEvent) => {
-              if (response.writableEnded) return
+              if (response.writableEnded || response.destroyed || !response.writable) return
               writeSse(response, event.type, event.payload)
               if (event.type === "complete" || event.type === "error") {
-                response.end()
+                try {
+                  response.end()
+                } catch {}
               }
             }
           : null
@@ -2989,7 +3183,7 @@ export async function startNovelStudioServer(options: ServerOptions = {}) {
         }
         let lastStreamSnapshotVersion = ""
         const writeSnapshot = async (options: { force?: boolean } = {}) => {
-          if (response.writableEnded) return
+          if (response.writableEnded || response.destroyed || !response.writable) return
           const state = await tryLoadState(context.projectRoot as string)
           const snapshotPayload = {
             activeProjectId: context.projectId,
@@ -2999,7 +3193,11 @@ export async function startNovelStudioServer(options: ServerOptions = {}) {
           }
           const snapshotVersion = typeof snapshotPayload.snapshotVersion === "string" ? snapshotPayload.snapshotVersion : ""
           if (!options.force && snapshotVersion && snapshotVersion === lastStreamSnapshotVersion) {
-            response.write(`: snapshot unchanged ${new Date().toISOString()}\n\n`)
+            if (!response.writableEnded && !response.destroyed && response.writable) {
+              try {
+                response.write(`: snapshot unchanged ${new Date().toISOString()}\n\n`)
+              } catch {}
+            }
             return
           }
           lastStreamSnapshotVersion = snapshotVersion
@@ -3007,7 +3205,7 @@ export async function startNovelStudioServer(options: ServerOptions = {}) {
         }
         const snapshotTimer = setInterval(() => {
           void writeSnapshot().catch((error) => {
-            if (!response.writableEnded) {
+            if (!response.writableEnded && !response.destroyed && response.writable) {
               writeSse(response, "error", { error: error instanceof Error ? error.message : String(error) })
             }
           })

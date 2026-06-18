@@ -82,6 +82,62 @@ export function setCachedActiveLlmConfig(config: ActiveLlmConfig | null): void {
   cachedActiveLlmConfig = config
 }
 
+function getEnvApiKey(values: ReturnType<typeof getProjectEnvStatus>["values"]) {
+  return (
+    process.env.LLM_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    values.LLM_API_KEY ||
+    values.OPENAI_API_KEY ||
+    ""
+  )
+}
+
+function buildEnvBackedLlmConfig(rootDir = process.cwd()) {
+  const envStatus = getProjectEnvStatus(rootDir)
+  const apiKey = getEnvApiKey(envStatus.values)
+
+  if (!envStatus.resolved.baseUrl || !envStatus.resolved.modelName || !apiKey) {
+    return null
+  }
+
+  return {
+    name: `Project .env (${envStatus.resolved.modelName})`,
+    baseUrl: envStatus.resolved.baseUrl,
+    apiKey,
+    modelName: envStatus.resolved.modelName,
+    temperature: readNumber(process.env.LLM_TEMPERATURE || envStatus.values.LLM_TEMPERATURE, 0.1),
+    timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || envStatus.values.LLM_TIMEOUT_MS, 120000),
+  }
+}
+
+export async function ensureEnvLlmConfigImported(rootDir = process.cwd()): Promise<void> {
+  const envConfig = buildEnvBackedLlmConfig(rootDir)
+  if (!envConfig) {
+    return
+  }
+
+  const dbRootDir = resolveFactoryRootDir(rootDir)
+  await withFactoryDb(dbRootDir, async (db) => {
+    const configs = db.listLlmConfigs()
+    const hasActiveConfig = configs.some((config) => Number(config.is_active) === 1)
+
+    if (configs.length === 0) {
+      db.addLlmConfig({
+        ...envConfig,
+        isActive: true,
+      })
+      return
+    }
+
+    if (!hasActiveConfig) {
+      const firstConfig = configs[0]
+      if (typeof firstConfig?.id === "string") {
+        db.activateLlmConfig(firstConfig.id)
+      }
+    }
+  })
+}
+
 function isWorkspaceRoot(dir: string): boolean {
   try {
     const pkgPath = path.join(dir, "package.json")
@@ -124,6 +180,7 @@ export function resolveFactoryRootDir(dir = process.cwd()): string {
 export async function loadActiveLlmConfig(rootDir = process.cwd()): Promise<ActiveLlmConfig | null> {
   const dbRootDir = resolveFactoryRootDir(rootDir)
   try {
+    await ensureEnvLlmConfigImported(rootDir)
     const activeDbConfig = await withFactoryDb(dbRootDir, async (db) => {
       return db.getActiveLlmConfig()
     })
@@ -153,4 +210,3 @@ export async function loadActiveLlmConfig(rootDir = process.cwd()): Promise<Acti
     return null
   }
 }
-

@@ -23,6 +23,7 @@ interface AgentReplyOptions {
   currentStage?: string
   stageInstruction?: string
   envRootDir?: string
+  temperature?: number
 }
 
 interface ProviderOverrideOptions {
@@ -282,6 +283,7 @@ async function streamOpenAiCompatibleResponse(
   const totalStreamTime = Date.now() - streamStartTime
   const totalRequestTime = Date.now() - baseTime
   console.log(`[LLM STREAM END] 数据流读取完成。流传输耗时: ${totalStreamTime}ms，从发起请求到完成总耗时: ${totalRequestTime}ms，接收字数: ${content.length}`)
+  console.log(`\n========== [LLM RESPONSE START] ==========\n${content.trim()}\n========== [LLM RESPONSE END] ==========\n`)
 
   return content.trim()
 }
@@ -355,8 +357,13 @@ export async function generateAgentReply(options: AgentReplyOptions) {
   }
 
 
+  const isDrafting = options.currentStage === "drafting"
+  const protocol = isDrafting
+    ? "正文创作协议：你负责执行小说章节的初稿创作、质量返工或自然度润色，必须输出具体的文学正文，且严禁输出讨论过程或无关废话。"
+    : AUTONOMOUS_DISCUSSION_PROTOCOL
+
   const system = [
-    AUTONOMOUS_DISCUSSION_PROTOCOL,
+    protocol,
     "",
     `输出语言：${options.preferredLanguage === "en-US" ? "English" : "简体中文"}`,
     `当前工作流阶段：${options.currentStage ?? "worldbuilding_dialogue"}`,
@@ -374,23 +381,28 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       : "",
     "Response contract:",
     "- 必须使用简体中文输出。",
-    "- 给出实质性讨论内容，不能只说一句拒绝。",
-    "- 可以使用简短 markdown 小节与列表。",
+    isDrafting ? "- 必须按照章节格式要求输出章节正文内容。" : "- 给出实质性讨论内容，不能只说一句拒绝。",
+    isDrafting ? "- 必须遵循小说人物档案，保证人名与情节的连续性。" : "- 可以使用简短 markdown 小节与列表。",
     "- 必须停留在当前 target 内。",
-    "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
-    "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
-    "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
-    options.priorTranscript?.trim() ? `Prior roundtable transcript:\n${options.priorTranscript.trim()}` : "",
-  ].join("\n")
+    isDrafting ? "" : "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
+    isDrafting ? "" : "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
+    isDrafting ? "" : "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
+    (!isDrafting && options.priorTranscript?.trim()) ? `Prior roundtable transcript:\n${options.priorTranscript.trim()}` : "",
+  ].filter(Boolean).join("\n")
 
   const startTime = Date.now()
+  const selectedTemperature = options.temperature !== undefined ? options.temperature : config.provider.temperature
   console.log(`[LLM REQUEST SEND] 准备向 API 发送 chat/completions 请求...`)
   console.log(`- BaseUrl: ${config.provider.baseUrl}`)
   console.log(`- Model: ${config.provider.modelName}`)
-  console.log(`- Temperature: ${config.provider.temperature}`)
+  console.log(`- Temperature: ${selectedTemperature}`)
   console.log(`- Messages Count: ${options.message ? 2 : 1}`)
   console.log(`- System Prompt Length: ${system.length} chars`)
   console.log(`- User Message Length: ${(options.message || "").length} chars`)
+  console.log(`\n========== [LLM SYSTEM PROMPT START] ==========\n${system}\n========== [LLM SYSTEM PROMPT END] ==========\n`)
+  if (options.message) {
+    console.log(`\n========== [LLM USER MESSAGE START] ==========\n${options.message}\n========== [LLM USER MESSAGE END] ==========\n`)
+  }
 
   const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
     const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -402,7 +414,7 @@ export async function generateAgentReply(options: AgentReplyOptions) {
       signal,
       body: JSON.stringify({
         model: config.provider.modelName,
-        temperature: config.provider.temperature,
+        temperature: selectedTemperature,
         stream: Boolean(options.onDelta),
         messages: [
           { role: "system", content: system },
@@ -437,6 +449,7 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     const totalTime = Date.now() - startTime
     const resContent = payload.choices?.[0]?.message?.content?.trim() || ""
     console.log(`[LLM REQUEST END] 非流式请求完成。总耗时: ${totalTime}ms，返回内容长度: ${resContent.length}`)
+    console.log(`\n========== [LLM RESPONSE START] ==========\n${resContent}\n========== [LLM RESPONSE END] ==========\n`)
 
     return resContent
   }, options.signal)

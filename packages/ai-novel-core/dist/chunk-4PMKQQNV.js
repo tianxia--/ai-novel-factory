@@ -263,6 +263,7 @@ function evaluateChapterConsistency(input) {
 }
 
 // src/factory-db.ts
+var chapterConsistencyCache = /* @__PURE__ */ new Map();
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";
 var MIN_CHAPTER_PASS_RATIO = 0.8;
@@ -2275,6 +2276,28 @@ var FactoryDb = class _FactoryDb {
         fact.latestTaskStatusAt = createdAt;
       }
     }
+    const reconciledRows = this.db.prepare(`
+      SELECT payload_json, created_at
+      FROM events
+      WHERE project_id = ?
+        AND type = 'CHAPTER_STATUS_RECONCILED'
+      ORDER BY created_at ASC
+    `).all(projectId);
+    for (const row of reconciledRows) {
+      const payload = readJson(row.payload_json, {});
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : [];
+      for (const ch of chapters) {
+        const chapterNumber = Number(ch.chapterNumber);
+        if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
+        if (isResetHistory(chapterNumber, row.created_at)) continue;
+        const fact = ensureFact(chapterNumber);
+        const status = normalizeTaskStatus(ch.to);
+        if (status) {
+          fact.latestTaskStatus = status;
+          fact.latestTaskStatusAt = String(row.created_at || "");
+        }
+      }
+    }
     for (const [chapterNumber, resetAt] of resetAtByChapter) {
       const fact = ensureFact(chapterNumber);
       const existingTaskAt = timestampMs(fact.latestTaskStatusAt);
@@ -2288,29 +2311,57 @@ var FactoryDb = class _FactoryDb {
     let previousProtagonistName = inferLockedProtagonistName(protagonistProfile);
     for (const fact of [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)) {
       if (fact.finalPath) {
-        const finalText = readTextFileSync(path.isAbsolute(fact.finalPath) ? fact.finalPath : path.join(projectRoot, fact.finalPath));
-        if (finalText) {
-          const consistency = evaluateChapterConsistency({
-            chapterNumber: fact.chapterNumber,
-            text: finalText,
-            previousProtagonistName,
-            protagonistProfile
-          });
-          fact.protagonistName = consistency.protagonistName;
-          fact.consistency = {
-            status: consistency.status,
-            reason: consistency.reason,
-            detectedNames: consistency.detectedNames
-          };
-          if (consistency.status === "eligible" && consistency.protagonistName && !previousProtagonistName) {
-            previousProtagonistName = consistency.protagonistName;
+        const absolutePath = path.isAbsolute(fact.finalPath) ? fact.finalPath : path.join(projectRoot, fact.finalPath);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fsSync.statSync(absolutePath).mtimeMs;
+        } catch {
+        }
+        const cacheKey = `${absolutePath}:${mtimeMs}:${previousProtagonistName || ""}:${protagonistProfile || ""}`;
+        const cached = chapterConsistencyCache.get(cacheKey);
+        if (cached && cached.mtimeMs === mtimeMs) {
+          fact.protagonistName = cached.protagonistName;
+          fact.consistency = cached.consistency;
+          if (cached.consistency.status === "eligible" && cached.protagonistName && !previousProtagonistName) {
+            previousProtagonistName = cached.protagonistName;
           }
-          if (consistency.status === "quarantined" && fact.contentQuality) {
+          if (cached.consistency.status === "quarantined" && fact.contentQuality) {
             fact.contentQuality = {
               ...fact.contentQuality,
               status: "quarantined",
-              reason: consistency.reason
+              reason: cached.consistency.reason
             };
+          }
+        } else {
+          const finalText = readTextFileSync(absolutePath);
+          if (finalText) {
+            const consistency = evaluateChapterConsistency({
+              chapterNumber: fact.chapterNumber,
+              text: finalText,
+              previousProtagonistName,
+              protagonistProfile
+            });
+            fact.protagonistName = consistency.protagonistName;
+            fact.consistency = {
+              status: consistency.status,
+              reason: consistency.reason,
+              detectedNames: consistency.detectedNames
+            };
+            if (consistency.status === "eligible" && consistency.protagonistName && !previousProtagonistName) {
+              previousProtagonistName = consistency.protagonistName;
+            }
+            if (consistency.status === "quarantined" && fact.contentQuality) {
+              fact.contentQuality = {
+                ...fact.contentQuality,
+                status: "quarantined",
+                reason: consistency.reason
+              };
+            }
+            chapterConsistencyCache.set(cacheKey, {
+              mtimeMs,
+              protagonistName: fact.protagonistName,
+              consistency: fact.consistency
+            });
           }
         }
       }
@@ -2333,7 +2384,7 @@ var FactoryDb = class _FactoryDb {
         fact.status = "complete";
       } else if (failedEventIsNewer || fact.qualityGate?.status === "blocked" && !taskInstructionIsNewer) {
         fact.status = "blocked";
-      } else if (taskInstructionIsNewer && (fact.latestTaskStatus === "pending" || fact.latestTaskStatus === "in_progress")) {
+      } else if (taskInstructionIsNewer && (fact.latestTaskStatus === "pending" || fact.latestTaskStatus === "in_progress" || fact.latestTaskStatus === "complete")) {
         fact.status = fact.latestTaskStatus;
       } else if (fact.qualityGate?.status === "passed" && fact.finalPath) {
         fact.status = "pending";
@@ -2572,10 +2623,17 @@ var FactoryDb = class _FactoryDb {
     const now = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const active = config.isActive ? 1 : 0;
+    if (active) {
+      this.db.prepare(`
+        UPDATE llm_configs SET is_active = 0
+      `).run();
+    }
     this.db.prepare(`
       INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, now);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, active, now, now);
+    return id;
   }
   updateLlmConfig(id, config) {
     const now = nowIso();

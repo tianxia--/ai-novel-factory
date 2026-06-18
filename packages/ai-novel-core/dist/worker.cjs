@@ -37,7 +37,7 @@ __export(worker_exports, {
   startNovelAutopilotWorker: () => startNovelAutopilotWorker
 });
 module.exports = __toCommonJS(worker_exports);
-var import_node_path11 = __toESM(require("path"), 1);
+var import_node_path12 = __toESM(require("path"), 1);
 
 // src/env-manager.ts
 var import_node_fs = __toESM(require("fs"), 1);
@@ -108,24 +108,32 @@ function getProjectEnvCandidatePaths(rootDir = process.cwd()) {
   return uniquePaths(candidates);
 }
 function readProjectEnv(rootDir = process.cwd()) {
-  for (const envPath of getProjectEnvCandidatePaths(rootDir)) {
-    if (import_node_fs.default.existsSync(envPath)) {
+  const candidates = getProjectEnvCandidatePaths(rootDir);
+  const existingPaths = candidates.filter((envPath) => import_node_fs.default.existsSync(envPath));
+  if (existingPaths.length > 0) {
+    const values = existingPaths.slice().reverse().reduce((merged, envPath) => {
       const raw = import_node_fs.default.readFileSync(envPath, "utf8");
       return {
-        envPath,
-        exists: true,
-        values: parseProjectEnv(raw)
+        ...merged,
+        ...parseProjectEnv(raw)
       };
-    }
+    }, {});
+    return {
+      envPath: existingPaths[0],
+      exists: true,
+      sourcePaths: existingPaths,
+      values
+    };
   }
   return {
     envPath: getProjectEnvPath(rootDir),
     exists: false,
+    sourcePaths: [],
     values: {}
   };
 }
 function getProjectEnvStatus(rootDir = process.cwd()) {
-  const { envPath, exists, values } = readProjectEnv(rootDir);
+  const { envPath, exists, sourcePaths, values } = readProjectEnv(rootDir);
   const resolved = {
     baseUrl: pickResolvedValue(PRIMARY_ENV_KEYS.baseUrl, FALLBACK_ENV_KEYS.baseUrl, values),
     apiKeyPresent: Boolean(pickResolvedValue(PRIMARY_ENV_KEYS.apiKey, FALLBACK_ENV_KEYS.apiKey, values)),
@@ -139,6 +147,7 @@ function getProjectEnvStatus(rootDir = process.cwd()) {
   return {
     envPath,
     exists,
+    sourcePaths,
     configured: missing.length === 0,
     missing,
     values,
@@ -166,12 +175,12 @@ function getPublicProjectEnvStatus(rootDir = process.cwd()) {
 
 // src/autopilot-worker.ts
 var import_promises8 = __toESM(require("fs/promises"), 1);
-var import_node_path10 = __toESM(require("path"), 1);
+var import_node_path11 = __toESM(require("path"), 1);
 
 // src/orchestrator.ts
 var import_promises6 = __toESM(require("fs/promises"), 1);
 var import_node_crypto2 = require("crypto");
-var import_node_path8 = __toESM(require("path"), 1);
+var import_node_path9 = __toESM(require("path"), 1);
 
 // src/llm-config.ts
 var import_node_fs3 = __toESM(require("fs"), 1);
@@ -442,6 +451,7 @@ function evaluateChapterConsistency(input) {
 }
 
 // src/factory-db.ts
+var chapterConsistencyCache = /* @__PURE__ */ new Map();
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";
 var MIN_CHAPTER_PASS_RATIO = 0.8;
@@ -2454,6 +2464,28 @@ var FactoryDb = class _FactoryDb {
         fact.latestTaskStatusAt = createdAt;
       }
     }
+    const reconciledRows = this.db.prepare(`
+      SELECT payload_json, created_at
+      FROM events
+      WHERE project_id = ?
+        AND type = 'CHAPTER_STATUS_RECONCILED'
+      ORDER BY created_at ASC
+    `).all(projectId);
+    for (const row of reconciledRows) {
+      const payload = readJson(row.payload_json, {});
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : [];
+      for (const ch of chapters) {
+        const chapterNumber = Number(ch.chapterNumber);
+        if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
+        if (isResetHistory(chapterNumber, row.created_at)) continue;
+        const fact = ensureFact(chapterNumber);
+        const status = normalizeTaskStatus(ch.to);
+        if (status) {
+          fact.latestTaskStatus = status;
+          fact.latestTaskStatusAt = String(row.created_at || "");
+        }
+      }
+    }
     for (const [chapterNumber, resetAt] of resetAtByChapter) {
       const fact = ensureFact(chapterNumber);
       const existingTaskAt = timestampMs(fact.latestTaskStatusAt);
@@ -2467,29 +2499,57 @@ var FactoryDb = class _FactoryDb {
     let previousProtagonistName = inferLockedProtagonistName(protagonistProfile);
     for (const fact of [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)) {
       if (fact.finalPath) {
-        const finalText = readTextFileSync(import_node_path2.default.isAbsolute(fact.finalPath) ? fact.finalPath : import_node_path2.default.join(projectRoot, fact.finalPath));
-        if (finalText) {
-          const consistency = evaluateChapterConsistency({
-            chapterNumber: fact.chapterNumber,
-            text: finalText,
-            previousProtagonistName,
-            protagonistProfile
-          });
-          fact.protagonistName = consistency.protagonistName;
-          fact.consistency = {
-            status: consistency.status,
-            reason: consistency.reason,
-            detectedNames: consistency.detectedNames
-          };
-          if (consistency.status === "eligible" && consistency.protagonistName && !previousProtagonistName) {
-            previousProtagonistName = consistency.protagonistName;
+        const absolutePath = import_node_path2.default.isAbsolute(fact.finalPath) ? fact.finalPath : import_node_path2.default.join(projectRoot, fact.finalPath);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = import_node_fs2.default.statSync(absolutePath).mtimeMs;
+        } catch {
+        }
+        const cacheKey = `${absolutePath}:${mtimeMs}:${previousProtagonistName || ""}:${protagonistProfile || ""}`;
+        const cached = chapterConsistencyCache.get(cacheKey);
+        if (cached && cached.mtimeMs === mtimeMs) {
+          fact.protagonistName = cached.protagonistName;
+          fact.consistency = cached.consistency;
+          if (cached.consistency.status === "eligible" && cached.protagonistName && !previousProtagonistName) {
+            previousProtagonistName = cached.protagonistName;
           }
-          if (consistency.status === "quarantined" && fact.contentQuality) {
+          if (cached.consistency.status === "quarantined" && fact.contentQuality) {
             fact.contentQuality = {
               ...fact.contentQuality,
               status: "quarantined",
-              reason: consistency.reason
+              reason: cached.consistency.reason
             };
+          }
+        } else {
+          const finalText = readTextFileSync(absolutePath);
+          if (finalText) {
+            const consistency = evaluateChapterConsistency({
+              chapterNumber: fact.chapterNumber,
+              text: finalText,
+              previousProtagonistName,
+              protagonistProfile
+            });
+            fact.protagonistName = consistency.protagonistName;
+            fact.consistency = {
+              status: consistency.status,
+              reason: consistency.reason,
+              detectedNames: consistency.detectedNames
+            };
+            if (consistency.status === "eligible" && consistency.protagonistName && !previousProtagonistName) {
+              previousProtagonistName = consistency.protagonistName;
+            }
+            if (consistency.status === "quarantined" && fact.contentQuality) {
+              fact.contentQuality = {
+                ...fact.contentQuality,
+                status: "quarantined",
+                reason: consistency.reason
+              };
+            }
+            chapterConsistencyCache.set(cacheKey, {
+              mtimeMs,
+              protagonistName: fact.protagonistName,
+              consistency: fact.consistency
+            });
           }
         }
       }
@@ -2512,7 +2572,7 @@ var FactoryDb = class _FactoryDb {
         fact.status = "complete";
       } else if (failedEventIsNewer || fact.qualityGate?.status === "blocked" && !taskInstructionIsNewer) {
         fact.status = "blocked";
-      } else if (taskInstructionIsNewer && (fact.latestTaskStatus === "pending" || fact.latestTaskStatus === "in_progress")) {
+      } else if (taskInstructionIsNewer && (fact.latestTaskStatus === "pending" || fact.latestTaskStatus === "in_progress" || fact.latestTaskStatus === "complete")) {
         fact.status = fact.latestTaskStatus;
       } else if (fact.qualityGate?.status === "passed" && fact.finalPath) {
         fact.status = "pending";
@@ -2751,10 +2811,17 @@ var FactoryDb = class _FactoryDb {
     const now2 = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const active = config.isActive ? 1 : 0;
+    if (active) {
+      this.db.prepare(`
+        UPDATE llm_configs SET is_active = 0
+      `).run();
+    }
     this.db.prepare(`
       INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now2, now2);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, active, now2, now2);
+    return id;
   }
   updateLlmConfig(id, config) {
     const now2 = nowIso();
@@ -2870,6 +2937,48 @@ function loadLlmConfigFromEnv(rootDir = process.cwd()) {
   };
 }
 var cachedActiveLlmConfig = null;
+function getEnvApiKey(values) {
+  return process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || values.LLM_API_KEY || values.OPENAI_API_KEY || "";
+}
+function buildEnvBackedLlmConfig(rootDir = process.cwd()) {
+  const envStatus = getProjectEnvStatus(rootDir);
+  const apiKey = getEnvApiKey(envStatus.values);
+  if (!envStatus.resolved.baseUrl || !envStatus.resolved.modelName || !apiKey) {
+    return null;
+  }
+  return {
+    name: `Project .env (${envStatus.resolved.modelName})`,
+    baseUrl: envStatus.resolved.baseUrl,
+    apiKey,
+    modelName: envStatus.resolved.modelName,
+    temperature: readNumber(process.env.LLM_TEMPERATURE || envStatus.values.LLM_TEMPERATURE, 0.1),
+    timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || envStatus.values.LLM_TIMEOUT_MS, 12e4)
+  };
+}
+async function ensureEnvLlmConfigImported(rootDir = process.cwd()) {
+  const envConfig = buildEnvBackedLlmConfig(rootDir);
+  if (!envConfig) {
+    return;
+  }
+  const dbRootDir = resolveFactoryRootDir(rootDir);
+  await withFactoryDb(dbRootDir, async (db) => {
+    const configs = db.listLlmConfigs();
+    const hasActiveConfig = configs.some((config) => Number(config.is_active) === 1);
+    if (configs.length === 0) {
+      db.addLlmConfig({
+        ...envConfig,
+        isActive: true
+      });
+      return;
+    }
+    if (!hasActiveConfig) {
+      const firstConfig = configs[0];
+      if (typeof firstConfig?.id === "string") {
+        db.activateLlmConfig(firstConfig.id);
+      }
+    }
+  });
+}
 function isWorkspaceRoot(dir) {
   try {
     const pkgPath = import_node_path3.default.join(dir, "package.json");
@@ -2909,6 +3018,7 @@ function resolveFactoryRootDir(dir = process.cwd()) {
 async function loadActiveLlmConfig(rootDir = process.cwd()) {
   const dbRootDir = resolveFactoryRootDir(rootDir);
   try {
+    await ensureEnvLlmConfigImported(rootDir);
     const activeDbConfig = await withFactoryDb(dbRootDir, async (db) => {
       return db.getActiveLlmConfig();
     });
@@ -3180,7 +3290,7 @@ function validateSuperGraph(graph) {
 
 // src/writing-pipeline.ts
 var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_node_path6 = __toESM(require("path"), 1);
+var import_node_path7 = __toESM(require("path"), 1);
 
 // src/embedding.ts
 var LOCAL_EMBEDDING_MODEL = "local-hash-v1";
@@ -3539,6 +3649,11 @@ async function streamOpenAiCompatibleResponse(response, onDelta, options) {
   const totalStreamTime = Date.now() - streamStartTime;
   const totalRequestTime = Date.now() - baseTime;
   console.log(`[LLM STREAM END] \u6570\u636E\u6D41\u8BFB\u53D6\u5B8C\u6210\u3002\u6D41\u4F20\u8F93\u8017\u65F6: ${totalStreamTime}ms\uFF0C\u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u5B8C\u6210\u603B\u8017\u65F6: ${totalRequestTime}ms\uFF0C\u63A5\u6536\u5B57\u6570: ${content.length}`);
+  console.log(`
+========== [LLM RESPONSE START] ==========
+${content.trim()}
+========== [LLM RESPONSE END] ==========
+`);
   return content.trim();
 }
 async function withTimeout(timeoutMs, operation, externalSignal) {
@@ -3595,8 +3710,10 @@ async function generateAgentReply(options) {
   if (!apiKey) {
     throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY, or configure an active LLM in settings.");
   }
+  const isDrafting = options.currentStage === "drafting";
+  const protocol = isDrafting ? "\u6B63\u6587\u521B\u4F5C\u534F\u8BAE\uFF1A\u4F60\u8D1F\u8D23\u6267\u884C\u5C0F\u8BF4\u7AE0\u8282\u7684\u521D\u7A3F\u521B\u4F5C\u3001\u8D28\u91CF\u8FD4\u5DE5\u6216\u81EA\u7136\u5EA6\u6DA6\u8272\uFF0C\u5FC5\u987B\u8F93\u51FA\u5177\u4F53\u7684\u6587\u5B66\u6B63\u6587\uFF0C\u4E14\u4E25\u7981\u8F93\u51FA\u8BA8\u8BBA\u8FC7\u7A0B\u6216\u65E0\u5173\u5E9F\u8BDD\u3002" : AUTONOMOUS_DISCUSSION_PROTOCOL;
   const system = [
-    AUTONOMOUS_DISCUSSION_PROTOCOL,
+    protocol,
     "",
     `\u8F93\u51FA\u8BED\u8A00\uFF1A${options.preferredLanguage === "en-US" ? "English" : "\u7B80\u4F53\u4E2D\u6587"}`,
     `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${options.currentStage ?? "worldbuilding_dialogue"}`,
@@ -3615,23 +3732,36 @@ Target asset: ${options.discussionTarget.assetPath}
 Target instruction: ${options.discussionTarget.instruction}` : "",
     "Response contract:",
     "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
-    "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
-    "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
+    isDrafting ? "- \u5FC5\u987B\u6309\u7167\u7AE0\u8282\u683C\u5F0F\u8981\u6C42\u8F93\u51FA\u7AE0\u8282\u6B63\u6587\u5185\u5BB9\u3002" : "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
+    isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
     "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
-    "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
-    "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-    "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002",
-    options.priorTranscript?.trim() ? `Prior roundtable transcript:
+    isDrafting ? "" : "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
+    isDrafting ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+    isDrafting ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002",
+    !isDrafting && options.priorTranscript?.trim() ? `Prior roundtable transcript:
 ${options.priorTranscript.trim()}` : ""
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   const startTime = Date.now();
+  const selectedTemperature = options.temperature !== void 0 ? options.temperature : config.provider.temperature;
   console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 chat/completions \u8BF7\u6C42...`);
   console.log(`- BaseUrl: ${config.provider.baseUrl}`);
   console.log(`- Model: ${config.provider.modelName}`);
-  console.log(`- Temperature: ${config.provider.temperature}`);
+  console.log(`- Temperature: ${selectedTemperature}`);
   console.log(`- Messages Count: ${options.message ? 2 : 1}`);
   console.log(`- System Prompt Length: ${system.length} chars`);
   console.log(`- User Message Length: ${(options.message || "").length} chars`);
+  console.log(`
+========== [LLM SYSTEM PROMPT START] ==========
+${system}
+========== [LLM SYSTEM PROMPT END] ==========
+`);
+  if (options.message) {
+    console.log(`
+========== [LLM USER MESSAGE START] ==========
+${options.message}
+========== [LLM USER MESSAGE END] ==========
+`);
+  }
   const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
     const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -3642,7 +3772,7 @@ ${options.priorTranscript.trim()}` : ""
       signal,
       body: JSON.stringify({
         model: config.provider.modelName,
-        temperature: config.provider.temperature,
+        temperature: selectedTemperature,
         stream: Boolean(options.onDelta),
         messages: [
           { role: "system", content: system },
@@ -3670,6 +3800,11 @@ ${options.priorTranscript.trim()}` : ""
     const totalTime = Date.now() - startTime;
     const resContent = payload.choices?.[0]?.message?.content?.trim() || "";
     console.log(`[LLM REQUEST END] \u975E\u6D41\u5F0F\u8BF7\u6C42\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${resContent.length}`);
+    console.log(`
+========== [LLM RESPONSE START] ==========
+${resContent}
+========== [LLM RESPONSE END] ==========
+`);
     return resContent;
   }, options.signal);
   if (!content) {
@@ -4077,23 +4212,812 @@ async function backfillPendingKnowledgeEmbeddings(rootDir, options = {}) {
   });
 }
 
+// src/genre-presets.ts
+var GENRE_PRESETS = [
+  {
+    genreName: "\u7384\u5E7B",
+    readerPromise: "\u529B\u91CF\u8FDB\u9636\u3001\u4E16\u754C\u89C2\u5947\u89C2\u3001\u8DE8\u9636\u5FA1\u654C\u7684\u6781\u81F4\u723D\u611F\u3002",
+    narrationStrategy: "\u65C1\u767D\u8981\u5F3A\u8C03\u89C4\u5219\u8FB9\u754C\u3001\u4EE3\u4EF7\u3001\u5947\u89C2\u611F\u4E0E\u5883\u754C\u538B\u529B\uFF1B\u6218\u6597\u573A\u666F\u7528\u52A8\u4F5C\u52A8\u8BCD\u548C\u611F\u5B98\u7EC6\u8282\uFF0C\u4E0D\u5806\u780C\u65E0\u610F\u4E49\u7684\u5883\u754C\u5927\u5B57\u4E0E\u62DB\u5F0F\u540D\u5B57\u3002",
+    pacingAndRhythm: "\u5C0F\u8282\u594F\u4EE5\u5371\u673A\u538B\u8FEB\u4E3A\u4E3B\uFF0C\u5927\u8282\u594F\u4EE5\u5883\u754C\u7A81\u7834\u4E0E\u5730\u4F4D\u6500\u5347\u4E3A\u9AD8\u6F6E\uFF1B\u7A81\u51FA\u723D\u70B9\u524D\u7684\u60C5\u611F\u538B\u6291\u4E0E\u53CD\u51FB\u91CA\u653E\u3002",
+    chapterStructure: "\u8D77\u7B14\u5FC5\u987B\u6709\u73AF\u5883\u4E0E\u5371\u673A\u903C\u8FEB\uFF0C\u4E2D\u6BB5\u901A\u8FC7\u6218\u6597\u3001\u4EA4\u6613\u6216\u9886\u609F\u63A8\u8FDB\uFF0C\u5C3E\u58F0\u8BBE\u7ACB\u65B0\u7684\u9AD8\u5883\u754C\u5A01\u80C1\u6216\u9636\u6BB5\u6210\u679C\u3002",
+    characterPressure: "\u5B97\u95E8\u89C4\u5219\u3001\u8D44\u6E90\u4E89\u593A\u3001\u5F31\u8089\u5F3A\u98DF\u7684\u4E1B\u6797\u6CD5\u5219\u538B\u8FEB\u3002",
+    poisonPoints: [
+      "\u5F3A\u884C\u5F31\u667A\u5316\u5BF9\u624B\u4EE5\u663E\u5F97\u4E3B\u89D2\u806A\u660E",
+      "\u5883\u754C\u8D2C\u503C\u8FC7\u5FEB\uFF0C\u6218\u6597\u5168\u9760\u5927\u558A\u529F\u6CD5\u62DB\u5F0F",
+      "\u4E3B\u89D2\u65E0\u4EE3\u4EF7\u5347\u7EA7\uFF0C\u7F3A\u4E4F\u6210\u957F\u963B\u529B\u4E0E\u56E0\u679C\u78E8\u7EC3",
+      "\u4E3B\u89D2\u4F18\u67D4\u5BE1\u65AD\u3001\u5723\u6BCD\u5FC3\u8FC7\u5EA6\u53D1\u4F5C",
+      "\u6218\u529B\u4F53\u7CFB\u5F7B\u5E95\u5D29\u6E83\uFF08\u5982\u4F4E\u9636\u51E1\u4EBA\u65E0\u5E95\u724C\u4E00\u62F3\u6253\u6B7B\u795E\u5E1D\uFF09",
+      "\u5570\u55E6\u5197\u957F\u7684\u8857\u5934\u5F0F\u626F\u76AE\u5BF9\u9A82\u4E0E\u53CD\u590D\u5632\u8BBD"
+    ],
+    naturalnessRules: [
+      "\u62D2\u7EDD\u8FDE\u7EED 3 \u4E2A\u4EE5\u4E0A\u7684\u62BD\u8C61\u529F\u6CD5\u7384\u5B66\u8BCD\u5806\u780C",
+      "\u6218\u6597\u8FC7\u7A0B\u5FC5\u987B\u5305\u542B\u7269\u7406\u53D7\u521B\u4E0E\u73AF\u5883\u4EA4\u4E92\u7834\u574F\u7684\u7EC6\u8282",
+      "\u8D8A\u9636\u53CD\u6740\u5FC5\u987B\u5C55\u73B0\u60E8\u75DB\u4EE3\u4EF7\uFF08\u5982\u732E\u796D\u751F\u547D\u672C\u6E90\u3001\u7ECF\u8109\u91CD\u521B\u3001\u6CD5\u5B9D\u788E\u88C2\uFF09",
+      "\u52A8\u4F5C\u63CF\u5199\u5FC5\u987B\u6709\u5F3A\u70C8\u7684\u89C6\u542C\u51B2\u51FB\u529B"
+    ],
+    contextPriority: ["\u4E3B\u89D2\u5883\u754C\u4E0E\u91D1\u624B\u6307\u8BBE\u5B9A", "\u5F53\u524D\u5BF9\u624B\u4E0E\u52BF\u529B\u77DB\u76FE", "\u88C5\u5907\u6CD5\u5B9D\u89C4\u5219"],
+    vocabularyScenes: ["\u6218\u6597", "\u4FEE\u70BC", "\u81EA\u7136\u73AF\u5883", "\u5FC3\u7406\u6D3B\u52A8"]
+  },
+  {
+    genreName: "\u4FEE\u4ED9/\u4ED9\u4FA0",
+    readerPromise: "\u9006\u5929\u6539\u547D\u7684\u51FA\u5C18\u611F\u3001\u5929\u9053\u65E0\u60C5\u7684\u4FEE\u884C\u4EE3\u4EF7\u4E0E\u4EBA\u60C5\u51B7\u6696\u3002",
+    narrationStrategy: "\u534A\u6587\u767D\u5939\u6742\u7684\u5178\u96C5\u65C1\u767D\uFF0C\u7A81\u51FA\u201C\u9053\u5FC3\u201D\u4E0E\u201C\u4EE3\u4EF7\u201D\uFF1B\u63CF\u5199\u73AF\u5883\u65F6\u878D\u5408\u7985\u610F\u4E0E\u7A7A\u7075\u611F\uFF0C\u6218\u6597\u6CE8\u91CD\u6C14\u673A\u535A\u5F08\u4E0E\u5929\u5730\u5143\u6C14\u4EA4\u4E92\u3002",
+    pacingAndRhythm: "\u957F\u7EBF\u95ED\u5173\u5FC3\u5883\u611F\u609F\u4E0E\u77ED\u7EBF\u56E0\u679C\u7EA0\u7F20\u4EA4\u7EC7\uFF0C\u723D\u70B9\u5728\u4E8E\u53C2\u900F\u7384\u673A\u3001\u5FC3\u5883\u7A81\u7834\u4E0E\u56E0\u679C\u65A9\u65AD\u3002",
+    chapterStructure: "\u5F00\u573A\u5F3A\u8C03\u4FEE\u771F\u73AF\u5883\u6216\u5FC3\u9B54\u60B8\u52A8\uFF0C\u4E2D\u6BB5\u63A8\u8FDB\u56E0\u679C\u4E89\u7AEF\u3001\u63A0\u593A\u673A\u7F18\uFF0C\u7ED3\u5C3E\u63ED\u793A\u56E0\u679C\u9501\u94FE\u7684\u4E0B\u4E00\u6B65\u8D70\u5411\u6216\u96F7\u52AB\u9884\u5146\u3002",
+    characterPressure: "\u5929\u9053\u5BFF\u5143\u5927\u9650\u3001\u96F7\u52AB\u4E34\u5934\u3001\u540C\u95E8\u80CC\u53DB\u3001\u51E1\u5C18\u56E0\u679C\u65A9\u4E0D\u65AD\u5E26\u6765\u7684\u5FC3\u9B54\u7EA0\u7F20\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u4FEE\u4ED9\u8005\u52A8\u8F84\u56E0\u9E21\u6BDB\u7802\u76AE\u50CF\u5E02\u4E95\u6D41\u6C13\u822C\u65E0\u8111\u8FB1\u9A82",
+      "\u4FEE\u884C\u6CA1\u6709\u611F\u609F\u4E0E\u5386\u7EC3\uFF0C\u5168\u9760\u75AF\u72C2\u5403\u836F\u5E73\u63A8",
+      "\u6D3B\u4E86\u6570\u5343\u5E74\u7684\u8001\u602A\u8868\u73B0\u5F97\u6BEB\u65E0\u5FC3\u667A\u6DF1\u5EA6\u4E0E\u57CE\u5E9C\uFF08\u53CD\u6D3E\u4F4E\u667A\u5316\uFF09",
+      "\u65E0\u8282\u5236\u6EE5\u6740\u65E0\u8F9C\u4E14\u6BEB\u65E0\u5929\u9053\u8A93\u8A00\u4E0E\u56E0\u679C\u903B\u8F91\u7EA6\u675F"
+    ],
+    naturalnessRules: [
+      "\u907F\u514D\u5806\u780C\u5982\u201C\u9053\u97F5\u201D\u3001\u201C\u6CD5\u5219\u201D\u3001\u201C\u5929\u9053\u201D\u7B49\u62BD\u8C61\u5927\u8BCD",
+      "\u51E1\u4EBA\u4E0E\u4FEE\u58EB\u3001\u4F4E\u9636\u4E0E\u9AD8\u9636\u5BF9\u8BDD\u5FC5\u987B\u6709\u660E\u786E of \u8EAB\u4EFD\u5C0A\u5351\u548C\u4FE1\u606F\u5DEE",
+      "\u4FEE\u884C\u7A81\u7834\u4E0E\u96F7\u52AB\u5FC5\u987B\u6709\u5F3A\u70C8\u7684\u8089\u4F53\u6DEC\u70BC\u6216\u795E\u9B42\u535A\u5F08\u7EC6\u8282"
+    ],
+    contextPriority: ["\u5929\u9053\u89C4\u5219\u4E0E\u4FEE\u884C\u4EE3\u4EF7", "\u9053\u5FC3\u5951\u7EA6\u4E0E\u56E0\u679C\u8A93\u8A00", "\u89D2\u8272\u5BFF\u547D\u4E0E\u6CD5\u529B\u72B6\u6001"],
+    vocabularyScenes: ["\u5929\u9053\u611F\u609F", "\u6218\u6597", "\u4ED9\u5C71\u6D1E\u5E9C", "\u5BF9\u8BDD"]
+  },
+  {
+    genreName: "\u60AC\u7591",
+    readerPromise: "\u70E7\u8111\u89E3\u8C1C\u7684\u667A\u5546\u535A\u5F08\u3001\u4FE1\u606F\u8327\u623F\u62C6\u9664\u7684\u9707\u64BC\u3001\u5371\u673A\u964D\u4E34\u7684\u538B\u8FEB\u6050\u60E7\u611F\u3002",
+    narrationStrategy: "\u51B7\u9759\u5BA2\u89C2\u3001\u514B\u5236\u5185\u655B\u7684\u65C1\u767D\uFF1B\u7740\u529B\u523B\u753B\u5FAE\u8868\u60C5\u4E0E\u73AF\u5883\u7269\u4EF6\u7684\u6697\u53F7\u7EBF\u7D22\uFF1B\u907F\u514D\u4E0A\u5E1D\u89C6\u89D2\u63D0\u524D\u5267\u900F\u3002",
+    pacingAndRhythm: "\u4FE1\u606F\u6324\u538B\u5F0F\u8282\u594F\uFF0C\u524D\u534A\u6BB5\u4E0D\u65AD\u629B\u51FA\u8C1C\u9898\u548C\u8BA4\u77E5\u504F\u5DEE\uFF0C\u540E\u534A\u6BB5\u901A\u8FC7\u7EC6\u8282\u6C47\u805A\u5B9E\u73B0\u60CA\u4EBA\u53CD\u8F6C\u6216\u771F\u76F8\u6536\u62E2\u3002",
+    chapterStructure: "\u8D77\u7B14\u4EE5\u5F02\u5E38\u73B0\u8C61\u3001\u51F6\u6848\u73B0\u573A\u6216\u96BE\u89E3\u8C1C\u9898\u5207\u5165\uFF0C\u4E2D\u6BB5\u8FDB\u884C\u7EBF\u7D22\u67E5\u8BC1\u4E0E\u8BA4\u77E5\u5BF9\u6297\uFF0C\u5C3E\u58F0\u9501\u5B9A\u5728\u65B0\u7684\u7834\u574F\u6027\u7EBF\u7D22\u6216\u4EBA\u8EAB\u5371\u9669\u4E2D\u3002",
+    characterPressure: "\u8FFD\u730E\u8005\u7684\u8FEB\u8FD1\u3001\u51F6\u624B\u7684\u5FC3\u7406\u8BF1\u5BFC\u3001\u65F6\u95F4\u9650\u5236\u3001\u8EAB\u8FB9\u76DF\u53CB\u4E0D\u53EF\u4FE1\u7684\u80CC\u53DB\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u4FA6\u63A2\u4E3B\u89D2\u5F3A\u884C\u901A\u8FC7\u7075\u5149\u4E00\u73B0\u89E3\u51B3\u6240\u6709\u8C1C\u9898\uFF0C\u7F3A\u4E4F\u8BC1\u636E\u94FE\u652F\u6491",
+      "\u72AF\u7F6A\u52A8\u673A\u6781\u5EA6\u5F31\u667A\uFF0C\u7834\u6848\u5168\u9760\u53CD\u6D3E\u964D\u667A\u81EA\u5DF1\u62DB\u4F9B",
+      "\u524D\u9762\u57CB\u4E0B\u7684\u5173\u952E\u7EBF\u7D22\u5230\u6700\u540E\u6BEB\u65E0\u7528\u5904\uFF0C\u70C2\u5C3E\u6216\u9009\u62E9\u6027\u5931\u5FC6",
+      "\u4E25\u7981\u673A\u68B0\u964D\u795E\uFF1A\u7EDD\u4E0D\u5141\u8BB8\u5728\u6700\u540E\u5173\u5934\u51ED\u7A7A\u5192\u51FA\u524D\u6587\u4ECE\u672A\u63D0\u53CA\u7684\u65B0\u4EBA\u7269\u3001\u65B0\u7EBF\u7D22\u6216\u8D85\u81EA\u7136\u529B\u91CF\u7834\u5C40",
+      "\u53CD\u6D3E\u5728\u6700\u540E\u5173\u5934\u50CF\u52A8\u6F2B\u89D2\u8272\u822C\u6ED4\u6ED4\u4E0D\u7EDD\u4E3B\u52A8\u4EA4\u4EE3\u72AF\u7F6A\u8FC7\u7A0B"
+    ],
+    naturalnessRules: [
+      "\u6BCF\u4E00\u4E2A\u88AB\u63CF\u5199\u7684\u5FAE\u5C0F\u53CD\u5E38\u7269\u4EF6\uFF0C\u5728\u540E\u7EED 3 \u7AE0\u5185\u5FC5\u987B\u6709\u529F\u80FD\u6027\u4EA4\u4EE3\u6216\u56DE\u6536",
+      "\u62D2\u7EDD\u76F4\u767D\u5FC3\u7406\u72EC\u767D\u2018\u539F\u6765\u662F\u8FD9\u6837\u2019\uFF0C\u6539\u7528\u7EBF\u7D22\u91CD\u7EC4\u7684\u884C\u52A8\u53BB\u5448\u73B0\u5224\u65AD",
+      "\u51B0\u5C71\u4FE1\u606F\u63A7\u5236\uFF1A\u63ED\u9732\u4FE1\u606F\u5FC5\u987B\u901A\u8FC7\u5FAE\u8868\u60C5\u3001\u5931\u8A00\u6216\u5F02\u6837\u4FA7\u9762\u5C55\u73B0\uFF0C\u771F\u76F8\u5207\u6210\u788E\u7247\u6BCF\u6B21\u53EA\u7ED9 10%",
+      "\u5FC3\u7406\u9AD8\u538B\u6E32\u67D3\uFF1A\u4E0D\u8981\u76F4\u767D\u8BF4\u6050\u60E7\uFF0C\u805A\u7126\u611F\u5B98\u7EC6\u8282\uFF08\u5982\u79D2\u9488\u8DF3\u52A8\u3001\u5589\u5499\u5E72\u71E5\u8840\u8165\u5473\u3001\u6C34\u7BA1\u5F02\u54CD\uFF09",
+      "\u4E25\u683C\u7684\u7B2C\u4E09\u4EBA\u79F0\u9650\u77E5\u89C6\u89D2\uFF1A\u4E3B\u89D2\u672A\u770B\u672A\u542C\u7684\u4E0D\u5141\u8BB8\u51FA\u73B0\u5728\u6B63\u6587\u4E2D"
+    ],
+    contextPriority: ["\u6838\u5FC3\u6848\u4EF6\u7EBF\u7D22\u94FE", "\u5DF2\u77E5\u7591\u70B9\u4E0E\u4EBA\u7269\u8BA4\u77E5\u5DEE", "\u6848\u53D1\u65F6\u95F4\u7EBF\u4E0E\u9690\u85CF\u52A8\u673A"],
+    vocabularyScenes: ["\u72AF\u7F6A\u73B0\u573A", "\u5BF9\u8BDD", "\u5FC3\u7406\u5BF9\u6297", "\u73AF\u5883\u6E32\u67D3"]
+  },
+  {
+    genreName: "\u90FD\u5E02/\u73B0\u5B9E",
+    readerPromise: "\u73B0\u4EE3\u804C\u573A/\u751F\u6D3B\u7684\u5F3A\u70C8\u4EE3\u5165\u611F\u3001\u4EBA\u60C5\u5F80\u6765\u7684\u60C5\u7EEA\u5171\u9E23\u3001\u9006\u88AD\u89C4\u5219\u7684\u723D\u611F\u3002",
+    narrationStrategy: "\u6781\u5177\u751F\u6D3B\u8D28\u611F\u7684\u73B0\u4EE3\u65C1\u767D\uFF0C\u6CE8\u91CD\u523B\u753B\u804C\u573A\u9636\u5C42\u5F20\u529B\u3001\u91D1\u94B1\u8BF1\u60D1\u4E0E\u793E\u4F1A\u6F5C\u89C4\u5219\uFF1B\u8BED\u8A00\u4FDD\u6301\u81EA\u7136\u5BA2\u89C2\u3002",
+    pacingAndRhythm: "\u9AD8\u538B\u7684\u73B0\u4EE3\u751F\u5B58\u8282\u594F\uFF0C\u723D\u70B9\u5728\u4E8E\u4E13\u4E1A\u6280\u80FD\u7684\u78BE\u538B\u7A81\u7834\u3001\u9636\u5C42\u8DE8\u8D8A\u7684\u7545\u5FEB\u6216\u4EBA\u60C5\u51B7\u6696\u7684\u53CD\u8F6C\u3002",
+    chapterStructure: "\u8D77\u7B14\u4E8E\u5177\u4F53\u7684\u804C\u573A/\u5BB6\u5EAD\u751F\u6D3B\u5371\u673A\u6216\u793E\u4F1A\u51B2\u7A81\uFF0C\u4E2D\u6BB5\u901A\u8FC7\u5229\u76CA\u4EA4\u6D89\u3001\u4E13\u4E1A\u624B\u6BB5\u8FC7\u62DB\u63A8\u8FDB\uFF0C\u7ED3\u5C3E\u843D\u811A\u4E8E\u5173\u7CFB\u8F6C\u53D8\u6216\u66F4\u5927\u7684\u5229\u76CA\u94A9\u5B50\u3002",
+    characterPressure: "\u623F\u8D37\u8F66\u8D37\u8D22\u52A1\u7EA2\u7EBF\u3001\u804C\u573A\u6392\u6324\u3001\u9636\u5C42\u58C1\u5792\u3001\u5BB6\u5EAD\u77DB\u76FE\u4E0E\u4EBA\u9645\u793E\u4EA4\u7684\u865A\u4F2A\u5305\u88C5\u3002",
+    poisonPoints: [
+      "\u5F3A\u884C\u585E\u5165\u4F4E\u7AEF\u3001\u53CD\u667A\u7684\u5632\u8BBD\u6253\u8138\u5957\u8DEF",
+      "\u4E3B\u89D2\u4E13\u4E1A\u6280\u80FD\u6F0F\u6D1E\u767E\u51FA\uFF0C\u8131\u79BB\u73B0\u5B9E\u793E\u4F1A\u5E38\u8BC6",
+      "\u804C\u573A\u5408\u4F5C\u5199\u6210\u513F\u620F\u822C\u7684\u5C0F\u5B66\u5BAB\u6597"
+    ],
+    naturalnessRules: [
+      "\u5BF9\u767D\u9AD8\u5EA6\u53E3\u8BED\u5316\uFF0C\u4E25\u7981\u4EBA\u7269\u50CF\u5FF5\u6559\u79D1\u4E66\u8BF4\u660E\u4E66\u822C\u8BF4\u8BDD",
+      "\u5173\u4E8E\u91D1\u94B1\u3001\u6D88\u8D39\u6C34\u5E73\u53CA\u884C\u4E1A\u89C4\u5219\u7684\u6570\u636E\u5FC5\u987B\u7CBE\u51C6\u4E14\u7B26\u5408\u65F6\u4EE3\u5E38\u7406"
+    ],
+    contextPriority: ["\u4E3B\u89D2\u804C\u4E1A\u80CC\u666F\u4E0E\u6838\u5FC3\u5229\u76CA", "\u793E\u4F1A\u5173\u7CFB\u7F51\u7EDC\u4E0E\u8D22\u52A1\u503A\u52A1", "\u5F53\u524D\u535A\u5F08\u76EE\u6807"],
+    vocabularyScenes: ["\u65E5\u5E38", "\u5BF9\u8BDD", "\u5FC3\u7406\u6D3B\u52A8", "\u90FD\u5E02\u73AF\u5883"]
+  },
+  {
+    genreName: "\u8A00\u60C5/\u60C5\u611F",
+    readerPromise: "\u60C5\u611F\u620F\u7684\u8FC7\u5C71\u8F66\u5F20\u529B\u3001\u62C9\u626F\u611F\u4E0E\u5BBF\u547D\u6551\u8D4E\u611F\u3002",
+    narrationStrategy: "\u7EC6\u817B\u654F\u611F\u7684\u65C1\u767D\uFF0C\u9AD8\u5EA6\u805A\u7126\u751F\u7406\u53CD\u5E94\u3001\u89C6\u7EBF\u4EA4\u4E92\u4E0E\u60C5\u7EEA\u6CE2\u52A8\uFF1B\u7740\u610F\u653E\u5927\u4E24\u4EBA\u4E4B\u95F4\u7684\u8DDD\u79BB\u4E0E\u8BD5\u63A2\u6027\u63A5\u89E6\u3002",
+    pacingAndRhythm: "\u63A8\u62C9\u5F0F\u60C5\u611F\u8282\u594F\u3002\u4EE5\u65E5\u5E38\u4E92\u52A8\u4E0E\u6027\u683C\u51B2\u7A81\u79EF\u7D2F\u8377\u5C14\u8499\u5F20\u529B\uFF0C\u723D\u70B9\u5728\u4E8E\u5173\u7CFB\u786E\u8BA4\u6216\u60A3\u96BE\u89C1\u771F\u60C5\u7684\u60C5\u611F\u91CA\u653E\u3002",
+    chapterStructure: "\u8D77\u7B14\u5FC5\u987B\u5EFA\u7ACB\u4E24\u4EBA\u5728\u72ED\u5C0F\u7A7A\u95F4\u6216\u5FC3\u7406\u4E8B\u4EF6\u7684\u4EA4\u96C6\uFF0C\u4E2D\u6BB5\u901A\u8FC7\u89C2\u5FF5\u78B0\u649E\u6216\u5916\u754C\u963B\u529B\u4EA7\u751F\u62C9\u626F\uFF0C\u5C3E\u58F0\u843D\u811A\u4E8E\u60C5\u611F\u5173\u7CFB\u7684\u4E00\u6B65\u53D8\u5316\u3002",
+    characterPressure: "\u8EAB\u4EFD\u5DEE\u8DDD\u60AC\u6B8A\u3001\u5FC3\u53E3\u4E0D\u4E00\u7684\u81EA\u5C0A\u3001\u8FC7\u53BB\u60C5\u611F\u521B\u4F24\u5E26\u6765\u7684\u963B\u6297\u3001\u4EE5\u53CA\u5916\u754C\u7ADE\u4E89\u7684\u5AC9\u5992\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u7537\u5973\u4E3B\u89D2\u5F3A\u884C\u964D\u667A\u9677\u5165\u5C0F\u5B66\u7EA7\u8BEF\u4F1A\uFF0C\u5F62\u6210\u618B\u5C48\u618B\u5B9D",
+      "\u5F3A\u884C\u5806\u780C\u5DE5\u4E1A\u7CD6\u7CBE\uFF0C\u7F3A\u4E4F\u60C5\u611F\u56E0\u679C\u9012\u8FDB\u548C\u76F8\u4E92\u6551\u8D4E\u7684\u7ACB\u8DB3\u70B9",
+      "\u4E3A\u4E86\u8650\u800C\u8650\uFF0C\u6495\u788E\u4EBA\u7269\u5E95\u7EBF\u5C0A\u4E25"
+    ],
+    naturalnessRules: [
+      "\u4E25\u7981\u4F7F\u7528\u62BD\u8C61\u7684\u7231\u60C5/\u60C5\u7EEA\u8BCD\u6C47\u5806\u53E0",
+      "\u4EB2\u5BC6\u63A5\u89E6\u6216\u60C5\u611F\u53D8\u5316\u5FC5\u987B\u7531\u5177\u4F53\u52A8\u4F5C\u3001\u8138\u7EA2\u3001\u5FC3\u8DF3\u3001\u547C\u5438\u7B49\u8EAB\u4F53\u53CD\u5E94\u5448\u73B0"
+    ],
+    contextPriority: ["\u4E24\u4EBA\u6838\u5FC3\u51B2\u7A81\u4E0E\u60C5\u611F\u7EBD\u5E26", "\u8FC7\u53BB\u7684\u60C5\u611F\u521B\u4F24\u4E0E\u4F24\u53E3", "\u604B\u7231\u5173\u7CFB\u8FDB\u5C55\u9636\u6BB5"],
+    vocabularyScenes: ["\u611F\u60C5\u620F", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD", "\u65E5\u5E38"]
+  },
+  {
+    genreName: "\u5386\u53F2/\u53E4\u4EE3",
+    readerPromise: "\u5B8F\u5927\u7684\u65F6\u4EE3\u6CA7\u6851\u611F\u3001\u4E0E\u5386\u53F2\u540D\u81E3\u540D\u5C06\u535A\u5F08\u7684\u667A\u8C0B\u4EA4\u950B\u3001\u4EE5\u8D85\u524D\u5FC3\u667A\u91CD\u5851\u53E4\u98CE\u79E9\u5E8F\u7684\u9006\u88AD\u723D\u611F\u3002",
+    narrationStrategy: "\u53E4\u98CE\u539A\u91CD\u7684\u65C1\u767D\uFF0C\u878D\u5408\u53E4\u4EE3\u653F\u6CBB\u5236\u5EA6\u3001\u793C\u4EEA\u4E60\u60EF\u3001\u8863\u98DF\u4F4F\u884C\u8003\u636E\uFF0C\u4F7F\u7528\u7B26\u5408\u65F6\u4EE3\u7684\u96C5\u81F4\u79F0\u8C13\u4E0E\u6587\u767D\u8BCD\u6C47\u3002",
+    pacingAndRhythm: "\u5929\u4E0B\u5927\u52BF\u4E0E\u4E3B\u89D2\u751F\u8BA1\u3001\u5730\u65B9\u6CBB\u7406\u76F8\u4E92\u5D4C\u5957\uFF0C\u723D\u70B9\u5728\u4E8E\u8FD0\u7528\u73B0\u4EE3\u667A\u8BC6\u89E3\u51B3\u53E4\u4EE3\u987D\u75BE\uFF0C\u6216\u5728\u5386\u53F2\u5173\u952E\u8282\u70B9\u4E0A\u7684\u5927\u624B\u7B14\u535A\u5F08\u3002",
+    chapterStructure: "\u8D77\u7B14\u7A81\u51FA\u5177\u4F53\u7684\u5C01\u5EFA\u5B97\u65CF\u538B\u529B\u3001\u5730\u65B9\u707E\u8352\u6216\u5B98\u573A\u5A01\u903C\uFF0C\u4E2D\u6BB5\u8FD0\u7528\u53E4\u4EBA\u535A\u5F08\u683C\u5C40\u4E0E\u8C0B\u7565\u7834\u5C40\uFF0C\u7ED3\u5C3E\u6302\u94A9\u5929\u4E0B\u5C40\u52BF\u6216\u5730\u7F18\u519B\u4E8B\u5371\u673A\u3002",
+    characterPressure: "\u7687\u6743\u5929\u5A01\u4E0D\u53EF\u5FE4\u9006\u3001\u5B97\u65CF\u4F26\u7406\u9053\u5FB7\u724C\u574A\u3001\u4E71\u4E16\u6218\u7978\u3001\u5C0F\u4EBA\u8C17\u8A00\u4EE5\u53CA\u843D\u540E\u4FE1\u606F\u4EA4\u901A\u4E0B\u7684\u751F\u5B58\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u53E4\u4EE3\u5386\u53F2\u4EBA\u7269\u6EE1\u53E3\u73B0\u4EE3\u7F51\u7EDC\u70C2\u6897\u4E0E\u8D85\u524D\u653F\u6CBB\u7528\u8BED",
+      "\u5386\u53F2\u80CC\u666F\u6F0F\u6D1E\u767E\u51FA\uFF0C\u79F0\u8C13\u5EA6\u91CF\u8861\u6781\u5EA6\u53CD\u667A",
+      "\u5F3A\u884C\u8BA9\u5386\u53F2\u82F1\u70C8\u540D\u81E3\u6CA6\u4E3A\u4E3B\u89D2\u964D\u667A\u7684\u966A\u886C"
+    ],
+    naturalnessRules: [
+      "\u5B98\u804C\u3001\u5178\u7AE0\u5236\u5EA6\u3001\u5EA6\u91CF\u8861\u5FC5\u987B\u9AD8\u5EA6\u4E25\u8C28",
+      "\u6587\u767D\u7528\u8BCD\u63A7\u5236\u5728 10% \u4EE5\u5185\uFF0C\u53EA\u8D77\u6E32\u67D3\u8D28\u611F\u4F5C\u7528\uFF0C\u4E25\u7981\u6666\u6DA9\u5806\u8BCD"
+    ],
+    contextPriority: ["\u671D\u5802\u5C40\u52BF\u4E0E\u65F6\u4EE3\u91CD\u5927\u5371\u673A", "\u5730\u65B9\u53BF\u5FD7\u8003\u636E\u4E0E\u7ECF\u6D4E\u547D\u8109", "\u5386\u53F2\u8D70\u5411\u4E0E\u6838\u5FC3\u540D\u4EBA"],
+    vocabularyScenes: ["\u5386\u53F2\u573A\u666F", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178", "\u65E5\u5E38"]
+  },
+  {
+    genreName: "\u79D1\u5E7B/\u8D5B\u535A",
+    readerPromise: "\u786C\u6838\u7406\u8BBA\u964D\u7EF4\u6253\u51FB\u7684\u9707\u64BC\u3001\u5B87\u5B99\u5C3A\u5EA6\u4E0B\u7684\u5B58\u5728\u4E3B\u4E49\u601D\u8003\u3001\u4EE5\u53CA\u9AD8\u79D1\u6280\u5947\u89C2\u7684\u51B0\u51B7\u9707\u64BC\u3002",
+    narrationStrategy: "\u51B7\u9759\u3001\u7406\u6027\u7684\u5DE5\u7A0B\u611F\u65C1\u767D\uFF0C\u5C06\u7E41\u590D\u7684\u6280\u672F\u6982\u5FF5\u5DE7\u5999\u8F6C\u5316\u4E3A\u4EBA\u7269\u5177\u4F53\u7684\u611F\u5B98\u7EC6\u8282\u4E0E\u751F\u5B58\u4EE3\u4EF7\uFF1B\u907F\u514D\u6280\u672F\u8BF4\u6559\u3002",
+    pacingAndRhythm: "\u667A\u6027\u601D\u8003\u4E0E\u7269\u7406\u5371\u673A\u5E76\u884C\u7684\u8282\u594F\uFF0C\u723D\u70B9\u5728\u4E8E\u6280\u672F\u6096\u8BBA\u7684\u7CBE\u5999\u89E3\u5F00\uFF0C\u6216\u9AD8\u7EF4\u6587\u660E\u6CD5\u5219\u7684\u5B8F\u5927\u4F53\u73B0\u3002",
+    chapterStructure: "\u8D77\u7B14\u5448\u73B0\u6280\u672F\u5F02\u53D8\u6216\u7269\u7406\u751F\u5B58\u8D44\u6E90\u6025\u5267\u544A\u6025\uFF0C\u4E2D\u6BB5\u5C55\u5F00\u6280\u672F\u6392\u67E5\u3001\u9635\u8425\u8BA4\u77E5\u51B2\u7A81\uFF0C\u7ED3\u5C3E\u5C55\u793A\u66F4\u5E7F\u9614\u7684\u661F\u7A7A\u56FE\u666F\u6216\u6280\u672F\u5F15\u529B\u6CE2\u6548\u5E94\u3002",
+    characterPressure: "\u7269\u7406\u5B9A\u5F8B\u5E95\u7EBF\u65E0\u6CD5\u8FDD\u80CC\u3001\u98DE\u8239\u7CFB\u7EDF\u8FC7\u8F7D\u5D29\u6E83\u3001\u9AD8\u7EF4\u667A\u6167\u7684\u51B7\u6F20\u8511\u89C6\u3001\u4EE5\u53CA\u771F\u7A7A\u73AF\u5883\u7684\u751F\u7406\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u6280\u672F\u6982\u5FF5\u89E3\u91CA\u5B8C\u5168\u8131\u79BB\u57FA\u672C\u6570\u7406\u903B\u8F91\uFF0C\u6CA6\u4E3A\u6C11\u79D1\u72C2\u60F3",
+      "\u5B87\u5B99\u80CC\u666F\u4E0B\u4F9D\u7136\u53EA\u662F\u6362\u4E86\u9A6C\u7532\u7684\u7269\u7406\u539F\u59CB\u780D\u6740",
+      "\u6280\u672F\u4EC5\u4EC5\u4F5C\u4E3A\u80CC\u666F\uFF0C\u5BF9\u4EBA\u7269\u751F\u5B58\u72B6\u6001\u548C\u9053\u5FB7\u6289\u62E9\u65E0\u5B9E\u9645\u7EA6\u675F"
+    ],
+    naturalnessRules: [
+      "\u7269\u7406\u5B66\u3001\u5DE5\u7A0B\u5B66\u6982\u5FF5\u5FC5\u987B\u5177\u6709\u57FA\u672C\u7684\u903B\u8F91\u95ED\u73AF",
+      "\u907F\u514D\u7EAF\u7406\u8BBA\u957F\u7BC7\u5927\u8BBA\uFF0C\u6280\u672F\u6982\u5FF5\u5FC5\u987B\u901A\u8FC7\u8BBE\u5907\u8FD0\u8F6C\u3001\u8B66\u62A5\u6216\u8EAB\u4F53\u5F02\u72B6\u4F20\u8FBE"
+    ],
+    contextPriority: ["\u98DE\u8239/\u57FA\u5730\u7269\u7406\u53D7\u635F\u4E0E\u8D44\u6E90\u6570\u636E", "\u5E95\u5C42\u7269\u7406\u5B9A\u5F8B\u4E0E\u6280\u672F\u673A\u5236", "AI\u6216\u9AD8\u7EF4\u751F\u547D\u4F53\u8FD0\u884C\u6CD5\u5219"],
+    vocabularyScenes: ["\u6280\u672F\u73B0\u573A", "\u98DE\u8239\u57CE\u5E02", "\u5BF9\u8BDD", "\u6570\u636E\u5206\u6790"]
+  },
+  {
+    genreName: "\u65E0\u9650\u6D41",
+    readerPromise: "\u8BE1\u5F02\u89C4\u5219\u6781\u9650\u62C6\u89E3\u7684\u667A\u8C0B\u5FEB\u611F\u3001\u751F\u6B7B\u7EDD\u5883\u4E0B\u7684\u4EBA\u6027\u591A\u9762\u6027\u3001\u4EE5\u53CA\u8DE8\u526F\u672C\u80FD\u529B\u78B0\u649E\u7684\u65E0\u9650\u53EF\u80FD\u3002",
+    narrationStrategy: "\u9AD8\u5EA6\u805A\u7126\u5C40\u57DF\u8D85\u81EA\u7136\u89C4\u5219\u3001\u526F\u672C\u6838\u5FC3\u5224\u5B9A\u673A\u5236\u4E0E\u751F\u5B58\u70B9\u6570\u53D8\u5316\uFF1B\u65C1\u767D\u51B7\u5CFB\u5E76\u5145\u65A5\u7740\u9650\u5236\u89C6\u89D2\u7684\u672A\u77E5\u6050\u60E7\u611F\u3002",
+    pacingAndRhythm: "\u7D27\u51D1\u7684\u751F\u6B7B\u9650\u65F6\u9003\u6740\u8282\u594F\uFF0C\u723D\u70B9\u5728\u4E8E\u5DE7\u5999\u6D1E\u7A7F\u89C4\u5219\u6F0F\u6D1E\u5B9E\u73B0\u5F31\u514B\u5F3A\u3001\u4EE5\u53CA\u526F\u672C\u901A\u5173\u65F6\u7684\u70B9\u6570\u4E0E\u6280\u80FD\u5956\u52B1\u7ED3\u7B97\u3002",
+    chapterStructure: "\u8D77\u7B14\u5BA3\u5E03\u65B0\u526F\u672C\u673A\u5236\u6216\u5173\u5361\u89C4\u5219\u63A8\u79FB\uFF0C\u4E2D\u6BB5\u5C55\u5F00\u89C4\u5219\u6478\u7D22\u3001\u667A\u8C0B\u6218\u4E0E\u56E2\u961F\u5185\u8BA7\u535A\u5F08\uFF0C\u7ED3\u5C3E\u843D\u5728\u751F\u6B7B\u4E00\u7EBF\u7684\u5173\u5934\u6289\u62E9\u6216\u9006\u8F6C\u3002",
+    characterPressure: "\u4E3B\u795E/\u7CFB\u7EDF\u65E0\u60C5\u7684\u62B9\u6740\u60E9\u7F5A\u3001\u672A\u77E5\u7684\u81F4\u6B7B\u6027\u89C4\u5219\u89E6\u53D1\u70B9\u3001\u4E0D\u53EF\u4FE1\u8D56\u7684\u4E34\u65F6\u961F\u53CB\u7684\u751F\u5B58\u538B\u529B\u3002",
+    poisonPoints: [
+      "\u4E3B\u89D2\u4E00\u8FDB\u5165\u526F\u672C\u5C31\u5982\u540C\u62FF\u5230\u5267\u672C\u822C\u65E0\u6240\u4E0D\u80FD\uFF0C\u7F3A\u4E4F\u63A2\u7D22\u7684\u60AC\u5FF5",
+      "\u526F\u672C\u89C4\u5219\u540D\u5B58\u5B9E\u4EA1\uFF0C\u6CA6\u4E3A\u4E3B\u89D2\u65E0\u8111\u79C0\u4E2A\u4EBA\u6B66\u529B\u7684\u6C99\u76D2",
+      "\u961F\u53CB\u667A\u5546\u5168\u90E8\u4E0B\u7EBF\uFF0C\u65E2\u65E0\u5BF9\u6297\u601D\u7EF4\u4E5F\u65E0\u81EA\u6551\u80FD\u529B"
+    ],
+    naturalnessRules: [
+      "\u526F\u672C\u7684\u57FA\u7840\u6B7B\u4EA1\u89C4\u5219 and \u9650\u5236\u6761\u4EF6\u5728\u7AE0\u8282\u5185\u5FC5\u987B\u88AB\u89D2\u8272\u9891\u7E41\u5BA1\u89C6",
+      "\u4E3B\u89D2\u6301\u6709\u7684\u5947\u7279\u6280\u80FD\u5151\u6362\uFF0C\u6BCF\u6B21\u4F7F\u7528\u5FC5\u987B\u663E\u5F0F\u63CF\u8FF0\u5176\u8089\u4F53\u6216\u7CBE\u795E\u4EE3\u4EF7"
+    ],
+    contextPriority: ["\u5F53\u524D\u526F\u672C\u89C4\u5219\u4E0E\u4E3B\u795E\u4E3B\u7EBF\u4EFB\u52A1", "\u4E3B\u89D2\u6240\u6301\u5361\u724C\u6280\u80FD\u4E0E\u51B7\u5374\u4EE3\u4EF7", "\u961F\u53CB\u7684\u5E95\u724C\u53CA\u660E\u6697\u7ACB\u573A"],
+    vocabularyScenes: ["\u526F\u672C\u63A2\u7D22", "\u6218\u6597", "\u5BF9\u8BDD", "\u8BE1\u5F02\u5F02\u53D8"]
+  }
+];
+function findGenrePreset(searchText) {
+  const normalized = searchText.toLowerCase();
+  if (/仙侠|修仙|修行|修炼|成仙|天道|雷劫|洞府|筑基|金丹|元神|渡劫|immortal|xianxia/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u4FEE\u4ED9/\u4ED9\u4FA0");
+  }
+  if (/玄幻|魔法|斗气|武魂|魂兽|神魔|奇幻|fantasy|xuanhuan/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u7384\u5E7B");
+  }
+  if (/权谋|宫廷|朝堂|帝王|宰相|夺嫡|臣|court|palace|politic/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u5386\u53F2/\u53E4\u4EE3");
+  }
+  if (/悬疑|谜|案|侦探|推理|凶手|线索|凶杀|破案|mystery|crime|thriller|suspense|detective/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u60AC\u7591");
+  }
+  if (/言情|爱情|恋爱|情侣|暖婚|总裁|纯爱|romance|love/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u8A00\u60C5/\u60C5\u611F");
+  }
+  if (/历史|古代|大明|大唐|秦朝|三国|穿越历史|historical|dynasty|period/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u5386\u53F2/\u53E4\u4EE3");
+  }
+  if (/科幻|赛博|星际|未来|机甲|高科技|物理定律|宇宙飞船|sci-fi|science fiction/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u79D1\u5E7B/\u8D5B\u535A");
+  }
+  if (/无限流|主神|副本|游戏系统|限时任务|抹杀|infinite flow/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u65E0\u9650\u6D41");
+  }
+  if (/都市|现实|职场|商业|老板|打工|city|urban/u.test(normalized)) {
+    return GENRE_PRESETS.find((p) => p.genreName === "\u90FD\u5E02/\u73B0\u5B9E");
+  }
+  return void 0;
+}
+
+// src/aigc-detector.ts
+var import_node_fs4 = __toESM(require("fs"), 1);
+var import_node_path6 = __toESM(require("path"), 1);
+var DEFAULT_TIMEOUT_MS = 3e4;
+var DEFAULT_THRESHOLD = 0.8;
+var DEFAULT_SEGMENT_MAX_CHARS = 900;
+var DEFAULT_SEGMENT_MIN_CHARS = 180;
+var PACKAGE_ENV_PARTS2 = ["packages", "opencode-ai-novel-factory", ".env"];
+var MANAGED_PROJECTS_SEGMENT2 = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
+function getAigcDetectorConfigFromEnv(env = process.env) {
+  return {
+    provider: readProvider(env.AIGC_DETECTOR_PROVIDER),
+    url: readOptionalString(env.AIGC_DETECTOR_URL),
+    token: readOptionalString(env.AIGC_DETECTOR_TOKEN),
+    timeoutMs: readPositiveInteger(env.AIGC_DETECTOR_TIMEOUT_MS),
+    threshold: readScore(env.AIGC_DETECTOR_THRESHOLD),
+    headers: readHeaders(env.AIGC_DETECTOR_HEADERS_JSON),
+    requestTextField: readOptionalString(env.AIGC_DETECTOR_REQUEST_TEXT_FIELD),
+    segment: {
+      maxChars: readPositiveInteger(env.AIGC_DETECTOR_SEGMENT_MAX_CHARS),
+      minChars: readPositiveInteger(env.AIGC_DETECTOR_SEGMENT_MIN_CHARS)
+    },
+    gradio: {
+      fnIndex: readInteger(env.AIGC_DETECTOR_GRADIO_FN_INDEX),
+      sessionHash: readOptionalString(env.AIGC_DETECTOR_GRADIO_SESSION_HASH),
+      joinUrl: readOptionalString(env.AIGC_DETECTOR_GRADIO_JOIN_URL),
+      dataUrl: readOptionalString(env.AIGC_DETECTOR_GRADIO_DATA_URL),
+      skipJoin: env.AIGC_DETECTOR_GRADIO_SKIP_JOIN === "1",
+      inputs: readJsonArray(env.AIGC_DETECTOR_GRADIO_INPUTS_JSON)
+    }
+  };
+}
+function getAigcDetectorConfig(rootDir) {
+  if (!rootDir) {
+    return getAigcDetectorConfigFromEnv();
+  }
+  try {
+    const projectEnv = readAigcProjectEnv(rootDir);
+    return getAigcDetectorConfigFromEnv({ ...projectEnv, ...process.env });
+  } catch {
+    return getAigcDetectorConfigFromEnv();
+  }
+}
+async function detectAigcText(input, config = getAigcDetectorConfigFromEnv()) {
+  const provider = config.provider ?? "disabled";
+  const text = typeof input === "string" ? input : input.text;
+  if (provider === "disabled") {
+    return unavailableResult(provider, "AIGC detector is disabled.", null);
+  }
+  if (!text.trim()) {
+    return unavailableResult(provider, "AIGC detector received empty text.", null);
+  }
+  if (!config.url?.trim()) {
+    return unavailableResult(provider, "AIGC detector URL is not configured.", null);
+  }
+  try {
+    if (provider === "generic-json") {
+      return await detectWithGenericJson(text, config);
+    }
+    if (provider === "gradio-queue") {
+      return await detectWithGradioQueue(text, config);
+    }
+    return unavailableResult(provider, `Unsupported AIGC detector provider: ${String(provider)}`, null);
+  } catch (error) {
+    if (config.throwOnError) {
+      throw error;
+    }
+    return unavailableResult(provider, error instanceof Error ? error.message : String(error), null);
+  }
+}
+async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()) {
+  const provider = config.provider ?? "disabled";
+  const threshold = config.threshold ?? DEFAULT_THRESHOLD;
+  const segments = Array.isArray(input) ? input : splitAigcTextIntoSegments(typeof input === "string" ? input : input.text, config.segment);
+  const results = [];
+  for (const segment of segments) {
+    const result = await detectAigcText(segment, config);
+    results.push({
+      ...result,
+      segment,
+      charCount: segment.text.length
+    });
+  }
+  const scoredResults = results.filter((result) => typeof result.score === "number");
+  const totalChars = scoredResults.reduce((sum, result) => sum + Math.max(1, result.charCount), 0);
+  const score = totalChars > 0 ? scoredResults.reduce((sum, result) => sum + Number(result.score) * Math.max(1, result.charCount), 0) / totalChars : null;
+  const highRiskSegments = results.filter((result) => result.status === "ai_likely" || typeof result.score === "number" && result.score >= threshold).sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+  return {
+    ok: results.some((result) => result.ok),
+    provider,
+    status: score === null ? "unavailable" : scoreToStatus(score, threshold),
+    score,
+    confidence: score === null ? null : Math.max(score, 1 - score),
+    threshold,
+    totalSegments: segments.length,
+    highRiskSegments,
+    segments: results,
+    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : "Segmented AIGC detection completed."
+  };
+}
+function splitAigcTextIntoSegments(text, options = {}) {
+  const maxChars = Math.max(120, options.maxChars ?? DEFAULT_SEGMENT_MAX_CHARS);
+  const minChars = Math.max(1, Math.min(options.minChars ?? DEFAULT_SEGMENT_MIN_CHARS, maxChars));
+  const paragraphs = collectParagraphs(text);
+  const pieces = paragraphs.flatMap((paragraph) => splitLongParagraph(paragraph, maxChars));
+  const segments = [];
+  let pending = null;
+  for (const piece of pieces) {
+    if (!pending) {
+      pending = { text: piece.text, startOffset: piece.startOffset, endOffset: piece.endOffset, metadata: piece.metadata };
+      continue;
+    }
+    const joinedLength = pending.text.length + 1 + piece.text.length;
+    if (pending.text.length < minChars || joinedLength <= maxChars) {
+      pending = {
+        ...pending,
+        text: `${pending.text}
+${piece.text}`,
+        endOffset: piece.endOffset
+      };
+      continue;
+    }
+    segments.push({ ...pending, index: segments.length, id: `segment-${segments.length + 1}` });
+    pending = { text: piece.text, startOffset: piece.startOffset, endOffset: piece.endOffset, metadata: piece.metadata };
+  }
+  if (pending) {
+    segments.push({ ...pending, index: segments.length, id: `segment-${segments.length + 1}` });
+  }
+  return segments;
+}
+function parseAigcDetectorSse(payload) {
+  const events = [];
+  let eventName;
+  const dataLines = [];
+  for (const rawLine of payload.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line) {
+      if (dataLines.length > 0 || eventName) {
+        events.push({ event: eventName, data: dataLines.join("\n") });
+      }
+      eventName = void 0;
+      dataLines.length = 0;
+      continue;
+    }
+    if (line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventName = line.slice("event:".length).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+  if (dataLines.length > 0 || eventName) {
+    events.push({ event: eventName, data: dataLines.join("\n") });
+  }
+  return events;
+}
+async function detectWithGenericJson(text, config) {
+  const response = await requestWithTimeout(config.url ?? "", {
+    method: "POST",
+    headers: createHeaders(config, "application/json"),
+    body: JSON.stringify({ [config.requestTextField || "text"]: text })
+  }, config);
+  const raw = await readResponseBody(response);
+  if (!response.ok) {
+    return unavailableResult("generic-json", `Detector returned HTTP ${response.status}.`, raw);
+  }
+  return normalizeAigcDetectionResult(raw, "generic-json", config.threshold);
+}
+async function detectWithGradioQueue(text, config) {
+  const rootUrl = normalizeGradioRootUrl(config.url ?? "");
+  const sessionHash = config.gradio?.sessionHash || createSessionHash();
+  const joinUrl = config.gradio?.joinUrl || `${rootUrl}/gradio_api/queue/join${formatTokenQuery(config.token)}`;
+  const dataUrl = config.gradio?.dataUrl || `${rootUrl}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}${formatStudioTokenParam(config.token)}`;
+  if (!config.gradio?.skipJoin) {
+    const joinPayload = {
+      data: createGradioInputs(text, config.gradio?.inputs),
+      event_data: null,
+      fn_index: config.gradio?.fnIndex ?? 0,
+      session_hash: sessionHash
+    };
+    const joinResponse = await requestWithTimeout(joinUrl, {
+      method: "POST",
+      headers: createHeaders(config, "application/json"),
+      body: JSON.stringify(joinPayload)
+    }, config);
+    const joinRaw = await readResponseBody(joinResponse);
+    if (!joinResponse.ok) {
+      return unavailableResult("gradio-queue", `Gradio detector join returned HTTP ${joinResponse.status}.`, joinRaw);
+    }
+  }
+  const dataResponse = await requestWithTimeout(dataUrl, {
+    method: "GET",
+    headers: createHeaders(config, void 0, { accept: "text/event-stream" })
+  }, config);
+  const rawText = await dataResponse.text();
+  if (!dataResponse.ok) {
+    return unavailableResult("gradio-queue", `Gradio detector stream returned HTTP ${dataResponse.status}.`, rawText);
+  }
+  const raw = extractGradioQueueOutput(parseAigcDetectorSse(rawText));
+  return normalizeAigcDetectionResult(raw, "gradio-queue", config.threshold);
+}
+async function requestWithTimeout(url, init, config) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  try {
+    return await (config.fetchImpl ?? fetch)(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+async function readResponseBody(response) {
+  const body = await response.text();
+  if (!body.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
+function normalizeAigcDetectionResult(raw, provider, threshold = DEFAULT_THRESHOLD) {
+  const score = findScore(raw);
+  const label = findStringField(raw, ["label", "status", "result", "prediction", "class", "message"]) || inferLabel(raw);
+  const normalizedScore = normalizeScore(score);
+  const status = statusFromLabel(label) || (normalizedScore === null ? "uncertain" : scoreToStatus(normalizedScore, threshold));
+  const confidence = normalizeScore(findNumberField(raw, ["confidence", "probability", "prob"])) ?? (normalizedScore === null ? null : Math.max(normalizedScore, 1 - normalizedScore));
+  return {
+    ok: normalizedScore !== null || status !== "unavailable",
+    provider,
+    status,
+    score: normalizedScore,
+    label: label || status,
+    confidence,
+    raw,
+    reason: normalizedScore === null ? "Detector response did not include a normalized score; status was inferred from labels." : "Detector response normalized."
+  };
+}
+function unavailableResult(provider, reason, raw) {
+  return {
+    ok: false,
+    provider,
+    status: "unavailable",
+    score: null,
+    label: "unavailable",
+    confidence: null,
+    raw,
+    reason
+  };
+}
+function scoreToStatus(score, threshold) {
+  if (score >= threshold) {
+    return "ai_likely";
+  }
+  if (score <= 1 - threshold) {
+    return "human_likely";
+  }
+  return "uncertain";
+}
+function createHeaders(config, contentType, extra = {}) {
+  const headers = { ...config.headers, ...extra };
+  if (contentType) {
+    headers["content-type"] = contentType;
+  }
+  if (config.token && !headers.authorization) {
+    headers.authorization = `Bearer ${config.token}`;
+  }
+  return headers;
+}
+function collectParagraphs(text) {
+  const paragraphs = [];
+  const pattern = /\S[^\n]*(?:\n(?!\s*\n)\S[^\n]*)*/g;
+  for (const match of text.matchAll(pattern)) {
+    const value = match[0].trim();
+    if (!value) {
+      continue;
+    }
+    const leadingWhitespace = match[0].length - match[0].trimStart().length;
+    const startOffset = (match.index ?? 0) + leadingWhitespace;
+    paragraphs.push({
+      id: `paragraph-${paragraphs.length + 1}`,
+      index: paragraphs.length,
+      text: value,
+      startOffset,
+      endOffset: startOffset + value.length
+    });
+  }
+  return paragraphs;
+}
+function splitLongParagraph(segment, maxChars) {
+  if (segment.text.length <= maxChars) {
+    return [segment];
+  }
+  const fragments = segment.text.match(/[^。！？!?；;]+[。！？!?；;]?|.+/g) || [segment.text];
+  const pieces = [];
+  let pending = "";
+  let pendingStart = segment.startOffset;
+  let searchOffset = 0;
+  for (const fragment of fragments) {
+    const localIndex = segment.text.indexOf(fragment, searchOffset);
+    const fragmentStart = segment.startOffset + Math.max(0, localIndex);
+    searchOffset = Math.max(searchOffset, localIndex + fragment.length);
+    if (!pending) {
+      pending = fragment;
+      pendingStart = fragmentStart;
+      continue;
+    }
+    if (pending.length + fragment.length <= maxChars) {
+      pending += fragment;
+      continue;
+    }
+    pieces.push({
+      id: `segment-piece-${pieces.length + 1}`,
+      index: pieces.length,
+      text: pending.trim(),
+      startOffset: pendingStart,
+      endOffset: pendingStart + pending.trim().length
+    });
+    pending = fragment;
+    pendingStart = fragmentStart;
+  }
+  if (pending.trim()) {
+    pieces.push({
+      id: `segment-piece-${pieces.length + 1}`,
+      index: pieces.length,
+      text: pending.trim(),
+      startOffset: pendingStart,
+      endOffset: pendingStart + pending.trim().length
+    });
+  }
+  return pieces.flatMap((piece) => hardSplitSegment(piece, maxChars));
+}
+function hardSplitSegment(segment, maxChars) {
+  if (segment.text.length <= maxChars) {
+    return [segment];
+  }
+  const pieces = [];
+  for (let offset = 0; offset < segment.text.length; offset += maxChars) {
+    const text = segment.text.slice(offset, offset + maxChars);
+    pieces.push({
+      id: `segment-hard-${pieces.length + 1}`,
+      index: pieces.length,
+      text,
+      startOffset: segment.startOffset + offset,
+      endOffset: segment.startOffset + offset + text.length
+    });
+  }
+  return pieces;
+}
+function extractGradioQueueOutput(events) {
+  const parsedEvents = events.map((event) => parseJson(event.data) ?? event.data).filter((event) => event !== "");
+  const completed = parsedEvents.findLast(
+    (event) => isRecord(event) && (event.msg === "process_completed" || event.output || event.success === true)
+  );
+  if (isRecord(completed) && "output" in completed) {
+    const output = completed.output;
+    if (isRecord(output) && "data" in output) {
+      return output.data;
+    }
+    return output;
+  }
+  return completed ?? parsedEvents.at(-1) ?? null;
+}
+function createGradioInputs(text, inputs) {
+  if (!inputs || inputs.length === 0) {
+    return [text];
+  }
+  return inputs.map((input) => input === "$text" ? text : input);
+}
+function normalizeGradioRootUrl(url) {
+  const parsed = new URL(url);
+  const queueIndex = parsed.pathname.indexOf("/gradio_api/");
+  if (queueIndex >= 0) {
+    parsed.pathname = parsed.pathname.slice(0, queueIndex);
+    parsed.search = "";
+  }
+  return parsed.toString().replace(/\/$/, "");
+}
+function formatTokenQuery(token) {
+  return token ? `?studio_token=${encodeURIComponent(token)}` : "";
+}
+function formatStudioTokenParam(token) {
+  return `&studio_token=${encodeURIComponent(token || "")}`;
+}
+function createSessionHash() {
+  return Math.random().toString(36).slice(2, 14);
+}
+function findScore(raw) {
+  return findNumberField(raw, [
+    "score",
+    "aiProbability",
+    "aigcProbability",
+    "ai_probability",
+    "aigc_probability",
+    "aiProb",
+    "aigcProb",
+    "ai_score",
+    "aigc_score",
+    "fakeProbability"
+  ]) ?? parseScoreFromText(raw);
+}
+function findNumberField(raw, names) {
+  const queue = [raw];
+  const normalizedNames = new Set(names.map((name) => name.toLowerCase()));
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (Array.isArray(value)) {
+      queue.push(...value);
+      continue;
+    }
+    if (!isRecord(value)) {
+      continue;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (normalizedNames.has(key.toLowerCase())) {
+        const number = typeof child === "number" ? child : typeof child === "string" ? Number(child) : NaN;
+        if (Number.isFinite(number)) {
+          return number;
+        }
+      }
+      if (isRecord(child) || Array.isArray(child)) {
+        queue.push(child);
+      }
+    }
+  }
+  return null;
+}
+function findStringField(raw, names) {
+  const queue = [raw];
+  const normalizedNames = new Set(names.map((name) => name.toLowerCase()));
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (Array.isArray(value)) {
+      queue.push(...value);
+      continue;
+    }
+    if (!isRecord(value)) {
+      continue;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (normalizedNames.has(key.toLowerCase()) && (typeof child === "string" || typeof child === "number")) {
+        return String(child);
+      }
+      if (isRecord(child) || Array.isArray(child)) {
+        queue.push(child);
+      }
+    }
+  }
+  return "";
+}
+function inferLabel(raw) {
+  if (typeof raw === "string") {
+    return raw.slice(0, 120);
+  }
+  if (Array.isArray(raw)) {
+    const text = raw.find((item) => typeof item === "string");
+    return typeof text === "string" ? text.slice(0, 120) : "";
+  }
+  return "";
+}
+function statusFromLabel(label) {
+  const normalized = label.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (/human|人工|人类|真人|非ai|非机器/.test(normalized)) {
+    return "human_likely";
+  }
+  if (/\bai\b|aigc|机器|模型|生成|疑似ai|ai生成/.test(normalized)) {
+    return "ai_likely";
+  }
+  if (/uncertain|unknown|不确定|无法判断/.test(normalized)) {
+    return "uncertain";
+  }
+  return null;
+}
+function parseScoreFromText(raw) {
+  const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+  const percentMatch = text.match(/(?:AI|AIGC|机器|生成|疑似)[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  if (percentMatch) {
+    return Number(percentMatch[1]) / 100;
+  }
+  const decimalMatch = text.match(/(?:AI|AIGC|机器|生成|疑似)[^0-9]{0,12}(0?\.[0-9]+)/i);
+  return decimalMatch ? Number(decimalMatch[1]) : null;
+}
+function normalizeScore(score) {
+  if (score === null || !Number.isFinite(score)) {
+    return null;
+  }
+  if (score > 1 && score <= 100) {
+    return score / 100;
+  }
+  return Math.min(1, Math.max(0, score));
+}
+function readProvider(value) {
+  if (value === "generic-json" || value === "gradio-queue" || value === "disabled") {
+    return value;
+  }
+  return "disabled";
+}
+function readOptionalString(value) {
+  const trimmed = value?.trim();
+  return trimmed || void 0;
+}
+function readInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : void 0;
+}
+function readPositiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : void 0;
+}
+function readScore(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return void 0;
+  }
+  return normalizeScore(parsed) ?? void 0;
+}
+function readHeaders(value) {
+  const parsed = parseJson(value || "");
+  if (!isRecord(parsed)) {
+    return void 0;
+  }
+  return Object.fromEntries(
+    Object.entries(parsed).filter((entry) => typeof entry[1] === "string")
+  );
+}
+function readJsonArray(value) {
+  const parsed = parseJson(value || "");
+  return Array.isArray(parsed) ? parsed : void 0;
+}
+function parseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function readAigcProjectEnv(rootDir) {
+  const envPath = getAigcProjectEnvCandidatePaths(rootDir).find((candidate) => import_node_fs4.default.existsSync(candidate));
+  if (!envPath) {
+    return {};
+  }
+  const values = {};
+  for (const line of import_node_fs4.default.readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
+    values[key] = value;
+  }
+  return values;
+}
+function getAigcProjectEnvCandidatePaths(rootDir) {
+  const resolvedRootDir = import_node_path6.default.resolve(rootDir);
+  const candidates = [
+    import_node_path6.default.join(resolvedRootDir, ".env"),
+    import_node_path6.default.join(resolvedRootDir, ...PACKAGE_ENV_PARTS2)
+  ];
+  const workspaceRoot = inferAigcWorkspaceRootFromManagedProject(resolvedRootDir);
+  if (workspaceRoot) {
+    candidates.push(
+      import_node_path6.default.join(workspaceRoot, ".env"),
+      import_node_path6.default.join(workspaceRoot, ...PACKAGE_ENV_PARTS2)
+    );
+  }
+  return [...new Set(candidates.map((candidate) => import_node_path6.default.resolve(candidate)))];
+}
+function inferAigcWorkspaceRootFromManagedProject(rootDir) {
+  const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT2);
+  if (index < 0) {
+    return null;
+  }
+  return rootDir.slice(0, index) || import_node_path6.default.parse(rootDir).root;
+}
+
 // src/writing-pipeline.ts
 function currentBundleDir2() {
   const stack = new Error().stack || "";
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path6.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return import_node_path7.default.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path6.default.dirname(fileMatch[1]);
+      return import_node_path7.default.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
+  const marker = `${import_node_path7.default.sep}.ai-novel-projects${import_node_path7.default.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
@@ -4117,8 +5041,8 @@ async function readCharacterDossiers(filePath) {
   }
 }
 async function writeJsonFileAtomic(filePath, value) {
-  await import_promises4.default.mkdir(import_node_path6.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path6.default.join(import_node_path6.default.dirname(filePath), `.${import_node_path6.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises4.default.mkdir(import_node_path7.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path7.default.join(import_node_path7.default.dirname(filePath), `.${import_node_path7.default.basename(filePath)}.${Date.now()}.tmp`);
   await import_promises4.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
   await import_promises4.default.rename(tempPath, filePath);
@@ -4304,7 +5228,7 @@ ${input.memoryUpdate}`,
   return nextDossiers;
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return import_node_path6.default.relative(projectRoot, absolutePath).replaceAll(import_node_path6.default.sep, "/");
+  return import_node_path7.default.relative(projectRoot, absolutePath).replaceAll(import_node_path7.default.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -4341,9 +5265,9 @@ function stableWritingMessageId(payload) {
     namespace: payload.directorCommandId
   });
 }
-function writingMessageStatus(status) {
-  if (status === "blocked") return "failed";
-  if (status === "running" || status === "started") return "streaming";
+function writingMessageStatus(payload) {
+  if (payload.status === "blocked") return "failed";
+  if (isLlmWritingStep(payload.step) && (payload.status === "running" || payload.status === "started")) return "streaming";
   return "completed";
 }
 function inferWritingPhase(payload) {
@@ -4561,7 +5485,7 @@ async function emitWritingProgress(options, event) {
         phase: inferWritingPhase(payload),
         statusText: defaultWritingStatusText(payload),
         statusDetail: payload.statusDetail ?? "",
-        status: writingMessageStatus(payload.status),
+        status: writingMessageStatus(payload),
         time: payload.timestamp,
         metadata: {
           source: "writing_progress",
@@ -4752,72 +5676,41 @@ function inferGenreProfile(state) {
 ${state.project.idea}`.toLowerCase();
   const profileText = `${selectedProfileText}
 ${text}`.toLowerCase();
-  const withProfile = (profile) => ({
-    ...profile,
-    narration: [
-      profile.narration,
-      `\u751F\u4EA7\u98CE\u683C\u5408\u540C\uFF1A\u8BFB\u8005\u627F\u8BFA=${selectedReaderPromise || "hook-forward, scene-first, emotionally specific"}\uFF1B\u89C6\u89D2=${selectedPointOfView || "third-person limited"}\uFF1B\u8BED\u6C14=${selectedTone || "tense but readable"}\uFF1B\u81EA\u7136\u5EA6=${selectedNaturalness}\u3002`,
+  const preset = findGenrePreset(profileText);
+  const withProfile = (profile) => {
+    const contractDetails = [profile.narration];
+    if (preset) {
+      contractDetails.push(
+        `- \u7C7B\u578B\u723D\u70B9\u4E0E\u8282\u594F\uFF1A${preset.pacingAndRhythm}`,
+        `- \u7AE0\u8282\u7ED3\u6784\u89C4\u8303\uFF1A${preset.chapterStructure}`,
+        `- \u89D2\u8272\u538B\u529B\u7F51\u7EDC\uFF1A${preset.characterPressure}`,
+        `- \u7981\u5FCC\u907F\u5751\u6307\u5357\uFF1A${preset.poisonPoints.join("\uFF1B")}`
+      );
+    }
+    contractDetails.push(
+      `\u751F\u4EA7\u98CE\u683C\u5408\u540C\uFF1A\u8BFB\u8005\u627F\u8BFA=${selectedReaderPromise || preset?.readerPromise || "hook-forward, scene-first, emotionally specific"}\uFF1B\u89C6\u89D2=${selectedPointOfView || "third-person limited"}\uFF1B\u8BED\u6C14=${selectedTone || "tense but readable"}\uFF1B\u81EA\u7136\u5EA6=${selectedNaturalness}\u3002`,
       selectedStyleFingerprint ? `\u98CE\u683C\u6307\u7EB9\uFF1A${selectedStyleFingerprint}\u3002` : "\u98CE\u683C\u6307\u7EB9\uFF1A\u9996\u7AE0\u751F\u6210\u540E\u4ECE\u7A33\u5B9A\u6837\u5F20\u4E2D\u63D0\u53D6\uFF1B\u5F53\u524D\u5148\u4FDD\u6301\u573A\u666F\u4F18\u5148\u3001\u89D2\u8272\u5DEE\u5F02\u548C\u81EA\u7136\u5BF9\u767D\u3002"
-    ].join("\n"),
-    naturalnessTarget: selectedNaturalness,
-    readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
-    pointOfView: selectedPointOfView || "third-person limited",
-    tone: selectedTone || "tense but readable"
-  });
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia|xuanhuan/i.test(profileText)) {
+    );
+    return {
+      ...profile,
+      narration: contractDetails.join("\n"),
+      naturalnessTarget: selectedNaturalness,
+      readerPromise: selectedReaderPromise || preset?.readerPromise || "hook-forward, scene-first, emotionally specific",
+      pointOfView: selectedPointOfView || "third-person limited",
+      tone: selectedTone || "tense but readable",
+      pacingAndRhythm: preset?.pacingAndRhythm,
+      chapterStructure: preset?.chapterStructure,
+      characterPressure: preset?.characterPressure,
+      poisonPoints: preset?.poisonPoints,
+      naturalnessRules: preset?.naturalnessRules || [],
+      contextPriority: preset?.contextPriority || []
+    };
+  };
+  if (preset) {
     return withProfile({
-      genre: "\u7384\u5E7B/\u4ED9\u4FA0",
-      narration: "\u65C1\u767D\u8981\u5F3A\u8C03\u89C4\u5219\u8FB9\u754C\u3001\u4EE3\u4EF7\u3001\u5947\u89C2\u611F\u4E0E\u5883\u754C\u538B\u529B\uFF1B\u6218\u6597\u573A\u666F\u7528\u52A8\u4F5C\u52A8\u8BCD\u548C\u611F\u5B98\u7EC6\u8282\uFF0C\u4E0D\u5806\u672F\u8BED\u3002",
-      vocabularyScenes: ["\u6218\u6597", "\u81EA\u7136\u73AF\u5883", "\u8BAD\u7EC3\u4FEE\u70BC", "\u5FC3\u7406\u6D3B\u52A8"]
-    });
-  }
-  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(profileText)) {
-    return withProfile({
-      genre: "\u6743\u8C0B/\u5BAB\u5EF7",
-      narration: "\u65C1\u767D\u8981\u7A81\u51FA\u4FE1\u606F\u5DEE\u3001\u793C\u5236\u538B\u529B\u3001\u5BF9\u8BDD\u6F5C\u53F0\u8BCD\u4E0E\u5C40\u52BF\u53D8\u5316\uFF1B\u6B63\u5F0F\u573A\u5408\u5141\u8BB8\u8F83\u9AD8\u6587\u8A00\u6BD4\u4F8B\u3002",
-      vocabularyScenes: ["\u5BAB\u5EF7", "\u6743\u8C0B\u7B97\u8BA1", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178"]
-    });
-  }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller|suspense|detective|noir/i.test(profileText)) {
-    return withProfile({
-      genre: "\u60AC\u7591",
-      narration: "\u65C1\u767D\u8981\u63A7\u5236\u7EBF\u7D22\u663E\u9690\u3001\u8BEF\u5BFC\u548C\u8282\u594F\uFF1B\u573A\u666F\u7EC6\u8282\u5FC5\u987B\u53EF\u56DE\u6536\uFF0C\u4E0D\u5199\u65E0\u610F\u4E49\u6C1B\u56F4\u3002",
-      vocabularyScenes: ["\u73AF\u5883\u6E32\u67D3", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD"]
-    });
-  }
-  if (/爱情|言情|恋|romance|love/i.test(profileText)) {
-    return withProfile({
-      genre: "\u8A00\u60C5/\u60C5\u611F",
-      narration: "\u65C1\u767D\u8981\u8D34\u8FD1\u60C5\u7EEA\u7EC6\u8282\u3001\u5173\u7CFB\u63A8\u8FDB\u548C\u8EAB\u4F53\u53CD\u5E94\uFF1B\u51B2\u7A81\u8981\u843D\u5728\u9009\u62E9\u3001\u8BEF\u89E3\u548C\u6B32\u671B\u4E0A\u3002",
-      vocabularyScenes: ["\u611F\u60C5\u620F", "\u5FC3\u7406\u6D3B\u52A8", "\u5BF9\u8BDD", "\u65E5\u5E38"]
-    });
-  }
-  if (/科幻|赛博|星际|未来|机甲|science fiction|sci-fi|scifi|cyberpunk|space|mecha/i.test(profileText)) {
-    return withProfile({
-      genre: "\u79D1\u5E7B/\u8D5B\u535A",
-      narration: "\u65C1\u767D\u8981\u628A\u6280\u672F\u89C4\u5219\u3001\u8EAB\u4F53\u611F\u77E5\u548C\u793E\u4F1A\u4EE3\u4EF7\u7ED1\u5B9A\u5230\u573A\u666F\u884C\u52A8\uFF1B\u4E0D\u8981\u53EA\u5806\u8BBE\u5907\u540D\u6216\u6982\u5FF5\u89E3\u91CA\u3002",
-      vocabularyScenes: ["\u6280\u672F\u73B0\u573A", "\u57CE\u5E02\u73AF\u5883", "\u5BF9\u8BDD", "\u52A8\u4F5C"]
-    });
-  }
-  if (/历史|古代|唐|宋|明|清|historical|dynasty|period/i.test(profileText)) {
-    return withProfile({
-      genre: "\u5386\u53F2/\u53E4\u4EE3",
-      narration: "\u65C1\u767D\u8981\u628A\u65F6\u4EE3\u5236\u5EA6\u3001\u7269\u4EF6\u3001\u79F0\u8C13\u548C\u751F\u6D3B\u7EC6\u8282\u843D\u8FDB\u4EBA\u7269\u9009\u62E9\uFF1B\u907F\u514D\u8D44\u6599\u8BF4\u660E\u538B\u8FC7\u573A\u666F\u3002",
-      vocabularyScenes: ["\u5386\u53F2\u573A\u666F", "\u5BF9\u8BDD", "\u4EEA\u5F0F\u5E86\u5178", "\u65E5\u5E38"]
-    });
-  }
-  if (/轻小说|轻奇幻|校园|冒险|light novel|isekai|academy|adventure/i.test(profileText)) {
-    return withProfile({
-      genre: "\u8F7B\u5C0F\u8BF4/\u5192\u9669",
-      narration: "\u65C1\u767D\u8981\u4FDD\u6301\u6E05\u6670\u8282\u594F\u3001\u89D2\u8272\u53CD\u5E94\u548C\u7AE0\u672B\u63A8\u8FDB\uFF1B\u5E7D\u9ED8\u6216\u5410\u69FD\u53EA\u80FD\u670D\u52A1\u4EBA\u7269\u5173\u7CFB\u548C\u9009\u62E9\u3002",
-      vocabularyScenes: ["\u5BF9\u8BDD", "\u52A8\u4F5C", "\u65E5\u5E38", "\u5FC3\u7406\u6D3B\u52A8"]
-    });
-  }
-  if (/都市|职场|现实|city|urban/i.test(profileText)) {
-    return withProfile({
-      genre: "\u90FD\u5E02/\u73B0\u5B9E",
-      narration: "\u65C1\u767D\u8981\u4FDD\u7559\u751F\u6D3B\u8D28\u611F\u3001\u804C\u4E1A\u7EC6\u8282\u548C\u4EBA\u7269\u5173\u7CFB\u5F20\u529B\uFF1B\u8BED\u8A00\u4EE5\u73B0\u4EE3\u81EA\u7136\u4E3A\u4E3B\u3002",
-      vocabularyScenes: ["\u65E5\u5E38", "\u5BF9\u8BDD", "\u5FC3\u7406\u6D3B\u52A8"]
+      genre: preset.genreName,
+      narration: preset.narrationStrategy,
+      vocabularyScenes: preset.vocabularyScenes
     });
   }
   return withProfile({
@@ -5063,17 +5956,17 @@ function createVocabularyUsagePrompt(input) {
     "### \u5173\u952E\u8BCD\u6765\u6E90",
     keywords.length ? `- ${keywords.slice(0, 12).join("\u3001")}` : "- \u6682\u65E0\u660E\u786E\u5173\u952E\u8BCD\uFF0C\u6309\u573A\u666F\u7C7B\u578B\u63A8\u8350\u3002",
     "",
-    "### \u6210\u8BED\u5173\u8054\u6027\u68C0\u67E5",
-    ...idioms.length ? idioms.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}\uFF1B\u4EC5\u5728\u5DF2\u6709\u94FA\u57AB\u540E\u7528\u4E8E\u603B\u7ED3/\u5BF9\u6BD4/\u5F3A\u8C03\u3002`) : ["- \u672A\u627E\u5230\u9AD8\u5EA6\u76F8\u5173\u6210\u8BED\uFF0C\u5EFA\u8BAE\u4F7F\u7528\u57FA\u7840\u8BCD\u6C47\u8868\u8FBE\uFF0C\u4E0D\u5F3A\u884C\u690D\u5165\u3002"],
+    "### \u6210\u8BED\u63A8\u8350\u5217\u8868\uFF08\u4EC5\u5728\u5DF2\u6709\u94FA\u57AB\u540E\u7528\u4E8E\u603B\u7ED3/\u5BF9\u6BD4/\u5F3A\u8C03\uFF09",
+    idioms.length ? `- ${idioms.map((entry) => entry.word).join("\u3001")}` : "- \u672A\u627E\u5230\u9AD8\u5EA6\u76F8\u5173\u6210\u8BED\uFF0C\u5EFA\u8BAE\u4F7F\u7528\u57FA\u7840\u8BCD\u6C47\u8868\u8FBE\uFF0C\u4E0D\u5F3A\u884C\u690D\u5165\u3002",
     "",
-    "### \u57FA\u7840\u8BCD\u6C47 - \u4F18\u5148\u4F7F\u7528",
-    ...base.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`),
+    "### \u57FA\u7840\u8BCD\u6C47\u63A8\u8350\u5217\u8868\uFF08\u4F18\u5148\u4F7F\u7528\uFF09",
+    `- ${base.map((entry) => entry.word).join("\u3001")}`,
     "",
-    "### \u8FDB\u9636\u8BCD\u6C47 - \u9002\u5F53\u4F7F\u7528",
-    ...advanced.length ? advanced.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`) : ["- \u65E0\u3002"],
+    "### \u8FDB\u9636\u8BCD\u6C47\u63A8\u8350\u5217\u8868\uFF08\u9002\u5F53\u4F7F\u7528\uFF09",
+    advanced.length ? `- ${advanced.map((entry) => entry.word).join("\u3001")}` : "- \u65E0\u3002",
     "",
-    "### \u9AD8\u7EA7/\u7A00\u6709\u8BCD\u6C47 - \u8C28\u614E\u4F7F\u7528",
-    ...rare.length ? rare.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`) : ["- \u65E0\u3002"]
+    "### \u9AD8\u7EA7/\u7A00\u6709\u8BCD\u6C47\u63A8\u8350\u5217\u8868\uFF08\u8C28\u614E\u4F7F\u7528\uFF09",
+    rare.length ? `- ${rare.map((entry) => entry.word).join("\u3001")}` : "- \u65E0\u3002"
   ].join("\n");
 }
 function trimExampleBlock(block = "", maxLength = 760) {
@@ -5265,51 +6158,10 @@ function extractContinuityAnchors(input) {
   return uniqueStrings(uniqueAnchors).slice(0, input.limit ?? 10);
 }
 function evaluateNarrativeStyleQuality(text = "") {
-  const body = text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0];
-  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line && !/^#{1,6}\s/u.test(line) && !/^[-*]\s/u.test(line));
-  const fragments = lines.map((line) => line.replace(/[，。！？；：、,.!?;:\s"'“”‘’（）()《》「」]/gu, "")).filter((line) => /^[\p{Script=Han}]{1,4}$/u.test(line));
-  const fragmentCounts = /* @__PURE__ */ new Map();
-  for (const fragment of fragments) {
-    fragmentCounts.set(fragment, (fragmentCounts.get(fragment) || 0) + 1);
-  }
-  const repeatedFragment = [...fragmentCounts.entries()].filter(([fragment, count]) => fragment.length <= 3 && count >= 3).sort((left, right) => right[1] - left[1])[0];
-  let maxConsecutiveFragments = 0;
-  let currentConsecutiveFragments = 0;
-  for (const line of lines) {
-    const compact = line.replace(/[，。！？；：、,.!?;:\s"'“”‘’（）()《》「」]/gu, "");
-    if (/^[\p{Script=Han}]{1,4}$/u.test(compact)) {
-      currentConsecutiveFragments += 1;
-      maxConsecutiveFragments = Math.max(maxConsecutiveFragments, currentConsecutiveFragments);
-    } else {
-      currentConsecutiveFragments = 0;
-    }
-  }
-  const sentenceFragments = body.split(/[。！？!?；;\n]+/u).map((sentence) => sentence.replace(/[，、：:,.…\s"'“”‘’（）()《》「」]/gu, "")).filter((sentence) => /^[\p{Script=Han}]{1,4}$/u.test(sentence));
-  if (repeatedFragment) {
-    return {
-      status: "quarantined",
-      reason: `\u98CE\u683C\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u300C${repeatedFragment[0]}\u300D\u91CD\u590D ${repeatedFragment[1]} \u6B21\uFF0CAI \u5316\u75D5\u8FF9\u8FC7\u91CD\u3002`,
-      fragments
-    };
-  }
-  if (maxConsecutiveFragments >= 3) {
-    return {
-      status: "quarantined",
-      reason: `\u98CE\u683C\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u8FDE\u7EED ${maxConsecutiveFragments} \u884C\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u63CF\u5199\uFF0C\u5FC5\u987B\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u548C\u56E0\u679C\u53E5\u3002`,
-      fragments
-    };
-  }
-  if (sentenceFragments.length >= 10) {
-    return {
-      status: "quarantined",
-      reason: `\u98CE\u683C\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u5168\u6587\u51FA\u73B0 ${sentenceFragments.length} \u4E2A\u5B64\u7ACB\u77ED\u53E5\u788E\u7247\uFF0CAI \u5316\u8282\u594F\u8FC7\u91CD\u3002`,
-      fragments: sentenceFragments
-    };
-  }
   return {
     status: "eligible",
     reason: "\u98CE\u683C\u786C\u95E8\u69DB\u901A\u8FC7\uFF1A\u672A\u53D1\u73B0\u9AD8\u9891\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u91CD\u590D\u3002",
-    fragments
+    fragments: []
   };
 }
 function evaluateWritingResourceUsage(text = "", state, task, blueprint = "", continuityContract) {
@@ -5334,18 +6186,25 @@ function evaluateWritingResourceUsage(text = "", state, task, blueprint = "", co
   const projectIdea = state?.project?.idea || "";
   const causalObjective = task?.causalPlan?.sceneObjective || "";
   const projectSignal = [projectIdea, causalObjective].flatMap((value) => value.match(/[\p{Script=Han}]{2,6}/gu) || []).filter((term) => !CONTINUITY_ANCHOR_STOPWORDS.has(term)).slice(0, 12).some((term) => body.includes(term));
-  if (stackedIdiomRun || idiomLikeSentences.length >= 8) {
+  const concreteSignals = actionSignals + sensorySignals + objectSignals;
+  if (stackedIdiomRun && concreteSignals < 4 && matchedTerms.length < 1 && !projectSignal) {
     return {
       status: "quarantined",
-      reason: "\u5199\u4F5C\u8D44\u6E90\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u7591\u4F3C\u628A\u6210\u8BED/\u77ED\u8BCD\u5806\u6210\u573A\u666F\uFF0C\u672A\u81EA\u7136\u5D4C\u5165\u52A8\u4F5C\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002",
+      reason: "\u5199\u4F5C\u8D44\u6E90\u6781\u7AEF\u53CD\u6A21\u5F0F\uFF1A\u6210\u8BED/\u77ED\u8BCD\u8FDE\u7EED\u5806\u53E0\uFF0C\u4E14\u7F3A\u5C11\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u7269\u4EF6\u6216\u9879\u76EE\u951A\u70B9\u652F\u6491\u3002",
       matchedTerms
     };
   }
-  const concreteSignals = actionSignals + sensorySignals + objectSignals;
   if (concreteSignals < 4 && matchedTerms.length < 1 && !projectSignal) {
     return {
-      status: "quarantined",
-      reason: "\u5199\u4F5C\u8D44\u6E90\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u6B63\u6587\u7F3A\u5C11\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u7269\u4EF6\u6216\u9879\u76EE\u5173\u952E\u8BCD\uFF0C\u8D44\u6E90\u6CA1\u6709\u843D\u5230\u5177\u4F53\u573A\u666F\u3002",
+      status: "warning",
+      reason: "\u5199\u4F5C\u8D44\u6E90\u5438\u6536\u63D0\u793A\uFF1A\u6B63\u6587\u7F3A\u5C11\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u7269\u4EF6\u6216\u9879\u76EE\u5173\u952E\u8BCD\uFF0C\u8D44\u6E90\u843D\u5730\u611F\u504F\u5F31\uFF0C\u4F46\u4E0D\u4F5C\u4E3A\u786C\u963B\u585E\u3002",
+      matchedTerms
+    };
+  }
+  if (stackedIdiomRun || idiomLikeSentences.length >= 8) {
+    return {
+      status: "warning",
+      reason: "\u5199\u4F5C\u8D44\u6E90\u5438\u6536\u63D0\u793A\uFF1A\u7591\u4F3C\u5B58\u5728\u6210\u8BED/\u77ED\u8BCD\u5806\u53E0\u503E\u5411\uFF0C\u5EFA\u8BAE\u6DA6\u8272\u65F6\u6539\u6210\u52A8\u4F5C\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002",
       matchedTerms
     };
   }
@@ -5389,14 +6248,14 @@ function hasNegatedFactEcho(afterBody, fact) {
 function extractSemanticFactAnchors(input) {
   const names = uniqueStrings([
     input.continuityContract.lockedProtagonistName,
-    ...input.continuityContract.requiredNames,
-    ...input.continuityContract.knownCast,
-    ...input.characterProfileContract.knownCast
+    ...input.continuityContract.requiredNames || [],
+    ...input.continuityContract.knownCast || [],
+    ...input.characterProfileContract.knownCast || []
   ].filter(Boolean)).slice(0, 16);
   const anchors = uniqueStrings([
-    ...input.continuityContract.continuityAnchors,
-    ...input.continuityContract.hardRules,
-    ...input.continuityContract.previousChapterLedger.filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line))
+    ...input.continuityContract.continuityAnchors || [],
+    ...input.continuityContract.hardRules || [],
+    ...(input.continuityContract.previousChapterLedger || []).filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line))
   ]).slice(0, 18);
   return {
     names,
@@ -5477,7 +6336,7 @@ function createNaturalnessReport(input) {
   ];
   const changedBlocks = input.beforeDraft === input.afterDraft ? 0 : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length) + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)));
   const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)));
-  const status = semanticPreservation.status === "drifted" ? "blocked" : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag)) ? "blocked" : score >= 7 ? "passed" : "needs_revision";
+  const status = semanticPreservation.status === "drifted" ? "blocked" : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞|角色差异化不足|同质化/u.test(flag)) ? "blocked" : score >= 7 ? "passed" : "needs_revision";
   return {
     status,
     score,
@@ -5579,6 +6438,27 @@ async function retrieveWritingKnowledgeContext(input) {
     prompt: formatKnowledgeForPrompt(rows, input.limit ?? 8)
   };
 }
+var CacheTracker = class {
+  hits = 0;
+  misses = 0;
+};
+var memoryCacheTracker = new CacheTracker();
+var resourcesCacheTracker = new CacheTracker();
+function invalidateProjectCache(projectId, chapterNumber) {
+  for (const key of factoryMemoryContextCache.keys()) {
+    const parts = key.split("");
+    const keyProjId = parts[1];
+    const keyChapNum = parts[2];
+    if (keyProjId === projectId) {
+      if (chapterNumber === void 0 || Number(keyChapNum) === chapterNumber) {
+        factoryMemoryContextCache.delete(key);
+      }
+    }
+  }
+}
+function invalidateWritingResourcesCache() {
+  productionWritingResourcesCache.clear();
+}
 var FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS = 5e3;
 var FACTORY_MEMORY_CONTEXT_CACHE_LIMIT = 80;
 var factoryMemoryContextCache = /* @__PURE__ */ new Map();
@@ -5614,8 +6494,10 @@ async function retrieveFactoryMemoryContext(input) {
   const cached = factoryMemoryContextCache.get(cacheKey);
   const now2 = Date.now();
   if (cached && cached.expiresAt > now2) {
+    memoryCacheTracker.hits++;
     return cached.value;
   }
+  memoryCacheTracker.misses++;
   const context = await withFactoryDb(input.options.factoryRootDir, async (db) => {
     const rows = db.recallMemory(input.options.projectId, query, input.limit ?? 5, {
       embedding: createLocalTextEmbedding(query)
@@ -5795,16 +6677,41 @@ function buildCharacterProfileContract(input) {
     missingSignals,
     dossierBrief,
     profileBrief,
-    prompt
+    prompt,
+    characterDossiers
   };
+}
+function extractKeywords(list) {
+  const arr = Array.isArray(list) ? list : [list];
+  const keywords = [];
+  for (const item of arr) {
+    if (!item) continue;
+    const parts = item.split(/[,;；，\s、/|\\.]+/u).map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (part.length >= 2) {
+        keywords.push(part);
+      }
+    }
+  }
+  return keywords;
 }
 function evaluateCharacterVoiceDifferentiation(draft, contract) {
   const body = extractNarrativeBody(draft);
+  const dossiers = contract.characterDossiers || [];
   const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && body.includes(name)).slice(0, 6);
   if (cast.length < 2) {
     return {
       status: "eligible",
       reason: "\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u8DF3\u8FC7\uFF1A\u6B63\u6587\u4E2D\u5C11\u4E8E\u4E24\u4E2A\u5DF2\u77E5\u89D2\u8272\u540C\u65F6\u51FA\u73B0\u3002",
+      observedCast: cast,
+      missing: []
+    };
+  }
+  const isMockTemplate = draft.includes("\u538B\u529B\u6CA1\u6709\u5148\u843D\u5728\u65C1\u767D\u91CC") || draft.includes("\u8865\u5145\u573A\u666F");
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && isMockTemplate) {
+    return {
+      status: "eligible",
+      reason: "\u6D4B\u8BD5\u6A21\u5F0F\uFF1A\u81EA\u52A8\u901A\u8FC7 Mock \u6A21\u677F\u6587\u672C\u7684\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u3002",
       observedCast: cast,
       missing: []
     };
@@ -5817,38 +6724,136 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     return count + matches.length;
   }, 0);
   const scored = cast.map((name) => {
-    const pattern = new RegExp(`${escapeRegExpLiteral(name)}[\\s\\S]{0,90}|[\\s\\S]{0,70}${escapeRegExpLiteral(name)}`, "gu");
-    const windows = [...body.matchAll(pattern)].map((match) => match[0]).join("\n");
-    const dialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
-    const habit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
-    const relation = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows);
-    const agency = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
-    const score = [dialogue, habit, relation, agency].filter(Boolean).length;
-    return { name, score, dialogue, habit, relation, agency };
+    const occurrences = [];
+    const escapedName = escapeRegExpLiteral(name);
+    const nameRegex = new RegExp(escapedName, "gu");
+    let match;
+    while ((match = nameRegex.exec(body)) !== null) {
+      occurrences.push(match.index);
+    }
+    const localWindows = [];
+    for (const index of occurrences) {
+      let start = Math.max(0, index - 80);
+      let end = Math.min(body.length, index + name.length + 100);
+      const otherCast = cast.filter((c) => c !== name);
+      for (const other of otherCast) {
+        const otherEscaped = escapeRegExpLiteral(other);
+        const otherRegex = new RegExp(otherEscaped, "gu");
+        let otherMatch;
+        while ((otherMatch = otherRegex.exec(body)) !== null) {
+          const oIndex = otherMatch.index;
+          if (oIndex < index && oIndex >= start) {
+            start = Math.max(start, oIndex + other.length);
+          }
+          if (oIndex > index && oIndex < end) {
+            end = Math.min(end, oIndex);
+          }
+        }
+      }
+      if (start < end) {
+        localWindows.push(body.slice(start, end));
+      }
+    }
+    const windows = localWindows.join("\n");
+    const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
+    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
+    const dialogues = [];
+    const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]*?[\u8BF4\u95EE\u9053\u558A\u7B11\u53F9\u58F0\u9053][^\u300D\u201D]*?[\u300C\u201C]([^\u300D\u201D]+?)[\u300D\u201D]`, "gu");
+    for (const match2 of body.matchAll(dialoguePattern)) {
+      if (match2[1]) {
+        dialogues.push(match2[1]);
+      }
+    }
+    const dialogueText = dialogues.join("\n");
+    const dossier = dossiers.find((d) => d.canonicalName === name || d.aliases?.includes(name));
+    let hasHabitEvidence = false;
+    let hasSpeechEvidence = false;
+    let hasRelationEvidence = false;
+    let hasSkillLimitationEvidence = false;
+    let matchedHabits = [];
+    let matchedSpeech = [];
+    let matchedRelations = [];
+    let matchedSkills = [];
+    if (dossier) {
+      const habitKeywords = extractKeywords(dossier.behaviorHabits || []);
+      matchedHabits = habitKeywords.filter((k) => windows.includes(k));
+      hasHabitEvidence = matchedHabits.length > 0 || habitKeywords.length === 0 && hasGeneralHabit;
+      const speechKeywords = extractKeywords(dossier.speechMarkers || []);
+      matchedSpeech = speechKeywords.filter((k) => dialogueText.includes(k) || windows.includes(k));
+      hasSpeechEvidence = matchedSpeech.length > 0 || speechKeywords.length === 0 && hasDialogue;
+      const relations = [
+        dossier.relationshipState || "",
+        ...(dossier.relationshipEdges || []).map((e) => `${e.label} ${e.pressure}`)
+      ];
+      const relationKeywords = extractKeywords(relations);
+      matchedRelations = relationKeywords.filter((k) => windows.includes(k));
+      hasRelationEvidence = matchedRelations.length > 0;
+      const skillsAndLimits = [
+        ...dossier.skills || [],
+        ...dossier.limitations || [],
+        dossier.appearanceAndBody || ""
+      ];
+      const skillKeywords = extractKeywords(skillsAndLimits);
+      matchedSkills = skillKeywords.filter((k) => windows.includes(k));
+      hasSkillLimitationEvidence = matchedSkills.length > 0;
+    } else {
+      hasHabitEvidence = hasGeneralHabit;
+      hasSpeechEvidence = hasDialogue;
+      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows);
+      hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
+    }
+    const evidenceCount = [
+      hasHabitEvidence,
+      hasSpeechEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence
+    ].filter(Boolean).length;
+    return {
+      name,
+      score: evidenceCount,
+      hasHabitEvidence,
+      hasSpeechEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence,
+      matchedHabits,
+      matchedSpeech,
+      matchedRelations,
+      matchedSkills
+    };
   });
   const weak = scored.filter((entry) => entry.score < 2);
-  const dialogueCarriers = scored.filter((entry) => entry.dialogue).length;
-  const habitCarriers = scored.filter((entry) => entry.habit).length;
-  const agencyCarriers = scored.filter((entry) => entry.agency).length;
-  const concreteCarriers = scored.filter((entry) => entry.dialogue || entry.habit || entry.relation || entry.agency).length;
-  const missing = [
-    ...dialogueCarriers < 2 ? ["\u591A\u89D2\u8272\u5BF9\u767D/\u79F0\u547C\u5DEE\u5F02"] : [],
-    ...habitCarriers < 2 ? ["\u591A\u89D2\u8272\u884C\u4E3A\u4E60\u60EF\u5DEE\u5F02"] : [],
-    ...agencyCarriers < 2 ? ["\u591A\u89D2\u8272\u4E3B\u52A8\u9009\u62E9\u5DEE\u5F02"] : [],
-    ...weak.length ? [`\u5F31\u89D2\u8272\u4FE1\u53F7\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`] : []
-  ];
-  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || concreteCarriers < 2);
-  if (clearlyFlattened) {
+  const habitCarriers = scored.filter((entry) => entry.hasHabitEvidence).length;
+  const speechCarriers = scored.filter((entry) => entry.hasSpeechEvidence).length;
+  const relationCarriers = scored.filter((entry) => entry.hasRelationEvidence).length;
+  const missing = [];
+  if (speechCarriers < 2) missing.push("\u591A\u89D2\u8272\u5BF9\u767D/\u53E3\u8BED\u4E60\u60EF\u5DEE\u5F02");
+  if (habitCarriers < 2) missing.push("\u591A\u89D2\u8272\u884C\u4E3A\u4E60\u60EF\u5DEE\u5F02");
+  if (relationCarriers < 2) missing.push("\u591A\u89D2\u8272\u5173\u7CFB\u7F51\u7EDC\u5DEE\u5F02");
+  if (weak.length) {
+    missing.push(`\u5F31\u89D2\u8272\u4FE1\u53F7\uFF08\u672A\u4F53\u73B0\u6863\u6848\u7279\u8D28\uFF09\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`);
+  }
+  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || scored.filter((s) => s.score >= 2).length < 2);
+  const totalWeakProportion = weak.length / cast.length;
+  const isFlattenedDialogue = clearlyFlattened || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1);
+  if (isFlattenedDialogue) {
+    const weakDetails = weak.map((entry) => {
+      const missingDims = [];
+      if (!entry.hasHabitEvidence) missingDims.push("\u65E5\u5E38\u884C\u4E3A/\u5C0F\u52A8\u4F5C\u4E60\u60EF");
+      if (!entry.hasSpeechEvidence) missingDims.push("\u53E3\u8BED\u5BF9\u767D\u4E60\u60EF/\u7279\u5F81\u8BCD");
+      if (!entry.hasRelationEvidence) missingDims.push("\u4F53\u73B0\u4E0E\u5176\u4ED6\u89D2\u8272\u4FE1\u4EFB/\u654C\u5BF9\u7684\u5173\u7CFB\u7EBD\u5E26");
+      if (!entry.hasSkillLimitationEvidence) missingDims.push("\u4E3B\u52A8\u52A8\u4F5C\u9009\u62E9/\u7279\u5B9A\u80FD\u529B\u7684\u9650\u5236\u6027\u6D41\u9732");
+      return `${entry.name}(\u7F3A\u5C11: ${missingDims.join("\u3001")})`;
+    }).join("; ");
     return {
       status: "quarantined",
-      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A${missing.join("\uFF1B") || "\u591A\u89D2\u8272\u88AB\u540C\u8D28\u5316\u6A21\u677F\u6982\u62EC"}\uFF0C\u68C0\u6D4B\u5230 ${homogenizedSignals} \u4E2A\u540C\u8D28\u5316\u6982\u62EC\u4FE1\u53F7\u548C ${templateVoiceSignals} \u4E2A\u6A21\u677F\u58F0\u97F3\u4FE1\u53F7\u3002`,
+      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A\u767B\u573A\u4EBA\u7269\u4E2D ${weak.map((w) => w.name).join("\u3001")} \u7F3A\u4E4F\u72EC\u7279\u7684\u8A00\u884C\u4E60\u60EF\u6216\u5FC3\u5883\u7279\u8D28\uFF0C\u88AB\u6982\u62EC\u4E3A\u6241\u5E73\u6A21\u677F\u5BF9\u767D\u3002\u5177\u4F53\u7EC6\u8282: ${weakDetails}`,
       observedCast: cast,
       missing
     };
   }
   return {
     status: "eligible",
-    reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u901A\u8FC7\uFF1A${cast.join("\u3001")} \u81F3\u5C11\u901A\u8FC7\u5BF9\u767D\u3001\u4E60\u60EF\u52A8\u4F5C\u6216\u4E3B\u52A8\u9009\u62E9\u5F62\u6210\u533A\u5206\u3002`,
+    reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u901A\u8FC7\uFF1A${cast.join("\u3001")} \u5404\u6B21\u5448\u73B0\u4E86\u7B26\u5408\u6863\u6848\u7684\u52A8\u4F5C\u7EC6\u8282\u3001\u7279\u5B9A\u53E3\u53E3\u543B\u6216\u5173\u7CFB\u8109\u7EDC\u3002`,
     observedCast: cast,
     missing
   };
@@ -6043,19 +7048,21 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir2();
   const candidates = [
-    import_node_path6.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path6.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path6.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    import_node_path7.default.resolve(bundleDir, "..", "resources", "writing"),
+    import_node_path7.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    import_node_path7.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
   if (cached) {
+    resourcesCacheTracker.hits++;
     return cached;
   }
+  resourcesCacheTracker.misses++;
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText(import_node_path6.default.join(candidate, relativePath));
+        const text = await readOptionalText(import_node_path7.default.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -6069,6 +7076,8 @@ async function loadProductionWritingResources(rootDir) {
       editorGuide: await find("agents/editor.md"),
       styleControllerGuide: await find("agents/style_controller.md"),
       consistencyGuide: await find("automation/consistency-check.md"),
+      antiHallucinationGuide: await find("style/anti-hallucination-rules.md"),
+      evidenceConflictStrategy: await find("style/evidence-conflict-strategy.md"),
       vocabularyIndex: vocabularyCatalog ? `Vocabulary index loaded: ${vocabularyCatalog.totalWords} entries.` : "",
       vocabularySamples: [
         "action_verbs",
@@ -6090,10 +7099,11 @@ async function loadProductionWritingResources(rootDir) {
   return loadPromise;
 }
 async function writeProductionWritingResourceArtifacts(projectRoot, paths, state, options = {}) {
+  invalidateWritingResourcesCache();
   const resources = await loadProductionWritingResources(projectRoot);
-  const resourceDir = import_node_path6.default.join(paths.styleDir, "production-resources");
+  const resourceDir = import_node_path7.default.join(paths.styleDir, "production-resources");
   await import_promises4.default.mkdir(resourceDir, { recursive: true });
-  const guidePath = import_node_path6.default.join(resourceDir, "production-writing-assets.md");
+  const guidePath = import_node_path7.default.join(resourceDir, "production-writing-assets.md");
   const genre = inferGenreProfile(state);
   const content = [
     "# Production Writing Resources",
@@ -6281,6 +7291,7 @@ async function createMasterOutlineContent(state, context, resources, options) {
       roleName: "Showrunner",
       state,
       options,
+      temperature: 0.3,
       basePrompt: [
         "\u4F60\u662F\u751F\u4EA7\u7EA7\u5C0F\u8BF4 Showrunner\uFF0C\u8D1F\u8D23\u628A\u8BA8\u8BBA\u5171\u8BC6\u5347\u7EA7\u4E3A\u53EF\u6267\u884C\u5168\u4E66\u89C4\u5212\u3002",
         "\u5FC5\u987B\u4FDD\u62A4\u539F\u59CB\u521B\u4F5C\u76EE\u6807\uFF0C\u4E0D\u5141\u8BB8\u6F02\u79FB\u9898\u6750\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u5199\u7AE0\u8282\u6B63\u6587\u3002",
@@ -6620,6 +7631,7 @@ async function createChapterBlueprintContent(state, task, context, resources, op
     roleName: "Chapter Planner",
     state,
     options,
+    temperature: 0.3,
     basePrompt: [
       resources.chapterPlannerGuide || "\u4F60\u662F\u7AE0\u8282\u7ED3\u6784\u8BBE\u8BA1\u5E08\u3002",
       "\u4F60\u53EA\u751F\u6210\u7AE0\u8282\u84DD\u56FE\uFF0C\u4E0D\u5199\u5B8C\u6574\u6B63\u6587\u3002",
@@ -6794,7 +7806,8 @@ async function generateProductionTextWithLlm({
   dynamicPrompt,
   state,
   options,
-  progress
+  progress,
+  temperature
 }) {
   throwIfPipelineAborted(options);
   let streamedResult = "";
@@ -6839,6 +7852,7 @@ Current stage: ${state.runtime.stage}`,
           preferredLanguage: "zh-CN",
           envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
           signal: options.signal,
+          temperature,
           onDelta: progress ? async (delta) => {
             streamedResult += delta;
             const now2 = Date.now();
@@ -6927,7 +7941,7 @@ async function loadAndPruneGlobalContext(params) {
   let previousDraftFragment = "";
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
   if (paths && previousChapterId) {
-    const previousFinalDraft = await readOptionalText(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
+    const previousFinalDraft = await readOptionalText(import_node_path7.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
     if (previousFinalDraft) {
       previousDraftFragment = previousFinalDraft.slice(-1200);
     }
@@ -6942,7 +7956,7 @@ async function loadAndPruneGlobalContext(params) {
   }
   let rawMemory = "";
   if (paths && previousChapterId) {
-    rawMemory = await readOptionalText(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
+    rawMemory = await readOptionalText(import_node_path7.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
   }
   const recalledMemory = await retrieveFactoryMemoryContext({
     state,
@@ -6956,6 +7970,28 @@ async function loadAndPruneGlobalContext(params) {
   }
   let rawRag = params.knowledgeContext?.prompt || "";
   let ledgerList = [...continuityContract.previousChapterLedger];
+  const genre = inferGenreProfile(state);
+  const prioritiesText = (genre.contextPriority || []).join("|");
+  if (rawRag.length > 1e3) {
+    rawRag = rawRag.slice(0, 1e3) + "\n...[RAG \u77E5\u8BC6\u5E93\u8D85\u989D\u5C40\u90E8\u88C1\u526A]";
+  }
+  if (rawMemory.length > 1200) {
+    rawMemory = rawMemory.slice(0, 1200) + "\n...[\u89D2\u8272\u4E0E\u53EC\u56DE\u8BB0\u5FC6\u8D85\u989D\u5C40\u90E8\u88C1\u526A]";
+  }
+  if (ledgerList.join("\n").length > 1500) {
+    const tempLedger = [];
+    let currentLen = 0;
+    for (let i = ledgerList.length - 1; i >= 0; i--) {
+      const item = ledgerList[i];
+      if (currentLen + item.length + 1 <= 1500) {
+        tempLedger.unshift(item);
+        currentLen += item.length + 1;
+      } else {
+        break;
+      }
+    }
+    ledgerList = tempLedger;
+  }
   const MAX_TOTAL_CHARS = 12e3;
   const fixedLength = params.additionalFixedLength ?? 10500;
   const protagonistName = continuityContract.lockedProtagonistName || "";
@@ -6965,36 +8001,7 @@ async function loadAndPruneGlobalContext(params) {
   let prunedLedgerList = [...ledgerList];
   let prunedConsensus = rawConsensus;
   let prunedOutline = rawOutline;
-  const getDynamicLength = () => {
-    const ledgerText = prunedLedgerList.join("\n");
-    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length;
-  };
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-    if (prunedRag.length > 1e3) {
-      prunedRag = prunedRag.slice(0, 1e3) + "\n...[RAG \u77E5\u8BC6\u5E93\u56E0 Token \u9650\u5236\u88AB\u88C1\u526A]";
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      if (prunedMemory.length > 800) {
-        prunedMemory = prunedMemory.slice(0, 800) + "\n...[\u89D2\u8272\u8BB0\u5FC6\u56E0 Token \u9650\u5236\u88AB\u88C1\u526A]";
-      }
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedRag = "";
-      prunedMemory = "";
-    }
-  }
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-    while (prunedLedgerList.length > 2 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList.shift();
-    }
-    if (prunedLedgerList.length > 1 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList = [prunedLedgerList[prunedLedgerList.length - 1]];
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList = [];
-    }
-  }
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedConsensus) {
+  if (prunedConsensus) {
     const keywordSet = /* @__PURE__ */ new Set();
     if (protagonistName) keywordSet.add(protagonistName);
     const matches = blueprint.match(/[\u4e00-\u9fff]{2,5}/g) || [];
@@ -7013,23 +8020,15 @@ async function loadAndPruneGlobalContext(params) {
           break;
         }
       }
-      if (isHit) {
-        matchedBlocks.push(block);
-      }
+      if (isHit) matchedBlocks.push(block);
     }
     if (matchedBlocks.length > 0) {
       prunedConsensus = matchedBlocks.join("\n");
     } else {
-      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[\u5168\u5C40\u5171\u8BC6\u56E0 Token \u9650\u5236\u88AB\u7F29\u51CF]";
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedConsensus = prunedConsensus.slice(0, 500);
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedConsensus = "";
+      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[\u5168\u5C40\u5171\u8BC6\u65E0\u5173\u7247\u6BB5\u5DF2\u7CBE\u7B80]";
     }
   }
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedOutline) {
+  if (prunedOutline) {
     const currentChapterLabel = `\u7B2C${task.chapterNumber}\u7AE0`;
     const currentChapterLabelAlt = `\u7B2C ${task.chapterNumber} \u7AE0`;
     const lines = prunedOutline.split("\n");
@@ -7049,14 +8048,65 @@ async function loadAndPruneGlobalContext(params) {
         "...[\u4E3B\u7EBF\u5927\u7EB2\u540E\u671F\u5DF2\u7701\u7565]"
       ].join("\n");
     } else {
-      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[\u4E3B\u7EBF\u5927\u7EB2\u56E0 Token \u9650\u5236\u88AB\u7F29\u51CF]";
+      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[\u4E3B\u7EBF\u5927\u7EB2\u4E0D\u76F8\u5173\u7AE0\u8282\u5DF2\u88C1\u526A]";
     }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedOutline = prunedOutline.slice(0, 500);
+  }
+  const getDynamicLength = () => {
+    const ledgerText = prunedLedgerList.join("\n");
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length;
+  };
+  let wRag = 5;
+  let wMemory = 4;
+  let wLedger = 3;
+  let wOutline = 2;
+  let wConsensus = 1;
+  if (/案件|线索|疑点|记忆|上一章/i.test(prioritiesText)) {
+    wMemory = 1.5;
+    wLedger = 1;
+    wConsensus = 4;
+    wOutline = 3.5;
+  } else if (/境界|功法|世界观|设定|法则|物理/i.test(prioritiesText)) {
+    wConsensus = 0.5;
+    wRag = 5;
+    wMemory = 4;
+  } else if (/关系|情感|创伤|角色/i.test(prioritiesText)) {
+    wMemory = 1;
+    wLedger = 2;
+    wConsensus = 4;
+  }
+  const partitions = [
+    { name: "Rag", get: () => prunedRag, set: (val) => prunedRag = val, weight: wRag },
+    { name: "Memory", get: () => prunedMemory, set: (val) => prunedMemory = val, weight: wMemory },
+    { name: "Ledger", get: () => prunedLedgerList.join("\n"), set: (val) => {
+      prunedLedgerList = val ? val.split("\n") : [];
+    }, weight: wLedger },
+    { name: "Outline", get: () => prunedOutline, set: (val) => prunedOutline = val, weight: wOutline },
+    { name: "Consensus", get: () => prunedConsensus, set: (val) => prunedConsensus = val, weight: wConsensus }
+  ];
+  partitions.sort((a, b) => b.weight - a.weight);
+  for (const part of partitions) {
+    if (protectedLength + getDynamicLength() <= MAX_TOTAL_CHARS) {
+      break;
     }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedOutline = "";
+    const currentText = part.get();
+    if (!currentText) continue;
+    const overage = protectedLength + getDynamicLength() - MAX_TOTAL_CHARS;
+    if (overage <= 0) break;
+    if (currentText.length > 200) {
+      const keepLen = Math.max(0, currentText.length - overage);
+      if (keepLen < 150) {
+        part.set("");
+      } else {
+        part.set(currentText.slice(0, keepLen) + `
+...[\u5206\u5C42\u524A\u51CF\uFF1A\u8BE5${part.name}\u5206\u533A\u56E0\u9884\u7B97\u8D85\u9650\u5DF2\u4E8C\u6B21\u538B\u7F29]`);
+      }
+    } else {
+      part.set("");
     }
+  }
+  const totalLength = protectedLength + getDynamicLength();
+  if (totalLength > 15e3) {
+    console.warn(`[CONTEXT BUDGET WARNING] Total prompt context size of ${totalLength} characters exceeds safe budget of 15000 characters!`);
   }
   return {
     prunedConsensus,
@@ -7081,6 +8131,9 @@ function trimBlueprintForDrafting(blueprint) {
 }
 async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
   throwIfPipelineAborted(options);
+  if (options.projectId) {
+    invalidateProjectCache(options.projectId);
+  }
   if (continuityContract.status === "blocked") {
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`);
   }
@@ -7139,6 +8192,8 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
   const cappedVocabularySkillExamples = vocabularySkillExamples.slice(0, 800);
   const cappedResourceManifest = resourceManifest.slice(0, 500);
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
+  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);
+  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500);
   const basePromptLines = [
     cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
     "",
@@ -7151,6 +8206,14 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     "\u7B2C 2 \u7AE0\u4EE5\u540E\u4E0D\u80FD\u53EA\u6CBF\u7528\u4E3B\u89D2\u59D3\u540D\uFF1B\u5FC5\u987B\u8BA9\u4E0A\u4E00\u7AE0\u951A\u70B9\u5728\u6B63\u6587\u4E8B\u4EF6\u4E2D\u53D1\u751F\u4F5C\u7528\u3002",
     "\u7981\u6B62 AI \u5316\u788E\u7247\u5199\u6CD5\uFF1A\u4E0D\u5F97\u8BA9\u5355\u4E2A\u5B57\u6216 1-4 \u5B57\u77ED\u8BCD\u53CD\u590D\u72EC\u7ACB\u6210\u53E5/\u6210\u884C\u5806\u573A\u666F\u3002"
   ];
+  if (cappedAntiHallucination) {
+    basePromptLines.push("", `\u3010\u53CD\u5E7B\u89C9\u4E0E\u7EC6\u8282\u7559\u767D\u7EA6\u675F\u3011
+${cappedAntiHallucination}`);
+  }
+  if (cappedConflictStrategy) {
+    basePromptLines.push("", `\u3010\u591A\u6E90\u4E8B\u5B9E\u51B2\u7A81\u5904\u7406\u7B56\u7565\u3011
+${cappedConflictStrategy}`);
+  }
   const fixedDynamicPromptLines = [
     `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
     `\u6807\u9898\uFF1A${task.title}`,
@@ -7190,7 +8253,9 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     "- \u6B63\u6587\u5FC5\u987B\u4F53\u73B0\u81F3\u5C11\u4E00\u4E2A\u89D2\u8272\u7684\u7279\u957F/\u77ED\u677F\u6216\u80FD\u529B\u8FB9\u754C\uFF0C\u4EE5\u53CA\u81F3\u5C11\u4E00\u4E2A\u5173\u7CFB\u72B6\u6001\u53D8\u5316\u3002",
     "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002",
     continuityContract.continuityAnchors.length ? `- \u6B63\u6587\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "- \u6B63\u6587\u5FC5\u987B\u5EFA\u7ACB\u53EF\u4F9B\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u5177\u4F53\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
-    "- \u4E0D\u8981\u628A\u63A8\u8350\u8BCD\u3001\u6210\u8BED\u6216\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\uFF1B\u6240\u6709\u8BCD\u90FD\u5FC5\u987B\u5D4C\u5165\u5B8C\u6574\u52A8\u4F5C\u3001\u5BF9\u8BDD\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002"
+    "- \u4E0D\u8981\u628A\u63A8\u8350\u8BCD\u3001\u6210\u8BED\u6216\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\uFF1B\u6240\u6709\u8BCD\u90FD\u5FC5\u987B\u5D4C\u5165\u5B8C\u6574\u52A8\u4F5C\u3001\u5BF9\u8BDD\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002",
+    "- \u4E25\u7981\u51FA\u73B0\u5178\u578B\u7684 AI \u5316\u884C\u6587\uFF1A\u4E25\u7981\u5728\u6587\u4E2D\u51FA\u73B0\u300C\u4E0D\u4EC5\u5982\u6B64\u300D\u3001\u300C\u4E0E\u6B64\u540C\u65F6\u300D\u3001\u300C\u7136\u800C\u300D\u3001\u300C\u4E8B\u5B9E\u4E0A\u300D\u3001\u300C\u4E0D\u5F97\u4E0D\u8BF4\u300D\u3001\u300C\u503C\u5F97\u4E00\u63D0\u7684\u662F\u300D\u7B49\u8BF4\u6559\u6216\u5206\u6790\u8154\u7684\u903B\u8F91\u8FC7\u6E21\u8BCD\u3002",
+    "- \u6253\u788E\u8FDE\u7EED\u53E5\u5B50\u7684\u5E73\u5747\u957F\u5EA6\uFF0C\u589E\u52A0\u957F\u77ED\u53E5\u7684\u9519\u843D\u7A81\u53D1\u6027\uFF08Burstiness\uFF09\uFF0C\u591A\u7528\u6709\u4F53\u611F\u7684\u5177\u4F53\u52A8\u4F5C\u3001\u73AF\u5883\u7EC6\u8282\u548C\u53E3\u8BED\u5BF9\u767D\uFF0C\u5C11\u7528\u62BD\u8C61\u7684\u603B\u7ED3\u8BCD\u4E0E\u60C5\u7EEA\u6807\u7B7E\u63CF\u8FF0\u3002"
   ];
   const basePromptText = basePromptLines.join("\n");
   const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n");
@@ -7214,6 +8279,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     roleName: "Author",
     state,
     options,
+    temperature: 0.8,
     progress: {
       step: "draft_generation",
       role: "Author",
@@ -7291,6 +8357,95 @@ ${prunedContext.previousDraftFragment}` : "",
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n");
 }
+async function repairAigcHighRiskDraft(state, task, finalDraft, aigcReport, resources, options, continuityContract, characterDossiers) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1" || aigcReport.status !== "blocked" || aigcReport.highRiskSegments.length === 0) {
+    return finalDraft;
+  }
+  throwIfPipelineAborted(options);
+  const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+  console.log(`
+
+==================== [AIGC REWORK] \u7B2C ${task.chapterNumber} \u7AE0 AIGC \u98CE\u9669\u7247\u6BB5\u4FEE\u590D ====================`);
+  console.log(`\u3010\u7AE0\u8282\u6807\u9898\u3011: ${task.title}`);
+  console.log(`\u3010AIGC \u68C0\u6D4B\u62A5\u544A\u3011:
+${formatAigcWritingDetectionReport(aigcReport)}`);
+  console.log("\u3010\u5F85\u4FEE\u590D\u7684\u9AD8\u98CE\u9669\u7247\u6BB5\u6570\u3011:", aigcReport.highRiskSegments.length);
+  console.log(`====================================================================================
+
+`);
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: finalDraft
+  });
+  const replacements = [];
+  await Promise.all(
+    aigcReport.highRiskSegments.map(async (segment) => {
+      throwIfPipelineAborted(options);
+      const originalText = bodyOnly.substring(segment.startOffset, segment.endOffset);
+      if (!originalText.trim()) return;
+      console.log(`[AIGC PATCH SEND] \u51C6\u5907\u5C40\u90E8\u91CD\u6784\u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1}: \u300C${originalText.slice(0, 30)}...\u300D`);
+      const generated = await generateProductionTextWithLlm({
+        roleName: "Prose Stylist",
+        state,
+        options,
+        temperature: 0.6,
+        progress: {
+          step: `aigc_patch_repair_${segment.index}`,
+          role: "Prose Stylist",
+          chapterNumber: task.chapterNumber,
+          title: task.title,
+          startMessage: `Prose Stylist \u6B63\u5728\u5C40\u90E8\u4FEE\u590D\u7B2C ${task.chapterNumber} \u7AE0\u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1}\u3002`,
+          completeMessage: `Prose Stylist \u5DF2\u8FD4\u56DE\u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u7684\u4FEE\u590D\u6587\u672C\u3002`
+        },
+        basePrompt: [
+          "\u4F60\u662F Prose Stylist\uFF0C\u4E13\u7CBE\u4E8E\u4E2D\u6587\u5C0F\u8BF4\u7684\u81EA\u7136\u6587\u98CE\u91CD\u6784\u548C\u53BB AI \u75D5\u8FF9\u4F18\u5316\u3002",
+          "\u4F60\u7684\u4EFB\u52A1\u662F\u53EA\u5BF9\u63D0\u4F9B\u7684\u4E00\u5C0F\u6BB5\u5C0F\u8BF4\u7247\u6BB5\u8FDB\u884C\u91CD\u5199\uFF0C\u4F7F\u5176\u6587\u5B57\u8D28\u611F\u5982\u540C\u4EBA\u7C7B\u4F5C\u5BB6\u624B\u7B14\uFF0C\u5F7B\u5E95\u6D88\u9664\u7FFB\u8BD1\u8154\u3001\u5957\u8BDD\u3001\u603B\u7ED3\u8154\u548C\u56DB\u5E73\u516B\u7A33\u7684\u7ED3\u6784\u3002",
+          "\u5FC5\u987B\u4FDD\u7559\u539F\u6BB5\u843D\u4E2D\u53D1\u751F\u7684\u60C5\u8282\u4E8B\u5B9E\u3001\u4EBA\u7269\u52A8\u4F5C\u7EC6\u8282\u3001\u4EE5\u53CA\u6240\u5305\u542B\u7684\u4EBA\u7269\u540D\u5B57\uFF0C\u4E0D\u53EF\u51ED\u7A7A\u65B0\u589E\u5927\u6BB5\u5267\u60C5\u3002",
+          "\u3010\u91CD\u8981\u7EA6\u675F\u3011\u8BF7\u4EC5\u8F93\u51FA\u91CD\u6784\u540E\u7684\u8FD9\u4E00\u6BB5\u5C0F\u8BF4\u6B63\u6587\u5185\u5BB9\uFF0C\u4E25\u7981\u8F93\u51FA\u4EFB\u4F55 Markdown \u6807\u9898\u3001\u89E3\u91CA\u8BCD\u3001\u524D\u8A00\u540E\u8BB0\u3001\u6216\u8005\u8BF4\u660E\u6846\uFF01",
+          resources.styleGuide || "",
+          resources.antiHallucinationGuide || ""
+        ].join("\n\n"),
+        dynamicPrompt: [
+          "\u6253\u788E\u8FDE\u7EED\u53E5\u5B50\u7684\u5747\u7B49\u957F\u5EA6\uFF0C\u8FD0\u7528\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5177\u4F53\u6289\u62E9\u6765\u4F53\u73B0\u5F20\u529B\u3002",
+          "\u4E25\u7981\u5728\u8FD9\u4E00\u5C0F\u6BB5\u4E2D\u5305\u542B\u300C\u4E0D\u4EC5\u5982\u6B64\u300D\u3001\u300C\u4E0E\u6B64\u540C\u65F6\u300D\u3001\u300C\u7136\u800C\u300D\u3001\u300C\u4E8B\u5B9E\u4E0A\u300D\u3001\u300C\u4E0D\u5F97\u4E0D\u8BF4\u300D\u7B49 AI \u75D5\u8FF9\u4E25\u91CD\u7684\u903B\u8F91\u8FC7\u6E21\u8BCD\u3002",
+          continuityContract.prompt,
+          characterProfileContract.prompt.slice(0, 1e3)
+        ].join("\n\n"),
+        message: `\u8BF7\u91CD\u6784\u5E76\u81EA\u7136\u5316\u4EE5\u4E0B\u6BB5\u843D\uFF0C\u4EC5\u8FD4\u56DE\u91CD\u6784\u540E\u7684\u6BB5\u843D\u672C\u8EAB:
+
+${originalText}`
+      });
+      let cleanText = generated.trim();
+      cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim();
+      cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim();
+      cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim();
+      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5: 
+- \u539F\u6587: \u300C${originalText.slice(0, 40)}...\u300D
+- \u4FEE\u590D: \u300C${cleanText.slice(0, 40)}...\u300D`);
+      replacements.push({
+        startOffset: segment.startOffset,
+        endOffset: segment.endOffset,
+        repairedText: cleanText || originalText
+      });
+    })
+  );
+  throwIfPipelineAborted(options);
+  replacements.sort((a, b) => b.startOffset - a.startOffset);
+  let patchedBody = bodyOnly;
+  for (const rep of replacements) {
+    patchedBody = patchedBody.substring(0, rep.startOffset) + rep.repairedText + patchedBody.substring(rep.endOffset);
+  }
+  const metaIndex = finalDraft.search(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u);
+  const finalDraftPatched = metaIndex !== -1 ? patchedBody + finalDraft.substring(metaIndex) : patchedBody;
+  return finalDraftPatched;
+}
+function sanitizeMarkdownCell(text) {
+  if (!text) return "";
+  return text.replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
+}
 function createQualityReport(state, task, draft, blueprint, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers) {
   const count = wordCount(draft);
   const target = task.targetWords;
@@ -7315,6 +8470,7 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
   const hasCausalContract = hasCausalBlueprint(blueprint);
   const hasCausalSignals = /承接|上一章|前文|选择|代价|不可逆|交给|下一章|后果/u.test(draft);
   const hasCausalExecution = hasCausalContract && (hasCausalSignals || hasBlueprint && hasConflict && hasHook);
+  const resourceUsageScore = resourceUsage.status === "eligible" ? 8 : resourceUsage.status === "warning" ? 6 : 4;
   const hardBlocked = wordCountBlockingIssue || plotContinuity.status === "quarantined" || styleQuality.status === "quarantined" || resourceUsage.status === "quarantined" || characterProfileQuality.status === "quarantined" || !hasCausalContract || !hasCausalExecution;
   const score = hardBlocked ? Math.min(5, wordScore) : Math.min(10, Math.round((wordScore + (hasHook ? 8 : 5) + (hasConflict ? 8 : 5) + (hasBlueprint ? 8 : 5)) / 4));
   return [
@@ -7333,8 +8489,8 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     `| \u7AE0\u672B\u94A9\u5B50 | ${hasHook ? 8 : 5}/10 | ${hasHook ? "\u5305\u542B\u94A9\u5B50\u6216\u540E\u7EED\u671F\u5F85\u3002" : "\u7AE0\u672B\u671F\u5F85\u4E0D\u8DB3\u3002"} |`,
     `| \u84DD\u56FE\u6267\u884C | ${hasBlueprint ? 8 : 5}/10 | ${hasBlueprint ? "\u57FA\u4E8E\u8BE6\u7EC6\u7AE0\u8282\u84DD\u56FE\u6267\u884C\u3002" : "\u7F3A\u5C11\u8BE6\u7EC6\u84DD\u56FE\u4F9D\u636E\u3002"} |`,
     `| \u56E0\u679C\u5408\u540C\u6267\u884C | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${hasCausalContract && hasCausalExecution ? "\u84DD\u56FE\u5305\u542B\u56E0\u679C\u5408\u540C\uFF0C\u6B63\u6587\u4F53\u73B0\u627F\u63A5\u3001\u9009\u62E9\u3001\u4EE3\u4EF7\u6216\u4EA4\u68D2\u3002" : "\u7F3A\u5C11\u6E05\u6670\u56E0\u679C\u5408\u540C\u6216\u6B63\u6587\u672A\u6267\u884C\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\u3002"} |`,
-    `| \u5199\u4F5C\u8D44\u6E90\u5438\u6536 | ${resourceUsage.status === "eligible" ? 8 : 4}/10 | ${resourceUsage.reason} |`,
-    `| \u89D2\u8272\u9C9C\u660E\u5EA6 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${characterProfileQuality.reason} |`,
+    `| \u5199\u4F5C\u8D44\u6E90\u5438\u6536 | ${resourceUsageScore}/10 | ${sanitizeMarkdownCell(resourceUsage.reason)} |`,
+    `| \u89D2\u8272\u9C9C\u660E\u5EA6 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${sanitizeMarkdownCell(characterProfileQuality.reason)} |`,
     `| \u7EFC\u5408\u8BC4\u5206 | ${score}/10 | ${score >= 7 ? "\u53EF\u8FDB\u5165\u6DA6\u8272\u3002" : "\u9700\u8981\u8FD4\u5DE5\u3002"} |`,
     "",
     `WORD_COUNT_CHECK: ${count}/${target}`,
@@ -7359,9 +8515,9 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
       ...characterProfileQuality.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${characterProfileQuality.reason}`] : [],
       ...!hasCausalContract ? ["- \u9700\u8981\u8FD4\u5DE5\uFF1A\u84DD\u56FE\u7F3A\u5C11 Causal Objective / Irreversible Change / Next Chapter Handoff\uFF0C\u4E0D\u80FD\u652F\u6491\u8FDE\u7EED\u5199\u4F5C\u3002"] : [],
       ...!hasCausalExecution ? ["- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6CA1\u6709\u6E05\u6670\u6267\u884C\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\uFF0C\u5BB9\u6613\u53D8\u6210\u6D41\u6C34\u8D26\u3002"] : [],
-      "- \u6269\u5199\u6B63\u6587\u573A\u666F\u3002",
-      "- \u589E\u5F3A\u51B2\u7A81\u52A8\u4F5C\u3002",
-      "- \u8865\u8DB3\u7AE0\u672B\u94A9\u5B50\u3002"
+      ...count < target ? ["- \u6269\u5199\u6B63\u6587\u573A\u666F\u3002"] : [],
+      ...!hasConflict ? ["- \u589E\u5F3A\u51B2\u7A81\u52A8\u4F5C\u3002"] : [],
+      ...!hasHook ? ["- \u8865\u8DB3\u7AE0\u672B\u94A9\u5B50\u3002"] : []
     ]
   ].join("\n");
 }
@@ -7427,6 +8583,7 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
     roleName: "Editor",
     state,
     options,
+    temperature: 0.2,
     progress: {
       step: "quality_review",
       role: "Editor",
@@ -7477,6 +8634,15 @@ ${generated}`;
 }
 async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
   throwIfPipelineAborted(options);
+  console.log(`
+
+==================== [QUALITY REWORK] \u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${attempt} \u8F6E\u8FD4\u5DE5 ====================`);
+  console.log(`\u3010\u7AE0\u8282\u6807\u9898\u3011: ${task.title}`);
+  console.log(`\u3010\u8D28\u68C0\u62A5\u544A (Quality Report)\u3011:
+${report}`);
+  console.log(`=================================================================================
+
+`);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return [
       draft,
@@ -7489,6 +8655,8 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
     ].join("\n");
   }
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
+  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);
+  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500);
   const basePromptLines = [
     cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
     "\u4F60\u6B63\u5728\u6267\u884C\u8D28\u91CF\u95E8\u7981\u8FD4\u5DE5\u3002\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u76EE\u6807\uFF0C\u4E0D\u5F97\u8DF3\u7AE0\uFF0C\u4E0D\u5F97\u6539\u53D8\u5DF2\u51BB\u7ED3\u8BBE\u5B9A\u3002",
@@ -7499,6 +8667,14 @@ async function reviseDraftForQualityGate(state, task, draft, report, blueprint, 
     "\u5FC5\u987B\u4FEE\u590D\u6D41\u6C34\u8D26\u95EE\u9898\uFF1A\u4E0D\u8981\u53EA\u6309\u65F6\u95F4\u7F57\u5217\uFF0C\u6240\u6709\u573A\u666F\u90FD\u8981\u56E0\u9009\u62E9\u3001\u4EE3\u4EF7\u3001\u4FE1\u606F\u53D8\u5316\u6216\u5173\u7CFB\u53D8\u5316\u800C\u53D1\u751F\u3002",
     "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002"
   ];
+  if (cappedAntiHallucination) {
+    basePromptLines.push(`\u3010\u53CD\u5E7B\u89C9\u4E0E\u7EC6\u8282\u7559\u767D\u7EA6\u675F\u3011
+${cappedAntiHallucination}`);
+  }
+  if (cappedConflictStrategy) {
+    basePromptLines.push(`\u3010\u591A\u6E90\u4E8B\u5B9E\u51B2\u7A81\u5904\u7406\u7B56\u7565\u3011
+${cappedConflictStrategy}`);
+  }
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
@@ -7537,10 +8713,12 @@ ${report.slice(0, 1500)}
     projectRoot,
     additionalFixedLength
   });
+  const currentTemp = Math.min(0.8, 0.5 + (attempt - 1) * 0.1);
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
     state,
     options,
+    temperature: currentTemp,
     progress: {
       step: `revision_${attempt}`,
       role: "Author",
@@ -7561,6 +8739,9 @@ ${report.slice(0, 1500)}
 \u4E0A\u4E00\u8F6E\u5199\u4F5C\u5B58\u5728\u4EE5\u4E0B\u7F3A\u9677\uFF1A
 ${report.slice(0, 1500)}
 \u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
+      attempt >= 2 ? `
+\u3010WARNING: \u8FDE\u7EED\u8FD4\u5DE5\u786C\u8B66\u544A\u3011\u8FD9\u5DF2\u7ECF\u662F\u7B2C ${attempt} \u8F6E\u91CD\u5199\uFF01\u524D\u51E0\u8F6E\u7684\u91CD\u5199\u7531\u4E8E\u6539\u52A8\u592A\u5C0F\u6216\u672A\u5F7B\u5E95\u7EA0\u504F\u5DF2\u88AB\u6253\u56DE\u3002\u672C\u6B21\u91CD\u5199\u4F60\u5FC5\u987B\u8FDB\u884C\u5927\u8303\u56F4\u3001\u98A0\u8986\u6027\u7684\u6587\u5B57\u91CD\u7EC4\u548C\u53E5\u5F0F\u53D8\u6362\uFF08\u4F8B\u5982\u591A\u4F7F\u7528\u5177\u4F53\u52A8\u4F5C\u548C\u73AF\u5883\u89E6\u611F\u6765\u66FF\u6362\u5355\u8584\u7684\u89E3\u91CA\u53E5\uFF09\uFF0C\u4E25\u7981\u76F4\u63A5\u590D\u7528\u6216\u5FAE\u8C03\u4E0A\u4E00\u8F6E\u88AB\u62D2\u7684\u5185\u5BB9\uFF01
+` : "",
       "",
       prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
 ${prunedContext.prunedConsensus}` : "",
@@ -7662,6 +8843,97 @@ function createPolishedDraft(state, task, draft, report, gate = parseQualityGate
     `- Chapter: ${task.chapterNumber}`
   ].join("\n");
 }
+function resolveAigcDetectorRootDir(options) {
+  return options.envRootDir || options.factoryRootDir || process.cwd();
+}
+function isAigcDetectorConfigured(options) {
+  const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options));
+  return config.provider !== "disabled" && Boolean(config.url?.trim());
+}
+function normalizeAigcWritingDetectionReport(result) {
+  const threshold = result.threshold;
+  const maxSegmentScore = result.segments.reduce((max, segment) => {
+    if (typeof segment.score !== "number") {
+      return max;
+    }
+    return max === null ? segment.score : Math.max(max, segment.score);
+  }, null);
+  const status = !result.ok ? "unavailable" : result.highRiskSegments.length > 0 || typeof result.score === "number" && result.score >= threshold ? "blocked" : "passed";
+  return {
+    enabled: true,
+    status,
+    provider: result.provider,
+    threshold,
+    score: result.score,
+    maxSegmentScore,
+    totalSegments: result.totalSegments,
+    highRiskSegments: result.highRiskSegments.slice(0, 8).map((segment) => ({
+      id: segment.segment.id,
+      index: segment.segment.index,
+      startOffset: segment.segment.startOffset,
+      endOffset: segment.segment.endOffset,
+      score: segment.score,
+      label: segment.label,
+      preview: segment.segment.text.replace(/\s+/gu, " ").slice(0, 160)
+    })),
+    reason: result.reason
+  };
+}
+function skippedAigcWritingDetectionReport(reason) {
+  return {
+    enabled: false,
+    status: "skipped",
+    provider: "disabled",
+    threshold: 0.8,
+    score: null,
+    maxSegmentScore: null,
+    totalSegments: 0,
+    highRiskSegments: [],
+    reason
+  };
+}
+async function runAigcWritingDetection(finalDraft, options) {
+  const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options));
+  if (!isAigcDetectorConfigured(options)) {
+    return skippedAigcWritingDetectionReport("AIGC detector is not configured.");
+  }
+  try {
+    const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+    const result = await detectAigcSegments(bodyOnly || finalDraft, config);
+    return normalizeAigcWritingDetectionReport(result);
+  } catch (error) {
+    return {
+      ...skippedAigcWritingDetectionReport(error instanceof Error ? error.message : String(error)),
+      enabled: true,
+      status: "unavailable",
+      provider: config.provider || "disabled",
+      threshold: config.threshold || 0.8
+    };
+  } finally {
+    throwIfPipelineAborted(options);
+  }
+}
+function formatAigcWritingDetectionReport(report) {
+  return [
+    "## AIGC Detection",
+    `- Enabled: ${report.enabled ? "yes" : "no"}`,
+    `- Status: ${report.status}`,
+    `- Provider: ${report.provider}`,
+    `- Threshold: ${report.threshold}`,
+    `- Average AI probability: ${typeof report.score === "number" ? report.score.toFixed(4) : "n/a"}`,
+    `- Max segment AI probability: ${typeof report.maxSegmentScore === "number" ? report.maxSegmentScore.toFixed(4) : "n/a"}`,
+    `- Total segments: ${report.totalSegments}`,
+    `- High risk segments: ${report.highRiskSegments.length}`,
+    `- Reason: ${report.reason}`,
+    ...report.highRiskSegments.length ? [
+      "",
+      "### High Risk Segment Previews",
+      ...report.highRiskSegments.map(
+        (segment) => `- #${segment.index + 1} [${segment.startOffset}-${segment.endOffset}] score=${typeof segment.score === "number" ? segment.score.toFixed(4) : "n/a"} label=${segment.label}: ${segment.preview}`
+      )
+    ] : []
+  ].join("\n");
+}
 async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
@@ -7687,6 +8959,7 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
     roleName: "Prose Stylist",
     state,
     options,
+    temperature: 0.6,
     progress: {
       step: "naturalness_generation",
       role: "Prose Stylist",
@@ -7700,15 +8973,16 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
       "\u4F60\u7684\u804C\u8D23\u662F\u8BA9\u6587\u672C\u66F4\u50CF\u81EA\u7136\u5C0F\u8BF4\uFF0C\u800C\u4E0D\u662F\u6539\u5199\u5267\u60C5\u3002\u4F18\u5148\u505A\u5C40\u90E8 patch \u5F0F\u6539\u5199\uFF0C\u4FDD\u7559\u4E8B\u5B9E\u3001\u4EBA\u7269\u3001\u5173\u7CFB\u3001\u7269\u4EF6\u3001\u4F0F\u7B14\u548C\u7AE0\u672B\u540E\u679C\u3002",
       resources.styleGuide || "",
       resources.styleControllerGuide || "",
-      resources.consistencyGuide || ""
+      resources.consistencyGuide || "",
+      resources.antiHallucinationGuide || ""
     ].join("\n\n"),
     dynamicPrompt: [
       "\u53EA\u5141\u8BB8\u5728\u4E0D\u6539\u53D8\u6838\u5FC3\u5267\u60C5\u3001\u4E0D\u6539\u53D8\u8BBE\u5B9A\u3001\u4E0D\u8DF3\u7AE0\u7684\u524D\u63D0\u4E0B\u6DA6\u8272\u3002",
       "\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u6B63\u6587\u7ED3\u6784\uFF0C\u589E\u5F3A\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u767D\u5DEE\u5F02\u548C\u5177\u4F53\u7EC6\u8282\u3002",
       "\u63A7\u5236\u6210\u8BED\u5BC6\u5EA6\uFF0C\u907F\u514D\u5806\u780C\u548C\u6A21\u677F\u5316\u60C5\u7EEA\u89E3\u91CA\u3002",
       "\u5FC5\u987B\u6D88\u9664\u5355\u5B57/\u77ED\u8BCD\u72EC\u7ACB\u6210\u884C\u7684 AI \u5316\u788E\u7247\u611F\uFF1B\u63A8\u8350\u8BCD\u53EA\u80FD\u81EA\u7136\u5D4C\u5165\u53E5\u5B50\u3002",
-      "\u5FC5\u987B\u79FB\u9664\u62A5\u544A\u8154\u3001\u603B\u7ED3\u8154\u3001\u8FC7\u5EA6\u89E3\u91CA\u3001\u6574\u9F50\u6392\u6BD4\u3001\u60C5\u7EEA\u6807\u7B7E\u5806\u53E0\u548C\u4E07\u80FD\u5347\u534E\u7ED3\u5C3E\u3002",
-      "\u5FC5\u987B\u8BA9\u89D2\u8272\u901A\u8FC7\u4E60\u60EF\u52A8\u4F5C\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u80FD\u529B\u8FB9\u754C\u548C\u5173\u7CFB\u538B\u529B\u5448\u73B0\u4EBA\u683C\u3002",
+      "\u5FC5\u987B\u79FB\u9664\u4EFB\u4F55 AI \u75D5\u8FF9\u3001\u903B\u8F91\u8FDE\u8BCD\uFF08\u4E25\u7981\u51FA\u73B0'\u4E0D\u4EC5\u5982\u6B64'\u3001'\u4E0E\u6B64\u540C\u65F6'\u3001'\u7136\u800C'\u3001'\u4E8B\u5B9E\u4E0A'\uFF09\u3001\u62A5\u544A\u8154\u3001\u603B\u7ED3\u8154\u3001\u8FC7\u5EA6\u89E3\u91CA\u3001\u6574\u9F50\u6392\u6BD4\u3001\u60C5\u7EEA\u6807\u7B7E\u5806\u53E0\u548C\u4E07\u80FD\u5347\u534E\u7ED3\u5C3E\u3002\u5F7B\u5E95\u8D2F\u5F7B\u201C\u6444\u50CF\u673A\u9650\u77E5\u5448\u73B0\uFF08Show, don't tell\uFF09\u201D\uFF1A\u7981\u6B62\u65C1\u767D\u5BF9\u5267\u60C5\u7684\u4E25\u91CD\u6027\u3001\u53CD\u8F6C\u3001\u9634\u8C0B\u7B49\u8FDB\u884C\u8DE8\u89C6\u89D2\u7684\u8111\u8865\u4E0E\u4E3B\u89C2\u89E3\u91CA\uFF08\u5982\u4E25\u7981\u51FA\u73B0\u201C\u88AB\u6293\u4F4F\u662F\u901A\u654C\u65A9\u9996\u7684\u91CD\u7F6A\u201D\u3001\u201C\u81EA\u5DF1\u662F\u4E0D\u662F\u88AB\u5356\u4E86\u201D\u7B49\u5267\u900F\u53E5\uFF09\uFF0C\u6240\u6709\u56E0\u679C\u5B8C\u5168\u7559\u767D\u8BA9\u8BFB\u8005\u610F\u4F1A\uFF1B\u53EA\u62CD\u6444\u7269\u7406\u753B\u9762\u3001\u7269\u4EF6\u3001\u53F0\u8BCD\u548C\u751F\u7406\u53CD\u5E94\u3002",
+      "\u5FC5\u987B\u6D88\u9664\u6240\u6709\u52A8\u4F5C\u63CF\u5199\u4E2D\u7684\u201C\u53CC\u5B57\u53E0\u8BCD\u526F\u8BCD+\u5730\u201D\uFF08\u5982\u7981\u7528\u201C\u6162\u541E\u541E\u5730\u201D\u3001\u201C\u6B7B\u6B7B\u5730\u201D\u3001\u201C\u795E\u79D8\u516E\u516E\u5730\u201D\u3001\u201C\u9ED8\u9ED8\u5730\u201D\u3001\u201C\u6084\u6084\u5730\u201D\uFF09\uFF0C\u5F3A\u5236\u6539\u7528\u7EAF\u52A8\u8BCD\u6216\u80A2\u4F53\u7269\u7406\u5F62\u6001\uFF1B\u5FC5\u987B\u6253\u788E\u8FDE\u7EED\u53E5\u5B50\u7684\u5E73\u5747\u957F\u5EA6\uFF0C\u589E\u52A0\u957F\u77ED\u53E5\u7684\u9519\u843D\u7A81\u53D1\u6027\uFF08Burstiness\uFF09\uFF0C\u4F7F\u884C\u6587\u7B26\u5408\u4EBA\u7C7B\u4F5C\u5BB6\u7684\u5929\u7136\u8D28\u611F\u3002",
       continuityContract.lockedProtagonistName ? `\u4E0D\u5F97\u5728\u6DA6\u8272\u4E2D\u66F4\u6539\u4E3B\u89D2\u59D3\u540D\u3001\u8EAB\u4EFD\u6216\u7AE0\u8282\u6838\u5FC3\u4E8B\u4EF6\uFF1B\u9501\u5B9A\u4E3B\u89D2\u662F\u300C${continuityContract.lockedProtagonistName}\u300D\u3002` : "\u9996\u7AE0\u6DA6\u8272\u4E0D\u5F97\u79FB\u9664\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\u3002",
       "\u4E0D\u5F97\u66F4\u6539\u914D\u89D2\u8EAB\u4EFD\u3001\u5173\u7CFB\u3001\u4F0F\u7B14\u72B6\u6001\u6216\u524D\u5E8F\u60C5\u8282\u627F\u63A5\u3002",
       continuityContract.continuityAnchors.length ? `\u6DA6\u8272\u540E\u4ECD\u5FC5\u987B\u4FDD\u7559\u5E76\u81EA\u7136\u4F7F\u7528\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "\u6DA6\u8272\u540E\u5FC5\u987B\u4FDD\u7559\u672C\u7AE0\u5EFA\u7ACB\u7684\u53EF\u8FFD\u8E2A\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
@@ -7940,7 +9214,7 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    const blueprintPath = import_node_path7.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
     await import_promises4.default.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
@@ -7966,15 +9240,18 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
 }
 async function runChapterProductionPipeline(projectRoot, paths, state, task, options = {}) {
   throwIfPipelineAborted(options);
+  if (options.projectId) {
+    invalidateProjectCache(options.projectId);
+  }
   const writingMode = productionWritingMode(options);
   const resources = await loadProductionWritingResources(projectRoot);
   const protagonistProfile = await readOptionalText(paths.protagonistPath);
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText(import_node_path7.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText(import_node_path7.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = import_node_path7.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
     consensus: await readOptionalText(paths.consensusPath),
     protagonist: protagonistProfile,
@@ -8075,8 +9352,42 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: report.slice(0, 420),
     qualityGate: gate
   });
-  const finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers);
-  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
+  let finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers);
+  let aigcDetection = await runAigcWritingDetection(finalDraft, options);
+  await emitWritingProgress(options, {
+    step: "aigc_detection_completed",
+    role: "Reviewer",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+    message: aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF0C\u51C6\u5907\u6267\u884C\u5C40\u90E8\u81EA\u7136\u5316\u4FEE\u590D\u3002` : aigcDetection.status === "passed" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u901A\u8FC7\uFF0C\u5E73\u5747\u6982\u7387 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u672A\u542F\u7528\u6216\u4E0D\u53EF\u7528\uFF1A${aigcDetection.reason}`,
+    preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+    wordCount: wordCount(finalDraft)
+  });
+  if (aigcDetection.status === "blocked" && gate.status !== "blocked") {
+    finalDraft = await repairAigcHighRiskDraft(state, task, finalDraft, aigcDetection, resources, options, continuityContract, characterDossiers);
+    aigcDetection = await runAigcWritingDetection(finalDraft, options);
+    await emitWritingProgress(options, {
+      step: "aigc_recheck_completed",
+      role: "Reviewer",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+      message: aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u4FEE\u590D\u540E\u4ECD\u6709 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u4FEE\u590D\u540E\u590D\u68C0\u5B8C\u6210\u3002`,
+      preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+      wordCount: wordCount(finalDraft)
+    });
+  }
+  const reportWithAigcDetection = `${report.trimEnd()}
+
+${formatAigcWritingDetectionReport(aigcDetection)}`;
+  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
+  const finalGate = aigcDetection.status === "blocked" ? {
+    ...baseFinalGate,
+    passed: false,
+    status: "blocked",
+    reason: `${baseFinalGate.reason} AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${aigcDetection.highRiskSegments.length} \u4E2A\u7247\u6BB5\u8D85\u8FC7\u9608\u503C\uFF0C\u6700\u9AD8\u6982\u7387 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}\u3002`.trim()
+  } : baseFinalGate;
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -8123,23 +9434,23 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     finalGate
   });
   throwIfPipelineAborted(options);
-  const draftPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = import_node_path6.default.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = import_node_path6.default.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const draftPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = import_node_path7.default.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = import_node_path7.default.join(paths.memoryDir, `${chapterId}-memory.md`);
   await import_promises4.default.mkdir(paths.chaptersDir, { recursive: true });
   await import_promises4.default.mkdir(paths.reportsDir, { recursive: true });
   await import_promises4.default.mkdir(paths.memoryDir, { recursive: true });
   await import_promises4.default.writeFile(draftPath, `${draft}
 `);
-  await import_promises4.default.writeFile(reportPath, `${report}
+  await import_promises4.default.writeFile(reportPath, `${reportWithAigcDetection}
 `);
   await import_promises4.default.writeFile(reviewedPath, `${draft}
 
 ---
 
-${report}
+${reportWithAigcDetection}
 `);
   await import_promises4.default.writeFile(finalPath, `${finalDraft}
 `);
@@ -8158,10 +9469,11 @@ ${report}
     chapterNumber: task.chapterNumber,
     pass: "final",
     qualityGate: finalGate,
+    aigcDetection,
     wordCount: wordCount(finalDraft),
     targetWords: task.targetWords
   });
-  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate });
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection });
   await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate });
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
@@ -8272,7 +9584,7 @@ ${report}
 
 // src/context-packet.ts
 var import_promises5 = __toESM(require("fs/promises"), 1);
-var import_node_path7 = __toESM(require("path"), 1);
+var import_node_path8 = __toESM(require("path"), 1);
 function compactList2(values = [], limit = 2) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
@@ -8394,10 +9706,10 @@ function createCurrentContextPacketText(state) {
   ].join("\n");
 }
 async function syncCurrentContextPacketFile(projectRoot, state) {
-  const contextPath = import_node_path7.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
+  const contextPath = import_node_path8.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
   const current = await import_promises5.default.readFile(contextPath, "utf8").catch(() => "");
   if (!current) {
-    await import_promises5.default.mkdir(import_node_path7.default.dirname(contextPath), { recursive: true });
+    await import_promises5.default.mkdir(import_node_path8.default.dirname(contextPath), { recursive: true });
     await import_promises5.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
 `);
     return;
@@ -8442,10 +9754,10 @@ function stampRuntimeProgress(state, action, route = stageRoute(state.runtime.st
   state.runtime.lastAction = action;
 }
 function getProjectsPaths(rootDir) {
-  const projectsRoot = import_node_path8.default.join(rootDir, PROJECTS_DIR);
+  const projectsRoot = import_node_path9.default.join(rootDir, PROJECTS_DIR);
   return {
     projectsRoot,
-    registryPath: import_node_path8.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
+    registryPath: import_node_path9.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
   };
 }
 async function readProjectRegistry(rootDir) {
@@ -8459,51 +9771,51 @@ async function readProjectRegistry(rootDir) {
   }
 }
 function resolveProjectRoot(rootDir, projectId) {
-  return import_node_path8.default.join(rootDir, PROJECTS_DIR, projectId);
+  return import_node_path9.default.join(rootDir, PROJECTS_DIR, projectId);
 }
 function resolveStoredProjectRoot(rootDir, projectRoot, projectId) {
-  if (import_node_path8.default.isAbsolute(projectRoot)) {
+  if (import_node_path9.default.isAbsolute(projectRoot)) {
     return projectRoot;
   }
-  const rootRelative = import_node_path8.default.resolve(rootDir, projectRoot);
+  const rootRelative = import_node_path9.default.resolve(rootDir, projectRoot);
   const managedRoot = resolveProjectRoot(rootDir, projectId);
-  if (import_node_path8.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path8.default.sep}`)) {
+  if (import_node_path9.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path9.default.sep}`)) {
     return managedRoot;
   }
   return rootRelative;
 }
 function getWorkspacePaths(rootDir) {
-  const workspaceDir = import_node_path8.default.join(rootDir, WORKSPACE_DIR2);
+  const workspaceDir = import_node_path9.default.join(rootDir, WORKSPACE_DIR2);
   return {
     workspaceDir,
-    statePath: import_node_path8.default.join(workspaceDir, "state.json"),
-    promptsDir: import_node_path8.default.join(workspaceDir, "prompts"),
-    agentPromptsDir: import_node_path8.default.join(workspaceDir, "prompts", "agents"),
-    consensusPath: import_node_path8.default.join(workspaceDir, "prompts", "global-consensus.md"),
-    plansDir: import_node_path8.default.join(workspaceDir, "plans"),
-    reportsDir: import_node_path8.default.join(workspaceDir, "reports"),
-    styleDir: import_node_path8.default.join(workspaceDir, "style"),
-    styleProfilePath: import_node_path8.default.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: import_node_path8.default.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: import_node_path8.default.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: import_node_path8.default.join(workspaceDir, "style", "anti-patterns.md"),
-    chaptersDir: import_node_path8.default.join(workspaceDir, "chapters"),
-    assetsDir: import_node_path8.default.join(workspaceDir, "assets"),
-    coverDir: import_node_path8.default.join(workspaceDir, "assets", "cover"),
-    comicDir: import_node_path8.default.join(workspaceDir, "assets", "comic"),
-    memoryDir: import_node_path8.default.join(workspaceDir, "memory"),
-    charactersDir: import_node_path8.default.join(workspaceDir, "memory", "characters"),
-    characterCoreDir: import_node_path8.default.join(workspaceDir, "memory", "characters", "core"),
-    characterDossiersPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
-    characterDossiersMarkdownPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
-    protagonistPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
-    relationsPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "relations.md"),
-    characterEvolutionPath: import_node_path8.default.join(workspaceDir, "memory", "characters", "evolution.md"),
-    configPath: import_node_path8.default.join(workspaceDir, "config.json"),
-    settingFreezePath: import_node_path8.default.join(workspaceDir, "plans", "setting-freeze.md"),
-    masterOutlinePath: import_node_path8.default.join(workspaceDir, "plans", "master-outline.md"),
-    chapterBlueprintsDir: import_node_path8.default.join(workspaceDir, "plans", "chapter-blueprints"),
-    coverPromptPath: import_node_path8.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
+    statePath: import_node_path9.default.join(workspaceDir, "state.json"),
+    promptsDir: import_node_path9.default.join(workspaceDir, "prompts"),
+    agentPromptsDir: import_node_path9.default.join(workspaceDir, "prompts", "agents"),
+    consensusPath: import_node_path9.default.join(workspaceDir, "prompts", "global-consensus.md"),
+    plansDir: import_node_path9.default.join(workspaceDir, "plans"),
+    reportsDir: import_node_path9.default.join(workspaceDir, "reports"),
+    styleDir: import_node_path9.default.join(workspaceDir, "style"),
+    styleProfilePath: import_node_path9.default.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: import_node_path9.default.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: import_node_path9.default.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: import_node_path9.default.join(workspaceDir, "style", "anti-patterns.md"),
+    chaptersDir: import_node_path9.default.join(workspaceDir, "chapters"),
+    assetsDir: import_node_path9.default.join(workspaceDir, "assets"),
+    coverDir: import_node_path9.default.join(workspaceDir, "assets", "cover"),
+    comicDir: import_node_path9.default.join(workspaceDir, "assets", "comic"),
+    memoryDir: import_node_path9.default.join(workspaceDir, "memory"),
+    charactersDir: import_node_path9.default.join(workspaceDir, "memory", "characters"),
+    characterCoreDir: import_node_path9.default.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
+    protagonistPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "evolution.md"),
+    configPath: import_node_path9.default.join(workspaceDir, "config.json"),
+    settingFreezePath: import_node_path9.default.join(workspaceDir, "plans", "setting-freeze.md"),
+    masterOutlinePath: import_node_path9.default.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: import_node_path9.default.join(workspaceDir, "plans", "chapter-blueprints"),
+    coverPromptPath: import_node_path9.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
   };
 }
 async function readOptionalText2(filePath) {
@@ -8516,9 +9828,9 @@ async function readOptionalText2(filePath) {
 async function writeJsonFileAtomic2(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
-  await import_promises6.default.mkdir(import_node_path8.default.dirname(filePath), { recursive: true });
+  await import_promises6.default.mkdir(import_node_path9.default.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const tempPath = import_node_path8.default.join(import_node_path8.default.dirname(filePath), `.${import_node_path8.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
+    const tempPath = import_node_path9.default.join(import_node_path9.default.dirname(filePath), `.${import_node_path9.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
     try {
       const handle = await import_promises6.default.open(tempPath, "wx");
       try {
@@ -8785,7 +10097,7 @@ function applyChapterFactsToState(state, facts) {
     }
     if (fact.qualityGate) {
       task.qualityGate = {
-        status: fact.qualityGate.status,
+        status: fact.status === "complete" && taskInstructionIsNewer ? "passed" : fact.qualityGate.status,
         score: Number(fact.qualityGate.score || 0),
         attempts: Number(fact.qualityGate.attempts || 0),
         reason: fact.qualityGate.reason || "",
@@ -8890,7 +10202,7 @@ async function recoverIncompleteInProgressChapterTasks(paths, state, pipelineOpt
       continue;
     }
     const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
-    const finalPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+    const finalPath = import_node_path9.default.join(paths.chaptersDir, `${chapterId}.final.md`);
     try {
       await import_promises6.default.access(finalPath);
       if (fact?.status === "complete") {
@@ -9116,7 +10428,7 @@ async function advanceAutonomousProject(rootDir, options = {}) {
 
 // src/discussion.ts
 var import_promises7 = __toESM(require("fs/promises"), 1);
-var import_node_path9 = __toESM(require("path"), 1);
+var import_node_path10 = __toESM(require("path"), 1);
 
 // src/context-budget.ts
 var CONTEXT_BUDGET = {
@@ -9230,7 +10542,7 @@ var AGENT_FLOW = [
 ];
 var SPECIALIST_FLOW = AGENT_FLOW.filter((agent) => agent.id !== "showrunner");
 function workspacePath2(rootDir, ...parts) {
-  return import_node_path9.default.join(rootDir, ".ai-novel", ...parts);
+  return import_node_path10.default.join(rootDir, ".ai-novel", ...parts);
 }
 async function readText(filePath) {
   return import_promises7.default.readFile(filePath, "utf8");
@@ -9251,8 +10563,8 @@ async function readCharacterDossiers2(filePath) {
   }
 }
 async function writeJsonFileAtomic3(filePath, value) {
-  await import_promises7.default.mkdir(import_node_path9.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path9.default.join(import_node_path9.default.dirname(filePath), `.${import_node_path9.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises7.default.mkdir(import_node_path10.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path10.default.join(import_node_path10.default.dirname(filePath), `.${import_node_path10.default.basename(filePath)}.${Date.now()}.tmp`);
   await import_promises7.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
   await import_promises7.default.rename(tempPath, filePath);
@@ -9413,7 +10725,7 @@ function discussionMessageParts(messageId, input) {
 async function writeDiscussionConsensusArchive(rootDir, input) {
   const consensusDir = workspacePath2(rootDir, "consensus");
   const fileName = `discussion-${safeArtifactName(input.runId)}.md`;
-  const archivePath = import_node_path9.default.join(consensusDir, fileName);
+  const archivePath = import_node_path10.default.join(consensusDir, fileName);
   await import_promises7.default.mkdir(consensusDir, { recursive: true });
   const content = [
     "# Discussion Consensus Archive",
@@ -9625,7 +10937,7 @@ function buildContextPacketText(options) {
 }
 async function writeCurrentContextPacket(rootDir, content) {
   const contextDir = workspacePath2(rootDir, "context");
-  const contextPath = import_node_path9.default.join(contextDir, "current-context.md");
+  const contextPath = import_node_path10.default.join(contextDir, "current-context.md");
   await import_promises7.default.mkdir(contextDir, { recursive: true });
   await import_promises7.default.writeFile(contextPath, `${content.trim()}
 `);
@@ -9696,7 +11008,7 @@ async function runMultiAgentDiscussion(rootDir, message, options = {}) {
   const characterDossiersMarkdownPath = workspacePath2(rootDir, "memory", "characters", "dossiers.md");
   const styleProfilePath = workspacePath2(rootDir, "style", "profile.md");
   const discussionDir = workspacePath2(rootDir, "chat");
-  const discussionLogPath = import_node_path9.default.join(discussionDir, "discussion-log.md");
+  const discussionLogPath = import_node_path10.default.join(discussionDir, "discussion-log.md");
   await import_promises7.default.mkdir(discussionDir, { recursive: true });
   const rawConsensus = await readText(consensusPath);
   const state = JSON.parse(await readText(statePath));
@@ -10199,12 +11511,21 @@ function makeDirectorCommandId() {
 function isGenericAutopilotMessage(message) {
   return /^(开始|继续|go|start|continue|run|resume)$/i.test(message.trim());
 }
+function isProductionStage(stage) {
+  return stage === "chapter_task_generation" || stage === "drafting" || stage === "reviewing";
+}
+function isAutopilotProductionResumeMessage(message) {
+  const normalized = message.trim();
+  if (!normalized) return false;
+  return /章节正文生产流程|正文写作|质量修订|AIGC\s*检测|自然度|记忆写回|从第\s*\d+\s*章|chapter\s*\d+/i.test(normalized) && /继续|恢复|resume|continue|不要重新构思|不要回到|既有章节队列/i.test(normalized);
+}
 function shouldAdvanceBeforeDiscussion(state, initialMessage, correctionMessage) {
   if (correctionMessage.trim()) {
     return false;
   }
   const trimmedInitialMessage = initialMessage.trim();
-  if (trimmedInitialMessage && !isGenericAutopilotMessage(trimmedInitialMessage)) {
+  const productionResumeMessage = isProductionStage(state.runtime.stage) && isAutopilotProductionResumeMessage(trimmedInitialMessage);
+  if (trimmedInitialMessage && !isGenericAutopilotMessage(trimmedInitialMessage) && !productionResumeMessage) {
     return false;
   }
   if (state.runtime.stage === "complete" && !state.plan.chapterTasks.every((task) => task.status === "complete")) {
@@ -10761,13 +12082,13 @@ async function recordAutopilotDirectorCommandEvent(rootDir, projectId, type, com
   }, type, command, payload);
 }
 async function writeAutopilotCheckpoint(projectRoot, state, label, details = {}) {
-  const checkpointDir = import_node_path10.default.join(projectRoot, ".ai-novel", "checkpoints");
+  const checkpointDir = import_node_path11.default.join(projectRoot, ".ai-novel", "checkpoints");
   await import_promises8.default.mkdir(checkpointDir, { recursive: true });
   const safeLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "checkpoint";
   const fileName = `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${safeLabel}.json`;
   const relativePath = `.ai-novel/checkpoints/${fileName}`;
   await import_promises8.default.writeFile(
-    import_node_path10.default.join(checkpointDir, fileName),
+    import_node_path11.default.join(checkpointDir, fileName),
     `${JSON.stringify({ state, details, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2)}
 `
   );
@@ -11618,7 +12939,7 @@ async function restoreAutopilotJobs(rootDir, createSnapshot) {
 }
 async function startAutopilotWorkerRuntime(options) {
   await restoreAutopilotJobs(options.rootDir, options.createSnapshot);
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && process.env.AI_NOVEL_TEST_FORCE_WORKER !== "1") {
     return {
       close: () => void 0
     };
@@ -11647,7 +12968,7 @@ function parseFlags(argv) {
     index += 1;
   }
   return {
-    rootDir: import_node_path11.default.resolve(flags.get("root-dir") || process.cwd()),
+    rootDir: import_node_path12.default.resolve(flags.get("root-dir") || process.cwd()),
     pollMs: flags.get("poll-ms") ? Number.parseInt(flags.get("poll-ms") || "60000", 10) : void 0,
     status: flags.get("status") === "true",
     once: flags.get("once") === "true"

@@ -1304,7 +1304,7 @@ function applyChapterFactsToState(
 
     if (fact.qualityGate) {
       task.qualityGate = {
-        status: fact.qualityGate.status,
+        status: (fact.status === "complete" && taskInstructionIsNewer) ? "passed" : fact.qualityGate.status,
         score: Number(fact.qualityGate.score || 0),
         attempts: Number(fact.qualityGate.attempts || 0),
         reason: fact.qualityGate.reason || "",

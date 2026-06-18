@@ -33,6 +33,7 @@ export interface ProjectEnvValues {
 export interface ProjectEnvStatus {
   envPath: string
   exists: boolean
+  sourcePaths: string[]
   configured: boolean
   missing: string[]
   values: ProjectEnvValues
@@ -115,20 +116,31 @@ export function getProjectEnvCandidatePaths(rootDir = process.cwd()) {
 }
 
 export function readProjectEnv(rootDir = process.cwd()) {
-  for (const envPath of getProjectEnvCandidatePaths(rootDir)) {
-    if (fs.existsSync(envPath)) {
-      const raw = fs.readFileSync(envPath, "utf8")
-      return {
-        envPath,
-        exists: true,
-        values: parseProjectEnv(raw),
-      }
+  const candidates = getProjectEnvCandidatePaths(rootDir)
+  const existingPaths = candidates.filter((envPath) => fs.existsSync(envPath))
+  if (existingPaths.length > 0) {
+    const values = existingPaths
+      .slice()
+      .reverse()
+      .reduce<ProjectEnvValues>((merged, envPath) => {
+        const raw = fs.readFileSync(envPath, "utf8")
+        return {
+          ...merged,
+          ...parseProjectEnv(raw),
+        }
+      }, {})
+    return {
+      envPath: existingPaths[0],
+      exists: true,
+      sourcePaths: existingPaths,
+      values,
     }
   }
 
   return {
     envPath: getProjectEnvPath(rootDir),
     exists: false,
+    sourcePaths: [],
     values: {} as ProjectEnvValues,
   }
 }
@@ -144,7 +156,7 @@ export function resolveProjectEnvWritePath(rootDir = process.cwd()) {
 }
 
 export function getProjectEnvStatus(rootDir = process.cwd()): ProjectEnvStatus {
-  const { envPath, exists, values } = readProjectEnv(rootDir)
+  const { envPath, exists, sourcePaths, values } = readProjectEnv(rootDir)
   const resolved = {
     baseUrl: pickResolvedValue(PRIMARY_ENV_KEYS.baseUrl, FALLBACK_ENV_KEYS.baseUrl, values),
     apiKeyPresent: Boolean(pickResolvedValue(PRIMARY_ENV_KEYS.apiKey, FALLBACK_ENV_KEYS.apiKey, values)),
@@ -160,6 +172,7 @@ export function getProjectEnvStatus(rootDir = process.cwd()): ProjectEnvStatus {
   return {
     envPath,
     exists,
+    sourcePaths,
     configured: missing.length === 0,
     missing,
     values,

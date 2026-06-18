@@ -1,7 +1,7 @@
 import {
+  deriveProjectRuntimeState,
   routeUserMessage
-} from "./chunk-NAGGUJYO.js";
-import "./chunk-SDIPDDNZ.js";
+} from "./chunk-TWWCRNG6.js";
 import {
   ensureAutopilotJob,
   executeManualAdvanceCommand,
@@ -13,8 +13,9 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-CXNWM7BT.js";
-import "./chunk-6NBXMMHP.js";
+} from "./chunk-HYZ2LJNY.js";
+import "./chunk-UIQAXZB3.js";
+import "./chunk-SDIPDDNZ.js";
 import {
   buildSuperGraphIndex,
   createManagedAutonomousProject,
@@ -30,22 +31,28 @@ import {
   superGraphFromDbRows,
   syncCurrentContextPacketFile,
   validateSuperGraph
-} from "./chunk-WUPQF76H.js";
+} from "./chunk-IUPCOQUD.js";
 import {
+  ensureEnvLlmConfigImported,
   getCachedActiveLlmConfig,
   getPublicProjectEnvStatus,
   loadActiveLlmConfig,
   testProviderConnectivity,
   upsertProjectEnvValues
-} from "./chunk-FOINQGCQ.js";
+} from "./chunk-TI62PTKZ.js";
+import {
+  detectAigcSegments,
+  detectAigcText,
+  getAigcDetectorConfig
+} from "./chunk-VNSQH63L.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-HL3WMSH6.js";
+} from "./chunk-M45WOEFA.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-CRFEPMYG.js";
+} from "./chunk-4PMKQQNV.js";
 import {
   createStatusMessage,
   createToolMessage,
@@ -72,6 +79,16 @@ function getPublicProjectEnvStatus2(rootDir = process.cwd()) {
     );
   }
   return status;
+}
+function redactLlmConfig(config) {
+  return {
+    ...config,
+    api_key: config.api_key ? "[configured]" : "",
+    api_key_configured: Boolean(config.api_key)
+  };
+}
+function redactLlmConfigs(configs) {
+  return configs.map((config) => redactLlmConfig(config));
 }
 function json(response, status, payload) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -100,11 +117,17 @@ function eventStreamHeaders(response) {
   });
 }
 function writeSse(response, eventName, data) {
-  response.write(`event: ${eventName}
+  if (response.writableEnded || response.destroyed || !response.writable) {
+    return;
+  }
+  try {
+    response.write(`event: ${eventName}
 `);
-  response.write(`data: ${JSON.stringify(data)}
+    response.write(`data: ${JSON.stringify(data)}
 
 `);
+  } catch {
+  }
 }
 function pct(value) {
   return `${(Number(value || 0) * 100).toFixed(1)}%`;
@@ -237,7 +260,8 @@ function isJsonApiRequest(method, pathname) {
       "/api/knowledge/search",
       "/api/knowledge/evaluate",
       "/api/llm-configs",
-      "/api/llm-configs/activate"
+      "/api/llm-configs/activate",
+      "/api/aigc-detect"
     ].includes(pathname);
   }
   if (method === "DELETE") {
@@ -256,6 +280,52 @@ async function forwardJsonApiRequest(rootDir, request, response, url, options = 
     embeddedWorker: options.embeddedWorker
   });
   json(response, result.status, result.payload);
+}
+function mergeApiAigcDetectorConfig(base, value) {
+  if (!value || typeof value !== "object") {
+    return base;
+  }
+  const input = value;
+  const provider = input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled" ? input.provider : base.provider;
+  return {
+    ...base,
+    provider,
+    url: typeof input.url === "string" ? input.url : base.url,
+    token: typeof input.token === "string" ? input.token : base.token,
+    timeoutMs: typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : base.timeoutMs,
+    threshold: typeof input.threshold === "number" ? input.threshold : base.threshold,
+    requestTextField: typeof input.requestTextField === "string" ? input.requestTextField : base.requestTextField,
+    segment: {
+      ...base.segment,
+      ...typeof input.segment === "object" && input.segment !== null ? input.segment : {}
+    },
+    gradio: {
+      ...base.gradio,
+      ...typeof input.gradio === "object" && input.gradio !== null ? input.gradio : {}
+    }
+  };
+}
+function readApiAigcSegments(value) {
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const segment = item;
+    const text = typeof segment.text === "string" ? segment.text : "";
+    if (!text.trim()) {
+      return [];
+    }
+    const startOffset = typeof segment.startOffset === "number" ? segment.startOffset : 0;
+    const endOffset = typeof segment.endOffset === "number" ? segment.endOffset : startOffset + text.length;
+    return [{
+      id: typeof segment.id === "string" ? segment.id : `segment-${index + 1}`,
+      index: typeof segment.index === "number" ? segment.index : index,
+      text,
+      startOffset,
+      endOffset,
+      metadata: typeof segment.metadata === "object" && segment.metadata !== null ? segment.metadata : void 0
+    }];
+  });
 }
 function serializeState(state) {
   return {
@@ -694,6 +764,7 @@ function semanticFactorySnapshotForVersion(factorySnapshot) {
   return {
     project: factorySnapshot.project,
     state: factorySnapshot.state,
+    projectRuntime: factorySnapshot.projectRuntime,
     artifactSummary: factorySnapshot.artifactSummary,
     productionObservability: factorySnapshot.productionObservability,
     chapterFacts: factorySnapshot.chapterFacts,
@@ -828,6 +899,50 @@ function deriveProductionObservability(factorySnapshot, resolvedState, contextPa
     return missing.length ? [`${dossier.canonicalName || dossier.id}: ${missing.join(", ")}`] : [];
   }).slice(0, 6);
   const memoryLag = Math.max(0, chapterFacts.filter((fact) => fact.status === "complete").length - chapterMemoryRows.length);
+  const now = /* @__PURE__ */ new Date();
+  const activeJobs = Array.isArray(snapshot.activeJobs) ? snapshot.activeJobs : [];
+  const staleJobsList = activeJobs.filter((job) => {
+    if (!job.lease_expires_at) return false;
+    return new Date(String(job.lease_expires_at)) < now;
+  }).map((job) => ({
+    id: String(job.id || ""),
+    kind: String(job.kind || ""),
+    leaseOwner: String(job.lease_owner || ""),
+    leaseExpiresAt: String(job.lease_expires_at || "")
+  }));
+  const blockedChaptersList = (state?.plan?.chapterTasks || []).filter((task) => task.status === "blocked").map((task) => {
+    const fact = chapterFacts.find((f) => Number(f.chapterNumber) === task.chapterNumber);
+    return {
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      recoveryAttempts: task.recoveryAttempts || 0,
+      recoveryBlocked: Boolean(task.recoveryBlocked),
+      blockReason: fact?.qualityGate && typeof fact.qualityGate === "object" ? fact.qualityGate.reason || "\u672A\u77E5\u95E8\u7981\u62E6\u622A" : "\u672A\u77E5\u95E8\u7981\u62E6\u622A"
+    };
+  });
+  const knowledgeObj = snapshot.knowledge || {};
+  const summaryObj = knowledgeObj.summary || {};
+  const diagnostics = {
+    blockedChapters: blockedChaptersList,
+    latestGateReason: blockedChaptersList[0]?.blockReason || "",
+    contextBudgetOverages: {
+      isOverages: estimatedChars > budgetLimit,
+      estimatedChars,
+      budgetLimit,
+      overageChars: Math.max(0, estimatedChars - budgetLimit)
+    },
+    ragRecall: {
+      projectSources: Number(summaryObj.projectSources || 0),
+      globalSources: Number(summaryObj.globalSources || 0),
+      recentRecallCount: recentMemory.filter((row) => String(row.kind || "") === "rag").length
+    },
+    characterDossierGaps: incompleteDossierFields,
+    workerLeaseIssues: {
+      hasIssues: staleJobsList.length > 0,
+      staleJobs: staleJobsList
+    },
+    memoryEmbeddingBacklog: recentMemory.filter((row) => String(row.embedding_status || "") === "pending").length
+  };
   return {
     style: {
       status: missingStyle.length === 0 ? "ready" : missingStyle.length <= 1 ? "warning" : "needs_setup",
@@ -873,7 +988,8 @@ function deriveProductionObservability(factorySnapshot, resolvedState, contextPa
     metadata: {
       styleMetadata: parseMetadataRow(styleArtifact),
       dossierMetadata: parseMetadataRow(dossierArtifact)
-    }
+    },
+    diagnostics
   };
 }
 function normalizeAutopilotRuntimeForPayload(state, factorySnapshot) {
@@ -961,14 +1077,20 @@ async function createWorkspacePayload(projectRoot, state, options = {}) {
     resolvedState,
     contextPacket
   );
+  const projectRuntime = deriveProjectRuntimeState({
+    state: resolvedState,
+    factorySnapshot
+  });
   const compactFactorySnapshot = factorySnapshot ? {
     ...factorySnapshot,
     state: compactState,
-    productionObservability
+    productionObservability,
+    projectRuntime
   } : null;
   const responseFactorySnapshot = useCompactPayload ? compactFactorySnapshotForPayload(compactFactorySnapshot) : compactFactorySnapshot;
   const payload = {
     state: compactState,
+    projectRuntime,
     consensus,
     contextPacket,
     graphIndex,
@@ -977,6 +1099,7 @@ async function createWorkspacePayload(projectRoot, state, options = {}) {
   };
   const snapshotVersion = createSnapshotVersion({
     state: compactState,
+    projectRuntime,
     consensus,
     contextPacket,
     graphViolations,
@@ -1055,6 +1178,17 @@ async function ensureDurableAutopilotJob(rootDir, projectId, message, options = 
   }).catch(() => null);
 }
 function createAutopilotKickoffMessage(state) {
+  const chapterTasks = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : [];
+  const nextTask = chapterTasks.find((task) => task.status !== "complete");
+  if (state.runtime?.stage === "drafting" || state.runtime?.stage === "reviewing" || state.runtime?.stage === "chapter_task_generation") {
+    return [
+      `\u7EE7\u7EED\u5C0F\u8BF4\u300A${state.project.title || state.project.idea}\u300B\u7684\u7AE0\u8282\u6B63\u6587\u751F\u4EA7\u6D41\u7A0B\u3002`,
+      `\u5F53\u524D\u9636\u6BB5\uFF1A${state.runtime.stage}\u3002\u4E0D\u8981\u91CD\u65B0\u6784\u601D\u4E16\u754C\u89C2\u3001\u4E3B\u89D2\u6838\u5FC3\u6216\u4E3B\u7EBF\u65B9\u5411\u3002`,
+      nextTask ? `\u4ECE\u7B2C ${nextTask.chapterNumber} \u7AE0\u300C${nextTask.title || `Chapter ${nextTask.chapterNumber}`}\u300D\u7EE7\u7EED\uFF0C\u6309\u65E2\u6709\u7AE0\u8282\u961F\u5217\u3001\u89D2\u8272\u6863\u6848\u3001\u8BB0\u5FC6\u548C\u8D28\u91CF\u95E8\u7981\u63A8\u8FDB\u3002` : "\u68C0\u67E5\u7AE0\u8282\u961F\u5217\uFF0C\u7EE7\u7EED\u5904\u7406\u4E0B\u4E00\u4E2A pending\u3001blocked \u6216\u53EF\u6062\u590D\u7684\u7AE0\u8282\u4EFB\u52A1\u3002",
+      `\u76EE\u6807\u603B\u7AE0\u6570\uFF1A${state.plan.totalChapters}\uFF0C\u5355\u7AE0\u5B57\u6570\uFF1A${state.plan.chapterWordTarget}\u3002`,
+      "\u4F18\u5148\u6267\u884C\u6B63\u6587\u5199\u4F5C\u3001\u8D28\u91CF\u4FEE\u8BA2\u3001\u81EA\u7136\u5EA6/AIGC \u68C0\u6D4B\u4E0E\u8BB0\u5FC6\u5199\u56DE\uFF0C\u4E0D\u8981\u56DE\u5230\u9996\u8F6E\u8BBE\u5B9A\u8BA8\u8BBA\u3002"
+    ].join("");
+  }
   return [
     `\u8BF7\u57FA\u4E8E\u5C0F\u8BF4\u60F3\u6CD5\u201C${state.project.idea}\u201D\u63A5\u7BA1\u521B\u4F5C\u6D41\u7A0B\u3002`,
     "\u5148\u5B8C\u6210\u4E16\u754C\u89C2\u57FA\u7EBF\u3001\u4E3B\u89D2\u6838\u5FC3\u3001\u4E3B\u7EBF\u65B9\u5411\u7684\u9996\u8F6E\u7EDF\u4E00\u8BA8\u8BBA\u3002",
@@ -1128,9 +1262,13 @@ async function buildProjectSummary(rootDir, project) {
   }
   const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null);
   if (!state) {
+    const projectRuntime2 = deriveProjectRuntimeState({
+      state: null,
+      factorySnapshot: dbSnapshot
+    });
     return {
       source: "empty",
-      stage: "worldbuilding_dialogue",
+      stage: projectRuntime2.workflowStage === "empty" ? "worldbuilding_dialogue" : projectRuntime2.workflowStage,
       progressPercent: 0,
       totalChapters: project.totalChapters || 0,
       completedChapters: 0,
@@ -1141,7 +1279,8 @@ async function buildProjectSummary(rootDir, project) {
       runnableJobs: 0,
       latestEventType: "",
       latestEventAt: "",
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      projectRuntime: projectRuntime2
     };
   }
   const tasks = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : [];
@@ -1170,20 +1309,26 @@ async function buildProjectSummary(rootDir, project) {
   const activeJobs = Array.isArray(dbSnapshot?.activeRuns) ? dbSnapshot.activeRuns.length : 0;
   const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0;
   const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null;
+  const projectRuntime = deriveProjectRuntimeState({
+    state,
+    factorySnapshot: dbSnapshot
+  });
+  const progress = projectRuntime.chapterProgress;
   return {
     source: dbSnapshot ? "db" : "state",
-    stage: state.runtime?.stage || "worldbuilding_dialogue",
-    progressPercent,
-    totalChapters,
-    completedChapters,
-    pendingChapters,
-    inProgressChapters,
-    blockedChapters,
+    stage: projectRuntime.workflowStage,
+    progressPercent: progress.progressPercent || progressPercent,
+    totalChapters: progress.totalChapters || totalChapters,
+    completedChapters: progress.completedChapters,
+    pendingChapters: progress.pendingChapters,
+    inProgressChapters: progress.inProgressChapters,
+    blockedChapters: progress.blockedChapters,
     activeJobs,
     runnableJobs,
     latestEventType: latestEvent?.type || "",
     latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
-    updatedAt: state.runtime?.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString()
+    updatedAt: state.runtime?.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+    projectRuntime
   };
 }
 async function reconcileFactoryProjectsWithRegistry(rootDir) {
@@ -1244,14 +1389,31 @@ async function resolveProjectContext(rootDir, projectId) {
 async function handleNovelStudioApi(rootDir, method, pathname, body = {}, options = {}) {
   const requestUrl = new URL(pathname, "http://local");
   const requestPathname = requestUrl.pathname;
+  if (method === "POST" && requestPathname === "/api/aigc-detect") {
+    const text = typeof body.text === "string" ? body.text : "";
+    const mode = body.mode === "text" ? "text" : "segments";
+    const detectorConfig = mergeApiAigcDetectorConfig(getAigcDetectorConfig(rootDir), body.config);
+    const segments = Array.isArray(body.segments) ? readApiAigcSegments(body.segments) : null;
+    if (!text.trim() && (!segments || segments.length === 0)) {
+      return { status: 400, payload: { error: "text_required" } };
+    }
+    const result = mode === "text" && !segments ? await detectAigcText(text, detectorConfig) : await detectAigcSegments(segments ?? text, detectorConfig);
+    return {
+      status: 200,
+      payload: {
+        result
+      }
+    };
+  }
   if (method === "GET" && requestPathname === "/api/llm-configs") {
+    await ensureEnvLlmConfigImported(rootDir);
     const configs = await withFactoryDb(rootDir, async (db) => {
       return db.listLlmConfigs();
     });
     return {
       status: 200,
       payload: {
-        configs
+        configs: redactLlmConfigs(configs)
       }
     };
   }
@@ -1262,15 +1424,26 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     const modelName = String(body.modelName || "").trim();
     const temperature = typeof body.temperature === "number" ? body.temperature : 0.1;
     const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 12e4;
-    if (!name || !baseUrl || !apiKey || !modelName) {
+    const configId = typeof body.id === "string" ? body.id.trim() : null;
+    const isConfiguredPlaceholder = apiKey === "[configured]";
+    if (!name || !baseUrl || !apiKey && !configId || !modelName) {
       return { status: 400, payload: { error: "missing_fields" } };
     }
-    const configId = typeof body.id === "string" ? body.id.trim() : null;
     await withFactoryDb(rootDir, async (db) => {
       if (configId) {
-        db.updateLlmConfig(configId, { name, baseUrl, apiKey, modelName, temperature, timeoutMs });
+        const currentConfig = db.listLlmConfigs().find((config) => config.id === configId);
+        if (!currentConfig) {
+          throw new Error("llm_config_not_found");
+        }
+        const nextApiKey = isConfiguredPlaceholder && typeof currentConfig?.api_key === "string" ? currentConfig.api_key : apiKey;
+        if (!nextApiKey) {
+          throw new Error("missing_api_key");
+        }
+        db.updateLlmConfig(configId, { name, baseUrl, apiKey: nextApiKey, modelName, temperature, timeoutMs });
       } else {
-        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs });
+        const existingConfigs = db.listLlmConfigs();
+        const hasActiveConfig = existingConfigs.some((config) => Number(config.is_active) === 1);
+        db.addLlmConfig({ name, baseUrl, apiKey, modelName, temperature, timeoutMs, isActive: !hasActiveConfig });
       }
     });
     await loadActiveLlmConfig(rootDir);
@@ -1281,7 +1454,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       status: 200,
       payload: {
         success: true,
-        configs
+        configs: redactLlmConfigs(configs)
       }
     };
   }
@@ -1301,7 +1474,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       status: 200,
       payload: {
         success: true,
-        configs
+        configs: redactLlmConfigs(configs)
       }
     };
   }
@@ -1321,7 +1494,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       status: 200,
       payload: {
         success: true,
-        configs
+        configs: redactLlmConfigs(configs)
       }
     };
   }
@@ -2505,10 +2678,13 @@ async function startNovelStudioServer(options = {}) {
         }
         const job = embeddedWorker ? getAutopilotJob(context.projectRoot) : null;
         const listener = job ? (event) => {
-          if (response.writableEnded) return;
+          if (response.writableEnded || response.destroyed || !response.writable) return;
           writeSse(response, event.type, event.payload);
           if (event.type === "complete" || event.type === "error") {
-            response.end();
+            try {
+              response.end();
+            } catch {
+            }
           }
         } : null;
         if (job && listener) {
@@ -2516,7 +2692,7 @@ async function startNovelStudioServer(options = {}) {
         }
         let lastStreamSnapshotVersion = "";
         const writeSnapshot = async (options2 = {}) => {
-          if (response.writableEnded) return;
+          if (response.writableEnded || response.destroyed || !response.writable) return;
           const state = await tryLoadState(context.projectRoot);
           const snapshotPayload = {
             activeProjectId: context.projectId,
@@ -2526,9 +2702,14 @@ async function startNovelStudioServer(options = {}) {
           };
           const snapshotVersion = typeof snapshotPayload.snapshotVersion === "string" ? snapshotPayload.snapshotVersion : "";
           if (!options2.force && snapshotVersion && snapshotVersion === lastStreamSnapshotVersion) {
-            response.write(`: snapshot unchanged ${(/* @__PURE__ */ new Date()).toISOString()}
+            if (!response.writableEnded && !response.destroyed && response.writable) {
+              try {
+                response.write(`: snapshot unchanged ${(/* @__PURE__ */ new Date()).toISOString()}
 
 `);
+              } catch {
+              }
+            }
             return;
           }
           lastStreamSnapshotVersion = snapshotVersion;
@@ -2536,7 +2717,7 @@ async function startNovelStudioServer(options = {}) {
         };
         const snapshotTimer = setInterval(() => {
           void writeSnapshot().catch((error) => {
-            if (!response.writableEnded) {
+            if (!response.writableEnded && !response.destroyed && response.writable) {
               writeSse(response, "error", { error: error instanceof Error ? error.message : String(error) });
             }
           });

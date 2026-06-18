@@ -5,7 +5,7 @@ import {
   createManualRetryChapterCommand,
   decideNovelDirectorCommand,
   isGenericAutopilotMessage
-} from "./chunk-6NBXMMHP.js";
+} from "./chunk-UIQAXZB3.js";
 import {
   advanceAutonomousProject,
   listAutonomousProjects,
@@ -16,22 +16,22 @@ import {
   runMultiAgentDiscussion,
   saveAutonomousState,
   upsertCheckpointInSuperGraph
-} from "./chunk-WUPQF76H.js";
+} from "./chunk-IUPCOQUD.js";
 import {
   createAutopilotStopError,
   getPublicProjectEnvStatus,
   isAutopilotStopError,
   throwIfStopped
-} from "./chunk-FOINQGCQ.js";
+} from "./chunk-TI62PTKZ.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   ingestGlobalWritingResources,
   ingestProjectArtifact
-} from "./chunk-HL3WMSH6.js";
+} from "./chunk-M45WOEFA.js";
 import {
   backfillPendingMemoryEmbeddings,
   withFactoryDb
-} from "./chunk-CRFEPMYG.js";
+} from "./chunk-4PMKQQNV.js";
 
 // src/director-commands.ts
 async function recordDirectorCommandEvent(options, type, command, payload = {}) {
@@ -1479,7 +1479,7 @@ function scheduleAutopilotRestore(rootDir, createSnapshot) {
 }
 async function startAutopilotWorkerRuntime(options) {
   await restoreAutopilotJobs(options.rootDir, options.createSnapshot);
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && process.env.AI_NOVEL_TEST_FORCE_WORKER !== "1") {
     return {
       close: () => void 0
     };

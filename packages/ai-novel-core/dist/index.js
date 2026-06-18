@@ -1,19 +1,20 @@
 import {
-  routeUserMessage
-} from "./chunk-NAGGUJYO.js";
-import {
   createWorkerWorkspacePayload,
   getNovelAutopilotWorkerStatus,
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-VMPBWWN7.js";
+} from "./chunk-4WIBD3KS.js";
+import {
+  deriveProjectRuntimeState,
+  routeUserMessage
+} from "./chunk-TWWCRNG6.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-CXNWM7BT.js";
+} from "./chunk-HYZ2LJNY.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -23,7 +24,7 @@ import {
   decideNovelDirectorCommand,
   isGenericAutopilotMessage,
   shouldAdvanceBeforeDiscussion
-} from "./chunk-6NBXMMHP.js";
+} from "./chunk-UIQAXZB3.js";
 import {
   advanceAutonomousProject,
   buildInitialSuperGraph,
@@ -50,12 +51,14 @@ import {
   upsertCheckpointInSuperGraph,
   upsertDiscussionInSuperGraph,
   validateSuperGraph
-} from "./chunk-WUPQF76H.js";
+} from "./chunk-IUPCOQUD.js";
 import {
   createContinuityContract,
   createDetailedChapterBlueprint,
   createDraftBodyFromBlueprint,
+  createNaturalnessReport,
   createProductionMasterOutline,
+  ensureEnvLlmConfigImported,
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
@@ -68,13 +71,19 @@ import {
   getProjectEnvStatus,
   getPublicProjectEnvStatus,
   inferGenreProfile,
+  invalidateAllCaches,
+  invalidateProjectCache,
+  invalidateWritingResourcesCache,
   loadActiveLlmConfig,
+  loadAndPruneGlobalContext,
   loadLlmConfigFromEnv,
   loadProductionWritingResources,
+  memoryCacheTracker,
   parseQualityGate,
   readProjectEnv,
   resolveFactoryRootDir,
   resolveProjectEnvWritePath,
+  resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runChapterProductionPipeline,
   setCachedActiveLlmConfig,
@@ -83,7 +92,16 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionWritingResourceArtifacts
-} from "./chunk-FOINQGCQ.js";
+} from "./chunk-TI62PTKZ.js";
+import {
+  createAigcDetectorClient,
+  detectAigcSegments,
+  detectAigcText,
+  getAigcDetectorConfig,
+  getAigcDetectorConfigFromEnv,
+  parseAigcDetectorSse,
+  splitAigcTextIntoSegments
+} from "./chunk-VNSQH63L.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -94,7 +112,7 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-HL3WMSH6.js";
+} from "./chunk-M45WOEFA.js";
 import {
   FactoryDb,
   backfillPendingMemoryEmbeddings,
@@ -107,7 +125,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-CRFEPMYG.js";
+} from "./chunk-4PMKQQNV.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,
@@ -132,6 +150,7 @@ export {
   buildSuperGraphIndex,
   chunkKnowledgeContent,
   createAgentMessage,
+  createAigcDetectorClient,
   createArtifactMessage,
   createBaseMessage,
   createContinuityContract,
@@ -145,6 +164,7 @@ export {
   createManualInterruptCommand,
   createManualRetryChapterCommand,
   createMessageId,
+  createNaturalnessReport,
   createProductionMasterOutline,
   createStatusMessage,
   createToolMessage,
@@ -152,6 +172,10 @@ export {
   createWorkerWorkspacePayload,
   decideNovelDirectorCommand,
   deleteManagedAutonomousProject,
+  deriveProjectRuntimeState,
+  detectAigcSegments,
+  detectAigcText,
+  ensureEnvLlmConfigImported,
   evaluateChapterConsistency,
   evaluateCharacterProfilePresence,
   evaluateKnowledgeBenchmark,
@@ -167,6 +191,8 @@ export {
   formatKnowledgeForPrompt,
   formatStatus,
   generateAgentReply,
+  getAigcDetectorConfig,
+  getAigcDetectorConfigFromEnv,
   getCachedActiveLlmConfig,
   getFactoryDbPath,
   getNovelAutopilotWorkerStatus,
@@ -182,9 +208,13 @@ export {
   ingestProjectArtifact,
   initAutonomousProject,
   initializeSuperGraph,
+  invalidateAllCaches,
+  invalidateProjectCache,
+  invalidateWritingResourcesCache,
   isGenericAutopilotMessage,
   listAutonomousProjects,
   loadActiveLlmConfig,
+  loadAndPruneGlobalContext,
   loadAutonomousState,
   loadLlmConfigFromEnv,
   loadProductionWritingResources,
@@ -192,6 +222,8 @@ export {
   loadSuperGraphForUpdate,
   makeAgentTurnId,
   makeRunId,
+  memoryCacheTracker,
+  parseAigcDetectorSse,
   parseQualityGate,
   prepareCoverGeneration,
   readProjectEnv,
@@ -199,6 +231,7 @@ export {
   resolveFactoryRootDir,
   resolveManagedProjectRoot,
   resolveProjectEnvWritePath,
+  resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   retrieveKnowledge,
   retryChapterProduction,
@@ -212,6 +245,7 @@ export {
   saveSuperGraph,
   setCachedActiveLlmConfig,
   shouldAdvanceBeforeDiscussion,
+  splitAigcTextIntoSegments,
   startNovelAutopilotWorker,
   superGraphFromDbRows,
   syncManagedProjectState,

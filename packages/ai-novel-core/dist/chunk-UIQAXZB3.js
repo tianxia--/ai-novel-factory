@@ -5,12 +5,21 @@ function makeDirectorCommandId() {
 function isGenericAutopilotMessage(message) {
   return /^(开始|继续|go|start|continue|run|resume)$/i.test(message.trim());
 }
+function isProductionStage(stage) {
+  return stage === "chapter_task_generation" || stage === "drafting" || stage === "reviewing";
+}
+function isAutopilotProductionResumeMessage(message) {
+  const normalized = message.trim();
+  if (!normalized) return false;
+  return /章节正文生产流程|正文写作|质量修订|AIGC\s*检测|自然度|记忆写回|从第\s*\d+\s*章|chapter\s*\d+/i.test(normalized) && /继续|恢复|resume|continue|不要重新构思|不要回到|既有章节队列/i.test(normalized);
+}
 function shouldAdvanceBeforeDiscussion(state, initialMessage, correctionMessage) {
   if (correctionMessage.trim()) {
     return false;
   }
   const trimmedInitialMessage = initialMessage.trim();
-  if (trimmedInitialMessage && !isGenericAutopilotMessage(trimmedInitialMessage)) {
+  const productionResumeMessage = isProductionStage(state.runtime.stage) && isAutopilotProductionResumeMessage(trimmedInitialMessage);
+  if (trimmedInitialMessage && !isGenericAutopilotMessage(trimmedInitialMessage) && !productionResumeMessage) {
     return false;
   }
   if (state.runtime.stage === "complete" && !state.plan.chapterTasks.every((task) => task.status === "complete")) {

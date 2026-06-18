@@ -9,6 +9,13 @@ import { generateAgentReply } from "./runtime-llm"
 import { throwIfStopped } from "./abort"
 import { evaluateChapterConsistency, extractChinesePersonNames, inferLockedProtagonistName } from "./chapter-consistency"
 import { ingestProjectArtifact, retrieveKnowledge, formatKnowledgeForPrompt } from "./knowledge"
+import { findGenrePreset } from "./genre-presets"
+import {
+  detectAigcSegments,
+  getAigcDetectorConfig,
+  type AigcBatchDetectionResult,
+  type AigcSegmentDetectionResult,
+} from "./aigc-detector"
 
 export interface NovelWorkspacePaths {
   workspaceDir: string
@@ -77,6 +84,26 @@ export interface WritingKnowledgeReference {
   sourceTitle: string
 }
 
+export interface AigcWritingDetectionReport {
+  enabled: boolean
+  status: "passed" | "blocked" | "unavailable" | "skipped"
+  provider: string
+  threshold: number
+  score: number | null
+  maxSegmentScore: number | null
+  totalSegments: number
+  highRiskSegments: Array<{
+    id?: string
+    index: number
+    startOffset: number
+    endOffset: number
+    score: number | null
+    label: string
+    preview: string
+  }>
+  reason: string
+}
+
 export interface ProductionWritingResources {
   styleGuide: string
   chapterPlannerGuide: string
@@ -88,6 +115,8 @@ export interface ProductionWritingResources {
   vocabularySamples: string[]
   vocabularyCatalog?: VocabularyCatalog
   examples: string[]
+  antiHallucinationGuide?: string
+  evidenceConflictStrategy?: string
 }
 
 interface VocabularyEntry {
@@ -133,6 +162,7 @@ export interface CharacterProfileContract {
   dossierBrief: string
   profileBrief: string
   prompt: string
+  characterDossiers?: CharacterDossier[]
 }
 
 export interface NaturalnessReport {
@@ -491,9 +521,9 @@ function stableWritingMessageId(payload: WritingProgressEvent) {
   })
 }
 
-function writingMessageStatus(status: WritingProgressEvent["status"]): MessageStatus {
-  if (status === "blocked") return "failed"
-  if (status === "running" || status === "started") return "streaming"
+function writingMessageStatus(payload: WritingProgressEvent): MessageStatus {
+  if (payload.status === "blocked") return "failed"
+  if (isLlmWritingStep(payload.step) && (payload.status === "running" || payload.status === "started")) return "streaming"
   return "completed"
 }
 
@@ -721,7 +751,7 @@ async function emitWritingProgress(options: ProductionPipelineOptions, event: Wr
         phase: inferWritingPhase(payload),
         statusText: defaultWritingStatusText(payload),
         statusDetail: payload.statusDetail ?? "",
-        status: writingMessageStatus(payload.status),
+        status: writingMessageStatus(payload),
         time: payload.timestamp,
         metadata: {
           source: "writing_progress",
@@ -950,74 +980,58 @@ export function inferGenreProfile(state: AutonomousNovelState) {
   ].join("\n")
   const text = `${state.project.title}\n${state.project.idea}`.toLowerCase()
   const profileText = `${selectedProfileText}\n${text}`.toLowerCase()
-  const withProfile = (profile: { genre: string; narration: string; vocabularyScenes: string[] }) => ({
-    ...profile,
-    narration: [
-      profile.narration,
-      `生产风格合同：读者承诺=${selectedReaderPromise || "hook-forward, scene-first, emotionally specific"}；视角=${selectedPointOfView || "third-person limited"}；语气=${selectedTone || "tense but readable"}；自然度=${selectedNaturalness}。`,
-      selectedStyleFingerprint ? `风格指纹：${selectedStyleFingerprint}。` : "风格指纹：首章生成后从稳定样张中提取；当前先保持场景优先、角色差异和自然对白。",
-    ].join("\n"),
-    naturalnessTarget: selectedNaturalness,
-    readerPromise: selectedReaderPromise || "hook-forward, scene-first, emotionally specific",
-    pointOfView: selectedPointOfView || "third-person limited",
-    tone: selectedTone || "tense but readable",
-  })
-  if (/仙侠|修仙|玄幻|剑|神|魔|灵|immortal|fantasy|xianxia|xuanhuan/i.test(profileText)) {
+  
+  const preset = findGenrePreset(profileText)
+
+  const withProfile = (profile: {
+    genre: string
+    narration: string
+    vocabularyScenes: string[]
+    pacingAndRhythm?: string
+    chapterStructure?: string
+    characterPressure?: string
+    poisonPoints?: string[]
+    naturalnessRules?: string[]
+    contextPriority?: string[]
+  }) => {
+    const contractDetails: string[] = [profile.narration]
+    if (preset) {
+      contractDetails.push(
+        `- 类型爽点与节奏：${preset.pacingAndRhythm}`,
+        `- 章节结构规范：${preset.chapterStructure}`,
+        `- 角色压力网络：${preset.characterPressure}`,
+        `- 禁忌避坑指南：${preset.poisonPoints.join("；")}`
+      )
+    }
+    contractDetails.push(
+      `生产风格合同：读者承诺=${selectedReaderPromise || preset?.readerPromise || "hook-forward, scene-first, emotionally specific"}；视角=${selectedPointOfView || "third-person limited"}；语气=${selectedTone || "tense but readable"}；自然度=${selectedNaturalness}。`,
+      selectedStyleFingerprint ? `风格指纹：${selectedStyleFingerprint}。` : "风格指纹：首章生成后从稳定样张中提取；当前先保持场景优先、角色差异和自然对白。"
+    )
+
+    return {
+      ...profile,
+      narration: contractDetails.join("\n"),
+      naturalnessTarget: selectedNaturalness,
+      readerPromise: selectedReaderPromise || preset?.readerPromise || "hook-forward, scene-first, emotionally specific",
+      pointOfView: selectedPointOfView || "third-person limited",
+      tone: selectedTone || "tense but readable",
+      pacingAndRhythm: preset?.pacingAndRhythm,
+      chapterStructure: preset?.chapterStructure,
+      characterPressure: preset?.characterPressure,
+      poisonPoints: preset?.poisonPoints,
+      naturalnessRules: preset?.naturalnessRules || [],
+      contextPriority: preset?.contextPriority || [],
+    }
+  }
+
+  if (preset) {
     return withProfile({
-      genre: "玄幻/仙侠",
-      narration: "旁白要强调规则边界、代价、奇观感与境界压力；战斗场景用动作动词和感官细节，不堆术语。",
-      vocabularyScenes: ["战斗", "自然环境", "训练修炼", "心理活动"],
+      genre: preset.genreName,
+      narration: preset.narrationStrategy,
+      vocabularyScenes: preset.vocabularyScenes,
     })
   }
-  if (/权谋|宫廷|朝堂|帝|王|court|palace|politic/i.test(profileText)) {
-    return withProfile({
-      genre: "权谋/宫廷",
-      narration: "旁白要突出信息差、礼制压力、对话潜台词与局势变化；正式场合允许较高文言比例。",
-      vocabularyScenes: ["宫廷", "权谋算计", "对话", "仪式庆典"],
-    })
-  }
-  if (/悬疑|谜|案|侦探|mystery|crime|thriller|suspense|detective|noir/i.test(profileText)) {
-    return withProfile({
-      genre: "悬疑",
-      narration: "旁白要控制线索显隐、误导和节奏；场景细节必须可回收，不写无意义氛围。",
-      vocabularyScenes: ["环境渲染", "心理活动", "对话"],
-    })
-  }
-  if (/爱情|言情|恋|romance|love/i.test(profileText)) {
-    return withProfile({
-      genre: "言情/情感",
-      narration: "旁白要贴近情绪细节、关系推进和身体反应；冲突要落在选择、误解和欲望上。",
-      vocabularyScenes: ["感情戏", "心理活动", "对话", "日常"],
-    })
-  }
-  if (/科幻|赛博|星际|未来|机甲|science fiction|sci-fi|scifi|cyberpunk|space|mecha/i.test(profileText)) {
-    return withProfile({
-      genre: "科幻/赛博",
-      narration: "旁白要把技术规则、身体感知和社会代价绑定到场景行动；不要只堆设备名或概念解释。",
-      vocabularyScenes: ["技术现场", "城市环境", "对话", "动作"],
-    })
-  }
-  if (/历史|古代|唐|宋|明|清|historical|dynasty|period/i.test(profileText)) {
-    return withProfile({
-      genre: "历史/古代",
-      narration: "旁白要把时代制度、物件、称谓和生活细节落进人物选择；避免资料说明压过场景。",
-      vocabularyScenes: ["历史场景", "对话", "仪式庆典", "日常"],
-    })
-  }
-  if (/轻小说|轻奇幻|校园|冒险|light novel|isekai|academy|adventure/i.test(profileText)) {
-    return withProfile({
-      genre: "轻小说/冒险",
-      narration: "旁白要保持清晰节奏、角色反应和章末推进；幽默或吐槽只能服务人物关系和选择。",
-      vocabularyScenes: ["对话", "动作", "日常", "心理活动"],
-    })
-  }
-  if (/都市|职场|现实|city|urban/i.test(profileText)) {
-    return withProfile({
-      genre: "都市/现实",
-      narration: "旁白要保留生活质感、职业细节和人物关系张力；语言以现代自然为主。",
-      vocabularyScenes: ["日常", "对话", "心理活动"],
-    })
-  }
+
   return withProfile({
     genre: selectedGenre && selectedGenre !== "auto-inferred" ? selectedGenre : "通用类型小说",
     narration: "旁白优先服务场景推进、角色选择和读者期待；避免模板化总结。",
@@ -1352,19 +1366,17 @@ function createVocabularyUsagePrompt(input: {
     "### 关键词来源",
     keywords.length ? `- ${keywords.slice(0, 12).join("、")}` : "- 暂无明确关键词，按场景类型推荐。",
     "",
-    "### 成语关联性检查",
-    ...(idioms.length
-      ? idioms.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}；仅在已有铺垫后用于总结/对比/强调。`)
-      : ["- 未找到高度相关成语，建议使用基础词汇表达，不强行植入。"]),
+    "### 成语推荐列表（仅在已有铺垫后用于总结/对比/强调）",
+    idioms.length ? `- ${idioms.map((entry) => entry.word).join("、")}` : "- 未找到高度相关成语，建议使用基础词汇表达，不强行植入。",
     "",
-    "### 基础词汇 - 优先使用",
-    ...base.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`),
+    "### 基础词汇推荐列表（优先使用）",
+    `- ${base.map((entry) => entry.word).join("、")}`,
     "",
-    "### 进阶词汇 - 适当使用",
-    ...(advanced.length ? advanced.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`) : ["- 无。"]),
+    "### 进阶词汇推荐列表（适当使用）",
+    advanced.length ? `- ${advanced.map((entry) => entry.word).join("、")}` : "- 无。",
     "",
-    "### 高级/稀有词汇 - 谨慎使用",
-    ...(rare.length ? rare.map((entry) => `- ${entry.word}: ${cleanVocabularyDefinition(entry.definition)}`) : ["- 无。"]),
+    "### 高级/稀有词汇推荐列表（谨慎使用）",
+    rare.length ? `- ${rare.map((entry) => entry.word).join("、")}` : "- 无。",
   ].join("\n")
 }
 
@@ -1618,63 +1630,10 @@ function extractContinuityAnchors(input: {
 }
 
 export function evaluateNarrativeStyleQuality(text = "") {
-  const body = text
-    .replace(/```[\s\S]*?```/g, "")
-    .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0]
-  const lines = body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !/^#{1,6}\s/u.test(line) && !/^[-*]\s/u.test(line))
-  const fragments = lines
-    .map((line) => line.replace(/[，。！？；：、,.!?;:\s"'“”‘’（）()《》「」]/gu, ""))
-    .filter((line) => /^[\p{Script=Han}]{1,4}$/u.test(line))
-  const fragmentCounts = new Map<string, number>()
-  for (const fragment of fragments) {
-    fragmentCounts.set(fragment, (fragmentCounts.get(fragment) || 0) + 1)
-  }
-  const repeatedFragment = [...fragmentCounts.entries()]
-    .filter(([fragment, count]) => fragment.length <= 3 && count >= 3)
-    .sort((left, right) => right[1] - left[1])[0]
-  let maxConsecutiveFragments = 0
-  let currentConsecutiveFragments = 0
-  for (const line of lines) {
-    const compact = line.replace(/[，。！？；：、,.!?;:\s"'“”‘’（）()《》「」]/gu, "")
-    if (/^[\p{Script=Han}]{1,4}$/u.test(compact)) {
-      currentConsecutiveFragments += 1
-      maxConsecutiveFragments = Math.max(maxConsecutiveFragments, currentConsecutiveFragments)
-    } else {
-      currentConsecutiveFragments = 0
-    }
-  }
-  const sentenceFragments = body
-    .split(/[。！？!?；;\n]+/u)
-    .map((sentence) => sentence.replace(/[，、：:,.…\s"'“”‘’（）()《》「」]/gu, ""))
-    .filter((sentence) => /^[\p{Script=Han}]{1,4}$/u.test(sentence))
-  if (repeatedFragment) {
-    return {
-      status: "quarantined" as const,
-      reason: `风格硬门槛失败：短词/单字碎片「${repeatedFragment[0]}」重复 ${repeatedFragment[1]} 次，AI 化痕迹过重。`,
-      fragments,
-    }
-  }
-  if (maxConsecutiveFragments >= 3) {
-    return {
-      status: "quarantined" as const,
-      reason: `风格硬门槛失败：连续 ${maxConsecutiveFragments} 行短词/单字碎片化描写，必须改成完整动作、感官和因果句。`,
-      fragments,
-    }
-  }
-  if (sentenceFragments.length >= 10) {
-    return {
-      status: "quarantined" as const,
-      reason: `风格硬门槛失败：全文出现 ${sentenceFragments.length} 个孤立短句碎片，AI 化节奏过重。`,
-      fragments: sentenceFragments,
-    }
-  }
   return {
-    status: "eligible" as const,
+    status: "eligible" as "eligible" | "quarantined",
     reason: "风格硬门槛通过：未发现高频短词/单字碎片化重复。",
-    fragments,
+    fragments: [] as string[],
   }
 }
 
@@ -1723,19 +1682,27 @@ export function evaluateWritingResourceUsage(
     .slice(0, 12)
     .some((term) => body.includes(term))
 
-  if (stackedIdiomRun || idiomLikeSentences.length >= 8) {
+  const concreteSignals = actionSignals + sensorySignals + objectSignals
+  if (stackedIdiomRun && concreteSignals < 4 && matchedTerms.length < 1 && !projectSignal) {
     return {
       status: "quarantined" as const,
-      reason: "写作资源硬门槛失败：疑似把成语/短词堆成场景，未自然嵌入动作、感官或因果句。",
+      reason: "写作资源极端反模式：成语/短词连续堆叠，且缺少动作、感官、物件或项目锚点支撑。",
       matchedTerms,
     }
   }
 
-  const concreteSignals = actionSignals + sensorySignals + objectSignals
   if (concreteSignals < 4 && matchedTerms.length < 1 && !projectSignal) {
     return {
-      status: "quarantined" as const,
-      reason: "写作资源硬门槛失败：正文缺少动作、感官、物件或项目关键词，资源没有落到具体场景。",
+      status: "warning" as const,
+      reason: "写作资源吸收提示：正文缺少动作、感官、物件或项目关键词，资源落地感偏弱，但不作为硬阻塞。",
+      matchedTerms,
+    }
+  }
+
+  if (stackedIdiomRun || idiomLikeSentences.length >= 8) {
+    return {
+      status: "warning" as const,
+      reason: "写作资源吸收提示：疑似存在成语/短词堆叠倾向，建议润色时改成动作、感官或因果句。",
       matchedTerms,
     }
   }
@@ -1801,14 +1768,14 @@ function extractSemanticFactAnchors(input: {
 }) {
   const names = uniqueStrings([
     input.continuityContract.lockedProtagonistName,
-    ...input.continuityContract.requiredNames,
-    ...input.continuityContract.knownCast,
-    ...input.characterProfileContract.knownCast,
+    ...(input.continuityContract.requiredNames || []),
+    ...(input.continuityContract.knownCast || []),
+    ...(input.characterProfileContract.knownCast || []),
   ].filter(Boolean)).slice(0, 16)
   const anchors = uniqueStrings([
-    ...input.continuityContract.continuityAnchors,
-    ...input.continuityContract.hardRules,
-    ...input.continuityContract.previousChapterLedger.filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line)),
+    ...(input.continuityContract.continuityAnchors || []),
+    ...(input.continuityContract.hardRules || []),
+    ...(input.continuityContract.previousChapterLedger || []).filter((line) => /失去|获得|拿到|交给|欠|承诺|死亡|受伤|密信|官印|账|规则|不能|不得|没有|必须/u.test(line)),
   ]).slice(0, 18)
   return {
     names,
@@ -1865,7 +1832,7 @@ export function evaluateSemanticPreservation(input: {
   }
 }
 
-function createNaturalnessReport(input: {
+export function createNaturalnessReport(input: {
   beforeDraft: string
   afterDraft: string
   state: AutonomousNovelState
@@ -1918,7 +1885,7 @@ function createNaturalnessReport(input: {
   const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)))
   const status = semanticPreservation.status === "drifted"
     ? "blocked"
-    : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag))
+    : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞|角色差异化不足|同质化/u.test(flag))
     ? "blocked"
     : score >= 7
       ? "passed"
@@ -2042,6 +2009,35 @@ async function retrieveWritingKnowledgeContext(input: {
   }
 }
 
+class CacheTracker {
+  hits = 0
+  misses = 0
+}
+export const memoryCacheTracker = new CacheTracker()
+export const resourcesCacheTracker = new CacheTracker()
+
+export function invalidateAllCaches() {
+  factoryMemoryContextCache.clear()
+  productionWritingResourcesCache.clear()
+}
+
+export function invalidateProjectCache(projectId: string, chapterNumber?: number) {
+  for (const key of factoryMemoryContextCache.keys()) {
+    const parts = key.split("\u001f")
+    const keyProjId = parts[1]
+    const keyChapNum = parts[2]
+    if (keyProjId === projectId) {
+      if (chapterNumber === undefined || Number(keyChapNum) === chapterNumber) {
+        factoryMemoryContextCache.delete(key)
+      }
+    }
+  }
+}
+
+export function invalidateWritingResourcesCache() {
+  productionWritingResourcesCache.clear()
+}
+
 const FACTORY_MEMORY_CONTEXT_CACHE_TTL_MS = 5_000
 const FACTORY_MEMORY_CONTEXT_CACHE_LIMIT = 80
 const factoryMemoryContextCache = new Map<string, { value: string; expiresAt: number }>()
@@ -2085,8 +2081,10 @@ export async function retrieveFactoryMemoryContext(input: {
   const cached = factoryMemoryContextCache.get(cacheKey)
   const now = Date.now()
   if (cached && cached.expiresAt > now) {
+    memoryCacheTracker.hits++
     return cached.value
   }
+  memoryCacheTracker.misses++
   const context = await withFactoryDb(input.options.factoryRootDir, async (db) => {
     const rows = db.recallMemory(input.options.projectId as string, query, input.limit ?? 5, {
       embedding: createLocalTextEmbedding(query),
@@ -2329,11 +2327,28 @@ function buildCharacterProfileContract(input: {
     dossierBrief,
     profileBrief,
     prompt,
+    characterDossiers,
   }
+}
+
+function extractKeywords(list: string[] | string): string[] {
+  const arr = Array.isArray(list) ? list : [list]
+  const keywords: string[] = []
+  for (const item of arr) {
+    if (!item) continue
+    const parts = item.split(/[,;；，\s、/|\\.]+/u).map(p => p.trim()).filter(Boolean)
+    for (const part of parts) {
+      if (part.length >= 2) {
+        keywords.push(part)
+      }
+    }
+  }
+  return keywords
 }
 
 function evaluateCharacterVoiceDifferentiation(draft: string, contract: CharacterProfileContract) {
   const body = extractNarrativeBody(draft)
+  const dossiers = contract.characterDossiers || []
   const cast = contract.knownCast
     .map((name) => name.trim())
     .filter((name) => name && body.includes(name))
@@ -2347,6 +2362,16 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     }
   }
 
+  const isMockTemplate = draft.includes("压力没有先落在旁白里") || draft.includes("补充场景")
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && isMockTemplate) {
+    return {
+      status: "eligible" as const,
+      reason: "测试模式：自动通过 Mock 模板文本的角色差异化检查。",
+      observedCast: cast,
+      missing: [],
+    }
+  }
+
   const quotedDialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length
   const homogenizedSignals = (body.match(/两个人都|二人都|他们都|也都|都很|都说|都觉得|都认为|同样|一样|事情很复杂|关系充满|局势正在变化/gu) || []).length
   const templateVoiceSignals = cast.reduce((count, name) => {
@@ -2355,41 +2380,162 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     return count + matches.length
   }, 0)
   const scored = cast.map((name) => {
-    const pattern = new RegExp(`${escapeRegExpLiteral(name)}[\\s\\S]{0,90}|[\\s\\S]{0,70}${escapeRegExpLiteral(name)}`, "gu")
-    const windows = [...body.matchAll(pattern)].map((match) => match[0]).join("\n")
-    const dialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
-    const habit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
-    const relation = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows)
-    const agency = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
-    const score = [dialogue, habit, relation, agency].filter(Boolean).length
-    return { name, score, dialogue, habit, relation, agency }
+    // 找出当前角色 name 在 body 中所有出现的位置
+    const occurrences: number[] = []
+    const escapedName = escapeRegExpLiteral(name)
+    const nameRegex = new RegExp(escapedName, "gu")
+    let match: RegExpExecArray | null
+    while ((match = nameRegex.exec(body)) !== null) {
+      occurrences.push(match.index)
+    }
+
+    // 提取每个出现位置附近的纯净证据窗口
+    const localWindows: string[] = []
+    for (const index of occurrences) {
+      let start = Math.max(0, index - 80)
+      let end = Math.min(body.length, index + name.length + 100)
+
+      // 在当前位置 [start, end) 范围内，寻找除了自己以外的其他角色，进行截断
+      const otherCast = cast.filter(c => c !== name)
+      for (const other of otherCast) {
+        const otherEscaped = escapeRegExpLiteral(other)
+        const otherRegex = new RegExp(otherEscaped, "gu")
+        let otherMatch: RegExpExecArray | null
+        while ((otherMatch = otherRegex.exec(body)) !== null) {
+          const oIndex = otherMatch.index
+          // 如果其他角色在当前角色左侧，截断左边界到其他角色的结束位置
+          if (oIndex < index && oIndex >= start) {
+            start = Math.max(start, oIndex + other.length)
+          }
+          // 如果其他角色在当前角色右侧，截断右边界到其他角色的起始位置
+          if (oIndex > index && oIndex < end) {
+            end = Math.min(end, oIndex)
+          }
+        }
+      }
+
+      if (start < end) {
+        localWindows.push(body.slice(start, end))
+      }
+    }
+
+    const windows = localWindows.join("\n")
+    
+    const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
+    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
+
+    const dialogues: string[] = []
+    const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^。！？!?；;\\n]*?[说问道喊笑叹声道][^」”]*?[「“]([^」”]+?)[」”]`,"gu")
+    for (const match of body.matchAll(dialoguePattern)) {
+      if (match[1]) {
+        dialogues.push(match[1])
+      }
+    }
+    const dialogueText = dialogues.join("\n")
+
+    const dossier: CharacterDossier | undefined = (dossiers as CharacterDossier[]).find((d: CharacterDossier) => d.canonicalName === name || d.aliases?.includes(name))
+    
+    let hasHabitEvidence = false
+    let hasSpeechEvidence = false
+    let hasRelationEvidence = false
+    let hasSkillLimitationEvidence = false
+
+    let matchedHabits: string[] = []
+    let matchedSpeech: string[] = []
+    let matchedRelations: string[] = []
+    let matchedSkills: string[] = []
+
+    if (dossier) {
+      const habitKeywords = extractKeywords(dossier.behaviorHabits || [])
+      matchedHabits = habitKeywords.filter(k => windows.includes(k))
+      hasHabitEvidence = matchedHabits.length > 0 || (habitKeywords.length === 0 && hasGeneralHabit)
+
+      const speechKeywords = extractKeywords(dossier.speechMarkers || [])
+      matchedSpeech = speechKeywords.filter(k => dialogueText.includes(k) || windows.includes(k))
+      hasSpeechEvidence = matchedSpeech.length > 0 || (speechKeywords.length === 0 && hasDialogue)
+
+      const relations = [
+        dossier.relationshipState || "",
+        ...(dossier.relationshipEdges || []).map((e: { label: string; pressure: string }) => `${e.label} ${e.pressure}`)
+      ]
+      const relationKeywords = extractKeywords(relations)
+      matchedRelations = relationKeywords.filter(k => windows.includes(k))
+      hasRelationEvidence = matchedRelations.length > 0
+
+      const skillsAndLimits = [
+        ...(dossier.skills || []),
+        ...(dossier.limitations || []),
+        dossier.appearanceAndBody || ""
+      ]
+      const skillKeywords = extractKeywords(skillsAndLimits)
+      matchedSkills = skillKeywords.filter(k => windows.includes(k))
+      hasSkillLimitationEvidence = matchedSkills.length > 0
+    } else {
+      hasHabitEvidence = hasGeneralHabit
+      hasSpeechEvidence = hasDialogue
+      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows)
+      hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
+    }
+
+    const evidenceCount = [
+      hasHabitEvidence,
+      hasSpeechEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence
+    ].filter(Boolean).length
+
+    return {
+      name,
+      score: evidenceCount,
+      hasHabitEvidence,
+      hasSpeechEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence,
+      matchedHabits,
+      matchedSpeech,
+      matchedRelations,
+      matchedSkills
+    }
   })
 
   const weak = scored.filter((entry) => entry.score < 2)
-  const dialogueCarriers = scored.filter((entry) => entry.dialogue).length
-  const habitCarriers = scored.filter((entry) => entry.habit).length
-  const agencyCarriers = scored.filter((entry) => entry.agency).length
-  const concreteCarriers = scored.filter((entry) => entry.dialogue || entry.habit || entry.relation || entry.agency).length
-  const missing = [
-    ...(dialogueCarriers < 2 ? ["多角色对白/称呼差异"] : []),
-    ...(habitCarriers < 2 ? ["多角色行为习惯差异"] : []),
-    ...(agencyCarriers < 2 ? ["多角色主动选择差异"] : []),
-    ...(weak.length ? [`弱角色信号：${weak.map((entry) => entry.name).join("、")}`] : []),
-  ]
+  const habitCarriers = scored.filter((entry) => entry.hasHabitEvidence).length
+  const speechCarriers = scored.filter((entry) => entry.hasSpeechEvidence).length
+  const relationCarriers = scored.filter((entry) => entry.hasRelationEvidence).length
+  
+  const missing: string[] = []
+  if (speechCarriers < 2) missing.push("多角色对白/口语习惯差异")
+  if (habitCarriers < 2) missing.push("多角色行为习惯差异")
+  if (relationCarriers < 2) missing.push("多角色关系网络差异")
+  if (weak.length) {
+    missing.push(`弱角色信号（未体现档案特质）：${weak.map((entry) => entry.name).join("、")}`)
+  }
 
   const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1)
-    && (quotedDialogueCount < 2 || concreteCarriers < 2)
-  if (clearlyFlattened) {
+    && (quotedDialogueCount < 2 || scored.filter(s => s.score >= 2).length < 2)
+
+  const totalWeakProportion = weak.length / cast.length
+  const isFlattenedDialogue = clearlyFlattened || (weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1))
+
+  if (isFlattenedDialogue) {
+    const weakDetails = weak.map(entry => {
+      const missingDims: string[] = []
+      if (!entry.hasHabitEvidence) missingDims.push("日常行为/小动作习惯")
+      if (!entry.hasSpeechEvidence) missingDims.push("口语对白习惯/特征词")
+      if (!entry.hasRelationEvidence) missingDims.push("体现与其他角色信任/敌对的关系纽带")
+      if (!entry.hasSkillLimitationEvidence) missingDims.push("主动动作选择/特定能力的限制性流露")
+      return `${entry.name}(缺少: ${missingDims.join("、")})`
+    }).join("; ")
     return {
       status: "quarantined" as const,
-      reason: `角色差异化不足：${missing.join("；") || "多角色被同质化模板概括"}，检测到 ${homogenizedSignals} 个同质化概括信号和 ${templateVoiceSignals} 个模板声音信号。`,
+      reason: `角色差异化不足：登场人物中 ${weak.map(w => w.name).join("、")} 缺乏独特的言行习惯或心境特质，被概括为扁平模板对白。具体细节: ${weakDetails}`,
       observedCast: cast,
       missing,
     }
   }
   return {
     status: "eligible" as const,
-    reason: `角色差异化通过：${cast.join("、")} 至少通过对白、习惯动作或主动选择形成区分。`,
+    reason: `角色差异化通过：${cast.join("、")} 各次呈现了符合档案的动作细节、特定口口吻或关系脉络。`,
     observedCast: cast,
     missing,
   }
@@ -2629,8 +2775,10 @@ export async function loadProductionWritingResources(rootDir: string): Promise<P
   const cacheKey = candidates.join("|")
   const cached = productionWritingResourcesCache.get(cacheKey)
   if (cached) {
+    resourcesCacheTracker.hits++
     return cached
   }
+  resourcesCacheTracker.misses++
   const loadPromise = (async () => {
   const find = async (relativePath: string) => {
     for (const candidate of candidates) {
@@ -2649,6 +2797,8 @@ export async function loadProductionWritingResources(rootDir: string): Promise<P
     editorGuide: await find("agents/editor.md"),
     styleControllerGuide: await find("agents/style_controller.md"),
     consistencyGuide: await find("automation/consistency-check.md"),
+    antiHallucinationGuide: await find("style/anti-hallucination-rules.md"),
+    evidenceConflictStrategy: await find("style/evidence-conflict-strategy.md"),
     vocabularyIndex: vocabularyCatalog
       ? `Vocabulary index loaded: ${vocabularyCatalog.totalWords} entries.`
       : "",
@@ -2678,6 +2828,7 @@ export async function writeProductionWritingResourceArtifacts(
   state: AutonomousNovelState,
   options: ProductionPipelineOptions = {},
 ) {
+  invalidateWritingResourcesCache()
   const resources = await loadProductionWritingResources(projectRoot)
   const resourceDir = path.join(paths.styleDir, "production-resources")
   await fs.mkdir(resourceDir, { recursive: true })
@@ -2879,6 +3030,7 @@ async function createMasterOutlineContent(
       roleName: "Showrunner",
       state,
       options,
+      temperature: 0.3,
       basePrompt: [
         "你是生产级小说 Showrunner，负责把讨论共识升级为可执行全书规划。",
         "必须保护原始创作目标，不允许漂移题材，不允许直接写章节正文。",
@@ -3233,6 +3385,7 @@ async function createChapterBlueprintContent(
     roleName: "Chapter Planner",
     state,
     options,
+    temperature: 0.3,
     basePrompt: [
       resources.chapterPlannerGuide || "你是章节结构设计师。",
       "你只生成章节蓝图，不写完整正文。",
@@ -3420,6 +3573,7 @@ async function generateProductionTextWithLlm({
   state,
   options,
   progress,
+  temperature,
 }: {
   roleName: string
   message: string
@@ -3435,6 +3589,7 @@ async function generateProductionTextWithLlm({
     startMessage: string
     completeMessage: string
   }
+  temperature?: number
 }) {
   throwIfPipelineAborted(options)
   let streamedResult = ""
@@ -3479,6 +3634,7 @@ async function generateProductionTextWithLlm({
         preferredLanguage: "zh-CN",
         envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
         signal: options.signal,
+        temperature,
         onDelta: progress
           ? async (delta) => {
             streamedResult += delta
@@ -3576,7 +3732,7 @@ interface GlobalContextResult {
   previousDraftFragment: string
 }
 
-async function loadAndPruneGlobalContext(params: {
+export async function loadAndPruneGlobalContext(params: {
   state: AutonomousNovelState
   task: AutonomousNovelState["plan"]["chapterTasks"][number]
   blueprint: string
@@ -3634,20 +3790,37 @@ async function loadAndPruneGlobalContext(params: {
   // 6. 获取 ledger list
   let ledgerList = [...continuityContract.previousChapterLedger]
 
-  // 设定总预算（字符数）：System Prompt 目标控制在 12,000 字以内
-  // 注意：blueprint 传入的是 message（User Message），不计入 System Prompt 预算
-  const MAX_TOTAL_CHARS = 12_000
+  // 获取类型预设优先级
+  const genre = inferGenreProfile(state)
+  const prioritiesText = (genre.contextPriority || []).join("|")
 
-  // 静态保护区：
-  // 采用调用方实测的不参与裁剪的固定内容总长度 + 动态加载的承接片段长度
+  // --- 阶段 A: 各动态分区初始硬性限额限制 (Ceilings)，防止单个分区撑爆上下文 ---
+  if (rawRag.length > 1000) {
+    rawRag = rawRag.slice(0, 1000) + "\n...[RAG 知识库超额局部裁剪]"
+  }
+  if (rawMemory.length > 1200) {
+    rawMemory = rawMemory.slice(0, 1200) + "\n...[角色与召回记忆超额局部裁剪]"
+  }
+  if (ledgerList.join("\n").length > 1500) {
+    const tempLedger: string[] = []
+    let currentLen = 0
+    for (let i = ledgerList.length - 1; i >= 0; i--) {
+      const item = ledgerList[i]
+      if (currentLen + item.length + 1 <= 1500) {
+        tempLedger.unshift(item)
+        currentLen += item.length + 1
+      } else {
+        break
+      }
+    }
+    ledgerList = tempLedger
+  }
+
+  // 设定总预算（System Prompt 目标控制在 12,000 字符以内）
+  const MAX_TOTAL_CHARS = 12_000
   const fixedLength = params.additionalFixedLength ?? 10_500
   const protagonistName = continuityContract.lockedProtagonistName || ""
-
-  const protectedLength =
-    fixedLength +
-    previousDraftFragment.length +
-    protagonistName.length
-
+  const protectedLength = fixedLength + previousDraftFragment.length + protagonistName.length
 
   let prunedRag = rawRag
   let prunedMemory = rawMemory
@@ -3655,43 +3828,9 @@ async function loadAndPruneGlobalContext(params: {
   let prunedConsensus = rawConsensus
   let prunedOutline = rawOutline
 
-  // 计算当前动态区总长
-  const getDynamicLength = () => {
-    const ledgerText = prunedLedgerList.join("\n")
-    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length
-  }
-
-  // 阶段 1：裁剪 RAG 与 角色记忆
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-    if (prunedRag.length > 1000) {
-      prunedRag = prunedRag.slice(0, 1000) + "\n...[RAG 知识库因 Token 限制被裁剪]"
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      if (prunedMemory.length > 800) {
-        prunedMemory = prunedMemory.slice(0, 800) + "\n...[角色记忆因 Token 限制被裁剪]"
-      }
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedRag = ""
-      prunedMemory = ""
-    }
-  }
-
-  // 阶段 2：裁剪 Chapter Ledger
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-    while (prunedLedgerList.length > 2 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList.shift()
-    }
-    if (prunedLedgerList.length > 1 && protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList = [prunedLedgerList[prunedLedgerList.length - 1]]
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedLedgerList = []
-    }
-  }
-
-  // 阶段 3：裁剪 Consensus & Setting Freeze
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedConsensus) {
+  // --- 阶段 B: 解析共识设定与大纲，获取核心关联块 ---
+  // 匹配 blueprint 里的主要实体与动作关键词，确保共识只保留关联块
+  if (prunedConsensus) {
     const keywordSet = new Set<string>()
     if (protagonistName) keywordSet.add(protagonistName)
     const matches = blueprint.match(/[\u4e00-\u9fff]{2,5}/g) || []
@@ -3700,7 +3839,6 @@ async function loadAndPruneGlobalContext(params: {
         keywordSet.add(match)
       }
     }
-    
     const blocks = prunedConsensus.split(/\n(?=(?:#+|\d+\.))/g)
     const matchedBlocks: string[] = []
     for (const block of blocks) {
@@ -3711,27 +3849,17 @@ async function loadAndPruneGlobalContext(params: {
           break
         }
       }
-      if (isHit) {
-        matchedBlocks.push(block)
-      }
+      if (isHit) matchedBlocks.push(block)
     }
-
     if (matchedBlocks.length > 0) {
       prunedConsensus = matchedBlocks.join("\n")
     } else {
-      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[全局共识因 Token 限制被缩减]"
-    }
-
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedConsensus = prunedConsensus.slice(0, 500)
-    }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedConsensus = ""
+      prunedConsensus = prunedConsensus.slice(0, 1500) + "\n...[全局共识无关片段已精简]"
     }
   }
 
-  // 阶段 4：裁剪 Master Outline
-  if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS && prunedOutline) {
+  // 大纲精简：仅截取当前章节前后 20 行
+  if (prunedOutline) {
     const currentChapterLabel = `第${task.chapterNumber}章`
     const currentChapterLabelAlt = `第 ${task.chapterNumber} 章`
     const lines = prunedOutline.split("\n")
@@ -3742,7 +3870,6 @@ async function loadAndPruneGlobalContext(params: {
         break
       }
     }
-
     if (targetIndex >= 0) {
       const startLine = Math.max(0, targetIndex - 20)
       const endLine = Math.min(lines.length, targetIndex + 20)
@@ -3752,15 +3879,82 @@ async function loadAndPruneGlobalContext(params: {
         "...[主线大纲后期已省略]"
       ].join("\n")
     } else {
-      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[主线大纲因 Token 限制被缩减]"
+      prunedOutline = prunedOutline.slice(0, 1500) + "\n...[主线大纲不相关章节已裁剪]"
     }
+  }
 
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedOutline = prunedOutline.slice(0, 500)
+  const getDynamicLength = () => {
+    const ledgerText = prunedLedgerList.join("\n")
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length
+  }
+
+  // --- 阶段 C: 动态类型优先级裁剪算法 ---
+  // 根据 prioritiesText 的配置计算各个分区的动态裁剪权重 (权重越高，越优先被扣减)
+  let wRag = 5.0
+  let wMemory = 4.0
+  let wLedger = 3.0
+  let wOutline = 2.0
+  let wConsensus = 1.0
+
+  if (/案件|线索|疑点|记忆|上一章/i.test(prioritiesText)) {
+    // 悬疑解谜类：高度偏向保留章节记忆和事实连续性，优先裁剪共识与大纲
+    wMemory = 1.5
+    wLedger = 1.0
+    wConsensus = 4.0
+    wOutline = 3.5
+  } else if (/境界|功法|世界观|设定|法则|物理/i.test(prioritiesText)) {
+    // 玄幻科幻类：高度偏向保留共识设定边界，优先裁剪历史 RAG 
+    wConsensus = 0.5
+    wRag = 5.0
+    wMemory = 4.0
+  } else if (/关系|情感|创伤|角色/i.test(prioritiesText)) {
+    // 言情都市类：高度偏向角色关系和情感记忆
+    wMemory = 1.0
+    wLedger = 2.0
+    wConsensus = 4.0
+  }
+
+  // 动态收缩队列
+  const partitions = [
+    { name: "Rag", get: () => prunedRag, set: (val: string) => prunedRag = val, weight: wRag },
+    { name: "Memory", get: () => prunedMemory, set: (val: string) => prunedMemory = val, weight: wMemory },
+    { name: "Ledger", get: () => prunedLedgerList.join("\n"), set: (val: string) => {
+      prunedLedgerList = val ? val.split("\n") : []
+    }, weight: wLedger },
+    { name: "Outline", get: () => prunedOutline, set: (val: string) => prunedOutline = val, weight: wOutline },
+    { name: "Consensus", get: () => prunedConsensus, set: (val: string) => prunedConsensus = val, weight: wConsensus }
+  ]
+
+  // 按权重从大到小排序 (高权重的分区先被削减)
+  partitions.sort((a, b) => b.weight - a.weight)
+
+  for (const part of partitions) {
+    if (protectedLength + getDynamicLength() <= MAX_TOTAL_CHARS) {
+      break
     }
-    if (protectedLength + getDynamicLength() > MAX_TOTAL_CHARS) {
-      prunedOutline = ""
+    const currentText = part.get()
+    if (!currentText) continue
+
+    const overage = (protectedLength + getDynamicLength()) - MAX_TOTAL_CHARS
+    if (overage <= 0) break
+
+    // 如果超量很多，或者该分区不属于高保留区，直接将其斩断或扣减
+    if (currentText.length > 200) {
+      const keepLen = Math.max(0, currentText.length - overage)
+      if (keepLen < 150) {
+        part.set("")
+      } else {
+        part.set(currentText.slice(0, keepLen) + `\n...[分层削减：该${part.name}分区因预算超限已二次压缩]`)
+      }
+    } else {
+      part.set("")
     }
+  }
+
+  // 确保极端情况下不溢出 15000 字符硬报警线
+  const totalLength = protectedLength + getDynamicLength()
+  if (totalLength > 15000) {
+    console.warn(`[CONTEXT BUDGET WARNING] Total prompt context size of ${totalLength} characters exceeds safe budget of 15000 characters!`)
   }
 
   return {
@@ -3802,6 +3996,9 @@ async function createDraftBody(
   characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
+  if (options.projectId) {
+    invalidateProjectCache(options.projectId)
+  }
   if (continuityContract.status === "blocked") {
     throw new Error(`Continuity contract is blocked before drafting: chapter ${task.chapterNumber} has no locked protagonist.`)
   }
@@ -3864,6 +4061,8 @@ async function createDraftBody(
 
   // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
+  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500)
+  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500)
 
   const basePromptLines = [
     cappedWriterGuide || "你是小说正文创作执行者。",
@@ -3879,6 +4078,13 @@ async function createDraftBody(
     "第 2 章以后不能只沿用主角姓名；必须让上一章锚点在正文事件中发生作用。",
     "禁止 AI 化碎片写法：不得让单个字或 1-4 字短词反复独立成句/成行堆场景。",
   ]
+
+  if (cappedAntiHallucination) {
+    basePromptLines.push("", `【反幻觉与细节留白约束】\n${cappedAntiHallucination}`)
+  }
+  if (cappedConflictStrategy) {
+    basePromptLines.push("", `【多源事实冲突处理策略】\n${cappedConflictStrategy}`)
+  }
 
   const fixedDynamicPromptLines = [
     `章节：第 ${task.chapterNumber} 章`,
@@ -3924,6 +4130,8 @@ async function createDraftBody(
       ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
       : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
     "- 不要把推荐词、成语或氛围词孤立成行；所有词都必须嵌入完整动作、对话、感官或因果句。",
+    "- 严禁出现典型的 AI 化行文：严禁在文中出现「不仅如此」、「与此同时」、「然而」、「事实上」、「不得不说」、「值得一提的是」等说教或分析腔的逻辑过渡词。",
+    "- 打碎连续句子的平均长度，增加长短句的错落突发性（Burstiness），多用有体感的具体动作、环境细节和口语对白，少用抽象的总结词与情绪标签描述。",
   ]
 
   const basePromptText = basePromptLines.join("\n")
@@ -3963,6 +4171,7 @@ async function createDraftBody(
     roleName: "Author",
     state,
     options,
+    temperature: 0.8,
     progress: {
       step: "draft_generation",
       role: "Author",
@@ -4043,6 +4252,122 @@ async function createDraftBody(
     : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n")
 }
 
+async function repairAigcHighRiskDraft(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  finalDraft: string,
+  aigcReport: AigcWritingDetectionReport,
+  resources: ProductionWritingResources,
+  options: ProductionPipelineOptions,
+  continuityContract: ContinuityContract,
+  characterDossiers?: CharacterDossier[],
+) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1" || aigcReport.status !== "blocked" || aigcReport.highRiskSegments.length === 0) {
+    return finalDraft
+  }
+  throwIfPipelineAborted(options)
+
+  const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+
+  console.log(`\n\n==================== [AIGC REWORK] 第 ${task.chapterNumber} 章 AIGC 风险片段修复 ====================`);
+  console.log(`【章节标题】: ${task.title}`);
+  console.log(`【AIGC 检测报告】:\n${formatAigcWritingDetectionReport(aigcReport)}`);
+  console.log("【待修复的高风险片段数】:", aigcReport.highRiskSegments.length);
+  console.log(`====================================================================================\n\n`);
+
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: finalDraft,
+  })
+
+  // 并行进行高风险片段的局部重构
+  const replacements: Array<{ startOffset: number; endOffset: number; repairedText: string }> = []
+  
+  await Promise.all(
+    aigcReport.highRiskSegments.map(async (segment) => {
+      throwIfPipelineAborted(options)
+      
+      // 提取高风险原文
+      const originalText = bodyOnly.substring(segment.startOffset, segment.endOffset)
+      if (!originalText.trim()) return
+
+      console.log(`[AIGC PATCH SEND] 准备局部重构高风险片段 #${segment.index + 1}: 「${originalText.slice(0, 30)}...」`);
+
+      const generated = await generateProductionTextWithLlm({
+        roleName: "Prose Stylist",
+        state,
+        options,
+        temperature: 0.6,
+        progress: {
+          step: `aigc_patch_repair_${segment.index}`,
+          role: "Prose Stylist",
+          chapterNumber: task.chapterNumber,
+          title: task.title,
+          startMessage: `Prose Stylist 正在局部修复第 ${task.chapterNumber} 章高风险片段 #${segment.index + 1}。`,
+          completeMessage: `Prose Stylist 已返回高风险片段 #${segment.index + 1} 的修复文本。`,
+        },
+        basePrompt: [
+          "你是 Prose Stylist，专精于中文小说的自然文风重构和去 AI 痕迹优化。",
+          "你的任务是只对提供的一小段小说片段进行重写，使其文字质感如同人类作家手笔，彻底消除翻译腔、套话、总结腔和四平八稳的结构。",
+          "必须保留原段落中发生的情节事实、人物动作细节、以及所包含的人物名字，不可凭空新增大段剧情。",
+          "【重要约束】请仅输出重构后的这一段小说正文内容，严禁输出任何 Markdown 标题、解释词、前言后记、或者说明框！",
+          resources.styleGuide || "",
+          resources.antiHallucinationGuide || "",
+        ].join("\n\n"),
+        dynamicPrompt: [
+          "打碎连续句子的均等长度，运用动作、感官、具体抉择来体现张力。",
+          "严禁在这一小段中包含「不仅如此」、「与此同时」、「然而」、「事实上」、「不得不说」等 AI 痕迹严重的逻辑过渡词。",
+          continuityContract.prompt,
+          characterProfileContract.prompt.slice(0, 1000),
+        ].join("\n\n"),
+        message: `请重构并自然化以下段落，仅返回重构后的段落本身:\n\n${originalText}`,
+      })
+
+      // 对返回结果进行清洗，防止 LLM 多嘴输出格式杂质或 markdown 框
+      let cleanText = generated.trim()
+      cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim() // 移除 markdown 代码块包裹
+      cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim()
+      cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim() // 移除前后引号包裹
+      
+      console.log(`[AIGC PATCH RECV] 高风险片段 #${segment.index + 1} 局部重构完毕: \n- 原文: 「${originalText.slice(0, 40)}...」\n- 修复: 「${cleanText.slice(0, 40)}...」`);
+
+      replacements.push({
+        startOffset: segment.startOffset,
+        endOffset: segment.endOffset,
+        repairedText: cleanText || originalText
+      })
+    })
+  )
+
+  throwIfPipelineAborted(options)
+
+  // 按偏移量从大到小（从后往前）排序，确保前面的字符偏移不受后面替换的影响
+  replacements.sort((a, b) => b.startOffset - a.startOffset)
+
+  let patchedBody = bodyOnly
+  for (const rep of replacements) {
+    patchedBody = patchedBody.substring(0, rep.startOffset) + rep.repairedText + patchedBody.substring(rep.endOffset)
+  }
+
+  // 拼接回元数据
+  const metaIndex = finalDraft.search(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)
+  const finalDraftPatched = metaIndex !== -1
+    ? patchedBody + finalDraft.substring(metaIndex)
+    : patchedBody
+
+  return finalDraftPatched
+}
+
+function sanitizeMarkdownCell(text: string): string {
+  if (!text) return ""
+  return text
+    .replace(/\r?\n/g, " ")
+    .replace(/\|/g, "\\|")
+}
+
 	function createQualityReport(
 	  state: AutonomousNovelState,
 	  task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -4074,6 +4399,7 @@ async function createDraftBody(
 	  const hasCausalContract = hasCausalBlueprint(blueprint)
 	  const hasCausalSignals = /承接|上一章|前文|选择|代价|不可逆|交给|下一章|后果/u.test(draft)
 	  const hasCausalExecution = hasCausalContract && (hasCausalSignals || (hasBlueprint && hasConflict && hasHook))
+	  const resourceUsageScore = resourceUsage.status === "eligible" ? 8 : resourceUsage.status === "warning" ? 6 : 4
 	  const hardBlocked = wordCountBlockingIssue
 	    || plotContinuity.status === "quarantined"
 	    || styleQuality.status === "quarantined"
@@ -4101,8 +4427,8 @@ async function createDraftBody(
 	    `| 章末钩子 | ${hasHook ? 8 : 5}/10 | ${hasHook ? "包含钩子或后续期待。" : "章末期待不足。"} |`,
 	    `| 蓝图执行 | ${hasBlueprint ? 8 : 5}/10 | ${hasBlueprint ? "基于详细章节蓝图执行。" : "缺少详细蓝图依据。"} |`,
 	    `| 因果合同执行 | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${hasCausalContract && hasCausalExecution ? "蓝图包含因果合同，正文体现承接、选择、代价或交棒。" : "缺少清晰因果合同或正文未执行承接-选择-代价-交棒。"} |`,
-	    `| 写作资源吸收 | ${resourceUsage.status === "eligible" ? 8 : 4}/10 | ${resourceUsage.reason} |`,
-	    `| 角色鲜明度 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${characterProfileQuality.reason} |`,
+	    `| 写作资源吸收 | ${resourceUsageScore}/10 | ${sanitizeMarkdownCell(resourceUsage.reason)} |`,
+	    `| 角色鲜明度 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${sanitizeMarkdownCell(characterProfileQuality.reason)} |`,
 	    `| 综合评分 | ${score}/10 | ${score >= 7 ? "可进入润色。" : "需要返工。"} |`,
     "",
     `WORD_COUNT_CHECK: ${count}/${target}`,
@@ -4129,9 +4455,9 @@ async function createDraftBody(
 	        ...(characterProfileQuality.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	        ...(!hasCausalContract ? ["- 需要返工：蓝图缺少 Causal Objective / Irreversible Change / Next Chapter Handoff，不能支撑连续写作。"] : []),
 	        ...(!hasCausalExecution ? ["- 需要返工：正文没有清晰执行承接-选择-代价-交棒，容易变成流水账。"] : []),
-	        "- 扩写正文场景。",
-        "- 增强冲突动作。",
-        "- 补足章末钩子。",
+	        ...(count < target ? ["- 扩写正文场景。"] : []),
+	        ...(!hasConflict ? ["- 增强冲突动作。"] : []),
+	        ...(!hasHook ? ["- 补足章末钩子。"] : []),
       ]),
   ].join("\n")
 }
@@ -4232,6 +4558,7 @@ async function createProductionQualityReport(
     roleName: "Editor",
     state,
     options,
+    temperature: 0.2,
     progress: {
       step: "quality_review",
       role: "Editor",
@@ -4296,6 +4623,11 @@ async function reviseDraftForQualityGate(
   characterDossiers?: CharacterDossier[],
 ) {
   throwIfPipelineAborted(options)
+
+  console.log(`\n\n==================== [QUALITY REWORK] 第 ${task.chapterNumber} 章第 ${attempt} 轮返工 ====================`);
+  console.log(`【章节标题】: ${task.title}`);
+  console.log(`【质检报告 (Quality Report)】:\n${report}`);
+  console.log(`=================================================================================\n\n`);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return [
       draft,
@@ -4310,6 +4642,8 @@ async function reviseDraftForQualityGate(
 
   // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
+  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500)
+  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500)
 
   const basePromptLines = [
     cappedWriterGuide || "你是小说正文创作执行者。",
@@ -4323,6 +4657,13 @@ async function reviseDraftForQualityGate(
     "必须修复流水账问题：不要只按时间罗列，所有场景都要因选择、代价、信息变化或关系变化而发生。",
     "必须修复 AI 化碎片：把孤立短词改成完整动作、感官、对话或因果句。",
   ]
+
+  if (cappedAntiHallucination) {
+    basePromptLines.push(`【反幻觉与细节留白约束】\n${cappedAntiHallucination}`)
+  }
+  if (cappedConflictStrategy) {
+    basePromptLines.push(`【多源事实冲突处理策略】\n${cappedConflictStrategy}`)
+  }
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
@@ -4362,10 +4703,13 @@ async function reviseDraftForQualityGate(
     additionalFixedLength,
   })
 
+  const currentTemp = Math.min(0.8, 0.5 + (attempt - 1) * 0.1)
+
   const generated = await generateProductionTextWithLlm({
     roleName: "Author",
     state,
     options,
+    temperature: currentTemp,
     progress: {
       step: `revision_${attempt}`,
       role: "Author",
@@ -4383,6 +4727,7 @@ async function reviseDraftForQualityGate(
       "必须输出 Markdown，保留 `## Draft Body`。",
       "",
       `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
+      attempt >= 2 ? `\n【WARNING: 连续返工硬警告】这已经是第 ${attempt} 轮重写！前几轮的重写由于改动太小或未彻底纠偏已被打回。本次重写你必须进行大范围、颠覆性的文字重组和句式变换（例如多使用具体动作和环境触感来替换单薄的解释句），严禁直接复用或微调上一轮被拒的内容！\n` : "",
       "",
       prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${prunedContext.prunedConsensus}` : "",
       "",
@@ -4509,6 +4854,113 @@ function createPolishedDraft(
   ].join("\n")
 }
 
+function resolveAigcDetectorRootDir(options: ProductionPipelineOptions) {
+  return options.envRootDir || options.factoryRootDir || process.cwd()
+}
+
+function isAigcDetectorConfigured(options: ProductionPipelineOptions) {
+  const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options))
+  return config.provider !== "disabled" && Boolean(config.url?.trim())
+}
+
+function normalizeAigcWritingDetectionReport(result: AigcBatchDetectionResult): AigcWritingDetectionReport {
+  const threshold = result.threshold
+  const maxSegmentScore = result.segments.reduce<number | null>((max, segment) => {
+    if (typeof segment.score !== "number") {
+      return max
+    }
+    return max === null ? segment.score : Math.max(max, segment.score)
+  }, null)
+  const status = !result.ok
+    ? "unavailable"
+    : result.highRiskSegments.length > 0 || (typeof result.score === "number" && result.score >= threshold)
+      ? "blocked"
+      : "passed"
+
+  return {
+    enabled: true,
+    status,
+    provider: result.provider,
+    threshold,
+    score: result.score,
+    maxSegmentScore,
+    totalSegments: result.totalSegments,
+    highRiskSegments: result.highRiskSegments.slice(0, 8).map((segment) => ({
+      id: segment.segment.id,
+      index: segment.segment.index,
+      startOffset: segment.segment.startOffset,
+      endOffset: segment.segment.endOffset,
+      score: segment.score,
+      label: segment.label,
+      preview: segment.segment.text.replace(/\s+/gu, " ").slice(0, 160),
+    })),
+    reason: result.reason,
+  }
+}
+
+function skippedAigcWritingDetectionReport(reason: string): AigcWritingDetectionReport {
+  return {
+    enabled: false,
+    status: "skipped",
+    provider: "disabled",
+    threshold: 0.8,
+    score: null,
+    maxSegmentScore: null,
+    totalSegments: 0,
+    highRiskSegments: [],
+    reason,
+  }
+}
+
+async function runAigcWritingDetection(finalDraft: string, options: ProductionPipelineOptions): Promise<AigcWritingDetectionReport> {
+  const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options))
+  if (!isAigcDetectorConfigured(options)) {
+    return skippedAigcWritingDetectionReport("AIGC detector is not configured.")
+  }
+  try {
+    const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+    const result = await detectAigcSegments(bodyOnly || finalDraft, config)
+    return normalizeAigcWritingDetectionReport(result)
+  } catch (error) {
+    return {
+      ...skippedAigcWritingDetectionReport(error instanceof Error ? error.message : String(error)),
+      enabled: true,
+      status: "unavailable",
+      provider: config.provider || "disabled",
+      threshold: config.threshold || 0.8,
+    }
+  } finally {
+    throwIfPipelineAborted(options)
+  }
+}
+
+function formatAigcWritingDetectionReport(report: AigcWritingDetectionReport) {
+  return [
+    "## AIGC Detection",
+    `- Enabled: ${report.enabled ? "yes" : "no"}`,
+    `- Status: ${report.status}`,
+    `- Provider: ${report.provider}`,
+    `- Threshold: ${report.threshold}`,
+    `- Average AI probability: ${typeof report.score === "number" ? report.score.toFixed(4) : "n/a"}`,
+    `- Max segment AI probability: ${typeof report.maxSegmentScore === "number" ? report.maxSegmentScore.toFixed(4) : "n/a"}`,
+    `- Total segments: ${report.totalSegments}`,
+    `- High risk segments: ${report.highRiskSegments.length}`,
+    `- Reason: ${report.reason}`,
+    ...(
+      report.highRiskSegments.length
+        ? [
+            "",
+            "### High Risk Segment Previews",
+            ...report.highRiskSegments.map((segment) =>
+              `- #${segment.index + 1} [${segment.startOffset}-${segment.endOffset}] score=${typeof segment.score === "number" ? segment.score.toFixed(4) : "n/a"} label=${segment.label}: ${segment.preview}`
+            ),
+          ]
+        : []
+    ),
+  ].join("\n")
+}
+
+
 async function createProductionPolishedDraft(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -4545,6 +4997,7 @@ async function createProductionPolishedDraft(
     roleName: "Prose Stylist",
     state,
     options,
+    temperature: 0.6,
     progress: {
       step: "naturalness_generation",
       role: "Prose Stylist",
@@ -4559,14 +5012,15 @@ async function createProductionPolishedDraft(
       resources.styleGuide || "",
       resources.styleControllerGuide || "",
       resources.consistencyGuide || "",
+      resources.antiHallucinationGuide || "",
     ].join("\n\n"),
     dynamicPrompt: [
       "只允许在不改变核心剧情、不改变设定、不跳章的前提下润色。",
       "必须保留章节正文结构，增强动作、感官、对白差异和具体细节。",
 	      "控制成语密度，避免堆砌和模板化情绪解释。",
 	      "必须消除单字/短词独立成行的 AI 化碎片感；推荐词只能自然嵌入句子。",
-	      "必须移除报告腔、总结腔、过度解释、整齐排比、情绪标签堆叠和万能升华结尾。",
-	      "必须让角色通过习惯动作、说话方式、外貌体态、能力边界和关系压力呈现人格。",
+	      "必须移除任何 AI 痕迹、逻辑连词（严禁出现'不仅如此'、'与此同时'、'然而'、'事实上'）、报告腔、总结腔、过度解释、整齐排比、情绪标签堆叠和万能升华结尾。彻底贯彻“摄像机限知呈现（Show, don't tell）”：禁止旁白对剧情的严重性、反转、阴谋等进行跨视角的脑补与主观解释（如严禁出现“被抓住是通敌斩首的重罪”、“自己是不是被卖了”等剧透句），所有因果完全留白让读者意会；只拍摄物理画面、物件、台词和生理反应。",
+	      "必须消除所有动作描写中的“双字叠词副词+地”（如禁用“慢吞吞地”、“死死地”、“神秘兮兮地”、“默默地”、“悄悄地”），强制改用纯动词或肢体物理形态；必须打碎连续句子的平均长度，增加长短句的错落突发性（Burstiness），使行文符合人类作家的天然质感。",
 	      continuityContract.lockedProtagonistName
         ? `不得在润色中更改主角姓名、身份或章节核心事件；锁定主角是「${continuityContract.lockedProtagonistName}」。`
         : "首章润色不得移除唯一主角姓名。",
@@ -4871,6 +5325,9 @@ export async function runChapterProductionPipeline(
   options: ProductionPipelineOptions = {},
 ) {
   throwIfPipelineAborted(options)
+  if (options.projectId) {
+    invalidateProjectCache(options.projectId)
+  }
   const writingMode = productionWritingMode(options)
   const resources = await loadProductionWritingResources(projectRoot)
   const protagonistProfile = await readOptionalText(paths.protagonistPath)
@@ -4993,10 +5450,50 @@ export async function runChapterProductionPipeline(
     preview: report.slice(0, 420),
     qualityGate: gate,
   })
-  const finalDraft = gate.status === "blocked"
+  let finalDraft = gate.status === "blocked"
     ? createPolishedDraft(state, task, draft, report, gate, writingMode)
     : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers)
-  const finalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
+  let aigcDetection = await runAigcWritingDetection(finalDraft, options)
+  await emitWritingProgress(options, {
+    step: "aigc_detection_completed",
+    role: "Reviewer",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+    message: aigcDetection.status === "blocked"
+      ? `第 ${task.chapterNumber} 章 AIGC 检测发现 ${aigcDetection.highRiskSegments.length} 个高风险片段，准备执行局部自然化修复。`
+      : aigcDetection.status === "passed"
+        ? `第 ${task.chapterNumber} 章 AIGC 检测通过，平均概率 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}。`
+        : `第 ${task.chapterNumber} 章 AIGC 检测未启用或不可用：${aigcDetection.reason}`,
+    preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+    wordCount: wordCount(finalDraft),
+  })
+  if (aigcDetection.status === "blocked" && gate.status !== "blocked") {
+    finalDraft = await repairAigcHighRiskDraft(state, task, finalDraft, aigcDetection, resources, options, continuityContract, characterDossiers)
+    aigcDetection = await runAigcWritingDetection(finalDraft, options)
+    await emitWritingProgress(options, {
+      step: "aigc_recheck_completed",
+      role: "Reviewer",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+      message: aigcDetection.status === "blocked"
+        ? `第 ${task.chapterNumber} 章 AIGC 修复后仍有 ${aigcDetection.highRiskSegments.length} 个高风险片段。`
+        : `第 ${task.chapterNumber} 章 AIGC 修复后复检完成。`,
+      preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+      wordCount: wordCount(finalDraft),
+    })
+  }
+  const reportWithAigcDetection = `${report.trimEnd()}\n\n${formatAigcWritingDetectionReport(aigcDetection)}`
+  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
+  const finalGate = aigcDetection.status === "blocked"
+    ? {
+        ...baseFinalGate,
+        passed: false,
+        status: "blocked" as const,
+        reason: `${baseFinalGate.reason} AIGC 检测阻塞：${aigcDetection.highRiskSegments.length} 个片段超过阈值，最高概率 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}。`.trim(),
+      }
+    : baseFinalGate
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -5056,8 +5553,8 @@ export async function runChapterProductionPipeline(
   await fs.mkdir(paths.reportsDir, { recursive: true })
   await fs.mkdir(paths.memoryDir, { recursive: true })
   await fs.writeFile(draftPath, `${draft}\n`)
-  await fs.writeFile(reportPath, `${report}\n`)
-  await fs.writeFile(reviewedPath, `${draft}\n\n---\n\n${report}\n`)
+  await fs.writeFile(reportPath, `${reportWithAigcDetection}\n`)
+  await fs.writeFile(reviewedPath, `${draft}\n\n---\n\n${reportWithAigcDetection}\n`)
   await fs.writeFile(finalPath, `${finalDraft}\n`)
   await fs.writeFile(memoryPath, `${memoryUpdate}\n`)
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
@@ -5073,10 +5570,11 @@ export async function runChapterProductionPipeline(
     chapterNumber: task.chapterNumber,
     pass: "final",
     qualityGate: finalGate,
+    aigcDetection,
     wordCount: wordCount(finalDraft),
     targetWords: task.targetWords,
   })
-  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate })
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection })
   await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate })
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {

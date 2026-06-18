@@ -1676,7 +1676,7 @@ export function scheduleAutopilotRestore(rootDir: string, createSnapshot: Autopi
 
 export async function startAutopilotWorkerRuntime(options: AutopilotWorkerRuntimeOptions) {
   await restoreAutopilotJobs(options.rootDir, options.createSnapshot)
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && process.env.AI_NOVEL_TEST_FORCE_WORKER !== "1") {
     return {
       close: () => undefined,
     }

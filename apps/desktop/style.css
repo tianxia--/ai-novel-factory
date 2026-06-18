@@ -4964,3 +4964,79 @@ input[type="number"] {
   display: flex;
   gap: 10px;
 }
+
+/* Diagnostics Panel Styles */
+.diagnostics-panel {
+  display: grid;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+.diagnostic-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.diagnostic-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.diagnostic-section strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.diagnostic-section strong i {
+  font-size: 9.5px;
+}
+
+.diagnostic-list {
+  display: grid;
+  gap: 5px;
+}
+
+.diagnostic-row {
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.diagnostic-row p {
+  margin-top: 3px;
+  font-size: 9.5px;
+  color: #fda4af;
+}
+
+.diagnostic-row.is-success {
+  border-color: rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.03);
+  color: #a7f3d0;
+}
+
+.diagnostic-row.is-warning {
+  border-color: rgba(245, 158, 11, 0.18);
+  background: rgba(245, 158, 11, 0.04);
+  color: #fef08a;
+}
+
+.diagnostic-row.is-error {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.04);
+  color: #fecaca;
+}

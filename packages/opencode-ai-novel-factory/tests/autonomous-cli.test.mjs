@@ -485,6 +485,22 @@ test("env manager falls back to package .env for studio web roots", async () => 
   const managedStatus = getProjectEnvStatus(managedProjectDir)
   assert.equal(managedStatus.configured, true)
   assert.equal(managedStatus.envPath, path.join(packageEnvDir, ".env"))
+
+  await fs.writeFile(
+    path.join(tempDir, ".env"),
+    [
+      "AIGC_DETECTOR_PROVIDER=generic-json",
+      "AIGC_DETECTOR_URL=http://127.0.0.1:8765/detect",
+      "",
+    ].join("\n"),
+  )
+  const mergedStatus = getProjectEnvStatus(tempDir)
+  assert.equal(mergedStatus.configured, true)
+  assert.equal(mergedStatus.resolved.baseUrl, "https://package-env.example/v1")
+  assert.equal(mergedStatus.resolved.apiKeyPresent, true)
+  assert.equal(mergedStatus.resolved.modelName, "package-model")
+  assert.equal(mergedStatus.values.AIGC_DETECTOR_PROVIDER, "generic-json")
+  assert.equal(mergedStatus.envPath, path.join(tempDir, ".env"))
 })
 
 test("env manager upserts into the existing discovered .env file", async () => {
@@ -519,6 +535,64 @@ test("env manager upserts into the existing discovered .env file", async () => {
 
   const status = getProjectEnvStatus(tempDir)
   assert.equal(status.resolved.modelName, "package-model-updated")
+})
+
+test("studio llm config list imports configured project env provider", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-llm-env-import-"))
+  const packageEnvDir = path.join(tempDir, "packages", "opencode-ai-novel-factory")
+  const { handleNovelStudioApi } = await loadServerModule()
+
+  await fs.mkdir(packageEnvDir, { recursive: true })
+  await fs.writeFile(
+    path.join(packageEnvDir, ".env"),
+    [
+      "LLM_BASE_URL=https://package-env.example/v1",
+      "LLM_API_KEY=package-secret",
+      "LLM_MODEL_ID=package-model",
+      "LLM_TIMEOUT_MS=90000",
+      "LLM_TEMPERATURE=0.25",
+      "",
+    ].join("\n"),
+  )
+  await fs.writeFile(
+    path.join(tempDir, ".env"),
+    [
+      "AIGC_DETECTOR_PROVIDER=generic-json",
+      "AIGC_DETECTOR_URL=http://127.0.0.1:8765/detect",
+      "",
+    ].join("\n"),
+  )
+
+  const result = await handleNovelStudioApi(tempDir, "GET", "/api/llm-configs")
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.configs.length, 1)
+  assert.match(result.payload.configs[0].name, /Project \.env/)
+  assert.equal(result.payload.configs[0].base_url, "https://package-env.example/v1")
+  assert.equal(result.payload.configs[0].model_name, "package-model")
+  assert.equal(result.payload.configs[0].api_key, "[configured]")
+  assert.equal(result.payload.configs[0].api_key_configured, true)
+  assert.equal(result.payload.configs[0].temperature, 0.25)
+  assert.equal(result.payload.configs[0].timeout_ms, 90000)
+  assert.equal(result.payload.configs[0].is_active, 1)
+
+  const updateResult = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+    id: result.payload.configs[0].id,
+    name: "Renamed env config",
+    baseUrl: "https://package-env.example/v2",
+    apiKey: "[configured]",
+    modelName: "package-model-v2",
+  })
+
+  assert.equal(updateResult.status, 200)
+  assert.equal(updateResult.payload.configs[0].api_key, "[configured]")
+  assert.equal(updateResult.payload.configs[0].api_key_configured, true)
+
+  const providerResult = await handleNovelStudioApi(tempDir, "POST", "/api/provider-test", {})
+  assert.equal(providerResult.status, 200)
+  assert.equal(providerResult.payload.result.ok, true)
+  assert.equal(providerResult.payload.result.baseUrl, "https://package-env.example/v2")
+  assert.equal(providerResult.payload.result.modelName, "package-model-v2")
 })
 
 test("tui controller parses composer input into explicit actions", async () => {
@@ -905,6 +979,54 @@ test("novel studio API records autopilot jobs in the factory database", async ()
   }
 })
 
+test("novel studio API resumes drafting autopilot without restarting worldbuilding", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-server-autopilot-drafting-"))
+  const { handleNovelStudioApi } = await loadServerModule()
+  const { createManagedAutonomousProject, withFactoryDb, decideNovelDirectorCommand } = await loadCoreModule()
+
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A city registrar keeps accounts for ghosts",
+    title: "Ghost Ledger",
+    totalChapters: 6,
+    chapterWordTarget: 2500,
+  })
+  const state = structuredClone(created.state)
+  state.runtime.stage = "drafting"
+  state.plan.chapterTasks[0].status = "complete"
+  state.plan.pendingChapters = 5
+  await withFactoryDb(tempDir, async (db) => db.updateProjectState(created.project.id, state))
+  await fs.writeFile(
+    path.join(created.project.projectRoot, ".ai-novel", "state.json"),
+    `${JSON.stringify(state, null, 2)}\n`,
+  )
+
+  const result = await handleNovelStudioApi(
+    tempDir,
+    "POST",
+    "/api/autopilot/start",
+    { projectId: created.project.id },
+  )
+
+  assert.equal(result.status, 200)
+  const userMessage = result.payload.factorySnapshot.recentMessages.find((message) =>
+    message.type === "user"
+    && message.metadata?.source === "autopilot_start"
+  )
+  assert.ok(userMessage)
+  assert.match(userMessage.data.content, /继续.*章节正文生产流程/)
+  assert.match(userMessage.data.content, /第 2 章/)
+  assert.doesNotMatch(userMessage.data.content, /先完成世界观基线/)
+  assert.doesNotMatch(userMessage.data.content, /首轮统一讨论/)
+
+  const job = result.payload.factorySnapshot.runnableJobs.find((entry) => entry.kind === "autopilot")
+  assert.ok(job)
+  const jobPayload = JSON.parse(job.payload_json)
+  assert.match(jobPayload.message, /继续.*章节正文生产流程/)
+  assert.doesNotMatch(jobPayload.message, /先完成世界观基线/)
+  assert.equal(decideNovelDirectorCommand(state, { userMessage: jobPayload.message }).type, "advance")
+})
+
 test("novel studio API queues durable knowledge reindex jobs for worker processing", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-server-knowledge-reindex-"))
   const { handleNovelStudioApi } = await loadServerModule()
@@ -1285,6 +1407,14 @@ test("studio project api creates isolated projects and requires selection when m
   assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.characterDossier.count, 3)
   assert.match(firstCreateStatus.payload.factorySnapshot.productionObservability.characterDossier.artifactPath, /dossiers\.json/)
   assert.equal(firstCreateStatus.payload.factorySnapshot.productionObservability.contextBudget.status, "ready")
+
+  const obsDiag = firstCreateStatus.payload.factorySnapshot.productionObservability.diagnostics
+  assert.ok(obsDiag, "Observability payload should contain diagnostics")
+  assert.equal(Array.isArray(obsDiag.blockedChapters), true)
+  assert.equal(obsDiag.contextBudgetOverages.isOverages, false)
+  assert.equal(obsDiag.ragRecall.projectSources, 0)
+  assert.equal(Array.isArray(obsDiag.characterDossierGaps), true)
+  assert.equal(obsDiag.workerLeaseIssues.hasIssues, false)
   const styleProfile = await fs.readFile(path.join(tempDir, ".ai-novel-projects", firstCreate.payload.projectId, ".ai-novel", "style", "profile.md"), "utf8")
   assert.match(styleProfile, /genre: suspense/)
   assert.match(styleProfile, /reader promise: mystery/)
@@ -1993,6 +2123,54 @@ test("desktop workflow makes a paused unattended flow explicit when no durable j
   assert.equal(model.workflow.automation.kind, "warning")
   assert.match(model.workflow.automation.label, /无人值守已暂停/)
   assert.match(model.workflow.automation.detail, /第 4 章/)
+})
+
+test("desktop view model exposes canonical project runtime state", async () => {
+  const { deriveStudioViewModel } = await loadViewModelModule()
+  const projectRuntime = {
+    workflowStage: "drafting",
+    rawWorkflowStage: "drafting",
+    productionStatus: "drafting",
+    executionStatus: "idle",
+    primaryAction: "continue",
+    primaryActionLabel: "继续创作",
+    nextTarget: { type: "chapter", chapterNumber: 16 },
+    reason: "项目已进入正文写作，当前没有后台任务运行，可从第 16 章继续。",
+    chapterProgress: {
+      totalChapters: 500,
+      completedChapters: 15,
+      passedChapters: 15,
+      contiguousCompletedChapters: 15,
+      pendingChapters: 485,
+      inProgressChapters: 0,
+      blockedChapters: 0,
+      nextChapterNumber: 16,
+      progressPercent: 3,
+    },
+    runningJobs: 0,
+    recoverableJobs: 0,
+    runnableJobs: 0,
+    activeJobs: 0,
+    updatedAt: "2026-06-11T00:00:00.000Z",
+  }
+  const model = deriveStudioViewModel({
+    state: {
+      project: { title: "Demo", idea: "一个小人物进入权力核心" },
+      runtime: { stage: "worldbuilding_dialogue", statusMessage: "旧缓存状态" },
+      plan: { totalChapters: 500, chapterWordTarget: 3000, pendingChapters: 500, chapterTasks: [] },
+      reactSetup: { unansweredQuestions: [] },
+      assets: { cover: { status: "pending" }, comic: { status: "pending" } },
+    },
+    factorySnapshot: {
+      projectRuntime,
+      activeJobs: [],
+      runnableJobs: [],
+    },
+  })
+
+  assert.equal(model.projectRuntime.primaryAction, "continue")
+  assert.equal(model.projectRuntime.primaryActionLabel, "继续创作")
+  assert.equal(model.workflow.currentStage.key, "drafting")
 })
 
 test("desktop workflow exposes production pipeline artifact counters from the database snapshot", async () => {
@@ -2882,6 +3060,9 @@ test("desktop snapshot merge preserves state and loads messages before transcrip
   assert.match(js, /Array\.isArray\(payload\.messages\)/)
   assert.match(js, /const recentMessages = payload\.appendDiscussionHistory/)
   assert.match(js, /recentMessages,\s*\n\s*}/)
+  assert.match(js, /const persistedIds = persistedEntryIdentitySet\(persistedEntries\)/)
+  assert.match(js, /!identity \|\| !persistedIds\.has\(identity\)/)
+  assert.doesNotMatch(js, /!identity \|\| !persistedIds\.has\(identity\) \|\| !isTransientOperationalStatus\(entry\)/)
   assert.match(js, /\/api\/messages\?\$\{params\.toString\(\)\}/)
   assert.match(js, /\/api\/transcript\?\$\{params\.toString\(\)\}/)
   assert.match(js, /const DISCUSSION_PAGE_SIZE = 20/)
@@ -3698,7 +3879,7 @@ test("desktop studio exposes network recovery status and retry hooks", async () 
   assert.match(js, /job\?\.status === "paused" \|\| !job\?\.lease_owner/)
   assert.match(js, /job\?\.status === "running"\s*&& job\?\.lease_owner/)
   assert.match(js, /function hasRunningAutopilotJob\(\)/)
-  assert.match(js, /const running = Boolean\(runtimeAutopilot\.running \|\| hasRunningAutopilotJob\(\) \|\| dashboardState\.autopilotStreamConnected\)/)
+  assert.match(js, /const running = Boolean\(runtimeAutopilot\.running \|\| hasRunningAutopilotJob\(\) \|\| \(dashboardState\.autopilotActive && dashboardState\.autopilotStreamConnected\)\)/)
   assert.match(js, /function syncComposerStatusFromAutopilotControl\(\)/)
   assert.match(js, /AUTOPILOT_RESUME_HINT/)
   assert.match(js, /后台 worker 正在运行；如果模型超时，会自动重试并保留进度。/)
@@ -3764,6 +3945,9 @@ test("desktop studio exposes manual unattended controls instead of auto-resuming
   assert.match(html, /id="autopilot-stop-button"/)
   assert.match(js, /function startAutopilotFromButton/)
   assert.match(js, /function hasRecoverableAutopilotJob/)
+  assert.match(js, /function hasStartedProductionWorkflow/)
+  assert.match(js, /control\.paused \|\| control\.workflowStarted/)
+  assert.match(js, /项目已进入生产流程，点击继续创作/)
   assert.match(js, /function maybeResumeAutopilotFromSnapshot/)
   assert.match(js, /点击“继续创作”后接着上次进度运行/)
   assert.doesNotMatch(js, /streamAutopilot\("",\s*\{\s*resume:\s*true,\s*skipStart:\s*true\s*\}\)/)
