@@ -139,6 +139,7 @@ async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()
   const totalChars = scoredResults.reduce((sum, result) => sum + Math.max(1, result.charCount), 0);
   const score = totalChars > 0 ? scoredResults.reduce((sum, result) => sum + Number(result.score) * Math.max(1, result.charCount), 0) / totalChars : null;
   const highRiskSegments = results.filter((result) => result.status === "ai_likely" || typeof result.score === "number" && result.score >= threshold).sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+  const failedResults = results.filter((result) => !result.ok);
   return {
     ok: results.some((result) => result.ok),
     provider,
@@ -149,7 +150,7 @@ async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()
     totalSegments: segments.length,
     highRiskSegments,
     segments: results,
-    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : "Segmented AIGC detection completed."
+    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : failedResults.length > 0 ? `AIGC detection failed: ${Array.from(new Set(failedResults.map((r) => r.reason))).join("; ")}` : "Segmented AIGC detection completed."
   };
 }
 function splitAigcTextIntoSegments(text, options = {}) {
@@ -416,7 +417,7 @@ function hardSplitSegment(segment, maxChars) {
 }
 function extractGradioQueueOutput(events) {
   const parsedEvents = events.map((event) => parseJson(event.data) ?? event.data).filter((event) => event !== "");
-  const completed = parsedEvents.findLast(
+  const completed = [...parsedEvents].reverse().find(
     (event) => isRecord(event) && (event.msg === "process_completed" || event.output || event.success === true)
   );
   if (isRecord(completed) && "output" in completed) {

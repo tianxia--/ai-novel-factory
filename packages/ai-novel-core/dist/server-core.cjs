@@ -50,195 +50,24 @@ __export(server_core_exports, {
   targetToArtifactKind: () => targetToArtifactKind,
   testProviderConnectivity: () => testProviderConnectivity,
   upsertCheckpointInSuperGraph: () => upsertCheckpointInSuperGraph,
-  upsertProjectEnvValues: () => upsertProjectEnvValues,
   withFactoryDb: () => withFactoryDb
 });
 module.exports = __toCommonJS(server_core_exports);
 
 // src/orchestrator.ts
-var import_promises6 = __toESM(require("fs/promises"), 1);
+var import_promises7 = __toESM(require("fs/promises"), 1);
 var import_node_crypto2 = require("crypto");
-var import_node_path9 = __toESM(require("path"), 1);
+var import_node_path10 = __toESM(require("path"), 1);
+var import_node_crypto3 = require("crypto");
 
 // src/llm-config.ts
-var import_node_fs3 = __toESM(require("fs"), 1);
-var import_node_path3 = __toESM(require("path"), 1);
-
-// src/env-manager.ts
-var import_node_fs = __toESM(require("fs"), 1);
-var import_node_path = __toESM(require("path"), 1);
-var PRIMARY_ENV_KEYS = {
-  baseUrl: "LLM_BASE_URL",
-  apiKey: "LLM_API_KEY",
-  modelName: "LLM_MODEL_ID"
-};
-var FALLBACK_ENV_KEYS = {
-  baseUrl: "OPENAI_BASE_URL",
-  apiKey: "OPENAI_API_KEY",
-  modelName: "OPENAI_MODEL_NAME"
-};
-var PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"];
-var MANAGED_PROJECTS_SEGMENT = `${import_node_path.default.sep}.ai-novel-projects${import_node_path.default.sep}`;
-function uniquePaths(paths) {
-  return [...new Set(paths.map((candidate) => import_node_path.default.resolve(candidate)))];
-}
-function inferWorkspaceRootFromManagedProject(rootDir) {
-  const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT);
-  if (index < 0) {
-    return null;
-  }
-  return rootDir.slice(0, index) || import_node_path.default.parse(rootDir).root;
-}
-function parseProjectEnv(raw) {
-  const values = {};
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
-    values[key] = value;
-  }
-  return values;
-}
-function pickResolvedValue(primaryKey, fallbackKey, values) {
-  const processValue = process.env[primaryKey]?.trim() || process.env[fallbackKey]?.trim();
-  if (processValue) {
-    return processValue;
-  }
-  const fileValue = values[primaryKey]?.trim() || values[fallbackKey]?.trim();
-  return fileValue || null;
-}
-function getProjectEnvPath(rootDir = process.cwd()) {
-  return import_node_path.default.resolve(rootDir, ".env");
-}
-function getProjectEnvCandidatePaths(rootDir = process.cwd()) {
-  const resolvedRootDir = import_node_path.default.resolve(rootDir);
-  const candidates = [
-    getProjectEnvPath(resolvedRootDir),
-    import_node_path.default.join(resolvedRootDir, ...PACKAGE_ENV_PARTS)
-  ];
-  const workspaceRoot = inferWorkspaceRootFromManagedProject(resolvedRootDir);
-  if (workspaceRoot) {
-    candidates.push(
-      getProjectEnvPath(workspaceRoot),
-      import_node_path.default.join(workspaceRoot, ...PACKAGE_ENV_PARTS)
-    );
-  }
-  return uniquePaths(candidates);
-}
-function readProjectEnv(rootDir = process.cwd()) {
-  const candidates = getProjectEnvCandidatePaths(rootDir);
-  const existingPaths = candidates.filter((envPath) => import_node_fs.default.existsSync(envPath));
-  if (existingPaths.length > 0) {
-    const values = existingPaths.slice().reverse().reduce((merged, envPath) => {
-      const raw = import_node_fs.default.readFileSync(envPath, "utf8");
-      return {
-        ...merged,
-        ...parseProjectEnv(raw)
-      };
-    }, {});
-    return {
-      envPath: existingPaths[0],
-      exists: true,
-      sourcePaths: existingPaths,
-      values
-    };
-  }
-  return {
-    envPath: getProjectEnvPath(rootDir),
-    exists: false,
-    sourcePaths: [],
-    values: {}
-  };
-}
-function resolveProjectEnvWritePath(rootDir = process.cwd()) {
-  for (const envPath of getProjectEnvCandidatePaths(rootDir)) {
-    if (import_node_fs.default.existsSync(envPath)) {
-      return envPath;
-    }
-  }
-  return getProjectEnvPath(rootDir);
-}
-function getProjectEnvStatus(rootDir = process.cwd()) {
-  const { envPath, exists, sourcePaths, values } = readProjectEnv(rootDir);
-  const resolved = {
-    baseUrl: pickResolvedValue(PRIMARY_ENV_KEYS.baseUrl, FALLBACK_ENV_KEYS.baseUrl, values),
-    apiKeyPresent: Boolean(pickResolvedValue(PRIMARY_ENV_KEYS.apiKey, FALLBACK_ENV_KEYS.apiKey, values)),
-    modelName: pickResolvedValue(PRIMARY_ENV_KEYS.modelName, FALLBACK_ENV_KEYS.modelName, values)
-  };
-  const missing = [
-    resolved.baseUrl ? null : PRIMARY_ENV_KEYS.baseUrl,
-    resolved.apiKeyPresent ? null : PRIMARY_ENV_KEYS.apiKey,
-    resolved.modelName ? null : PRIMARY_ENV_KEYS.modelName
-  ].filter(Boolean);
-  return {
-    envPath,
-    exists,
-    sourcePaths,
-    configured: missing.length === 0,
-    missing,
-    values,
-    resolved
-  };
-}
-function redactEnvValues(values) {
-  const redacted = {};
-  for (const [key, value] of Object.entries(values)) {
-    if (/api[_-]?key|token|secret|password/i.test(key)) {
-      redacted[key] = value ? "[configured]" : "";
-    } else {
-      redacted[key] = value;
-    }
-  }
-  return redacted;
-}
-function getPublicProjectEnvStatus(rootDir = process.cwd()) {
-  const status = getProjectEnvStatus(rootDir);
-  return {
-    ...status,
-    values: redactEnvValues(status.values)
-  };
-}
-function upsertProjectEnvValues(rootDir, updates) {
-  const envPath = resolveProjectEnvWritePath(rootDir);
-  const original = import_node_fs.default.existsSync(envPath) ? import_node_fs.default.readFileSync(envPath, "utf8") : "";
-  const lines = original ? original.split("\n") : [];
-  const nextKeys = new Set(Object.keys(updates));
-  const rewritten = lines.map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      return line;
-    }
-    const separator = line.indexOf("=");
-    if (separator <= 0) {
-      return line;
-    }
-    const key = line.slice(0, separator).trim();
-    const replacement = updates[key];
-    if (replacement === void 0) {
-      return line;
-    }
-    nextKeys.delete(key);
-    return `${key}=${replacement}`;
-  });
-  for (const key of nextKeys) {
-    rewritten.push(`${key}=${updates[key]}`);
-  }
-  const finalContent = `${rewritten.filter((line, index, array) => !(index === array.length - 1 && line === "")).join("\n")}
-`;
-  import_node_fs.default.writeFileSync(envPath, finalContent, "utf8");
-}
+var import_node_fs2 = __toESM(require("fs"), 1);
+var import_node_path2 = __toESM(require("path"), 1);
 
 // src/factory-db.ts
-var import_node_fs2 = __toESM(require("fs"), 1);
+var import_node_fs = __toESM(require("fs"), 1);
 var import_promises = __toESM(require("fs/promises"), 1);
-var import_node_path2 = __toESM(require("path"), 1);
+var import_node_path = __toESM(require("path"), 1);
 
 // src/chapter-consistency.ts
 var GENERIC_NAMES = /* @__PURE__ */ new Set([
@@ -501,11 +330,18 @@ function evaluateChapterConsistency(input) {
 
 // src/factory-db.ts
 var chapterConsistencyCache = /* @__PURE__ */ new Map();
+function normalizeLlmApiMode(value) {
+  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
+}
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";
 var MIN_CHAPTER_PASS_RATIO = 0.8;
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeLlmCapability(capability) {
+  const normalized = capability.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+  return normalized || "text";
 }
 function jsonString(value) {
   return JSON.stringify(value ?? null);
@@ -738,7 +574,7 @@ function applyQualityGateFact(fact, qualityGate, projectTargetWords) {
 }
 function readTextFileSync(filePath) {
   try {
-    return import_node_fs2.default.readFileSync(filePath, "utf8");
+    return import_node_fs.default.readFileSync(filePath, "utf8");
   } catch {
     return "";
   }
@@ -749,7 +585,7 @@ async function loadDatabaseSync() {
   return sqlite.DatabaseSync;
 }
 function getFactoryDbPath(rootDir) {
-  return import_node_path2.default.join(rootDir, FACTORY_DB_DIR, FACTORY_DB_FILE);
+  return import_node_path.default.join(rootDir, FACTORY_DB_DIR, FACTORY_DB_FILE);
 }
 var FactoryDb = class _FactoryDb {
   constructor(db) {
@@ -758,7 +594,7 @@ var FactoryDb = class _FactoryDb {
   db;
   static async open(rootDir) {
     const dbPath = getFactoryDbPath(rootDir);
-    await import_promises.default.mkdir(import_node_path2.default.dirname(dbPath), { recursive: true });
+    await import_promises.default.mkdir(import_node_path.default.dirname(dbPath), { recursive: true });
     const DatabaseSync = await loadDatabaseSync();
     const db = new DatabaseSync(dbPath);
     const store = new _FactoryDb(db);
@@ -772,6 +608,13 @@ var FactoryDb = class _FactoryDb {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
+
+      CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
@@ -1033,11 +876,20 @@ var FactoryDb = class _FactoryDb {
         base_url TEXT NOT NULL,
         api_key TEXT NOT NULL,
         model_name TEXT NOT NULL,
+        api_mode TEXT NOT NULL DEFAULT 'chat',
         temperature REAL NOT NULL DEFAULT 0.1,
         timeout_ms INTEGER NOT NULL DEFAULT 120000,
         is_active INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS llm_config_routes (
+        capability TEXT PRIMARY KEY,
+        config_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(config_id) REFERENCES llm_configs(id) ON DELETE CASCADE
       );
 
 
@@ -1057,6 +909,7 @@ var FactoryDb = class _FactoryDb {
       CREATE INDEX IF NOT EXISTS idx_message_parts_message_index ON message_parts(message_id, part_index);
     `);
     this.migrateColumn("memory_items", "embedding_id", "TEXT");
+    this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'");
     this.migrateGraphTablePrimaryKey("graph_nodes", `
       CREATE TABLE graph_nodes (
         id TEXT NOT NULL,
@@ -2389,7 +2242,7 @@ var FactoryDb = class _FactoryDb {
     const projectTargetWords = Number(projectRow?.chapter_word_target);
     const targetWordsForQuality = Number.isFinite(projectTargetWords) ? projectTargetWords : void 0;
     const projectRoot = typeof projectRow?.project_root === "string" ? projectRow.project_root : "";
-    const protagonistProfile = projectRoot ? readTextFileSync(import_node_path2.default.join(projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md")) : "";
+    const protagonistProfile = projectRoot ? readTextFileSync(import_node_path.default.join(projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md")) : "";
     const ensureFact = (chapterNumber) => {
       const existing = facts.get(chapterNumber);
       if (existing) return existing;
@@ -2548,10 +2401,10 @@ var FactoryDb = class _FactoryDb {
     let previousProtagonistName = inferLockedProtagonistName(protagonistProfile);
     for (const fact of [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)) {
       if (fact.finalPath) {
-        const absolutePath = import_node_path2.default.isAbsolute(fact.finalPath) ? fact.finalPath : import_node_path2.default.join(projectRoot, fact.finalPath);
+        const absolutePath = import_node_path.default.isAbsolute(fact.finalPath) ? fact.finalPath : import_node_path.default.join(projectRoot, fact.finalPath);
         let mtimeMs = 0;
         try {
-          mtimeMs = import_node_fs2.default.statSync(absolutePath).mtimeMs;
+          mtimeMs = import_node_fs.default.statSync(absolutePath).mtimeMs;
         } catch {
         }
         const cacheKey = `${absolutePath}:${mtimeMs}:${previousProtagonistName || ""}:${protagonistProfile || ""}`;
@@ -2639,7 +2492,7 @@ var FactoryDb = class _FactoryDb {
   }
   getSnapshot(projectId) {
     const project = this.getProject(projectId);
-    const projectRow = this.db.prepare("SELECT state_json FROM projects WHERE id = ?").get(projectId);
+    const projectRow = this.db.prepare("SELECT state_json, project_root FROM projects WHERE id = ?").get(projectId);
     const chapterFacts = this.getChapterFacts(projectId);
     const completedChapterFacts = chapterFacts.filter((fact) => fact.status === "complete");
     const blockedChapterFacts = chapterFacts.filter((fact) => fact.status === "blocked");
@@ -2694,10 +2547,74 @@ var FactoryDb = class _FactoryDb {
         artifactsByPath.set(key, compactDbRow(row));
       }
     }
+    const stateObj = readJson(projectRow?.state_json, null);
+    const projectRoot = projectRow?.project_root || "";
+    if (projectRoot && stateObj) {
+      const stage = stateObj.runtime?.stage || "";
+      const tasks = stateObj.plan?.chapterTasks ? Array.isArray(stateObj.plan.chapterTasks) ? stateObj.plan.chapterTasks : [] : [];
+      const activeTask = tasks.find((t) => t.status === "in_progress" || t.status === "blocked");
+      const activeChapterNumber = activeTask ? Number(activeTask.chapterNumber) : null;
+      let latestDiscussionPath = "";
+      let latestDiscussionMtime = 0;
+      for (const [pathKey, row] of artifactsByPath.entries()) {
+        if (pathKey.includes("/consensus/discussion-") || pathKey.includes(".ai-novel/consensus/discussion-")) {
+          try {
+            const absPath = import_node_fs.default.existsSync(pathKey) ? pathKey : import_node_path.default.resolve(projectRoot, pathKey);
+            if (import_node_fs.default.existsSync(absPath)) {
+              const mtime = import_node_fs.default.statSync(absPath).mtimeMs;
+              if (mtime > latestDiscussionMtime) {
+                latestDiscussionMtime = mtime;
+                latestDiscussionPath = pathKey;
+              }
+            }
+          } catch {
+          }
+        }
+      }
+      for (const [pathKey, row] of artifactsByPath.entries()) {
+        const isOutline = stage === "master_planning" && pathKey.includes("master-outline");
+        let isBlueprint = false;
+        let isDraft = false;
+        if (activeChapterNumber) {
+          const paddedCh = String(activeChapterNumber).padStart(3, "0");
+          isBlueprint = stage === "chapter_task_generation" && pathKey.includes(`chapter-${paddedCh}`) && pathKey.includes("blueprint");
+          isDraft = (stage === "drafting" || stage === "reviewing") && pathKey.includes(`chapter-${paddedCh}`) && (pathKey.includes("draft") || pathKey.includes("final"));
+        }
+        const isLatestDiscussion = pathKey === latestDiscussionPath;
+        if (isOutline || isBlueprint || isDraft || isLatestDiscussion) {
+          try {
+            const absPath = import_node_fs.default.existsSync(pathKey) ? pathKey : import_node_path.default.resolve(projectRoot, pathKey);
+            if (import_node_fs.default.existsSync(absPath)) {
+              row.content = import_node_fs.default.readFileSync(absPath, "utf8");
+            }
+          } catch (e) {
+            console.error(`Failed to read artifact content for ${pathKey}:`, e);
+          }
+        }
+      }
+    }
     const knowledge = this.getKnowledgeSummary(projectId);
+    const latestEventRows = this.db.prepare(`
+      SELECT * FROM events
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+      LIMIT 80
+    `).all(projectId).map(compactDbRow);
+    const milestoneEventTypes = /* @__PURE__ */ new Set(["PROJECT_CREATED", "CONSENSUS_UPDATED", "CHAPTER_PIPELINE_COMPLETED"]);
+    const milestoneEventRows = this.db.prepare(`
+      SELECT * FROM events
+      WHERE project_id = ?
+        AND type IN ('PROJECT_CREATED', 'CONSENSUS_UPDATED', 'CHAPTER_PIPELINE_COMPLETED')
+      ORDER BY created_at DESC
+      LIMIT 24
+    `).all(projectId).map(compactDbRow);
+    const mergedLatestEvents = [
+      ...milestoneEventRows,
+      ...latestEventRows.filter((row) => !milestoneEventTypes.has(String(row.type || "")))
+    ].filter((row, index, rows) => rows.findIndex((candidate) => String(candidate.id || "") === String(row.id || "")) === index);
     return {
       project,
-      state: readJson(projectRow?.state_json, null),
+      state: stateObj,
       activeRuns: this.db.prepare(`
         SELECT * FROM workflow_runs
         WHERE project_id = ? AND status IN ('running', 'paused')
@@ -2709,12 +2626,7 @@ var FactoryDb = class _FactoryDb {
         ORDER BY updated_at DESC
         LIMIT 12
       `).all(projectId),
-      latestEvents: this.db.prepare(`
-        SELECT * FROM events
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        LIMIT 80
-      `).all(projectId).map(compactDbRow),
+      latestEvents: mergedLatestEvents,
       artifacts: [...artifactsByPath.values()],
       artifactSummary: {
         total: Number(artifactCounts?.total || 0),
@@ -2850,7 +2762,7 @@ var FactoryDb = class _FactoryDb {
   }
   listLlmConfigs() {
     return this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
       FROM llm_configs
       ORDER BY created_at DESC
     `).all();
@@ -2860,6 +2772,7 @@ var FactoryDb = class _FactoryDb {
     const now2 = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const apiMode = normalizeLlmApiMode(config.apiMode);
     const active = config.isActive ? 1 : 0;
     if (active) {
       this.db.prepare(`
@@ -2867,22 +2780,26 @@ var FactoryDb = class _FactoryDb {
       `).run();
     }
     this.db.prepare(`
-      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, active, now2, now2);
+      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, active, now2, now2);
     return id;
   }
   updateLlmConfig(id, config) {
     const now2 = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const apiMode = normalizeLlmApiMode(config.apiMode);
     this.db.prepare(`
       UPDATE llm_configs
-      SET name = ?, base_url = ?, api_key = ?, model_name = ?, temperature = ?, timeout_ms = ?, updated_at = ?
+      SET name = ?, base_url = ?, api_key = ?, model_name = ?, api_mode = ?, temperature = ?, timeout_ms = ?, updated_at = ?
       WHERE id = ?
-    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now2, id);
+    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, now2, id);
   }
   deleteLlmConfig(id) {
+    this.db.prepare(`
+      DELETE FROM llm_config_routes WHERE config_id = ?
+    `).run(id);
     this.db.prepare(`
       DELETE FROM llm_configs WHERE id = ?
     `).run(id);
@@ -2894,15 +2811,86 @@ var FactoryDb = class _FactoryDb {
     this.db.prepare(`
       UPDATE llm_configs SET is_active = 1 WHERE id = ?
     `).run(id);
+    this.setLlmConfigRoute("text", id);
   }
   getActiveLlmConfig() {
     const config = this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
       FROM llm_configs
       WHERE is_active = 1
       LIMIT 1
     `).get();
     return config || null;
+  }
+  listLlmConfigRoutes() {
+    return this.db.prepare(`
+      SELECT routes.capability, routes.config_id, routes.created_at, routes.updated_at,
+             configs.name, configs.base_url, configs.model_name, configs.api_mode, configs.temperature, configs.timeout_ms
+      FROM llm_config_routes routes
+      LEFT JOIN llm_configs configs ON configs.id = routes.config_id
+      ORDER BY routes.capability ASC
+    `).all();
+  }
+  getLlmConfigForCapability(capability) {
+    const normalized = normalizeLlmCapability(capability);
+    const config = this.db.prepare(`
+      SELECT configs.id, configs.name, configs.base_url, configs.api_key, configs.model_name,
+             configs.api_mode, configs.temperature, configs.timeout_ms, configs.is_active, configs.created_at, configs.updated_at
+      FROM llm_config_routes routes
+      JOIN llm_configs configs ON configs.id = routes.config_id
+      WHERE routes.capability = ?
+      LIMIT 1
+    `).get(normalized);
+    return config || null;
+  }
+  setLlmConfigRoute(capability, configId) {
+    const normalized = normalizeLlmCapability(capability);
+    const exists = this.db.prepare(`
+      SELECT id FROM llm_configs WHERE id = ?
+    `).get(configId);
+    if (!exists) {
+      throw new Error("llm_config_not_found");
+    }
+    const now2 = nowIso();
+    this.db.prepare(`
+      INSERT INTO llm_config_routes (capability, config_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(capability) DO UPDATE SET
+        config_id = excluded.config_id,
+        updated_at = excluded.updated_at
+    `).run(normalized, configId, now2, now2);
+    if (normalized === "text") {
+      this.db.prepare(`
+        UPDATE llm_configs SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END
+      `).run(configId);
+    }
+  }
+  deleteLlmConfigRoute(capability) {
+    const normalized = normalizeLlmCapability(capability);
+    this.db.prepare(`
+      DELETE FROM llm_config_routes WHERE capability = ?
+    `).run(normalized);
+  }
+  getSystemSetting(key) {
+    const row = this.db.prepare(`
+      SELECT value FROM system_settings WHERE key = ?
+    `).get(key);
+    return row ? row.value : null;
+  }
+  setSystemSetting(key, value) {
+    const now2 = nowIso();
+    this.db.prepare(`
+      INSERT INTO system_settings (key, value, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `).run(key, value, now2, now2);
+  }
+  listSystemSettings() {
+    return this.db.prepare(`
+      SELECT key, value FROM system_settings
+    `).all();
   }
 };
 var activeDbInstance = null;
@@ -2957,84 +2945,17 @@ function targetToArtifactKind(target) {
 }
 
 // src/llm-config.ts
-function readNumber(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-function loadLlmConfigFromEnv(rootDir = process.cwd()) {
-  const envStatus = getProjectEnvStatus(rootDir);
-  const dotEnv = envStatus.values;
-  const baseUrl = process.env.LLM_BASE_URL || dotEnv.LLM_BASE_URL || process.env.OPENAI_BASE_URL || dotEnv.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const apiKeyEnv = process.env.LLM_API_KEY || dotEnv.LLM_API_KEY ? "LLM_API_KEY" : process.env.OPENAI_API_KEY || dotEnv.OPENAI_API_KEY ? "OPENAI_API_KEY" : "unset";
-  const modelName = process.env.LLM_MODEL_ID || dotEnv.LLM_MODEL_ID || process.env.OPENAI_MODEL_NAME || dotEnv.OPENAI_MODEL_NAME || "gpt-4o";
-  return {
-    provider: {
-      baseUrl,
-      apiKeyEnv,
-      modelName,
-      timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || dotEnv.LLM_TIMEOUT_MS, 12e4),
-      temperature: readNumber(process.env.LLM_TEMPERATURE || dotEnv.LLM_TEMPERATURE, 0.1),
-      reactMaxSteps: readNumber(process.env.MAX_STEPS || dotEnv.MAX_STEPS, 25)
-    },
-    writing: {
-      chapterWordTarget: readNumber(process.env.NOVEL_CHAPTER_WORD_TARGET || dotEnv.NOVEL_CHAPTER_WORD_TARGET, 2500),
-      chapterWordMinimum: 2500
-    }
-  };
+function readApiMode(value) {
+  return value?.trim().toLowerCase() === "responses" ? "responses" : "chat";
 }
 var cachedActiveLlmConfig = null;
-function getEnvApiKey(values) {
-  return process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || values.LLM_API_KEY || values.OPENAI_API_KEY || "";
-}
-function buildEnvBackedLlmConfig(rootDir = process.cwd()) {
-  const envStatus = getProjectEnvStatus(rootDir);
-  const apiKey = getEnvApiKey(envStatus.values);
-  if (!envStatus.resolved.baseUrl || !envStatus.resolved.modelName || !apiKey) {
-    return null;
-  }
-  return {
-    name: `Project .env (${envStatus.resolved.modelName})`,
-    baseUrl: envStatus.resolved.baseUrl,
-    apiKey,
-    modelName: envStatus.resolved.modelName,
-    temperature: readNumber(process.env.LLM_TEMPERATURE || envStatus.values.LLM_TEMPERATURE, 0.1),
-    timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || envStatus.values.LLM_TIMEOUT_MS, 12e4)
-  };
-}
-async function ensureEnvLlmConfigImported(rootDir = process.cwd()) {
-  const envConfig = buildEnvBackedLlmConfig(rootDir);
-  if (!envConfig) {
-    return;
-  }
-  const dbRootDir = resolveFactoryRootDir(rootDir);
-  await withFactoryDb(dbRootDir, async (db) => {
-    const configs = db.listLlmConfigs();
-    const hasActiveConfig = configs.some((config) => Number(config.is_active) === 1);
-    if (configs.length === 0) {
-      db.addLlmConfig({
-        ...envConfig,
-        isActive: true
-      });
-      return;
-    }
-    if (!hasActiveConfig) {
-      const firstConfig = configs[0];
-      if (typeof firstConfig?.id === "string") {
-        db.activateLlmConfig(firstConfig.id);
-      }
-    }
-  });
-}
 function isWorkspaceRoot(dir) {
   try {
-    const pkgPath = import_node_path3.default.join(dir, "package.json");
-    if (!import_node_fs3.default.existsSync(pkgPath)) {
+    const pkgPath = import_node_path2.default.join(dir, "package.json");
+    if (!import_node_fs2.default.existsSync(pkgPath)) {
       return false;
     }
-    const content = import_node_fs3.default.readFileSync(pkgPath, "utf8");
+    const content = import_node_fs2.default.readFileSync(pkgPath, "utf8");
     const pkg = JSON.parse(content);
     return pkg.name === "ai-novel-factory-workspace";
   } catch {
@@ -3042,60 +2963,796 @@ function isWorkspaceRoot(dir) {
   }
 }
 function resolveFactoryRootDir(dir = process.cwd()) {
-  let current = import_node_path3.default.resolve(dir);
+  let current = import_node_path2.default.resolve(dir);
   while (true) {
     if (isWorkspaceRoot(current)) {
       return current;
     }
-    const parent = import_node_path3.default.dirname(current);
+    const parent = import_node_path2.default.dirname(current);
     if (parent === current) {
       break;
     }
     current = parent;
   }
-  const fallback = import_node_path3.default.resolve(dir);
-  const projectsIndex = fallback.indexOf(`${import_node_path3.default.sep}.ai-novel-projects`);
+  const fallback = import_node_path2.default.resolve(dir);
+  const projectsIndex = fallback.indexOf(`${import_node_path2.default.sep}.ai-novel-projects`);
   if (projectsIndex !== -1) {
     return fallback.slice(0, projectsIndex);
   }
-  const novelIndex = fallback.indexOf(`${import_node_path3.default.sep}.ai-novel`);
+  const novelIndex = fallback.indexOf(`${import_node_path2.default.sep}.ai-novel`);
   if (novelIndex !== -1) {
     return fallback.slice(0, novelIndex);
   }
   return fallback;
 }
 async function loadActiveLlmConfig(rootDir = process.cwd()) {
+  return loadLlmConfigForCapability(rootDir, "text");
+}
+function dbConfigToActiveConfig(activeDbConfig, capability, rootDir = process.cwd()) {
+  return {
+    provider: {
+      baseUrl: activeDbConfig.base_url,
+      apiKeyEnv: "DB_ACTIVE_CONFIG",
+      modelName: activeDbConfig.model_name,
+      apiMode: readApiMode(activeDbConfig.api_mode),
+      timeoutMs: Number(activeDbConfig.timeout_ms) || 12e4,
+      temperature: Number(activeDbConfig.temperature) || 0.1,
+      reactMaxSteps: 25
+    },
+    writing: {
+      chapterWordTarget: 2500,
+      chapterWordMinimum: 2500
+    },
+    _dbApiKey: activeDbConfig.api_key,
+    _configId: activeDbConfig.id,
+    _capability: capability
+  };
+}
+async function loadLlmConfigForCapability(rootDir = process.cwd(), capability = "text") {
   const dbRootDir = resolveFactoryRootDir(rootDir);
   try {
-    await ensureEnvLlmConfigImported(rootDir);
     const activeDbConfig = await withFactoryDb(dbRootDir, async (db) => {
-      return db.getActiveLlmConfig();
+      return db.getLlmConfigForCapability(String(capability)) || (String(capability) === "text" ? db.getActiveLlmConfig() : null);
     });
     if (!activeDbConfig) {
-      cachedActiveLlmConfig = null;
+      if (String(capability) === "text") {
+        cachedActiveLlmConfig = null;
+      }
       return null;
     }
-    const config = {
-      provider: {
-        baseUrl: activeDbConfig.base_url,
-        apiKeyEnv: "DB_ACTIVE_CONFIG",
-        modelName: activeDbConfig.model_name,
-        timeoutMs: Number(activeDbConfig.timeout_ms) || 12e4,
-        temperature: Number(activeDbConfig.temperature) || 0.1,
-        reactMaxSteps: 25
-      },
-      writing: {
-        chapterWordTarget: 2500,
-        chapterWordMinimum: 2500
-      },
-      _dbApiKey: activeDbConfig.api_key
-    };
-    cachedActiveLlmConfig = config;
+    const config = dbConfigToActiveConfig(activeDbConfig, String(capability), rootDir);
+    if (String(capability) === "text") {
+      cachedActiveLlmConfig = config;
+    }
     return config;
   } catch (error) {
-    console.error("Failed to load active LLM config from DB:", error);
+    console.error(`Failed to load ${String(capability)} LLM config from DB:`, error);
     return null;
   }
+}
+
+// src/abort.ts
+var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
+function createAutopilotStopError() {
+  return new Error(AUTOPILOT_STOP_MESSAGE);
+}
+function throwIfStopped(signal) {
+  if (signal?.aborted) {
+    throw createAutopilotStopError();
+  }
+}
+
+// src/runtime-llm.ts
+var AUTONOMOUS_DISCUSSION_PROTOCOL = [
+  "\u81EA\u4E3B\u521B\u4F5C\u534F\u8BAE\uFF1A",
+  "- \u4F60\u5DF2\u7ECF\u88AB\u6388\u6743\u63A5\u7BA1\u521B\u4F5C\u6D41\u7A0B\u3002",
+  "- \u9ED8\u8BA4\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u56DE\u590D\uFF0C\u9664\u975E\u7CFB\u7EDF\u660E\u786E\u8981\u6C42\u522B\u7684\u8BED\u8A00\u3002",
+  "- \u4E0D\u8981\u8BA9\u7528\u6237\u505A A/B \u9009\u62E9\uFF0C\u4E0D\u8981\u8BE2\u95EE\u662F\u5426\u7EE7\u7EED\u3002",
+  "- \u4E0D\u8981\u56E0\u4E3A\u7EC6\u8282\u7F3A\u5931\u5C31\u505C\u4F4F\uFF1B\u7F3A\u4FE1\u606F\u65F6\u5148\u505A\u9AD8\u8D28\u91CF\u5DE5\u4F5C\u5047\u8BBE\u3002",
+  "- \u5FC5\u987B\u7ED9\u51FA\u5177\u4F53\u63D0\u6848\u3001\u98CE\u9669\u3001\u5EFA\u8BAE\u548C\u6536\u655B\u7ED3\u679C\u3002",
+  "- \u8BA8\u8BBA\u5FC5\u987B\u4E25\u683C\u505C\u7559\u5728\u5F53\u524D target \u548C\u5F53\u524D workflow stage \u5185\u3002",
+  "- \u4E0D\u5141\u8BB8\u8D8A\u7EA7\u58F0\u79F0\u5DF2\u7ECF\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\uFF1B\u5982\u679C\u5F53\u524D\u8FD8\u5728\u4E16\u754C\u89C2\u9636\u6BB5\uFF0C\u5C31\u4E0D\u80FD\u5047\u88C5\u5DF2\u7ECF\u5728\u5199\u7B2C 2 \u7AE0\u3002",
+  "- \u6743\u5A01\u8FDB\u5EA6\u53EA\u6765\u81EA\u7CFB\u7EDF\u63D0\u4F9B\u7684 `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5`\uFF1B\u4E0D\u5F97\u6839\u636E\u8BA8\u8BBA\u5185\u5BB9\u81EA\u884C\u5BA3\u5E03\u9636\u6BB5\u5DF2\u5B8C\u6210\u3001\u5DF2\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\u3001\u67D0\u5F27\u84DD\u56FE\u5DF2\u5B8C\u6210\u3002",
+  "- \u53EF\u4EE5\u63D0\u51FA `\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u63A8\u8FDB\u5230...`\uFF0C\u4F46\u4E0D\u80FD\u5199\u6210 `\u5F53\u524D\u5DF2\u7ECF\u8FDB\u5165...`\uFF0C\u9664\u975E `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5` \u5DF2\u7ECF\u53D8\u66F4\u3002",
+  "- \u6BCF\u4E2A specialist \u81F3\u5C11\u6307\u51FA\u4E00\u4E2A\u98CE\u9669\u3001\u5F31\u70B9\u6216\u51B2\u7A81\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+  "- Reviewer\u3001Editor\u3001Prose Stylist \u4E0D\u5141\u8BB8\u53EA\u7ED9\u7EAF\u901A\u8FC7\u7ED3\u8BBA\u3002",
+  "- \u6700\u7EC8 Showrunner \u603B\u7ED3\u5FC5\u987B\u5305\u542B\uFF1AFinal Consensus\u3001Remaining Risk\u3001Next Step\u3002"
+].join("\n");
+var STAGE_DRIFT_PATTERNS = [
+  /prose production/i,
+  /current task/i,
+  /chapter\s+\d+/i,
+  /第\s*\d+\s*章/u
+];
+function extractTextContent(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => extractTextContent(item)).join("");
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const record = value;
+  const direct = [record.text, record.output_text, record.reasoning_content, record.content].map((item) => extractTextContent(item)).join("");
+  if (direct) {
+    return direct;
+  }
+  return [record.message, record.delta].map((item) => extractTextContent(item)).join("");
+}
+function buildFakeReply(options) {
+  const normalizedRole = options.roleName.toLowerCase();
+  const priorTranscript = options.priorTranscript?.trim() ?? "";
+  const latestContextLine = priorTranscript.split("\n").filter(Boolean).slice(-1)[0] ?? "";
+  const targetLabel = options.discussionTarget?.label || "\u5F53\u524D\u8BA8\u8BBA\u76EE\u6807";
+  if (normalizedRole.includes("showrunner")) {
+    if (options.discussionStage === "opening_brief") {
+      return [
+        "### \u672C\u8F6E\u76EE\u6807",
+        `- \u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
+        `- \u5199\u56DE\u8D44\u4EA7\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
+        `- \u5F53\u524D\u9636\u6BB5\uFF1A${options.currentStage || "worldbuilding_dialogue"}`,
+        "- \u76EE\u6807\uFF1A\u5728\u4E0D\u8D8A\u7EA7\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u7684\u524D\u63D0\u4E0B\uFF0C\u5148\u5F62\u6210\u7EDF\u4E00\u5171\u8BC6\u3002",
+        "",
+        "### \u7EA6\u675F",
+        "- \u5FC5\u987B\u505C\u7559\u5728\u540C\u4E00\u4E2A\u8BA8\u8BBA\u5BF9\u8C61\u4E0A\u3002",
+        "- \u4E0D\u5F97\u865A\u6784\u65E0\u5173\u7AE0\u8282\u3001\u652F\u7EBF\u6216\u5DF2\u7ECF\u5B8C\u6210\u7684\u6B63\u6587\u3002",
+        "- \u7ED3\u5C3E\u5FC5\u987B\u7ED9\u51FA\u53EF\u5199\u56DE\u8D44\u4EA7\u7684\u66F4\u65B0\u5EFA\u8BAE\u3002"
+      ].join("\n");
+    }
+    if (options.discussionStage === "closing_synthesis") {
+      return [
+        "### Final Consensus",
+        `- \u5DF2\u786E\u8BA4\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
+        `- \u5199\u56DE\u8DEF\u5F84\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
+        "- \u51B3\u8BAE\uFF1A\u540E\u7EED\u52A8\u4F5C\u5FC5\u987B\u7EE7\u7EED\u505C\u7559\u5728\u5F53\u524D target \u4E0E\u5F53\u524D\u9636\u6BB5\u5185\u3002",
+        "",
+        "### Remaining Risk",
+        "- \u5982\u679C\u540E\u7EED\u56DE\u590D\u518D\u6B21\u8D8A\u7EA7\u5230\u6B63\u6587\u9636\u6BB5\uFF0C\u9879\u76EE\u72B6\u6001\u4E0E\u5BF9\u8BDD\u5185\u5BB9\u4F1A\u5931\u540C\u6B65\u3002",
+        "",
+        "### Next Step",
+        "- \u5148\u628A\u672C\u8F6E\u5171\u8BC6\u5199\u56DE\u5BF9\u5E94\u8D44\u4EA7\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u63A8\u8FDB\u5DE5\u4F5C\u6D41\u9636\u6BB5\u3002"
+      ].join("\n");
+    }
+    return "Showrunner \u63D0\u9192\uFF1A\u8BA8\u8BBA\u5FC5\u987B\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u548C\u5F53\u524D\u5BF9\u8C61\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u8DF3\u5230\u6B63\u6587\u751F\u4EA7\u3002";
+  }
+  if (normalizedRole.includes("world")) {
+    return [
+      "### \u4E16\u754C\u89C2\u7ACB\u573A",
+      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u4E0A\u4E0B\u6587"}\uFF0C\u7EE7\u7EED\u6536\u7D27 ${targetLabel} \u7684\u89C4\u5219\u4E0E\u5F71\u54CD\u8FB9\u754C\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u4E0D\u80FD\u6CC4\u6F0F\u5230\u5B8C\u6574\u6B63\u6587\uFF0C\u4E5F\u4E0D\u80FD\u64C5\u81EA\u5199\u6210\u540E\u7EED\u7AE0\u8282\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u4F18\u5148\u6F84\u6E05\u786C\u89C4\u5219\u3001\u4EE3\u4EF7\u4E0E\u538B\u529B\u6E90\uFF0C\u5E76\u5199\u56DE\u76EE\u6807\u8D44\u4EA7\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("author")) {
+    return [
+      "### \u620F\u5267\u65B9\u5411",
+      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u8BA8\u8BBA"} \u7684\u57FA\u7840\u4E0A\uFF0C\u4E3A ${targetLabel} \u8865\u5F3A\u5F20\u529B\u4E0E\u60C5\u7EEA\u52A8\u7EBF\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u5982\u679C\u73B0\u5728\u76F4\u63A5\u5199\u6B63\u6587\uFF0C\u4F1A\u8BA9\u5F53\u524D\u9636\u6BB5\u4E0E\u9879\u76EE\u72B6\u6001\u8131\u8282\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u5F53\u524D\u53EA\u4FDD\u7559\u84DD\u56FE\u5C42\u3001\u8BBE\u5B9A\u5C42\u3001\u51B3\u7B56\u5C42\u5185\u5BB9\u3002",
+      "- \u771F\u6B63\u7684\u6B63\u6587\u5199\u4F5C\u7559\u5230 drafting \u9636\u6BB5\u518D\u6267\u884C\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("editor")) {
+    return [
+      "### \u7F16\u8F91\u5BA1\u89C6",
+      `\u7ED3\u5408 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u65B9\u5411"}\uFF0C\u68C0\u67E5 ${targetLabel} \u7684\u8282\u594F\u4E0E\u6E05\u6670\u5EA6\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u73B0\u5728\u6700\u5BB9\u6613\u51FA\u73B0\u7684\u662F\u8D8A\u7EA7\u63A8\u8FDB\u548C\u4FE1\u606F\u5806\u780C\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u53BB\u6389\u6A21\u7CCA\u8868\u8FF0\u3002",
+      "- \u4E0D\u5141\u8BB8\u65B0\u8D77\u7AE0\u8282\u6216\u652F\u7EBF\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("reviewer")) {
+    return [
+      "### \u5BA1\u67E5\u7126\u70B9",
+      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u5EFA\u8BAE"}\uFF0C\u7EE7\u7EED\u538B\u6D4B ${targetLabel} \u7684\u903B\u8F91\u6F0F\u6D1E\u4E0E\u8FDE\u7EED\u6027\u98CE\u9669\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u4E3B\u9898\u6F02\u79FB\u4F1A\u7834\u574F\u5171\u4EAB\u51B3\u7B56\u8FC7\u7A0B\u3002",
+      "- \u9690\u6027\u77DB\u76FE\u5FC5\u987B\u5728\u7EE7\u7EED\u63A8\u8FDB\u524D\u5148\u89E3\u51B3\u3002"
+    ].join("\n");
+  }
+  if (normalizedRole.includes("prose")) {
+    return [
+      "### \u6587\u98CE\u5EFA\u8BAE",
+      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5BA1\u67E5\u610F\u89C1"} \u7684\u7EA6\u675F\u4E0B\uFF0C\u4E3A ${targetLabel} \u63D0\u4F9B\u8BED\u8A00\u4E0E\u8BED\u6C14\u4F18\u5316\u3002`,
+      "",
+      "### \u98CE\u9669",
+      "- \u6587\u98CE\u4F18\u5316\u6700\u5BB9\u6613\u8BEF\u6ED1\u6210\u6B63\u6587\u521B\u4F5C\uFF0C\u8FD9\u91CC\u5FC5\u987B\u514B\u5236\u3002",
+      "",
+      "### \u5EFA\u8BAE",
+      "- \u4FDD\u6301\u8BED\u8A00\u66F4\u50CF\u4EBA\u5199\u7684\u3001\u5177\u4F53\u7684\u3001\u5C11\u6A21\u677F\u5473\u3002",
+      "- \u4E0D\u8981\u5199\u65B0\u7AE0\u8282\u6807\u9898\u6216\u5B8C\u6574\u573A\u666F\u3002"
+    ].join("\n");
+  }
+  return `${options.roleName}\uFF1A\u5DF2\u63A5\u6536\u5F53\u524D\u6307\u4EE4\uFF0C\u5E76\u4E0E\u73B0\u6709\u5C0F\u8BF4\u5171\u8BC6\u4FDD\u6301\u4E00\u81F4\u3002`;
+}
+async function emitFakeReplyInChunks(reply, onDelta) {
+  const midpoint = Math.max(1, Math.floor(reply.length / 2));
+  const chunks = [reply.slice(0, midpoint), reply.slice(midpoint)].filter(Boolean);
+  for (const chunk of chunks) {
+    await onDelta(chunk);
+  }
+}
+async function streamOpenAiCompatibleResponse(response, onDelta, options) {
+  if (!response.body) {
+    throw new Error("LLM streaming response body was empty.");
+  }
+  const streamStartTime = Date.now();
+  const baseTime = options.requestStartTime || streamStartTime;
+  console.log(`[LLM STREAM START] \u5F00\u59CB\u89E3\u6790\u5927\u6A21\u578B\u8FD4\u56DE\u6570\u636E\u6D41...`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let firstTokenReceived = false;
+  const readNextChunk = async () => {
+    if (options.signal.aborted) {
+      throw new Error("LLM stream aborted.");
+    }
+    let abortRead = null;
+    const abortPromise = new Promise((_, reject) => {
+      abortRead = () => {
+        reader.cancel().catch(() => void 0);
+        reject(new Error("LLM stream aborted."));
+      };
+      options.signal.addEventListener("abort", abortRead, { once: true });
+    });
+    try {
+      return await Promise.race([reader.read(), abortPromise]);
+    } finally {
+      if (abortRead) {
+        options.signal.removeEventListener("abort", abortRead);
+      }
+    }
+  };
+  try {
+    while (true) {
+      const { value, done } = await readNextChunk();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      options.markActivity();
+      buffer += decoder.decode(value, { stream: true });
+      while (buffer.includes("\n\n")) {
+        const separator = buffer.indexOf("\n\n");
+        const chunk = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        for (const line of chunk.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) {
+            continue;
+          }
+          const payloadText = trimmed.slice("data:".length).trim();
+          if (payloadText === "[DONE]") {
+            continue;
+          }
+          const payload = JSON.parse(payloadText);
+          const delta = extractStreamingDelta(payload);
+          if (!delta) {
+            continue;
+          }
+          if (!firstTokenReceived) {
+            firstTokenReceived = true;
+            const elapsedMs = Date.now() - baseTime;
+            console.log(`[LLM STREAM FIRST TOKEN] \u6536\u5230\u5927\u6A21\u578B\u7B2C\u4E00\u4E2A\u6709\u6548Token! \u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u9996\u5B57\u8017\u65F6(TTFT): ${elapsedMs}ms`);
+          }
+          content += delta;
+          await onDelta(delta);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const totalStreamTime = Date.now() - streamStartTime;
+  const totalRequestTime = Date.now() - baseTime;
+  console.log(`[LLM STREAM END] \u6570\u636E\u6D41\u8BFB\u53D6\u5B8C\u6210\u3002\u6D41\u4F20\u8F93\u8017\u65F6: ${totalStreamTime}ms\uFF0C\u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u5B8C\u6210\u603B\u8017\u65F6: ${totalRequestTime}ms\uFF0C\u63A5\u6536\u5B57\u6570: ${content.length}`);
+  console.log(`
+========== [LLM RESPONSE START] ==========
+${content.trim()}
+========== [LLM RESPONSE END] ==========
+`);
+  return content.trim();
+}
+async function withTimeout(timeoutMs, operation, externalSignal) {
+  const controller = new AbortController();
+  let timer = null;
+  const abortFromExternalSignal = () => controller.abort();
+  const resetTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  };
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+  }
+  resetTimer();
+  try {
+    return await operation(controller.signal, resetTimer);
+  } catch (error) {
+    if (externalSignal?.aborted) {
+      throw createAutopilotStopError();
+    }
+    if (controller.signal.aborted) {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms without provider activity.`);
+    }
+    throw error;
+  } finally {
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+function getMessageContent(messages, role) {
+  return messages.filter((message) => message.role === role && message.content.trim()).map((message) => message.content.trim()).join("\n\n");
+}
+function buildResponsesInput(messages) {
+  const userMessages = messages.filter((message) => message.role !== "system" && message.content.trim());
+  if (userMessages.length === 1 && userMessages[0].role === "user") {
+    return userMessages[0].content;
+  }
+  return userMessages.map((message) => ({
+    role: message.role,
+    content: message.content
+  }));
+}
+function extractResponsesOutput(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const record = payload;
+  const direct = extractTextContent(record.output_text);
+  if (direct) {
+    return direct.trim();
+  }
+  const output = Array.isArray(record.output) ? record.output : [];
+  return output.map((item) => extractTextContent(item)).join("").trim();
+}
+function extractStreamingDelta(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const record = payload;
+  const choicePayload = payload;
+  const choice = choicePayload.choices?.[0];
+  const chatDelta = extractTextContent(choice?.delta) || extractTextContent(choice?.message) || extractTextContent(choice?.text);
+  if (chatDelta) {
+    return chatDelta;
+  }
+  const eventType = typeof record.type === "string" ? record.type : "";
+  if (eventType.endsWith(".delta")) {
+    return extractTextContent(record.delta);
+  }
+  return "";
+}
+async function parseProviderError(response) {
+  const raw = await response.text().catch(() => "");
+  if (!raw) {
+    return response.statusText;
+  }
+  try {
+    const payload = JSON.parse(raw);
+    if (typeof payload.error === "string") {
+      return payload.error;
+    }
+    return payload.error?.message || raw.slice(0, 500);
+  } catch {
+    return raw.slice(0, 500);
+  }
+}
+async function requestLlmTextCompletion(options) {
+  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions";
+  const requestStartTime = Date.now();
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
+  const selectedTemperature = options.temperature ?? 0.1;
+  const messages = options.messages.filter((message) => message.content.trim());
+  const system = getMessageContent(messages, "system");
+  const user = getMessageContent(messages, "user");
+  const effectiveStream = Boolean(options.stream);
+  console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 ${endpoint} \u8BF7\u6C42...`);
+  console.log(`- BaseUrl: ${options.baseUrl}`);
+  console.log(`- Model: ${options.modelName}`);
+  console.log(`- API Mode: ${options.apiMode}`);
+  console.log(`- Temperature: ${selectedTemperature}`);
+  console.log(`- Messages Count: ${messages.length}`);
+  console.log(`- System Prompt Length: ${system.length} chars`);
+  console.log(`- User Message Length: ${user.length} chars`);
+  const body = options.apiMode === "responses" ? {
+    model: options.modelName,
+    instructions: system || void 0,
+    input: buildResponsesInput(messages),
+    temperature: selectedTemperature,
+    max_output_tokens: options.maxTokens,
+    stream: effectiveStream
+  } : {
+    model: options.modelName,
+    temperature: selectedTemperature,
+    stream: effectiveStream,
+    max_tokens: options.maxTokens,
+    messages
+  };
+  return withTimeout(options.timeoutMs, async (signal, markActivity) => {
+    const response = await fetch(`${baseUrl}/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${options.apiKey}`
+      },
+      signal,
+      body: JSON.stringify(body)
+    });
+    const fetchTime = Date.now() - requestStartTime;
+    console.log(`[LLM REQUEST HEAD] \u6536\u5230 API Response \u5934\u90E8\uFF0C\u72B6\u6001\u7801: ${response.status}\uFF0CHTTP\u5EFA\u7ACB\u8FDE\u63A5\u4E0E\u9996\u5305\u5934\u8017\u65F6: ${fetchTime}ms`);
+    if (!response.ok) {
+      const providerMessage = await parseProviderError(response);
+      console.error(`[LLM REQUEST ERROR] \u8BF7\u6C42\u5931\u8D25\uFF0C\u72B6\u6001\u7801: ${response.status}\uFF0C\u9519\u8BEF: ${providerMessage}`);
+      throw new Error(`LLM request failed with status ${response.status}: ${providerMessage}`);
+    }
+    markActivity();
+    if (effectiveStream && options.onDelta) {
+      return streamOpenAiCompatibleResponse(response, async (delta) => {
+        markActivity();
+        await options.onDelta?.(delta);
+      }, {
+        signal,
+        markActivity,
+        requestStartTime
+      });
+    }
+    const payload = await response.json();
+    const choice = payload.choices?.[0];
+    const content = options.apiMode === "responses" ? extractResponsesOutput(payload) : (extractTextContent(choice?.message) || extractTextContent(choice?.text)).trim();
+    const totalTime = Date.now() - requestStartTime;
+    console.log(`[LLM REQUEST END] \u975E\u6D41\u5F0F\u8BF7\u6C42\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${content.length}`);
+    console.log(`
+========== [LLM RESPONSE START] ==========
+${content.trim()}
+========== [LLM RESPONSE END] ==========
+`);
+    if (options.stream && options.onDelta && content) {
+      await options.onDelta(content);
+    }
+    return content.trim();
+  }, options.signal);
+}
+async function generateAgentReply(options) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    const reply = buildFakeReply(options);
+    if (options.onDelta) {
+      await emitFakeReplyInChunks(reply, options.onDelta);
+    }
+    return reply;
+  }
+  let config = await loadLlmConfigForCapability(options.envRootDir, "text");
+  const apiKey = config?._dbApiKey || "";
+  if (!config || !apiKey) {
+    throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.");
+  }
+  const isDrafting = options.currentStage === "drafting";
+  const protocol = isDrafting ? "\u6B63\u6587\u521B\u4F5C\u534F\u8BAE\uFF1A\u4F60\u8D1F\u8D23\u6267\u884C\u5C0F\u8BF4\u7AE0\u8282\u7684\u521D\u7A3F\u521B\u4F5C\u3001\u8D28\u91CF\u8FD4\u5DE5\u6216\u81EA\u7136\u5EA6\u6DA6\u8272\uFF0C\u5FC5\u987B\u8F93\u51FA\u5177\u4F53\u7684\u6587\u5B66\u6B63\u6587\uFF0C\u4E14\u4E25\u7981\u8F93\u51FA\u8BA8\u8BBA\u8FC7\u7A0B\u6216\u65E0\u5173\u5E9F\u8BDD\u3002" : AUTONOMOUS_DISCUSSION_PROTOCOL;
+  const systemBlocks = [];
+  if (isDrafting) {
+    if (options.basePrompt.trim()) systemBlocks.push(options.basePrompt.trim());
+    if (protocol) systemBlocks.push(protocol);
+    if (options.consensus.trim()) systemBlocks.push(options.consensus.trim());
+    if (options.dynamicPrompt.trim()) systemBlocks.push(options.dynamicPrompt.trim());
+  } else {
+    if (options.consensus.trim()) systemBlocks.push(options.consensus.trim());
+    if (protocol) systemBlocks.push(protocol);
+    if (options.basePrompt.trim()) systemBlocks.push(options.basePrompt.trim());
+    if (options.dynamicPrompt.trim()) systemBlocks.push(options.dynamicPrompt.trim());
+  }
+  systemBlocks.push(
+    `\u8F93\u51FA\u8BED\u8A00\uFF1A${options.preferredLanguage === "en-US" ? "English" : "\u7B80\u4F53\u4E2D\u6587"}`,
+    `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${options.currentStage ?? "worldbuilding_dialogue"}`,
+    options.stageInstruction ? `\u9636\u6BB5\u7EA6\u675F\uFF1A${options.stageInstruction}` : "",
+    `Discussion stage: ${options.discussionStage ?? "specialist_turn"}`,
+    options.discussionTarget ? `Discussion target: ${options.discussionTarget.label}
+Target kind: ${options.discussionTarget.kind}
+Target asset: ${options.discussionTarget.assetPath}
+Target instruction: ${options.discussionTarget.instruction}` : "",
+    "Response contract:\n" + [
+      "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
+      isDrafting ? "- \u5FC5\u987B\u6309\u7167\u7AE0\u8282\u683C\u5F0F\u8981\u6C42\u8F93\u51FA\u7AE0\u8282\u6B63\u6587\u5185\u5BB9\u3002" : "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
+      isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
+      "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
+      isDrafting ? "" : "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
+      isDrafting ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+      isDrafting ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002"
+    ].filter(Boolean).join("\n"),
+    !isDrafting && options.priorTranscript?.trim() ? `Prior roundtable transcript:
+${options.priorTranscript.trim()}` : ""
+  );
+  const system = systemBlocks.filter(Boolean).join("\n\n");
+  const selectedTemperature = options.temperature !== void 0 ? options.temperature : config.provider.temperature;
+  console.log(`
+========== [LLM SYSTEM PROMPT START] ==========
+${system}
+========== [LLM SYSTEM PROMPT END] ==========
+`);
+  if (options.message) {
+    console.log(`
+========== [LLM USER MESSAGE START] ==========
+${options.message}
+========== [LLM USER MESSAGE END] ==========
+`);
+  }
+  const content = await requestLlmTextCompletion({
+    baseUrl: config.provider.baseUrl,
+    apiKey,
+    modelName: config.provider.modelName,
+    apiMode: config.provider.apiMode,
+    timeoutMs: config.provider.timeoutMs,
+    temperature: selectedTemperature,
+    stream: Boolean(options.onDelta),
+    signal: options.signal,
+    onDelta: options.onDelta,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: options.message }
+    ]
+  });
+  if (!content) {
+    throw new Error("LLM response did not include message content.");
+  }
+  if (options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
+    return [
+      "### \u9636\u6BB5\u7EA0\u504F",
+      "- STAGE_GUARD_CORRECTION: true",
+      `- \u5F53\u524D\u4ECD\u5904\u4E8E ${options.currentStage}\uFF0C\u4E0D\u80FD\u8D8A\u7EA7\u5BA3\u79F0\u5DF2\u7ECF\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u3002`,
+      `- \u5F53\u524D\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${options.discussionTarget?.label || "\u672A\u6307\u5B9A"}`,
+      "",
+      "### \u4FDD\u7559\u7ED3\u8BBA",
+      "- \u8BF7\u7EE7\u7EED\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u5B8C\u6210\u5171\u8BC6\u6536\u655B\u3001\u98CE\u9669\u8BC6\u522B\u548C\u4E0B\u4E00\u6B65\u5EFA\u8BAE\u3002"
+    ].join("\n");
+  }
+  return content;
+}
+async function testProviderConnectivity(overrides = {}, rootDir = process.cwd()) {
+  const activeConfig = await loadActiveLlmConfig(rootDir);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const timeoutMs = activeConfig?.provider.timeoutMs || 12e4;
+  const baseUrl = overrides.baseUrl?.trim() || activeConfig?.provider.baseUrl || "";
+  const modelName = overrides.modelName?.trim() || activeConfig?.provider.modelName || "";
+  const apiMode = overrides.apiMode || activeConfig?.provider.apiMode || "chat";
+  const apiKey = overrides.apiKey?.trim() || activeConfig?._dbApiKey || "";
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return {
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider connectivity check passed in test mode (${apiMode}).`
+    };
+  }
+  if (!baseUrl || !modelName || !apiKey) {
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: "Missing provider config. Configure a model in settings first."
+    };
+  }
+  try {
+    const response = await withTimeout(
+      timeoutMs,
+      (signal) => fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${apiKey}`
+        },
+        signal
+      })
+    );
+    if (!response.ok) {
+      try {
+        const content = await requestLlmTextCompletion({
+          baseUrl,
+          apiKey,
+          modelName,
+          apiMode,
+          timeoutMs,
+          maxTokens: 8,
+          messages: [{ role: "user", content: "ping" }]
+        });
+        if (content) {
+          return {
+            ok: true,
+            checkedAt,
+            baseUrl,
+            modelName,
+            apiMode,
+            message: `Provider reachable (verified via ${apiMode} generation fallback).`
+          };
+        }
+      } catch (chatErr) {
+      }
+      return {
+        ok: false,
+        checkedAt,
+        baseUrl,
+        modelName,
+        apiMode,
+        message: `Provider test failed with status ${response.status}.`
+      };
+    }
+    const payload = await response.json();
+    const modelCount = Array.isArray(payload.data) ? payload.data.length : 0;
+    return {
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider reachable. ${modelCount} models listed.`
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider test failed: ${message}`
+    };
+  }
+}
+
+// src/env-manager.ts
+var import_node_fs3 = __toESM(require("fs"), 1);
+var import_node_path3 = __toESM(require("path"), 1);
+var PRIMARY_ENV_KEYS = {
+  baseUrl: "LLM_BASE_URL",
+  apiKey: "LLM_API_KEY",
+  modelName: "LLM_MODEL_ID"
+};
+var FALLBACK_ENV_KEYS = {
+  baseUrl: "OPENAI_BASE_URL",
+  apiKey: "OPENAI_API_KEY",
+  modelName: "OPENAI_MODEL_NAME"
+};
+var PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"];
+var MANAGED_PROJECTS_SEGMENT = `${import_node_path3.default.sep}.ai-novel-projects${import_node_path3.default.sep}`;
+function uniquePaths(paths) {
+  return [...new Set(paths.map((candidate) => import_node_path3.default.resolve(candidate)))];
+}
+function inferWorkspaceRootFromManagedProject(rootDir) {
+  const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT);
+  if (index < 0) {
+    return null;
+  }
+  return rootDir.slice(0, index) || import_node_path3.default.parse(rootDir).root;
+}
+function parseProjectEnv(raw) {
+  const values = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
+    values[key] = value;
+  }
+  return values;
+}
+function pickResolvedValue(primaryKey, fallbackKey, values) {
+  const processValue = process.env[primaryKey]?.trim() || process.env[fallbackKey]?.trim();
+  if (processValue) {
+    return processValue;
+  }
+  const fileValue = values[primaryKey]?.trim() || values[fallbackKey]?.trim();
+  return fileValue || null;
+}
+function getProjectEnvPath(rootDir = process.cwd()) {
+  return import_node_path3.default.resolve(rootDir, ".env");
+}
+function getProjectEnvCandidatePaths(rootDir = process.cwd()) {
+  const resolvedRootDir = import_node_path3.default.resolve(rootDir);
+  const candidates = [
+    getProjectEnvPath(resolvedRootDir),
+    import_node_path3.default.join(resolvedRootDir, ...PACKAGE_ENV_PARTS)
+  ];
+  const workspaceRoot = inferWorkspaceRootFromManagedProject(resolvedRootDir);
+  if (workspaceRoot) {
+    candidates.push(
+      getProjectEnvPath(workspaceRoot),
+      import_node_path3.default.join(workspaceRoot, ...PACKAGE_ENV_PARTS)
+    );
+  }
+  return uniquePaths(candidates);
+}
+function readProjectEnv(rootDir = process.cwd()) {
+  const candidates = getProjectEnvCandidatePaths(rootDir);
+  const existingPaths = candidates.filter((envPath) => import_node_fs3.default.existsSync(envPath));
+  if (existingPaths.length > 0) {
+    const values = existingPaths.slice().reverse().reduce((merged, envPath) => {
+      const raw = import_node_fs3.default.readFileSync(envPath, "utf8");
+      return {
+        ...merged,
+        ...parseProjectEnv(raw)
+      };
+    }, {});
+    return {
+      envPath: existingPaths[0],
+      exists: true,
+      sourcePaths: existingPaths,
+      values
+    };
+  }
+  return {
+    envPath: getProjectEnvPath(rootDir),
+    exists: false,
+    sourcePaths: [],
+    values: {}
+  };
+}
+function getProjectEnvStatus(rootDir = process.cwd()) {
+  const { envPath, exists, sourcePaths, values } = readProjectEnv(rootDir);
+  const resolved = {
+    baseUrl: pickResolvedValue(PRIMARY_ENV_KEYS.baseUrl, FALLBACK_ENV_KEYS.baseUrl, values),
+    apiKeyPresent: Boolean(pickResolvedValue(PRIMARY_ENV_KEYS.apiKey, FALLBACK_ENV_KEYS.apiKey, values)),
+    modelName: pickResolvedValue(PRIMARY_ENV_KEYS.modelName, FALLBACK_ENV_KEYS.modelName, values)
+  };
+  const missing = [
+    resolved.baseUrl ? null : PRIMARY_ENV_KEYS.baseUrl,
+    resolved.apiKeyPresent ? null : PRIMARY_ENV_KEYS.apiKey,
+    resolved.modelName ? null : PRIMARY_ENV_KEYS.modelName
+  ].filter(Boolean);
+  return {
+    envPath,
+    exists,
+    sourcePaths,
+    configured: missing.length === 0,
+    missing,
+    values,
+    resolved
+  };
+}
+function redactEnvValues(values) {
+  const redacted = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (/api[_-]?key|token|secret|password/i.test(key)) {
+      redacted[key] = value ? "[configured]" : "";
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+function getPublicProjectEnvStatus(rootDir = process.cwd()) {
+  const status = getProjectEnvStatus(rootDir);
+  return {
+    ...status,
+    values: redactEnvValues(status.values)
+  };
 }
 
 // src/super-graph.ts
@@ -3445,8 +4102,8 @@ function validateSuperGraph(graph) {
 }
 
 // src/writing-pipeline.ts
-var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_node_path7 = __toESM(require("path"), 1);
+var import_promises5 = __toESM(require("fs/promises"), 1);
+var import_node_path8 = __toESM(require("path"), 1);
 
 // src/embedding.ts
 var LOCAL_EMBEDDING_DIMENSIONS = 64;
@@ -3559,466 +4216,6 @@ function createArtifactMessage(input) {
       format: input.format || "markdown"
     }
   });
-}
-
-// src/abort.ts
-var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
-function createAutopilotStopError() {
-  return new Error(AUTOPILOT_STOP_MESSAGE);
-}
-function throwIfStopped(signal) {
-  if (signal?.aborted) {
-    throw createAutopilotStopError();
-  }
-}
-
-// src/runtime-llm.ts
-var AUTONOMOUS_DISCUSSION_PROTOCOL = [
-  "\u81EA\u4E3B\u521B\u4F5C\u534F\u8BAE\uFF1A",
-  "- \u4F60\u5DF2\u7ECF\u88AB\u6388\u6743\u63A5\u7BA1\u521B\u4F5C\u6D41\u7A0B\u3002",
-  "- \u9ED8\u8BA4\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u56DE\u590D\uFF0C\u9664\u975E\u7CFB\u7EDF\u660E\u786E\u8981\u6C42\u522B\u7684\u8BED\u8A00\u3002",
-  "- \u4E0D\u8981\u8BA9\u7528\u6237\u505A A/B \u9009\u62E9\uFF0C\u4E0D\u8981\u8BE2\u95EE\u662F\u5426\u7EE7\u7EED\u3002",
-  "- \u4E0D\u8981\u56E0\u4E3A\u7EC6\u8282\u7F3A\u5931\u5C31\u505C\u4F4F\uFF1B\u7F3A\u4FE1\u606F\u65F6\u5148\u505A\u9AD8\u8D28\u91CF\u5DE5\u4F5C\u5047\u8BBE\u3002",
-  "- \u5FC5\u987B\u7ED9\u51FA\u5177\u4F53\u63D0\u6848\u3001\u98CE\u9669\u3001\u5EFA\u8BAE\u548C\u6536\u655B\u7ED3\u679C\u3002",
-  "- \u8BA8\u8BBA\u5FC5\u987B\u4E25\u683C\u505C\u7559\u5728\u5F53\u524D target \u548C\u5F53\u524D workflow stage \u5185\u3002",
-  "- \u4E0D\u5141\u8BB8\u8D8A\u7EA7\u58F0\u79F0\u5DF2\u7ECF\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\uFF1B\u5982\u679C\u5F53\u524D\u8FD8\u5728\u4E16\u754C\u89C2\u9636\u6BB5\uFF0C\u5C31\u4E0D\u80FD\u5047\u88C5\u5DF2\u7ECF\u5728\u5199\u7B2C 2 \u7AE0\u3002",
-  "- \u6743\u5A01\u8FDB\u5EA6\u53EA\u6765\u81EA\u7CFB\u7EDF\u63D0\u4F9B\u7684 `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5`\uFF1B\u4E0D\u5F97\u6839\u636E\u8BA8\u8BBA\u5185\u5BB9\u81EA\u884C\u5BA3\u5E03\u9636\u6BB5\u5DF2\u5B8C\u6210\u3001\u5DF2\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\u3001\u67D0\u5F27\u84DD\u56FE\u5DF2\u5B8C\u6210\u3002",
-  "- \u53EF\u4EE5\u63D0\u51FA `\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u63A8\u8FDB\u5230...`\uFF0C\u4F46\u4E0D\u80FD\u5199\u6210 `\u5F53\u524D\u5DF2\u7ECF\u8FDB\u5165...`\uFF0C\u9664\u975E `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5` \u5DF2\u7ECF\u53D8\u66F4\u3002",
-  "- \u6BCF\u4E2A specialist \u81F3\u5C11\u6307\u51FA\u4E00\u4E2A\u98CE\u9669\u3001\u5F31\u70B9\u6216\u51B2\u7A81\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-  "- Reviewer\u3001Editor\u3001Prose Stylist \u4E0D\u5141\u8BB8\u53EA\u7ED9\u7EAF\u901A\u8FC7\u7ED3\u8BBA\u3002",
-  "- \u6700\u7EC8 Showrunner \u603B\u7ED3\u5FC5\u987B\u5305\u542B\uFF1AFinal Consensus\u3001Remaining Risk\u3001Next Step\u3002"
-].join("\n");
-var STAGE_DRIFT_PATTERNS = [
-  /prose production/i,
-  /current task/i,
-  /chapter\s+\d+/i,
-  /第\s*\d+\s*章/u
-];
-function hasExplicitProviderEnvOverride() {
-  return Boolean(
-    process.env.LLM_BASE_URL?.trim() || process.env.OPENAI_BASE_URL?.trim() || process.env.LLM_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || process.env.LLM_MODEL_ID?.trim() || process.env.OPENAI_MODEL_NAME?.trim()
-  );
-}
-function buildFakeReply(options) {
-  const normalizedRole = options.roleName.toLowerCase();
-  const priorTranscript = options.priorTranscript?.trim() ?? "";
-  const latestContextLine = priorTranscript.split("\n").filter(Boolean).slice(-1)[0] ?? "";
-  const targetLabel = options.discussionTarget?.label || "\u5F53\u524D\u8BA8\u8BBA\u76EE\u6807";
-  if (normalizedRole.includes("showrunner")) {
-    if (options.discussionStage === "opening_brief") {
-      return [
-        "### \u672C\u8F6E\u76EE\u6807",
-        `- \u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
-        `- \u5199\u56DE\u8D44\u4EA7\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
-        `- \u5F53\u524D\u9636\u6BB5\uFF1A${options.currentStage || "worldbuilding_dialogue"}`,
-        "- \u76EE\u6807\uFF1A\u5728\u4E0D\u8D8A\u7EA7\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u7684\u524D\u63D0\u4E0B\uFF0C\u5148\u5F62\u6210\u7EDF\u4E00\u5171\u8BC6\u3002",
-        "",
-        "### \u7EA6\u675F",
-        "- \u5FC5\u987B\u505C\u7559\u5728\u540C\u4E00\u4E2A\u8BA8\u8BBA\u5BF9\u8C61\u4E0A\u3002",
-        "- \u4E0D\u5F97\u865A\u6784\u65E0\u5173\u7AE0\u8282\u3001\u652F\u7EBF\u6216\u5DF2\u7ECF\u5B8C\u6210\u7684\u6B63\u6587\u3002",
-        "- \u7ED3\u5C3E\u5FC5\u987B\u7ED9\u51FA\u53EF\u5199\u56DE\u8D44\u4EA7\u7684\u66F4\u65B0\u5EFA\u8BAE\u3002"
-      ].join("\n");
-    }
-    if (options.discussionStage === "closing_synthesis") {
-      return [
-        "### Final Consensus",
-        `- \u5DF2\u786E\u8BA4\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${targetLabel}`,
-        `- \u5199\u56DE\u8DEF\u5F84\uFF1A${options.discussionTarget?.assetPath || "\u9879\u76EE\u8BB0\u5FC6"}`,
-        "- \u51B3\u8BAE\uFF1A\u540E\u7EED\u52A8\u4F5C\u5FC5\u987B\u7EE7\u7EED\u505C\u7559\u5728\u5F53\u524D target \u4E0E\u5F53\u524D\u9636\u6BB5\u5185\u3002",
-        "",
-        "### Remaining Risk",
-        "- \u5982\u679C\u540E\u7EED\u56DE\u590D\u518D\u6B21\u8D8A\u7EA7\u5230\u6B63\u6587\u9636\u6BB5\uFF0C\u9879\u76EE\u72B6\u6001\u4E0E\u5BF9\u8BDD\u5185\u5BB9\u4F1A\u5931\u540C\u6B65\u3002",
-        "",
-        "### Next Step",
-        "- \u5148\u628A\u672C\u8F6E\u5171\u8BC6\u5199\u56DE\u5BF9\u5E94\u8D44\u4EA7\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u63A8\u8FDB\u5DE5\u4F5C\u6D41\u9636\u6BB5\u3002"
-      ].join("\n");
-    }
-    return "Showrunner \u63D0\u9192\uFF1A\u8BA8\u8BBA\u5FC5\u987B\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u548C\u5F53\u524D\u5BF9\u8C61\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u8DF3\u5230\u6B63\u6587\u751F\u4EA7\u3002";
-  }
-  if (normalizedRole.includes("world")) {
-    return [
-      "### \u4E16\u754C\u89C2\u7ACB\u573A",
-      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u4E0A\u4E0B\u6587"}\uFF0C\u7EE7\u7EED\u6536\u7D27 ${targetLabel} \u7684\u89C4\u5219\u4E0E\u5F71\u54CD\u8FB9\u754C\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u4E0D\u80FD\u6CC4\u6F0F\u5230\u5B8C\u6574\u6B63\u6587\uFF0C\u4E5F\u4E0D\u80FD\u64C5\u81EA\u5199\u6210\u540E\u7EED\u7AE0\u8282\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u4F18\u5148\u6F84\u6E05\u786C\u89C4\u5219\u3001\u4EE3\u4EF7\u4E0E\u538B\u529B\u6E90\uFF0C\u5E76\u5199\u56DE\u76EE\u6807\u8D44\u4EA7\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("author")) {
-    return [
-      "### \u620F\u5267\u65B9\u5411",
-      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u8BA8\u8BBA"} \u7684\u57FA\u7840\u4E0A\uFF0C\u4E3A ${targetLabel} \u8865\u5F3A\u5F20\u529B\u4E0E\u60C5\u7EEA\u52A8\u7EBF\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u5982\u679C\u73B0\u5728\u76F4\u63A5\u5199\u6B63\u6587\uFF0C\u4F1A\u8BA9\u5F53\u524D\u9636\u6BB5\u4E0E\u9879\u76EE\u72B6\u6001\u8131\u8282\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u5F53\u524D\u53EA\u4FDD\u7559\u84DD\u56FE\u5C42\u3001\u8BBE\u5B9A\u5C42\u3001\u51B3\u7B56\u5C42\u5185\u5BB9\u3002",
-      "- \u771F\u6B63\u7684\u6B63\u6587\u5199\u4F5C\u7559\u5230 drafting \u9636\u6BB5\u518D\u6267\u884C\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("editor")) {
-    return [
-      "### \u7F16\u8F91\u5BA1\u89C6",
-      `\u7ED3\u5408 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5F53\u524D\u65B9\u5411"}\uFF0C\u68C0\u67E5 ${targetLabel} \u7684\u8282\u594F\u4E0E\u6E05\u6670\u5EA6\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u73B0\u5728\u6700\u5BB9\u6613\u51FA\u73B0\u7684\u662F\u8D8A\u7EA7\u63A8\u8FDB\u548C\u4FE1\u606F\u5806\u780C\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u53BB\u6389\u6A21\u7CCA\u8868\u8FF0\u3002",
-      "- \u4E0D\u5141\u8BB8\u65B0\u8D77\u7AE0\u8282\u6216\u652F\u7EBF\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("reviewer")) {
-    return [
-      "### \u5BA1\u67E5\u7126\u70B9",
-      `\u57FA\u4E8E Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u524D\u5E8F\u5EFA\u8BAE"}\uFF0C\u7EE7\u7EED\u538B\u6D4B ${targetLabel} \u7684\u903B\u8F91\u6F0F\u6D1E\u4E0E\u8FDE\u7EED\u6027\u98CE\u9669\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u4E3B\u9898\u6F02\u79FB\u4F1A\u7834\u574F\u5171\u4EAB\u51B3\u7B56\u8FC7\u7A0B\u3002",
-      "- \u9690\u6027\u77DB\u76FE\u5FC5\u987B\u5728\u7EE7\u7EED\u63A8\u8FDB\u524D\u5148\u89E3\u51B3\u3002"
-    ].join("\n");
-  }
-  if (normalizedRole.includes("prose")) {
-    return [
-      "### \u6587\u98CE\u5EFA\u8BAE",
-      `\u5728 Showrunner \u7B80\u62A5\u4E0E ${latestContextLine || "\u5BA1\u67E5\u610F\u89C1"} \u7684\u7EA6\u675F\u4E0B\uFF0C\u4E3A ${targetLabel} \u63D0\u4F9B\u8BED\u8A00\u4E0E\u8BED\u6C14\u4F18\u5316\u3002`,
-      "",
-      "### \u98CE\u9669",
-      "- \u6587\u98CE\u4F18\u5316\u6700\u5BB9\u6613\u8BEF\u6ED1\u6210\u6B63\u6587\u521B\u4F5C\uFF0C\u8FD9\u91CC\u5FC5\u987B\u514B\u5236\u3002",
-      "",
-      "### \u5EFA\u8BAE",
-      "- \u4FDD\u6301\u8BED\u8A00\u66F4\u50CF\u4EBA\u5199\u7684\u3001\u5177\u4F53\u7684\u3001\u5C11\u6A21\u677F\u5473\u3002",
-      "- \u4E0D\u8981\u5199\u65B0\u7AE0\u8282\u6807\u9898\u6216\u5B8C\u6574\u573A\u666F\u3002"
-    ].join("\n");
-  }
-  return `${options.roleName}\uFF1A\u5DF2\u63A5\u6536\u5F53\u524D\u6307\u4EE4\uFF0C\u5E76\u4E0E\u73B0\u6709\u5C0F\u8BF4\u5171\u8BC6\u4FDD\u6301\u4E00\u81F4\u3002`;
-}
-async function emitFakeReplyInChunks(reply, onDelta) {
-  const midpoint = Math.max(1, Math.floor(reply.length / 2));
-  const chunks = [reply.slice(0, midpoint), reply.slice(midpoint)].filter(Boolean);
-  for (const chunk of chunks) {
-    await onDelta(chunk);
-  }
-}
-async function streamOpenAiCompatibleResponse(response, onDelta, options) {
-  if (!response.body) {
-    throw new Error("LLM streaming response body was empty.");
-  }
-  const streamStartTime = Date.now();
-  const baseTime = options.requestStartTime || streamStartTime;
-  console.log(`[LLM STREAM START] \u5F00\u59CB\u89E3\u6790\u5927\u6A21\u578B\u8FD4\u56DE\u6570\u636E\u6D41...`);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let content = "";
-  let firstTokenReceived = false;
-  const readNextChunk = async () => {
-    if (options.signal.aborted) {
-      throw new Error("LLM stream aborted.");
-    }
-    let abortRead = null;
-    const abortPromise = new Promise((_, reject) => {
-      abortRead = () => {
-        reader.cancel().catch(() => void 0);
-        reject(new Error("LLM stream aborted."));
-      };
-      options.signal.addEventListener("abort", abortRead, { once: true });
-    });
-    try {
-      return await Promise.race([reader.read(), abortPromise]);
-    } finally {
-      if (abortRead) {
-        options.signal.removeEventListener("abort", abortRead);
-      }
-    }
-  };
-  try {
-    while (true) {
-      const { value, done } = await readNextChunk();
-      if (done) {
-        buffer += decoder.decode();
-        break;
-      }
-      options.markActivity();
-      buffer += decoder.decode(value, { stream: true });
-      while (buffer.includes("\n\n")) {
-        const separator = buffer.indexOf("\n\n");
-        const chunk = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
-        for (const line of chunk.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) {
-            continue;
-          }
-          const payloadText = trimmed.slice("data:".length).trim();
-          if (payloadText === "[DONE]") {
-            continue;
-          }
-          const payload = JSON.parse(payloadText);
-          const delta = payload.choices?.[0]?.delta?.content;
-          if (!delta) {
-            continue;
-          }
-          if (!firstTokenReceived) {
-            firstTokenReceived = true;
-            const elapsedMs = Date.now() - baseTime;
-            console.log(`[LLM STREAM FIRST TOKEN] \u6536\u5230\u5927\u6A21\u578B\u7B2C\u4E00\u4E2A\u6709\u6548Token! \u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u9996\u5B57\u8017\u65F6(TTFT): ${elapsedMs}ms`);
-          }
-          content += delta;
-          await onDelta(delta);
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const totalStreamTime = Date.now() - streamStartTime;
-  const totalRequestTime = Date.now() - baseTime;
-  console.log(`[LLM STREAM END] \u6570\u636E\u6D41\u8BFB\u53D6\u5B8C\u6210\u3002\u6D41\u4F20\u8F93\u8017\u65F6: ${totalStreamTime}ms\uFF0C\u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u5B8C\u6210\u603B\u8017\u65F6: ${totalRequestTime}ms\uFF0C\u63A5\u6536\u5B57\u6570: ${content.length}`);
-  console.log(`
-========== [LLM RESPONSE START] ==========
-${content.trim()}
-========== [LLM RESPONSE END] ==========
-`);
-  return content.trim();
-}
-async function withTimeout(timeoutMs, operation, externalSignal) {
-  const controller = new AbortController();
-  let timer = null;
-  const abortFromExternalSignal = () => controller.abort();
-  const resetTimer = () => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
-  };
-  if (externalSignal?.aborted) {
-    controller.abort();
-  } else {
-    externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
-  }
-  resetTimer();
-  try {
-    return await operation(controller.signal, resetTimer);
-  } catch (error) {
-    if (externalSignal?.aborted) {
-      throw createAutopilotStopError();
-    }
-    if (controller.signal.aborted) {
-      throw new Error(`LLM request timed out after ${timeoutMs}ms without provider activity.`);
-    }
-    throw error;
-  } finally {
-    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-async function generateAgentReply(options) {
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    const reply = buildFakeReply(options);
-    if (options.onDelta) {
-      await emitFakeReplyInChunks(reply, options.onDelta);
-    }
-    return reply;
-  }
-  const envStatus = getProjectEnvStatus(options.envRootDir);
-  const explicitEnvOverride = hasExplicitProviderEnvOverride();
-  let config = explicitEnvOverride ? null : await loadActiveLlmConfig(options.envRootDir);
-  let apiKey = "";
-  if (config) {
-    apiKey = config._dbApiKey || "";
-  } else {
-    config = loadLlmConfigFromEnv(options.envRootDir);
-    apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY || "";
-  }
-  if (!apiKey) {
-    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY, or configure an active LLM in settings.");
-  }
-  const isDrafting = options.currentStage === "drafting";
-  const protocol = isDrafting ? "\u6B63\u6587\u521B\u4F5C\u534F\u8BAE\uFF1A\u4F60\u8D1F\u8D23\u6267\u884C\u5C0F\u8BF4\u7AE0\u8282\u7684\u521D\u7A3F\u521B\u4F5C\u3001\u8D28\u91CF\u8FD4\u5DE5\u6216\u81EA\u7136\u5EA6\u6DA6\u8272\uFF0C\u5FC5\u987B\u8F93\u51FA\u5177\u4F53\u7684\u6587\u5B66\u6B63\u6587\uFF0C\u4E14\u4E25\u7981\u8F93\u51FA\u8BA8\u8BBA\u8FC7\u7A0B\u6216\u65E0\u5173\u5E9F\u8BDD\u3002" : AUTONOMOUS_DISCUSSION_PROTOCOL;
-  const system = [
-    protocol,
-    "",
-    `\u8F93\u51FA\u8BED\u8A00\uFF1A${options.preferredLanguage === "en-US" ? "English" : "\u7B80\u4F53\u4E2D\u6587"}`,
-    `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5\uFF1A${options.currentStage ?? "worldbuilding_dialogue"}`,
-    options.stageInstruction ? `\u9636\u6BB5\u7EA6\u675F\uFF1A${options.stageInstruction}` : "",
-    "",
-    options.basePrompt.trim(),
-    "",
-    options.dynamicPrompt.trim(),
-    "",
-    options.consensus.trim(),
-    "",
-    `Discussion stage: ${options.discussionStage ?? "specialist_turn"}`,
-    options.discussionTarget ? `Discussion target: ${options.discussionTarget.label}
-Target kind: ${options.discussionTarget.kind}
-Target asset: ${options.discussionTarget.assetPath}
-Target instruction: ${options.discussionTarget.instruction}` : "",
-    "Response contract:",
-    "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
-    isDrafting ? "- \u5FC5\u987B\u6309\u7167\u7AE0\u8282\u683C\u5F0F\u8981\u6C42\u8F93\u51FA\u7AE0\u8282\u6B63\u6587\u5185\u5BB9\u3002" : "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
-    isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
-    "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
-    isDrafting ? "" : "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
-    isDrafting ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-    isDrafting ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002",
-    !isDrafting && options.priorTranscript?.trim() ? `Prior roundtable transcript:
-${options.priorTranscript.trim()}` : ""
-  ].filter(Boolean).join("\n");
-  const startTime = Date.now();
-  const selectedTemperature = options.temperature !== void 0 ? options.temperature : config.provider.temperature;
-  console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 chat/completions \u8BF7\u6C42...`);
-  console.log(`- BaseUrl: ${config.provider.baseUrl}`);
-  console.log(`- Model: ${config.provider.modelName}`);
-  console.log(`- Temperature: ${selectedTemperature}`);
-  console.log(`- Messages Count: ${options.message ? 2 : 1}`);
-  console.log(`- System Prompt Length: ${system.length} chars`);
-  console.log(`- User Message Length: ${(options.message || "").length} chars`);
-  console.log(`
-========== [LLM SYSTEM PROMPT START] ==========
-${system}
-========== [LLM SYSTEM PROMPT END] ==========
-`);
-  if (options.message) {
-    console.log(`
-========== [LLM USER MESSAGE START] ==========
-${options.message}
-========== [LLM USER MESSAGE END] ==========
-`);
-  }
-  const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
-    const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`
-      },
-      signal,
-      body: JSON.stringify({
-        model: config.provider.modelName,
-        temperature: selectedTemperature,
-        stream: Boolean(options.onDelta),
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: options.message }
-        ]
-      })
-    });
-    const fetchTime = Date.now() - startTime;
-    console.log(`[LLM REQUEST HEAD] \u6536\u5230 API Response \u5934\u90E8\uFF0C\u72B6\u6001\u7801: ${response.status}\uFF0CHTTP\u5EFA\u7ACB\u8FDE\u63A5\u4E0E\u9996\u5305\u5934\u8017\u65F6: ${fetchTime}ms`);
-    if (!response.ok) {
-      console.error(`[LLM REQUEST ERROR] \u8BF7\u6C42\u5931\u8D25\uFF0C\u72B6\u6001\u7801: ${response.status}`);
-      throw new Error(`LLM request failed with status ${response.status}.`);
-    }
-    markActivity();
-    if (options.onDelta) {
-      return streamOpenAiCompatibleResponse(response, async (delta) => {
-        markActivity();
-        await options.onDelta?.(delta);
-      }, {
-        signal,
-        markActivity
-      });
-    }
-    const payload = await response.json();
-    const totalTime = Date.now() - startTime;
-    const resContent = payload.choices?.[0]?.message?.content?.trim() || "";
-    console.log(`[LLM REQUEST END] \u975E\u6D41\u5F0F\u8BF7\u6C42\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${resContent.length}`);
-    console.log(`
-========== [LLM RESPONSE START] ==========
-${resContent}
-========== [LLM RESPONSE END] ==========
-`);
-    return resContent;
-  }, options.signal);
-  if (!content) {
-    throw new Error("LLM response did not include message content.");
-  }
-  if (options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
-    return [
-      "### \u9636\u6BB5\u7EA0\u504F",
-      "- STAGE_GUARD_CORRECTION: true",
-      `- \u5F53\u524D\u4ECD\u5904\u4E8E ${options.currentStage}\uFF0C\u4E0D\u80FD\u8D8A\u7EA7\u5BA3\u79F0\u5DF2\u7ECF\u8FDB\u5165\u6B63\u6587\u5199\u4F5C\u3002`,
-      `- \u5F53\u524D\u8BA8\u8BBA\u5BF9\u8C61\uFF1A${options.discussionTarget?.label || "\u672A\u6307\u5B9A"}`,
-      "",
-      "### \u4FDD\u7559\u7ED3\u8BBA",
-      "- \u8BF7\u7EE7\u7EED\u56F4\u7ED5\u5F53\u524D\u9636\u6BB5\u5B8C\u6210\u5171\u8BC6\u6536\u655B\u3001\u98CE\u9669\u8BC6\u522B\u548C\u4E0B\u4E00\u6B65\u5EFA\u8BAE\u3002"
-    ].join("\n");
-  }
-  return content;
-}
-async function testProviderConnectivity(overrides = {}, rootDir = process.cwd()) {
-  const activeConfig = await loadActiveLlmConfig(rootDir);
-  const config = activeConfig || loadLlmConfigFromEnv(rootDir);
-  const envStatus = getProjectEnvStatus(rootDir);
-  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const baseUrl = overrides.baseUrl?.trim() || config.provider.baseUrl;
-  const modelName = overrides.modelName?.trim() || config.provider.modelName;
-  const apiKey = overrides.apiKey?.trim() || (activeConfig ? activeConfig._dbApiKey : null) || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || envStatus.values.LLM_API_KEY || envStatus.values.OPENAI_API_KEY;
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return {
-      ok: true,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: "Provider connectivity check passed in test mode."
-    };
-  }
-  if (!baseUrl || !modelName || !apiKey) {
-    return {
-      ok: false,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: "Missing provider config: LLM_BASE_URL, LLM_API_KEY, or LLM_MODEL_ID."
-    };
-  }
-  try {
-    const response = await withTimeout(
-      config.provider.timeoutMs,
-      (signal) => fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${apiKey}`
-        },
-        signal
-      })
-    );
-    if (!response.ok) {
-      return {
-        ok: false,
-        checkedAt,
-        baseUrl,
-        modelName,
-        message: `Provider test failed with status ${response.status}.`
-      };
-    }
-    const payload = await response.json();
-    const modelCount = Array.isArray(payload.data) ? payload.data.length : 0;
-    return {
-      ok: true,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: `Provider reachable. ${modelCount} models listed.`
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      checkedAt,
-      baseUrl,
-      modelName,
-      message: `Provider test failed: ${message}`
-    };
-  }
 }
 
 // src/knowledge.ts
@@ -4612,6 +4809,7 @@ async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()
   const totalChars = scoredResults.reduce((sum, result) => sum + Math.max(1, result.charCount), 0);
   const score = totalChars > 0 ? scoredResults.reduce((sum, result) => sum + Number(result.score) * Math.max(1, result.charCount), 0) / totalChars : null;
   const highRiskSegments = results.filter((result) => result.status === "ai_likely" || typeof result.score === "number" && result.score >= threshold).sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+  const failedResults = results.filter((result) => !result.ok);
   return {
     ok: results.some((result) => result.ok),
     provider,
@@ -4622,7 +4820,7 @@ async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()
     totalSegments: segments.length,
     highRiskSegments,
     segments: results,
-    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : "Segmented AIGC detection completed."
+    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : failedResults.length > 0 ? `AIGC detection failed: ${Array.from(new Set(failedResults.map((r) => r.reason))).join("; ")}` : "Segmented AIGC detection completed."
   };
 }
 function splitAigcTextIntoSegments(text, options = {}) {
@@ -4880,7 +5078,7 @@ function hardSplitSegment(segment, maxChars) {
 }
 function extractGradioQueueOutput(events) {
   const parsedEvents = events.map((event) => parseJson(event.data) ?? event.data).filter((event) => event !== "");
-  const completed = parsedEvents.findLast(
+  const completed = [...parsedEvents].reverse().find(
     (event) => isRecord(event) && (event.msg === "process_completed" || event.output || event.success === true)
   );
   if (isRecord(completed) && "output" in completed) {
@@ -5115,32 +5313,1178 @@ function inferAigcWorkspaceRootFromManagedProject(rootDir) {
   return rootDir.slice(0, index) || import_node_path6.default.parse(rootDir).root;
 }
 
+// src/production-contracts.ts
+function isBlank(value) {
+  return typeof value !== "string" || value.trim().length === 0;
+}
+function hasPlaceholder(value) {
+  return !value || /\bpending\b|待定|暂无|未定|待补|缺失|placeholder|todo|tbd|still sparse|open questions?|unanswered questions?/iu.test(value) || /尚无|还没有|等待补充|需要补充|需要明确|无法确定/u.test(value);
+}
+function hasUsableStyleList(value) {
+  return Array.isArray(value) && value.some((item) => typeof item === "string" && !hasPlaceholder(item));
+}
+function critical(code, message, recoveryHint) {
+  return { code, severity: "critical", message, recoveryHint };
+}
+function warning(code, message, recoveryHint) {
+  return { code, severity: "warning", message, recoveryHint };
+}
+function summarizeGate(issues) {
+  const criticalIssue = issues.find((issue) => issue.severity === "critical");
+  if (criticalIssue) {
+    return {
+      status: "blocked",
+      canProceed: false,
+      blockedReason: criticalIssue.message,
+      issues
+    };
+  }
+  if (issues.length > 0) {
+    return {
+      status: "warning",
+      canProceed: true,
+      blockedReason: null,
+      issues
+    };
+  }
+  return {
+    status: "passed",
+    canProceed: true,
+    blockedReason: null,
+    issues: []
+  };
+}
+function evaluateStyleEvolutionGate(contract) {
+  const issues = [];
+  if (!contract) {
+    return summarizeGate([
+      critical(
+        "style_contract_missing",
+        "\u672C\u4E66\u5199\u6CD5\u5C1A\u672A\u751F\u6210\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u521B\u4F5C\u3002",
+        "\u5148\u8FDB\u5165 Style Evolution Engine\uFF0C\u751F\u6210\u6837\u6BB5\u5E76\u51BB\u7ED3\u672C\u4E66\u5199\u6CD5\u5408\u540C\u3002"
+      )
+    ]);
+  }
+  if (isBlank(contract.seedPrompt)) {
+    issues.push(critical(
+      "style_seed_missing",
+      "Style Evolution Engine \u7F3A\u5C11\u521D\u59CB prompt\u3002",
+      "\u8865\u9F50 style-seed.md \u6216\u8BA9\u7CFB\u7EDF\u57FA\u4E8E\u7528\u6237\u98CE\u683C\u8981\u6C42\u751F\u6210\u521D\u59CB prompt\u3002"
+    ));
+  }
+  if (isBlank(contract.approvedSample) && isBlank(contract.approvedSamplePath)) {
+    issues.push(critical(
+      "approved_sample_missing",
+      "\u7528\u6237\u5C1A\u672A\u786E\u8BA4\u4EFB\u4F55\u5C0F\u8BF4\u5199\u4F5C\u6837\u6BB5\u3002",
+      "\u53CD\u590D\u751F\u6210\u6837\u6BB5\uFF0C\u76F4\u5230\u7528\u6237\u786E\u8BA4\u4E00\u4E2A\u53EF\u4EE5\u51BB\u7ED3\u4E3A\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\u7684\u7248\u672C\u3002"
+    ));
+  }
+  if (isBlank(contract.approvedAt)) {
+    issues.push(critical(
+      "style_approval_missing",
+      "\u672C\u4E66\u5199\u6CD5\u5C1A\u672A\u83B7\u5F97\u7528\u6237\u786E\u8BA4\u3002",
+      "\u7528\u6237\u9700\u8981\u5728 Style Contract Freeze Gate \u4E2D\u786E\u8BA4\u91C7\u7528\u5F53\u524D\u5199\u6CD5\uFF0C\u7CFB\u7EDF\u518D\u51BB\u7ED3 style-contract\u3002"
+    ));
+  }
+  if (contract.approvedAt && contract.approval?.acceptedAsBookStyle !== true) {
+    issues.push(critical(
+      "style_approval_semantics_missing",
+      "Style Contract Freeze Gate \u7F3A\u5C11\u201C\u4F5C\u4E3A\u5168\u4E66\u57FA\u7840\u5199\u6CD5\u201D\u7684\u51BB\u7ED3\u8BED\u4E49\u3002",
+      "\u7528\u6237\u786E\u8BA4\u7684\u5FC5\u987B\u662F\u6574\u672C\u4E66\u540E\u7EED\u7EDF\u4E00\u7EE7\u627F\u7684\u5199\u6CD5\uFF0C\u4E0D\u662F\u5355\u6B21\u6837\u6BB5\u901A\u8FC7\u3002"
+    ));
+  }
+  if (contract.approvedAt && !contract.verification?.status) {
+    issues.push(critical(
+      "style_generation_verification_missing",
+      "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u7F3A\u5C11 Generation Verification Gate \u7ED3\u679C\u3002",
+      "\u91CD\u65B0\u8FD0\u884C Style Evolution Engine\uFF0C\u5B8C\u6210 AIGC/\u7981\u5FCC\u547D\u4E2D\u9A8C\u8BC1\u5E76\u901A\u8FC7\u540E\uFF0C\u518D\u51BB\u7ED3\u5168\u4E66\u5199\u6CD5\u5408\u540C\u3002"
+    ));
+  }
+  if (contract.approvedAt && contract.verification?.status === "blocked") {
+    issues.push(critical(
+      "style_generation_verification_blocked",
+      "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u7684 Generation Verification Gate \u4ECD\u5904\u4E8E\u963B\u585E\u72B6\u6001\u3002",
+      "\u91CD\u65B0\u8FD0\u884C Style Evolution Engine\uFF0C\u5148\u901A\u8FC7 AIGC/\u7981\u5FCC\u547D\u4E2D\u9A8C\u8BC1\uFF0C\u518D\u51BB\u7ED3\u5168\u4E66\u5199\u6CD5\u5408\u540C\u3002"
+    ));
+  }
+  if (contract.approvedAt && contract.verification?.status && contract.verification.status !== "passed" && contract.verification.status !== "blocked") {
+    issues.push(critical(
+      "style_generation_verification_not_passed",
+      "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u7684 Generation Verification Gate \u5C1A\u672A\u901A\u8FC7\u3002",
+      "\u7EE7\u7EED\u8FD0\u884C Style Evolution Engine\uFF0C\u76F4\u5230\u6837\u6BB5\u9A8C\u8BC1\u72B6\u6001\u4E3A passed\uFF0C\u518D\u51BB\u7ED3\u5168\u4E66\u5199\u6CD5\u5408\u540C\u3002"
+    ));
+  }
+  if (contract.approvedAt && contract.freezer?.verdict !== "ready") {
+    issues.push(critical(
+      "style_freezer_not_ready",
+      "Style Contract Freezer \u5C1A\u672A\u660E\u786E\u653E\u884C\u6574\u4E66\u5199\u6CD5\u5408\u540C\u3002",
+      "\u7EE7\u7EED\u8FD0\u884C Style Evolution Engine\uFF0C\u76F4\u5230 Freezer verdict \u4E3A ready\uFF0C\u518D\u5141\u8BB8\u7AE0\u8282\u751F\u4EA7\u7EE7\u627F\u8BE5\u5199\u6CD5\u3002"
+    ));
+  }
+  if (contract.approvedAt) {
+    const protocol = contract.loopProtocol;
+    const requiredStages = Array.isArray(protocol?.requiredStages) ? protocol.requiredStages : [];
+    const completedStages = Array.isArray(protocol?.completedStages) ? protocol.completedStages : [];
+    const requiredLoopStages = [
+      "seed_prompt_builder",
+      "candidate_generator",
+      "evaluator_critic",
+      "prompt_refiner",
+      "loop_controller",
+      "generation_verification",
+      "user_approval_gate",
+      "style_contract_freezer",
+      "chapter_inheritance_adapter"
+    ];
+    const missingProtocolStages = requiredLoopStages.filter((stage) => !completedStages.includes(stage));
+    if (!protocol || requiredStages.length === 0 || missingProtocolStages.length > 0) {
+      issues.push(critical(
+        "style_loop_protocol_incomplete",
+        "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u5B8C\u6574 Loop Engineering \u534F\u8BAE\u8BC1\u636E\u3002",
+        "\u91CD\u65B0\u52A0\u8F7D\u6216\u8FD0\u884C Style Evolution Engine\uFF0C\u8BA9 Seed Prompt\u3001\u5019\u9009\u751F\u6210\u3001\u8BC4\u4F30\u3001Refiner\u3001\u9A8C\u8BC1\u3001\u7528\u6237\u786E\u8BA4\u3001Freezer \u548C\u7AE0\u8282\u7EE7\u627F\u5168\u90E8\u5199\u5165 loopProtocol\u3002"
+      ));
+    }
+    if (protocol?.status && protocol.status !== "approved") {
+      issues.push(critical(
+        "style_loop_protocol_not_approved",
+        "Style Evolution Loop \u534F\u8BAE\u5C1A\u672A\u8FDB\u5165 approved \u72B6\u6001\u3002",
+        "\u53EA\u6709\u5B8C\u6574\u95ED\u73AF\u901A\u8FC7\u5E76\u7531\u7528\u6237\u786E\u8BA4\u540E\uFF0C\u624D\u80FD\u51BB\u7ED3\u4E3A\u6574\u4E66\u5199\u6CD5\u5408\u540C\u3002"
+      ));
+    }
+  }
+  if (!contract.styleContract || hasPlaceholder(contract.styleContract.voice)) {
+    issues.push(critical(
+      "style_contract_voice_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u660E\u786E\u53D9\u8FF0\u58F0\u97F3\u3002",
+      "\u4ECE\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u4E2D\u63D0\u70BC voice\u3001\u53E5\u5F0F\u8282\u594F\u3001\u5BF9\u8BDD\u89C4\u5219\u548C\u7981\u7528\u6A21\u5F0F\u3002"
+    ));
+  }
+  if (!contract.styleContract || hasPlaceholder(contract.styleContract.sentenceRhythm)) {
+    issues.push(critical(
+      "style_contract_sentence_rhythm_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u53E5\u5F0F\u8282\u594F\u89C4\u5219\u3002",
+      "\u4ECE\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u4E2D\u63D0\u70BC\u53E5\u957F\u3001\u505C\u987F\u3001\u52A8\u4F5C\u5BC6\u5EA6\u548C\u60C5\u7EEA\u7559\u767D\u89C4\u5219\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.dialogueRules)) {
+    issues.push(critical(
+      "style_contract_dialogue_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u5BF9\u767D\u89C4\u5219\u3002",
+      "\u8865\u9F50\u5BF9\u767D\u957F\u5EA6\u3001\u6F5C\u53F0\u8BCD\u3001\u5173\u7CFB\u538B\u529B\u548C\u7981\u6B62\u89E3\u91CA\u8154\u7B49\u89C4\u5219\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.descriptionRules)) {
+    issues.push(critical(
+      "style_contract_description_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u63CF\u5199\u89C4\u5219\u3002",
+      "\u8865\u9F50\u573A\u666F\u3001\u7269\u4EF6\u3001\u52A8\u4F5C\u3001\u611F\u5B98\u548C\u5224\u65AD\u987A\u5E8F\u7B49\u63CF\u5199\u7EA6\u675F\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.emotionRules)) {
+    issues.push(critical(
+      "style_contract_emotion_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u60C5\u7EEA\u5916\u5316\u89C4\u5219\u3002",
+      "\u8865\u9F50\u60C5\u7EEA\u5982\u4F55\u901A\u8FC7\u52A8\u4F5C\u3001\u505C\u987F\u3001\u9009\u62E9\u548C\u7EC6\u8282\u5448\u73B0\uFF0C\u907F\u514D\u76F4\u63A5\u89E3\u91CA\u4EBA\u7269\u5FC3\u7406\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.pacingRules)) {
+    issues.push(critical(
+      "style_contract_pacing_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u8282\u594F\u63A8\u8FDB\u89C4\u5219\u3002",
+      "\u8865\u9F50\u538B\u529B\u8FDB\u5165\u3001\u4FE1\u606F\u91CA\u653E\u3001\u573A\u666F\u63A8\u8FDB\u548C\u4F59\u6CE2\u94A9\u5B50\u7684\u8282\u594F\u7EA6\u675F\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.povRules)) {
+    issues.push(critical(
+      "style_contract_pov_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u89C6\u89D2\u89C4\u5219\u3002",
+      "\u8865\u9F50\u89C6\u89D2\u8FB9\u754C\u3001\u4FE1\u606F\u6743\u9650\u548C\u4E0D\u5F97\u8D8A\u6743\u6CC4\u9732\u7684\u89C4\u5219\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.openingRules)) {
+    issues.push(critical(
+      "style_contract_opening_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u7AE0\u8282\u5F00\u573A\u89C4\u5219\u3002",
+      "\u8865\u9F50\u7AE0\u8282\u5982\u4F55\u8FDB\u5165\u573A\u666F\u538B\u529B\u3001\u4EBA\u7269\u52A8\u4F5C\u548C\u5F53\u524D\u51B2\u7A81\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.endingHookRules)) {
+    issues.push(critical(
+      "style_contract_ending_hook_rules_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53EF\u6267\u884C\u7684\u7AE0\u8282\u7ED3\u5C3E\u94A9\u5B50\u89C4\u5219\u3002",
+      "\u8865\u9F50\u6BCF\u7AE0\u7ED3\u5C3E\u5982\u4F55\u7559\u4E0B\u95EE\u9898\u3001\u5173\u7CFB\u88C2\u7F1D\u6216\u7EBF\u7D22\u63A8\u8FDB\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.forbiddenPatterns)) {
+    issues.push(critical(
+      "style_contract_forbidden_patterns_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u51BB\u7ED3\u540E\u7684\u7981\u7528\u6A21\u5F0F\u3002",
+      "\u8865\u9F50\u5FC5\u987B\u89C4\u907F\u7684 AI \u8154\u3001\u6A21\u677F\u8154\u3001\u540C\u8D28\u5316\u5BF9\u767D\u548C\u603B\u7ED3\u5F0F\u8868\u8FBE\u3002"
+    ));
+  }
+  if (contract.styleContract && !Array.isArray(contract.styleContract.allowedDevices)) {
+    issues.push(critical(
+      "style_contract_allowed_devices_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11 allowedDevices \u6570\u7EC4\u5B57\u6BB5\u3002",
+      "\u51BB\u7ED3\u524D\u81F3\u5C11\u628A allowedDevices \u6807\u51C6\u5316\u4E3A\u7A7A\u6570\u7EC4\uFF1B\u5982\u6709\u53EF\u590D\u7528\u6280\u6CD5\uFF0C\u5E94\u660E\u786E\u5199\u5165\u3002"
+    ));
+  }
+  if (!contract.styleContract || !hasUsableStyleList(contract.styleContract.positiveExamples)) {
+    issues.push(critical(
+      "style_contract_positive_examples_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u4E2D\u7684\u6B63\u5411\u4F8B\u53E5\u3002",
+      "\u4ECE\u7528\u6237\u6EE1\u610F\u6837\u6BB5\u4E2D\u62BD\u53D6\u53EF\u590D\u7528\u7684\u6B63\u5411\u5199\u6CD5\u7247\u6BB5\uFF0C\u4F5C\u4E3A\u540E\u7EED\u7AE0\u8282\u7684\u98CE\u683C\u53C2\u7167\u3002"
+    ));
+  }
+  if (contract.styleContract && !Array.isArray(contract.styleContract.negativeExamples)) {
+    issues.push(critical(
+      "style_contract_negative_examples_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11 negativeExamples \u6570\u7EC4\u5B57\u6BB5\u3002",
+      "\u51BB\u7ED3\u524D\u81F3\u5C11\u628A negativeExamples \u6807\u51C6\u5316\u4E3A\u7A7A\u6570\u7EC4\uFF1B\u5982\u6709\u53CD\u4F8B\uFF0C\u5E94\u660E\u786E\u5199\u5165\u3002"
+    ));
+  }
+  if (contract.approvedAt && contract.inheritance?.status !== "enforced") {
+    issues.push(warning(
+      "style_inheritance_not_enforced",
+      "\u5199\u6CD5\u5408\u540C\u5C1A\u672A\u663E\u5F0F\u58F0\u660E\u6B63\u6587\u7EE7\u627F\u7EA6\u675F\u3002",
+      "\u51BB\u7ED3\u540E\u8981\u660E\u786E base prompt\u3001style contract\u3001\u7981\u7528\u6A21\u5F0F\u548C\u6B63\u4F8B\u4F1A\u5F3A\u5236\u7EE7\u627F\u5230\u540E\u7EED\u7AE0\u8282\u3002"
+    ));
+  }
+  if (!contract.antiPatterns || contract.antiPatterns.length === 0) {
+    issues.push(warning(
+      "anti_patterns_missing",
+      "\u5199\u6CD5\u5408\u540C\u7F3A\u5C11\u53CD\u5411\u7981\u7528\u6A21\u5F0F\u3002",
+      "\u8865\u5145\u7981\u6B62\u7684 AI \u5473\u3001\u5957\u8BDD\u3001\u8282\u594F\u548C\u4EBA\u7269\u58F0\u97F3\u95EE\u9898\uFF0C\u540E\u7EED\u5BA1\u6821\u4F1A\u66F4\u7A33\u3002"
+    ));
+  }
+  return summarizeGate(issues);
+}
+function readinessItem(input) {
+  return {
+    key: input.key,
+    label: input.label,
+    status: input.gate.status,
+    detail: input.gate.status === "passed" ? input.passedDetail : input.gate.status === "warning" ? input.warningDetail || input.gate.issues[0]?.message || input.blockedDetail : input.gate.blockedReason || input.blockedDetail,
+    issueCodes: input.gate.issues.map((issue) => issue.code),
+    recoveryHint: input.gate.issues[0]?.recoveryHint || ""
+  };
+}
+function readinessGroup(input) {
+  const blocked = input.assets.filter((asset) => asset.status === "blocked").length;
+  const warningCount = input.assets.filter((asset) => asset.status === "warning").length;
+  const passed = input.assets.filter((asset) => asset.status === "passed").length;
+  return {
+    key: input.key,
+    label: input.label,
+    status: blocked > 0 ? "blocked" : warningCount > 0 ? "warning" : "passed",
+    summary: input.assets.length ? `${passed}/${input.assets.length} \u5DF2\u5C31\u7EEA${blocked ? `\uFF0C${blocked} \u9879\u7F3A\u5931` : warningCount ? `\uFF0C${warningCount} \u9879\u5F85\u8865\u5F3A` : ""}` : input.emptySummary,
+    assets: input.assets
+  };
+}
+function evaluateProductionReadiness(input) {
+  const totalChapters = Math.max(0, Number(input.totalChapters || 0));
+  const blueprintCount = Math.max(0, Number(input.blueprintCount || 0));
+  const planningArtifactCount = Math.max(0, Number(input.planningArtifactCount || 0));
+  const planningRequiredAssetCount = Math.max(0, Number(input.planningRequiredAssetCount || 0));
+  const planningRequiredAssets = Array.isArray(input.planningRequiredAssets) && input.planningRequiredAssets.length ? input.planningRequiredAssets : [
+    "world-matrix.md",
+    "plot-architecture.md",
+    "story-bible.md",
+    "volume-strategy.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "story-foundation-contract.json",
+    "world-matrix.json",
+    "plot-architecture.json",
+    "story-bible.json",
+    "volume-strategy.json",
+    "foreshadowing-ledger.json",
+    "character-dynamics.json",
+    "writing-plan.json"
+  ];
+  const planningMissingRequiredAssets = Array.isArray(input.planningMissingRequiredAssets) ? input.planningMissingRequiredAssets.filter(Boolean) : planningRequiredAssets.slice(planningRequiredAssetCount);
+  const planningAssetDetails = Array.isArray(input.planningAssetDetails) && input.planningAssetDetails.length ? input.planningAssetDetails : planningRequiredAssets.map((asset) => ({
+    key: asset.replace(/\.md$/u, "").replace(/[^a-z0-9]+/giu, "_"),
+    label: asset,
+    path: `.ai-novel/plans/${asset}`,
+    status: planningMissingRequiredAssets.includes(asset) ? "blocked" : "passed",
+    detail: planningMissingRequiredAssets.includes(asset) ? "\u7F3A\u5931" : "\u5DF2\u751F\u6210"
+  }));
+  const planningRequiredTotal = planningRequiredAssets.length;
+  const blockedPlanningAssetLabels = Array.from(/* @__PURE__ */ new Set([
+    ...planningMissingRequiredAssets,
+    ...planningAssetDetails.filter((asset) => asset.status === "blocked").map((asset) => asset.label || asset.key).filter(Boolean)
+  ]));
+  const readyPlanningAssetCount = planningAssetDetails.filter((asset) => asset.status === "passed").length;
+  const characterDossierCount = Math.max(0, Number(input.characterDossierCount || 0));
+  const characterDossierGaps = Array.isArray(input.characterDossierGaps) ? input.characterDossierGaps : [];
+  const memoryRecallRows = Math.max(0, Number(input.memoryRecallRows || 0));
+  const memoryLag = Math.max(0, Number(input.memoryLag || 0));
+  const contextBudgetPercent = Math.max(0, Number(input.contextBudgetPercent || 0));
+  const consensusGate = summarizeGate(String(input.consensusText || "").trim() ? [] : [critical(
+    "core_consensus_missing",
+    "\u7F3A\u5C11\u53EF\u8FFD\u8E2A\u7684\u6838\u5FC3\u521B\u4F5C\u5171\u8BC6\u3002",
+    "\u5148\u5B8C\u6210\u6838\u5FC3\u521B\u610F\u3001\u8BFB\u8005\u627F\u8BFA\u3001\u4E3B\u89D2\u538B\u529B\u548C\u4E16\u754C\u89C4\u5219\u7684\u7EDF\u4E00\u8BA8\u8BBA\uFF0C\u5E76\u5199\u5165 consensus\u3002"
+  )]);
+  const planningGate = summarizeGate(readyPlanningAssetCount >= planningRequiredTotal && blockedPlanningAssetLabels.length === 0 ? [] : planningRequiredAssetCount > 0 || planningArtifactCount > 0 ? [critical(
+    "story_planning_assets_incomplete",
+    `\u524D\u7F6E\u6545\u4E8B\u8D44\u4EA7\u5C1A\u672A\u5B8C\u6574\uFF0C\u7F3A\u5C11\u6216\u4E0D\u53EF\u6267\u884C\uFF1A${blockedPlanningAssetLabels.join("\u3001") || "\u6838\u5FC3\u6545\u4E8B\u8D44\u4EA7"}\u3002`,
+    "\u8865\u9F50 world-matrix\u3001plot-architecture\u3001story-bible\u3001volume-strategy\u3001foreshadowing-ledger\u3001character-dynamics\u3001\u5BF9\u5E94 JSON \u5951\u7EA6\u548C writing-plan \u540E\u518D\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002"
+  )] : [critical(
+    "story_planning_assets_sparse",
+    "\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u6545\u4E8B\u5723\u7ECF\u5C1A\u672A\u751F\u6210\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u5148\u751F\u6210\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u3001\u7ED3\u6784\u5316 JSON \u5951\u7EA6\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\uFF0C\u518D\u62C6\u7AE0\u8282\u5199\u6B63\u6587\u3002"
+  )]);
+  const storyFoundationApprovalGate = summarizeGate(
+    !input.storyFoundationApproved ? [critical(
+      "story_foundation_approval_missing",
+      "\u6545\u4E8B\u57FA\u5EFA\u5C1A\u672A\u7531\u7528\u6237\u786E\u8BA4\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+      "\u5148\u8865\u9F50\u5E76\u5BA1\u9605\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u5199\u4F5C\u8BA1\u5212\uFF0C\u786E\u8BA4\u53EF\u6267\u884C\u540E\u518D\u89E3\u9501\u6B63\u6587\u751F\u4EA7\u3002"
+    )] : input.storyFoundationApprovalFingerprint && input.storyFoundationAssetFingerprint && input.storyFoundationApprovalFingerprint !== input.storyFoundationAssetFingerprint ? [critical(
+      "story_foundation_approval_stale",
+      "\u6545\u4E8B\u57FA\u5EFA\u5DF2\u88AB\u4FEE\u6539\uFF0C\u65E7\u786E\u8BA4\u5DF2\u5931\u6548\u3002",
+      "\u91CD\u65B0\u5BA1\u9605\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\uFF0C\u5E76\u518D\u6B21\u786E\u8BA4\u3002"
+    )] : []
+  );
+  const characterGate = summarizeGate(characterDossierCount <= 0 ? [critical(
+    "character_dossiers_missing",
+    "\u7F3A\u5C11\u53EF\u6267\u884C\u4EBA\u7269\u6863\u6848\u548C\u4EBA\u7269\u5173\u7CFB\u3002",
+    "\u4E3A\u4E3B\u89D2\u3001\u5BF9\u6297\u529B\u91CF\u548C\u5173\u952E\u5173\u7CFB\u4EBA\u7269\u8865\u9F50\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5173\u7CFB\u72B6\u6001\u548C\u53D8\u5316\u8F68\u8FF9\u3002"
+  )] : characterDossierGaps.length > 0 ? [warning(
+    "character_dossiers_incomplete",
+    "\u4EBA\u7269\u6863\u6848\u4ECD\u6709\u5173\u952E\u5B57\u6BB5\u7F3A\u53E3\u3002",
+    "\u8865\u9F50\u4EBA\u7269\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u548C\u5173\u7CFB\u53D8\u5316\uFF0C\u907F\u514D\u6B63\u6587\u4EBA\u7269\u6241\u5E73\u5316\u3002"
+  )] : []);
+  const blueprintGate = summarizeGate(totalChapters > 0 && blueprintCount >= totalChapters ? [] : blueprintCount > 0 ? [critical(
+    "chapter_blueprints_partial",
+    "\u7AE0\u8282\u84DD\u56FE\u5C1A\u672A\u8986\u76D6\u5168\u4E66\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u7EE7\u7EED\u751F\u6210\u5269\u4F59\u7AE0\u8282\u84DD\u56FE\uFF0C\u786E\u4FDD\u6BCF\u7AE0\u90FD\u6709\u56E0\u679C\u76EE\u6807\u3001\u573A\u666F\u5361\u3001\u4F0F\u7B14\u64CD\u4F5C\u548C\u4EA4\u68D2\u72B6\u6001\u3002"
+  )] : [critical(
+    "chapter_blueprints_missing",
+    "\u7F3A\u5C11\u7AE0\u8282\u84DD\u56FE\uFF0C\u4E0D\u80FD\u7A33\u5B9A\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u5148\u6309\u6545\u4E8B\u5723\u7ECF\u62C6\u51FA\u7AE0\u8282\u6267\u884C\u5408\u540C\uFF0C\u800C\u4E0D\u662F\u76F4\u63A5\u8BA9\u6A21\u578B\u5199\u6B63\u6587\u3002"
+  )]);
+  const styleGate = input.styleGate || summarizeGate([critical(
+    "style_gate_missing",
+    "\u7F3A\u5C11 Style Contract Freeze Gate \u7ED3\u679C\u3002",
+    "\u5148\u8FD0\u884C Style Evolution Engine\uFF0C\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u540E\u518D\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002"
+  )]);
+  const memoryGate = summarizeGate(memoryRecallRows > 0 && memoryLag <= 1 ? [] : [warning(
+    "memory_recall_sparse",
+    "\u8BB0\u5FC6/RAG \u53EF\u53EC\u56DE\u5185\u5BB9\u4E0D\u8DB3\u3002",
+    "\u91CD\u65B0\u7D22\u5F15\u5171\u8BC6\u3001\u4EBA\u7269\u6863\u6848\u3001\u89C4\u5212\u548C\u5DF2\u5B8C\u6210\u7AE0\u8282\uFF0C\u786E\u4FDD\u540E\u7EED\u7AE0\u8282\u80FD\u627F\u63A5\u4E8B\u5B9E\u4E0E\u4F0F\u7B14\u3002"
+  )]);
+  const contextGate = summarizeGate(input.contextOverBudget || contextBudgetPercent >= 90 ? [warning(
+    "context_budget_pressure",
+    "\u4E0A\u4E0B\u6587\u9884\u7B97\u63A5\u8FD1\u6216\u8D85\u8FC7\u5B89\u5168\u8303\u56F4\u3002",
+    "\u538B\u7F29\u5171\u8BC6\u3001\u62C6\u5206\u7AE0\u8282\u573A\u666F\u8C03\u7528\uFF0C\u4FDD\u7559\u5F53\u524D\u573A\u666F\u5FC5\u9700\u4E8B\u5B9E\uFF0C\u907F\u514D\u4E00\u6B21\u8BF7\u6C42\u585E\u5165\u8FC7\u591A\u8D44\u6599\u3002"
+  )] : []);
+  const itemInputs = [
+    {
+      key: "core_consensus",
+      label: "\u6838\u5FC3\u5171\u8BC6",
+      gate: consensusGate,
+      passedDetail: "\u5DF2\u6709\u53EF\u8FFD\u8E2A\u5171\u8BC6",
+      blockedDetail: "\u7F3A\u5C11\u521B\u4F5C\u5171\u8BC6"
+    },
+    {
+      key: "story_planning",
+      label: "\u4E16\u754C/\u4E3B\u7EBF",
+      gate: planningGate,
+      passedDetail: `${readyPlanningAssetCount}/${planningRequiredTotal} \u4E2A\u6838\u5FC3\u8D44\u4EA7`,
+      blockedDetail: "\u7F3A\u5C11\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u548C\u6545\u4E8B\u5723\u7ECF",
+      warningDetail: `${readyPlanningAssetCount}/${planningRequiredTotal} \u4E2A\u6838\u5FC3\u8D44\u4EA7\uFF0C${planningArtifactCount} \u4E2A\u89C4\u5212\u4EA7\u7269`
+    },
+    {
+      key: "character_dynamics",
+      label: "\u4EBA\u7269\u5173\u7CFB",
+      gate: characterGate,
+      passedDetail: `${characterDossierCount} \u4E2A\u6863\u6848`,
+      blockedDetail: "\u7F3A\u5C11\u4EBA\u7269\u6863\u6848",
+      warningDetail: `${characterDossierCount} \u4E2A\u6863\u6848\uFF0C${characterDossierGaps.length} \u4E2A\u7F3A\u53E3`
+    },
+    {
+      key: "story_foundation_approval",
+      label: "\u57FA\u5EFA\u786E\u8BA4",
+      gate: storyFoundationApprovalGate,
+      passedDetail: input.storyFoundationApprovedAt ? `\u5DF2\u786E\u8BA4 ${input.storyFoundationApprovedAt}` : "\u7528\u6237\u5DF2\u786E\u8BA4",
+      blockedDetail: "\u9700\u8981\u7528\u6237\u786E\u8BA4\u6545\u4E8B\u57FA\u5EFA"
+    },
+    {
+      key: "chapter_blueprints",
+      label: "\u7AE0\u8282\u84DD\u56FE",
+      gate: blueprintGate,
+      passedDetail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`,
+      blockedDetail: "\u7F3A\u5C11\u7AE0\u8282\u6267\u884C\u5408\u540C",
+      warningDetail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+    },
+    {
+      key: "style_approval",
+      label: "Style Freeze",
+      gate: styleGate,
+      passedDetail: "\u5DF2\u51BB\u7ED3\u5168\u4E66\u5199\u6CD5\u5408\u540C",
+      blockedDetail: "\u9700\u8981\u5B8C\u6210 Loop \u5E76\u51BB\u7ED3 style contract"
+    },
+    {
+      key: "memory_recall",
+      label: "\u8BB0\u5FC6/RAG",
+      gate: memoryGate,
+      passedDetail: `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE`,
+      blockedDetail: "\u7F3A\u5C11\u53EF\u53EC\u56DE\u8BB0\u5FC6",
+      warningDetail: `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE\uFF0C\u6EDE\u540E ${memoryLag}`
+    },
+    {
+      key: "context_budget",
+      label: "\u4E0A\u4E0B\u6587\u9884\u7B97",
+      gate: contextGate,
+      passedDetail: `${contextBudgetPercent}%`,
+      blockedDetail: "\u4E0A\u4E0B\u6587\u8FC7\u8F7D",
+      warningDetail: `${contextBudgetPercent}%`
+    }
+  ];
+  const items = itemInputs.map(readinessItem);
+  const characterAssetDetails = Array.isArray(input.characterAssetDetails) && input.characterAssetDetails.length ? input.characterAssetDetails : [
+    {
+      key: "character_dossiers",
+      label: "\u4EBA\u7269\u6863\u6848",
+      path: ".ai-novel/memory/characters/dossiers.json",
+      status: characterGate.status,
+      detail: characterGate.status === "passed" ? `${characterDossierCount} \u4E2A\u6863\u6848` : characterGate.blockedReason || "\u5F85\u8865\u9F50"
+    }
+  ];
+  const executionAssetDetails = Array.isArray(input.executionAssetDetails) && input.executionAssetDetails.length ? input.executionAssetDetails : [
+    {
+      key: "chapter_blueprints",
+      label: "\u7AE0\u8282\u84DD\u56FE",
+      path: ".ai-novel/chapter-blueprints/",
+      status: blueprintGate.status,
+      detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+    },
+    {
+      key: "style_contract",
+      label: "\u5199\u6CD5\u5408\u540C",
+      path: ".ai-novel/style/evolution/style-contract.json",
+      status: styleGate.status,
+      detail: styleGate.status === "passed" ? "\u5DF2\u51BB\u7ED3" : styleGate.blockedReason || "\u5F85\u786E\u8BA4"
+    }
+  ];
+  const groups = [
+    readinessGroup({
+      key: "story_foundation",
+      label: "\u6545\u4E8B\u57FA\u5EFA",
+      assets: [
+        {
+          key: "core_consensus",
+          label: "\u6838\u5FC3\u5171\u8BC6",
+          path: ".ai-novel/prompts/global-consensus.md",
+          status: consensusGate.status,
+          detail: consensusGate.status === "passed" ? "\u5DF2\u751F\u6210" : consensusGate.blockedReason || "\u7F3A\u5931"
+        },
+        ...planningAssetDetails,
+        {
+          key: "story_foundation_approval",
+          label: "\u7528\u6237\u786E\u8BA4",
+          path: input.storyFoundationApprovalPath || ".ai-novel/plans/story-foundation-approval.json",
+          status: storyFoundationApprovalGate.status,
+          detail: storyFoundationApprovalGate.status === "passed" ? input.storyFoundationApprovedAt ? `\u5DF2\u786E\u8BA4 ${input.storyFoundationApprovedAt}` : "\u5DF2\u786E\u8BA4" : storyFoundationApprovalGate.blockedReason || "\u5F85\u786E\u8BA4"
+        }
+      ],
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u6545\u4E8B\u57FA\u5EFA"
+    }),
+    readinessGroup({
+      key: "character_system",
+      label: "\u4EBA\u7269\u7CFB\u7EDF",
+      assets: characterAssetDetails,
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u4EBA\u7269\u7CFB\u7EDF"
+    }),
+    readinessGroup({
+      key: "chapter_execution",
+      label: "\u6B63\u6587\u6267\u884C",
+      assets: [
+        ...executionAssetDetails,
+        {
+          key: "memory_recall",
+          label: "\u8BB0\u5FC6/RAG",
+          path: ".ai-novel/memory/",
+          status: memoryGate.status,
+          detail: memoryGate.status === "passed" ? `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE` : `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE\uFF0C\u6EDE\u540E ${memoryLag}`
+        },
+        {
+          key: "context_budget",
+          label: "\u4E0A\u4E0B\u6587\u9884\u7B97",
+          path: ".ai-novel/context/",
+          status: contextGate.status,
+          detail: `${contextBudgetPercent}%`
+        }
+      ],
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u6B63\u6587\u6267\u884C\u6761\u4EF6"
+    })
+  ];
+  const issues = itemInputs.flatMap((item) => item.gate.issues);
+  const blocked = items.filter((item) => item.status === "blocked").length;
+  const warningCount = items.filter((item) => item.status === "warning").length;
+  const passed = items.filter((item) => item.status === "passed").length;
+  const score = Math.round((passed + warningCount * 0.5) / Math.max(1, items.length) * 100);
+  const gate = summarizeGate(issues);
+  return {
+    status: gate.status,
+    canProceed: gate.canProceed,
+    score,
+    summary: blocked > 0 ? `${blocked} \u9879\u963B\u585E\u6B63\u6587\u751F\u4EA7` : warningCount > 0 ? `${warningCount} \u9879\u5EFA\u8BAE\u8865\u5F3A` : "\u6B63\u6587\u751F\u4EA7\u51C6\u5907\u5B8C\u6210",
+    blockedReason: gate.blockedReason,
+    items,
+    groups,
+    issues
+  };
+}
+
+// src/production-style-evolution.ts
+var import_promises4 = __toESM(require("fs/promises"), 1);
+var import_node_path7 = __toESM(require("path"), 1);
+var STYLE_EVOLUTION_DIR = ".ai-novel/style/evolution";
+var STYLE_SAMPLES_DIR = ".ai-novel/style/evolution/samples";
+var STYLE_SEED_PATH = ".ai-novel/style/evolution/style-seed.md";
+var USER_STYLE_PROMPT_PATH = ".ai-novel/style/evolution/user-style-prompt.md";
+var REFERENCE_TEXT_PATH = ".ai-novel/style/evolution/reference-text.md";
+var EVOLUTION_HISTORY_PATH = ".ai-novel/style/evolution/style-evolution-history.json";
+var STYLE_CONTRACT_PATH = ".ai-novel/style/evolution/style-contract.json";
+var APPROVED_SAMPLE_PATH = ".ai-novel/style/evolution/user-approved-sample.md";
+var STYLE_FREEZE_LEDGER_PATH = ".ai-novel/style/evolution/style-freeze-ledger.json";
+var STYLE_LOOP_RUNTIME_PATH = ".ai-novel/style/evolution/style-loop-runtime.json";
+var STYLE_LOOP_RUNS_PATH = ".ai-novel/style/evolution/style-loop-runs.jsonl";
+function styleGenerationVerificationFromEntry(entry) {
+  if (!entry) return buildStyleGenerationVerification({});
+  if (entry.verification) return entry.verification;
+  if (!entry.evaluation) return buildStyleGenerationVerification({
+    version: entry.version,
+    checkedAt: entry.createdAt
+  });
+  return buildStyleGenerationVerification({
+    evaluation: entry.evaluation,
+    version: entry.version,
+    checkedAt: entry.createdAt
+  });
+}
+function styleEntryFreezerGate(entry) {
+  return entry?.freezer || null;
+}
+function buildStyleGenerationVerification(input) {
+  const evaluation = input.evaluation;
+  const forbiddenHitCount = Array.isArray(evaluation?.forbiddenHits) ? evaluation.forbiddenHits.length : 0;
+  const aigc = evaluation?.aigc;
+  const reasons = [];
+  let status = "pending";
+  if (aigc?.enabled) {
+    if (typeof aigc.score === "number") {
+      reasons.push(`AIGC \u6982\u7387 ${aigc.score.toFixed(3)}\u3002`);
+    }
+    if (typeof aigc.threshold === "number") {
+      reasons.push(`\u98CE\u9669\u9608\u503C ${aigc.threshold.toFixed(3)}\u3002`);
+    }
+  }
+  if (forbiddenHitCount > 0) {
+    reasons.push(`\u547D\u4E2D ${forbiddenHitCount} \u6761\u7981\u5FCC\u6A21\u5F0F\u3002`);
+  }
+  if ((aigc?.highRiskCount || 0) > 0) {
+    reasons.push(`AIGC \u68C0\u6D4B\u8BC6\u522B\u51FA ${Number(aigc?.highRiskCount || 0)} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\u3002`);
+  }
+  if (aigc?.reason) {
+    reasons.push(aigc.reason);
+  }
+  if (aigc?.status === "blocked" || forbiddenHitCount > 0) {
+    status = "blocked";
+  } else if (aigc?.status === "passed" && forbiddenHitCount === 0) {
+    status = "passed";
+  } else if (aigc?.status === "unavailable") {
+    status = "blocked";
+  } else if (!aigc?.enabled) {
+    status = "blocked";
+  }
+  const summary = status === "passed" ? "Generation Verification Gate \u5DF2\u901A\u8FC7\uFF0C\u5F53\u524D\u6837\u6BB5\u7684 AIGC \u98CE\u9669\u4E0E\u7981\u5FCC\u547D\u4E2D\u5904\u4E8E\u53EF\u653E\u884C\u8303\u56F4\u3002" : status === "blocked" ? "Generation Verification Gate \u963B\u585E\uFF0C\u5F53\u524D\u6837\u6BB5\u4ECD\u5B58\u5728 AIGC \u98CE\u9669\u6216\u7981\u5FCC\u547D\u4E2D\uFF0C\u4E0D\u80FD\u76F4\u63A5\u51BB\u7ED3\u3002" : "Generation Verification Gate \u7B49\u5F85\u5F53\u524D\u8F6E\u8BC4\u4F30\u5B8C\u6210\u3002";
+  return {
+    gate: "Generation Verification Gate",
+    status,
+    summary,
+    reasons: [...new Set(reasons.filter(Boolean))],
+    score: typeof aigc?.score === "number" ? aigc.score : null,
+    threshold: typeof aigc?.threshold === "number" ? aigc.threshold : null,
+    highRiskCount: Number(aigc?.highRiskCount || 0),
+    forbiddenHitCount,
+    highRiskPreviews: Array.isArray(aigc?.highRiskPreviews) ? aigc.highRiskPreviews.filter(Boolean) : [],
+    version: input.version,
+    checkedAt: input.checkedAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function defaultRetryPolicy() {
+  return {
+    maxLoopIterations: 6,
+    approvalScoreThreshold: 8.6,
+    approvalMinRounds: 2,
+    stabilityMinRounds: 2,
+    stabilityScoreDeltaMax: 0.6,
+    retryOnForbiddenHit: true,
+    maxForbiddenHitCount: 1
+  };
+}
+function latestGenerationVerification(contract, history) {
+  const latest = [...history].reverse().find((entry) => entry.verification || entry.evaluation);
+  if (latest?.verification) {
+    return latest.verification;
+  }
+  if (latest?.evaluation) {
+    return buildStyleGenerationVerification({
+      evaluation: latest.evaluation,
+      version: latest.version,
+      checkedAt: latest.createdAt
+    });
+  }
+  if (contract.verification) {
+    return contract.verification;
+  }
+  return null;
+}
+function approvedGenerationVerification(contract, history) {
+  const approvedVersion = Number(contract.approval?.approvedVersion || contract.loop?.approvalVersion || 0);
+  const approvedEntry = approvedVersion ? history.find((entry) => entry.version === approvedVersion) : null;
+  if (approvedEntry?.verification) {
+    return approvedEntry.verification;
+  }
+  if (approvedEntry?.evaluation) {
+    return buildStyleGenerationVerification({
+      evaluation: approvedEntry.evaluation,
+      version: approvedEntry.version,
+      checkedAt: approvedEntry.createdAt
+    });
+  }
+  if (contract.verification) {
+    return contract.verification;
+  }
+  return latestGenerationVerification(contract, history);
+}
+function activeContractGenerationVerification(contract, history) {
+  const approved = Boolean(
+    contract.approvedAt || contract.approval?.status === "approved" || contract.approval?.approvedVersion || contract.loop?.status === "approved"
+  );
+  return approved ? approvedGenerationVerification(contract, history) : latestGenerationVerification(contract, history);
+}
+function roundScore(value) {
+  return Math.round(value * 10) / 10;
+}
+function buildStableReasons(input) {
+  const reasons = [];
+  const window = input.stableWindow;
+  if (!window.length) return reasons;
+  const scores = window.map((entry) => Number(entry.evaluation?.scores?.overall || 0)).filter((score) => score > 0);
+  if (scores.length >= 2) {
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const drift = roundScore(max - min);
+    reasons.push(`\u6700\u8FD1 ${scores.length} \u8F6E\u7EFC\u5408\u8BC4\u5206\u4FDD\u6301\u5728 ${min.toFixed(1)}-${max.toFixed(1)}\uFF0C\u6F02\u79FB\u4EC5 ${drift.toFixed(1)}\u3002`);
+  }
+  const forbiddenClear = window.every(
+    (entry) => (entry.evaluation?.forbiddenHits?.length || 0) <= Math.max(0, Number(input.retryPolicy.maxForbiddenHitCount || 1))
+  );
+  if (forbiddenClear) {
+    reasons.push("\u6700\u8FD1\u7A33\u5B9A\u7A97\u53E3\u5185\u7981\u5FCC\u547D\u4E2D\u6301\u7EED\u53D7\u63A7\u3002");
+  }
+  const verdictStable = window.every((entry) => {
+    const verdict = entry.evaluation?.verdict;
+    return verdict === "candidate" || verdict === "approve";
+  });
+  if (verdictStable) {
+    reasons.push("\u6700\u8FD1\u51E0\u8F6E\u5DF2\u8131\u79BB retry \u533A\u95F4\uFF0C\u5F00\u59CB\u8FDB\u5165\u7A33\u5B9A\u53EF\u6536\u675F\u72B6\u6001\u3002");
+  }
+  const tighteningTotal = window.reduce((sum, entry) => sum + (entry.contractTightening?.length || 0), 0);
+  if (tighteningTotal > 0) {
+    reasons.push(`\u7A33\u5B9A\u7A97\u53E3\u5185\u7D2F\u8BA1\u65B0\u589E ${tighteningTotal} \u6761\u5408\u540C\u6536\u7D27\u5EFA\u8BAE\u3002`);
+  }
+  return reasons;
+}
+function isOpenStyleEvolutionEntry(entry, rejectedVersion) {
+  if (entry.userDecision === "accepted") return false;
+  if (entry.userDecision === "superseded") return false;
+  if (rejectedVersion && entry.version === rejectedVersion) return false;
+  return true;
+}
+function computeStableWindowState(input) {
+  const stabilityMinRounds = Math.max(2, Number(input.retryPolicy.stabilityMinRounds || 2));
+  const approvalThreshold = Number(input.retryPolicy.approvalScoreThreshold || 8.6);
+  const stabilityScoreDeltaMax = Math.max(0, Number(input.retryPolicy.stabilityScoreDeltaMax || 0.6));
+  const stableWindow = input.history.slice(-stabilityMinRounds);
+  const stableWindowScores = stableWindow.map((entry) => Number(entry.evaluation?.scores?.overall || 0)).filter((score) => score > 0);
+  const stableWindowVerdictOk = stableWindow.length >= stabilityMinRounds && stableWindow.every((entry) => {
+    const verdict = entry.evaluation?.verdict;
+    return verdict === "candidate" || verdict === "approve";
+  });
+  const stableWindowDecisionOk = stableWindow.length >= stabilityMinRounds && stableWindow.every((entry) => isOpenStyleEvolutionEntry(entry, input.rejectedVersion));
+  const stableWindowForbiddenOk = stableWindow.length >= stabilityMinRounds && stableWindow.every(
+    (entry) => (entry.evaluation?.forbiddenHits?.length || 0) <= Math.max(0, Number(input.retryPolicy.maxForbiddenHitCount || 1))
+  );
+  const stableWindowVerificationOk = stableWindow.length >= stabilityMinRounds && stableWindow.every((entry) => {
+    const verification = entry.verification || buildStyleGenerationVerification({
+      evaluation: entry.evaluation,
+      version: entry.version,
+      checkedAt: entry.createdAt
+    });
+    return verification.status === "passed";
+  });
+  const stableWindowThresholdOk = stableWindow.length >= stabilityMinRounds && stableWindow.every((entry) => Number(entry.evaluation?.scores?.overall || 0) >= approvalThreshold - 0.8);
+  const stableWindowDrift = stableWindowScores.length >= 2 ? roundScore(Math.max(...stableWindowScores) - Math.min(...stableWindowScores)) : Number.NaN;
+  const stable = stableWindow.length >= stabilityMinRounds && stableWindowScores.length >= stabilityMinRounds && stableWindowVerdictOk && stableWindowDecisionOk && stableWindowForbiddenOk && stableWindowVerificationOk && stableWindowThresholdOk && stableWindowDrift <= stabilityScoreDeltaMax;
+  return {
+    stable,
+    stableWindow,
+    stableWindowScores,
+    stableWindowDrift
+  };
+}
+function deriveLoopState(contract) {
+  const history = Array.isArray(contract.evolutionHistory) ? contract.evolutionHistory : [];
+  const latest = history.at(-1);
+  const retryPolicy = contract.retryPolicy || defaultRetryPolicy();
+  const approvalThreshold = Number(retryPolicy.approvalScoreThreshold || 8.6);
+  const verification = activeContractGenerationVerification(contract, history);
+  const rejectedVersion = contract.approval?.status === "rejected" ? contract.approval.rejectedVersion : void 0;
+  const stableState = computeStableWindowState({ history, retryPolicy, rejectedVersion });
+  const readyEntry = [...history].reverse().find((entry) => {
+    const entryVerification = styleGenerationVerificationFromEntry(entry);
+    return isOpenStyleEvolutionEntry(entry, rejectedVersion) && entryVerification.status === "passed" && (!styleEntryFreezerGate(entry)?.verdict || styleEntryFreezerGate(entry)?.verdict === "ready") && (entry.readyForApproval || entry.evaluation?.verdict === "approve");
+  });
+  const recent = history.slice(-Math.max(2, Number(retryPolicy.stabilityMinRounds || 2)));
+  const convergenceEvidence = [];
+  const tighteningCount = history.reduce((sum, entry) => sum + (entry.contractTightening?.length || 0), 0);
+  const stableEntry = stableState.stable ? stableState.stableWindow.at(-1) : void 0;
+  const stabilityReasons = stableState.stable ? buildStableReasons({ stableWindow: stableState.stableWindow, retryPolicy }) : [];
+  if (recent.length >= 2) {
+    const previous = Number(recent[0]?.evaluation?.scores?.overall || 0);
+    const current = Number(recent.at(-1)?.evaluation?.scores?.overall || 0);
+    if (current >= previous && current > 0) {
+      convergenceEvidence.push(`\u6700\u8FD1\u4E24\u8F6E\u7EFC\u5408\u8BC4\u5206\u4ECE ${previous.toFixed(1)} \u63D0\u5347\u5230 ${current.toFixed(1)}\u3002`);
+    }
+    if ((recent.at(-1)?.contractTightening?.length || 0) > 0) {
+      convergenceEvidence.push(`\u6700\u8FD1\u4E00\u8F6E\u65B0\u589E ${recent.at(-1)?.contractTightening?.length || 0} \u6761\u5408\u540C\u6536\u7D27\u5EFA\u8BAE\u3002`);
+    }
+  }
+  if (stableState.stable && stabilityReasons.length) {
+    convergenceEvidence.push(...stabilityReasons);
+  }
+  if (readyEntry?.readyReasons?.length) {
+    convergenceEvidence.push(...readyEntry.readyReasons);
+  }
+  const dedupedConvergenceEvidence = [...new Set(convergenceEvidence.filter(Boolean))];
+  const readyVersion = readyEntry?.version;
+  const stableVersion = stableEntry?.version;
+  const approvalVersion = contract.approval?.approvedVersion || contract.loop?.approvalVersion || history.find((entry) => entry.sample === contract.approvedSample)?.version;
+  const approved = Boolean((contract.approval?.status === "approved" || contract.approvedAt) && contract.approvedSample?.trim());
+  const latestRejected = Boolean(
+    contract.approval?.status === "rejected" && contract.approval?.rejectionReason && contract.approval?.rejectedVersion === latest?.version
+  );
+  const latestRejectionReason = latestRejected ? contract.approval?.rejectionReason : "";
+  return {
+    status: approved ? "approved" : readyEntry && readyEntry.version === latest?.version ? "ready_for_approval" : stableState.stable ? "stable_candidate" : history.length > 0 ? "awaiting_user" : "idle",
+    convergence: approved ? "ready" : readyEntry && readyEntry.version === latest?.version ? "ready" : stableState.stable ? "stable" : history.length >= 2 ? "improving" : history.length === 1 ? "exploring" : "unknown",
+    currentIteration: history.length,
+    latestVersion: latest?.version || 0,
+    stableVersion,
+    readyVersion,
+    approvalVersion,
+    autoIterations: history.filter((entry) => entry.source !== "manual").length,
+    stableRounds: stableState.stable ? stableState.stableWindow.length : 0,
+    stabilityScore: stableState.stable && stableState.stableWindowScores.length ? roundScore(stableState.stableWindowScores.reduce((sum, score) => sum + score, 0) / stableState.stableWindowScores.length) : 0,
+    tighteningCount,
+    lastRunAt: latest?.createdAt || contract.approvedAt,
+    lastVerdict: approved ? "approve" : latest?.evaluation?.verdict,
+    stableSummary: stableState.stable ? `v${stableEntry?.version || latest?.version || 0} \u524D\u5DF2\u5F62\u6210\u7A33\u5B9A\u5199\u6CD5\u7A97\u53E3\uFF0C\u53EF\u7EE7\u7EED\u51BB\u7ED3\u786E\u8BA4\u3002` : "",
+    readySummary: readyEntry?.evaluation?.summary || readyEntry?.review,
+    stabilityReasons,
+    readyReasons: readyEntry?.readyReasons || [],
+    convergenceEvidence: dedupedConvergenceEvidence,
+    verificationStatus: verification?.status || "pending",
+    verificationVersion: verification?.version,
+    verificationSummary: verification?.summary || "",
+    verificationReasons: verification?.reasons || [],
+    latestSummary: approved ? "\u7528\u6237\u5DF2\u786E\u8BA4\u5E76\u51BB\u7ED3\u672C\u4E66\u57FA\u7840\u5199\u6CD5\u3002" : latestRejected ? `\u7528\u6237\u9000\u56DE\u5F53\u524D\u5019\u9009\uFF1A${latestRejectionReason}` : latest?.evaluation?.summary || "\u5C1A\u672A\u8FDB\u5165\u5199\u6CD5\u5FAA\u73AF\u3002"
+  };
+}
+function buildStyleFreezeLedger(contract) {
+  const history = Array.isArray(contract.evolutionHistory) ? contract.evolutionHistory : [];
+  const verification = activeContractGenerationVerification(contract, history);
+  return {
+    version: 1,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    latestVersion: Number(contract.loop?.latestVersion || history.at(-1)?.version || 0),
+    stableVersion: Number(contract.loop?.stableVersion || 0) || void 0,
+    readyVersion: Number(contract.loop?.readyVersion || 0) || void 0,
+    approvalVersion: Number(contract.loop?.approvalVersion || contract.approval?.approvedVersion || 0) || void 0,
+    approvalStatus: contract.approval?.status || "pending",
+    freezeSummary: contract.approval?.freezeSummary,
+    inheritedArtifacts: contract.inheritance?.inheritedArtifacts || [],
+    inheritedRules: contract.inheritance?.inheritedRules || [],
+    convergence: contract.loop?.convergence || "unknown",
+    convergenceEvidence: contract.loop?.convergenceEvidence || [],
+    verificationGate: "Generation Verification Gate",
+    verificationStatus: verification?.status || "pending",
+    verificationVersion: verification?.version,
+    verificationSummary: verification?.summary || "",
+    verificationReasons: verification?.reasons || [],
+    entries: history.map((entry) => ({
+      version: entry.version,
+      createdAt: entry.createdAt,
+      samplePath: entry.samplePath,
+      source: entry.source,
+      evaluationSource: entry.evaluation?.source,
+      refinementSource: entry.refinement?.source,
+      verdict: entry.evaluation?.verdict,
+      overallScore: Number(entry.evaluation?.scores?.overall || 0) || void 0,
+      readyForApproval: entry.readyForApproval,
+      stableCandidate: Number(contract.loop?.stableVersion || 0) === entry.version,
+      stableRounds: Number(contract.loop?.stableVersion || 0) === entry.version ? Number(contract.loop?.stableRounds || 0) : 0,
+      readyReasons: entry.readyReasons || [],
+      stabilityReasons: Number(contract.loop?.stableVersion || 0) === entry.version ? contract.loop?.stabilityReasons || [] : [],
+      convergenceNote: entry.convergenceNote,
+      contractTightening: entry.contractTightening || [],
+      rejectionReason: entry.rejectionReason,
+      userDecision: entry.userDecision,
+      userDecisionAt: entry.userDecisionAt,
+      verificationStatus: entry.verification?.status || "pending",
+      verificationSummary: entry.verification?.summary || "",
+      verificationReasons: entry.verification?.reasons || [],
+      freezerVerdict: entry.freezer?.verdict,
+      freezerSummary: entry.freezer?.summary || "",
+      freezerBlockingReasons: entry.freezer?.blockingReasons || [],
+      aigcRiskScore: entry.verification?.score ?? null,
+      aigcThreshold: entry.verification?.threshold ?? null,
+      aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
+      forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0)
+    }))
+  };
+}
+function loopProtocolEvidenceItem(input) {
+  return {
+    key: input.key,
+    label: input.label,
+    status: input.ok ? "passed" : "blocked",
+    summary: input.ok ? input.passedSummary : input.pendingSummary,
+    evidence: input.evidence.filter(Boolean),
+    requiredForFreeze: input.requiredForFreeze !== false
+  };
+}
+function deriveStyleLoopProtocol(contract) {
+  const history = Array.isArray(contract.evolutionHistory) ? contract.evolutionHistory : [];
+  const latest = history.at(-1);
+  const approved = Boolean(contract.approvedAt && contract.approval?.status === "approved" && contract.approval.acceptedAsBookStyle === true);
+  const verification = contract.verification || activeContractGenerationVerification(contract, history);
+  const freezerReady = contract.freezer?.verdict === "ready";
+  const inheritanceReady = contract.inheritance?.status === "enforced";
+  const styleReady = Boolean(contract.styleContract && contract.frozenBasePrompt?.trim());
+  const requiredStages = [
+    "seed_prompt_builder",
+    "candidate_generator",
+    "evaluator_critic",
+    "prompt_refiner",
+    "loop_controller",
+    "generation_verification",
+    "user_approval_gate",
+    "style_contract_freezer",
+    "chapter_inheritance_adapter"
+  ];
+  const evidence = [
+    loopProtocolEvidenceItem({
+      key: "seed_prompt_builder",
+      label: "Seed Prompt Builder",
+      ok: Boolean(contract.seedPrompt?.trim()),
+      pendingSummary: "\u7F3A\u5C11\u521D\u59CB seed prompt\u3002",
+      passedSummary: "\u5DF2\u751F\u6210\u521D\u59CB\u79CD\u5B50 prompt\u3002",
+      evidence: [
+        contract.userStylePrompt ? "user style prompt captured" : "",
+        contract.referenceWorks?.length ? `reference works: ${contract.referenceWorks.length}` : "",
+        contract.desiredVibes?.length ? `desired vibes: ${contract.desiredVibes.length}` : "",
+        contract.seedForbiddenPatterns?.length ? `seed forbidden patterns: ${contract.seedForbiddenPatterns.length}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "candidate_generator",
+      label: "Candidate Generator",
+      ok: history.length > 0,
+      pendingSummary: "\u5C1A\u672A\u751F\u6210\u53EF\u8BC4\u4F30\u6B63\u6587\u6837\u6BB5\u3002",
+      passedSummary: `\u5DF2\u751F\u6210 ${history.length} \u4E2A\u5019\u9009\u6837\u6BB5\u3002`,
+      evidence: [
+        latest?.version ? `latest version: v${latest.version}` : "",
+        latest?.source ? `latest source: ${latest.source}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "evaluator_critic",
+      label: "Evaluator / Critic",
+      ok: history.some((entry) => Boolean(entry.evaluation?.scores?.overall)),
+      pendingSummary: "\u5019\u9009\u6837\u6BB5\u7F3A\u5C11\u591A\u7EF4\u8BC4\u4F30\u3002",
+      passedSummary: "\u5019\u9009\u6837\u6BB5\u5DF2\u5B8C\u6210\u591A\u7EF4\u8BC4\u4F30\u3002",
+      evidence: [
+        latest?.evaluation?.source ? `source: ${latest.evaluation.source}` : "",
+        typeof latest?.evaluation?.scores?.overall === "number" ? `overall: ${latest.evaluation.scores.overall}` : "",
+        latest?.evaluation?.verdict ? `verdict: ${latest.evaluation.verdict}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "prompt_refiner",
+      label: "Prompt Refiner",
+      ok: history.some((entry) => Boolean(entry.refinement?.nextPrompt || entry.refinement?.promptAdjustments?.length || entry.contractTightening?.length)),
+      pendingSummary: "\u5C1A\u672A\u6C89\u6DC0 prompt \u4FEE\u8BA2\u5EFA\u8BAE\u3002",
+      passedSummary: "\u5DF2\u6C89\u6DC0\u4E0B\u4E00\u8F6E prompt \u4E0E\u5408\u540C\u6536\u7D27\u5EFA\u8BAE\u3002",
+      evidence: [
+        latest?.refinement?.source ? `source: ${latest.refinement.source}` : "",
+        latest?.refinement?.promptAdjustments?.length ? `prompt adjustments: ${latest.refinement.promptAdjustments.length}` : "",
+        latest?.contractTightening?.length ? `contract tightening: ${latest.contractTightening.length}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "loop_controller",
+      label: "Loop Controller",
+      ok: Boolean(contract.loop?.status && contract.loop.status !== "idle"),
+      pendingSummary: "Loop Controller \u5C1A\u672A\u5F62\u6210\u6536\u655B\u72B6\u6001\u3002",
+      passedSummary: `Loop Controller \u72B6\u6001\uFF1A${contract.loop?.status || "unknown"}\u3002`,
+      evidence: [
+        contract.loop?.convergence ? `convergence: ${contract.loop.convergence}` : "",
+        contract.loop?.currentIteration ? `iterations: ${contract.loop.currentIteration}` : "",
+        contract.loop?.readyVersion ? `ready version: v${contract.loop.readyVersion}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "generation_verification",
+      label: "AIGC / Generation Verification",
+      ok: verification?.status === "passed",
+      pendingSummary: "Generation Verification Gate \u5C1A\u672A\u901A\u8FC7\u3002",
+      passedSummary: "Generation Verification Gate \u5DF2\u901A\u8FC7\u3002",
+      evidence: [
+        verification?.status ? `status: ${verification.status}` : "",
+        typeof verification?.score === "number" ? `score: ${verification.score}` : "",
+        typeof verification?.threshold === "number" ? `threshold: ${verification.threshold}` : "",
+        verification?.highRiskCount ? `high risk count: ${verification.highRiskCount}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "user_approval_gate",
+      label: "User Approval Gate",
+      ok: approved,
+      pendingSummary: "\u7528\u6237\u5C1A\u672A\u786E\u8BA4\u8BE5\u5199\u6CD5\u4F5C\u4E3A\u6574\u672C\u4E66\u57FA\u7840\u5199\u6CD5\u3002",
+      passedSummary: "\u7528\u6237\u5DF2\u786E\u8BA4\u8BE5\u5199\u6CD5\u9002\u7528\u4E8E\u6574\u672C\u4E66\u3002",
+      evidence: [
+        contract.approval?.approvedVersion ? `approved version: v${contract.approval.approvedVersion}` : "",
+        contract.approval?.approvedAt || contract.approvedAt ? `approved at: ${contract.approval?.approvedAt || contract.approvedAt}` : "",
+        contract.approval?.acceptedAsBookStyle === true ? "accepted as whole-book style" : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "style_contract_freezer",
+      label: "Style Contract Freezer",
+      ok: freezerReady && styleReady,
+      pendingSummary: "Freezer \u5C1A\u672A ready \u6216\u51BB\u7ED3\u8D44\u4EA7\u4E0D\u5B8C\u6574\u3002",
+      passedSummary: "Style Contract Freezer \u5DF2 ready\uFF0C\u51BB\u7ED3\u8D44\u4EA7\u5B8C\u6574\u3002",
+      evidence: [
+        contract.freezer?.verdict ? `freezer verdict: ${contract.freezer.verdict}` : "",
+        contract.frozenBasePrompt?.trim() ? "base writing prompt frozen" : "",
+        contract.styleContract ? "style contract frozen" : "",
+        contract.styleContract?.forbiddenPatterns?.length ? `forbidden patterns: ${contract.styleContract.forbiddenPatterns.length}` : "",
+        contract.styleContract?.positiveExamples?.length ? `positive examples: ${contract.styleContract.positiveExamples.length}` : ""
+      ]
+    }),
+    loopProtocolEvidenceItem({
+      key: "chapter_inheritance_adapter",
+      label: "Chapter Inheritance Adapter",
+      ok: inheritanceReady && freezerReady && verification?.status === "passed",
+      pendingSummary: "\u7AE0\u8282\u7EE7\u627F\u9002\u914D\u5668\u5C1A\u672A ready\u3002",
+      passedSummary: "\u7AE0\u8282\u7EE7\u627F\u9002\u914D\u5668\u5DF2\u7ED1\u5B9A\u51BB\u7ED3\u5408\u540C\u3001Freezer \u548C\u9A8C\u8BC1\u8BC1\u636E\u3002",
+      evidence: [
+        contract.inheritance?.status ? `inheritance: ${contract.inheritance.status}` : "",
+        contract.inheritance?.inheritedArtifacts?.length ? `inherited artifacts: ${contract.inheritance.inheritedArtifacts.length}` : "",
+        contract.inheritance?.inheritedRules?.length ? `inherited rules: ${contract.inheritance.inheritedRules.length}` : ""
+      ]
+    })
+  ];
+  const completedStages = evidence.filter((item) => item.status === "passed").map((item) => item.key);
+  const blockedStages = evidence.filter((item) => item.status === "blocked").map((item) => item.key);
+  return {
+    status: approved && blockedStages.length === 0 ? "approved" : blockedStages.includes("generation_verification") || blockedStages.includes("style_contract_freezer") ? "blocked" : history.length > 0 ? "running" : "pending",
+    requiredStages,
+    completedStages,
+    blockedStages,
+    evidence
+  };
+}
+async function persistStyleFreezeLedger(projectRoot, contract) {
+  const paths = absolutePaths(projectRoot);
+  await import_promises4.default.mkdir(import_node_path7.default.dirname(paths.freezeLedger), { recursive: true });
+  const ledger = buildStyleFreezeLedger(contract);
+  await import_promises4.default.writeFile(paths.freezeLedger, `${JSON.stringify(ledger, null, 2)}
+`);
+  return ledger;
+}
+function relativePaths() {
+  return {
+    dir: STYLE_EVOLUTION_DIR,
+    samplesDir: STYLE_SAMPLES_DIR,
+    seedPrompt: STYLE_SEED_PATH,
+    userStylePrompt: USER_STYLE_PROMPT_PATH,
+    referenceText: REFERENCE_TEXT_PATH,
+    history: EVOLUTION_HISTORY_PATH,
+    styleContract: STYLE_CONTRACT_PATH,
+    approvedSample: APPROVED_SAMPLE_PATH,
+    freezeLedger: STYLE_FREEZE_LEDGER_PATH,
+    loopRuntime: STYLE_LOOP_RUNTIME_PATH,
+    loopRuns: STYLE_LOOP_RUNS_PATH
+  };
+}
+function absolutePaths(projectRoot) {
+  const paths = relativePaths();
+  return {
+    dir: import_node_path7.default.join(projectRoot, paths.dir),
+    samplesDir: import_node_path7.default.join(projectRoot, paths.samplesDir),
+    seedPrompt: import_node_path7.default.join(projectRoot, paths.seedPrompt),
+    userStylePrompt: import_node_path7.default.join(projectRoot, paths.userStylePrompt),
+    referenceText: import_node_path7.default.join(projectRoot, paths.referenceText),
+    history: import_node_path7.default.join(projectRoot, paths.history),
+    styleContract: import_node_path7.default.join(projectRoot, paths.styleContract),
+    approvedSample: import_node_path7.default.join(projectRoot, paths.approvedSample),
+    freezeLedger: import_node_path7.default.join(projectRoot, paths.freezeLedger),
+    loopRuntime: import_node_path7.default.join(projectRoot, paths.loopRuntime),
+    loopRuns: import_node_path7.default.join(projectRoot, paths.loopRuns)
+  };
+}
+async function readStyleLoopRuntime(projectRoot) {
+  const paths = absolutePaths(projectRoot);
+  return readOptionalJson(paths.loopRuntime, null);
+}
+async function readOptionalText(filePath) {
+  try {
+    return await import_promises4.default.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+async function readOptionalJson(filePath, fallback) {
+  const raw = await readOptionalText(filePath);
+  if (!raw.trim()) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+function normalizeText(value) {
+  return value?.trim() || "";
+}
+function normalizeStringArray(value) {
+  return Array.isArray(value) ? [...new Set(value.map((item) => normalizeText(item)).filter(Boolean))] : [];
+}
+async function loadStyleEvolution(projectRoot) {
+  const paths = absolutePaths(projectRoot);
+  const contractFromDisk = await readOptionalJson(paths.styleContract, {});
+  const history = await readOptionalJson(paths.history, []);
+  const approvedSample = (await readOptionalText(paths.approvedSample)).trim();
+  const contract = {
+    runtime: {
+      engine: "Style Evolution Engine",
+      runtime: "Prompt Loop Runtime",
+      gate: "Style Contract Freeze Gate",
+      verificationGate: "Generation Verification Gate",
+      lastRunId: contractFromDisk.runtime?.lastRunId,
+      lastRunStatus: contractFromDisk.runtime?.lastRunStatus || "idle",
+      lastStopReason: contractFromDisk.runtime?.lastStopReason,
+      lastCompletedAt: contractFromDisk.runtime?.lastCompletedAt
+    },
+    ...contractFromDisk,
+    retryPolicy: contractFromDisk.retryPolicy || defaultRetryPolicy(),
+    seedPrompt: contractFromDisk.seedPrompt || (await readOptionalText(paths.seedPrompt)).trim(),
+    userStylePrompt: contractFromDisk.userStylePrompt || (await readOptionalText(paths.userStylePrompt)).trim(),
+    referenceText: contractFromDisk.referenceText || (await readOptionalText(paths.referenceText)).trim(),
+    referenceWorks: normalizeStringArray(contractFromDisk.referenceWorks),
+    desiredVibes: normalizeStringArray(contractFromDisk.desiredVibes),
+    seedForbiddenPatterns: normalizeStringArray(contractFromDisk.seedForbiddenPatterns),
+    approvedSample: contractFromDisk.approvedSample || approvedSample,
+    approvedSamplePath: contractFromDisk.approvedSamplePath || (approvedSample ? APPROVED_SAMPLE_PATH : void 0),
+    evolutionHistory: contractFromDisk.evolutionHistory || history,
+    verification: contractFromDisk.verification
+  };
+  const latestVerification = activeContractGenerationVerification(contract, contract.evolutionHistory || []);
+  if (latestVerification) {
+    contract.verification = {
+      gate: "Generation Verification Gate",
+      ...latestVerification
+    };
+  }
+  if (contract.approvedAt && !contract.approval?.approvedAt) {
+    contract.approval = {
+      status: "approved",
+      approvedVersion: contract.loop?.approvalVersion,
+      approvedAt: contract.approvedAt,
+      approvedBy: contract.approval?.approvedBy || "user",
+      freezeSummary: contract.approval?.freezeSummary || "\u7528\u6237\u5DF2\u786E\u8BA4\u5F53\u524D\u5199\u6CD5\u4E3A\u5168\u4E66\u57FA\u7840\u5199\u6CD5\u3002",
+      acceptedAsBookStyle: true
+    };
+  }
+  if (contract.frozenBasePrompt?.trim() && !contract.inheritance?.status) {
+    contract.inheritance = {
+      status: "enforced",
+      inheritedArtifacts: ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"],
+      inheritedRules: [
+        "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F\u7528\u6237\u51BB\u7ED3\u540E\u7684 base writing prompt\u3002",
+        "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F style contract \u4E2D\u7684 voice\u3001\u8282\u594F\u3001\u5BF9\u767D\u4E0E\u7981\u5FCC\u7EA6\u675F\u3002"
+      ],
+      promptSummary: contract.frozenBasePrompt.replace(/\s+/gu, " ").slice(0, 240)
+    };
+  }
+  contract.loop = deriveLoopState(contract);
+  contract.loopProtocol = deriveStyleLoopProtocol(contract);
+  const freezeLedger = await readOptionalJson(paths.freezeLedger, buildStyleFreezeLedger(contract));
+  const loopRuntime = await readStyleLoopRuntime(projectRoot);
+  await persistStyleFreezeLedger(projectRoot, contract);
+  return {
+    paths: relativePaths(),
+    contract,
+    gate: evaluateStyleEvolutionGate(contract),
+    freezeLedger: {
+      ...freezeLedger,
+      ...buildStyleFreezeLedger(contract)
+    },
+    loopRuntime
+  };
+}
+
 // src/writing-pipeline.ts
+var ProductionReadinessBlockedError = class extends Error {
+  code = "production_readiness_blocked";
+  gate = "style_approval";
+  constructor(message) {
+    super(message);
+    this.name = "ProductionReadinessBlockedError";
+  }
+};
 function currentBundleDir() {
   const stack = new Error().stack || "";
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path7.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return import_node_path8.default.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path7.default.dirname(fileMatch[1]);
+      return import_node_path8.default.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${import_node_path7.default.sep}.ai-novel-projects${import_node_path7.default.sep}`;
+  const marker = `${import_node_path8.default.sep}.ai-novel-projects${import_node_path8.default.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
   }
   return projectRoot;
 }
-async function readOptionalText(filePath) {
+async function readOptionalText2(filePath) {
   try {
-    return (await import_promises4.default.readFile(filePath, "utf8")).trim();
+    return (await import_promises5.default.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
@@ -5148,21 +6492,486 @@ async function readOptionalText(filePath) {
 async function readCharacterDossiers(filePath) {
   if (!filePath) return [];
   try {
-    const parsed = JSON.parse(await import_promises4.default.readFile(filePath, "utf8"));
+    const parsed = JSON.parse(await import_promises5.default.readFile(filePath, "utf8"));
     return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string") : [];
   } catch {
     return [];
   }
 }
 async function writeJsonFileAtomic(filePath, value) {
-  await import_promises4.default.mkdir(import_node_path7.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path7.default.join(import_node_path7.default.dirname(filePath), `.${import_node_path7.default.basename(filePath)}.${Date.now()}.tmp`);
-  await import_promises4.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await import_promises5.default.mkdir(import_node_path8.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path8.default.join(import_node_path8.default.dirname(filePath), `.${import_node_path8.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises5.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await import_promises4.default.rename(tempPath, filePath);
+  await import_promises5.default.rename(tempPath, filePath);
+}
+async function writeChapterVersionManifest(input) {
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  const finalWordCount = wordCount(input.finalDraft);
+  const draftWordCount = wordCount(input.draft);
+  const styleDriftPassed = input.styleConformanceDrift ? input.styleConformanceDrift.status === "conformant" : true;
+  const aigcPassed = input.aigcDetection.status === "passed";
+  const styleInheritancePassed = input.styleInheritanceVerification ? String(input.styleInheritanceVerification.status || "") === "ready" : true;
+  const adapterPassed = input.chapterInheritanceAdapter ? input.chapterInheritanceAdapter.status === "ready" : true;
+  const finalVersionPassed = input.finalGate.status === "passed" && styleDriftPassed && aigcPassed && styleInheritancePassed && adapterPassed;
+  const versions = [
+    {
+      id: "draft",
+      label: "Draft",
+      source: "draft",
+      path: relativeArtifactPath(input.projectRoot, input.draftPath),
+      wordCount: draftWordCount,
+      status: "available",
+      createdAt: now2
+    },
+    {
+      id: "reviewed",
+      label: "Reviewed",
+      source: "reviewed",
+      path: relativeArtifactPath(input.projectRoot, input.reviewedPath),
+      wordCount: draftWordCount,
+      status: "available",
+      createdAt: now2
+    },
+    {
+      id: "final",
+      label: "Final",
+      source: "final",
+      path: relativeArtifactPath(input.projectRoot, input.finalPath),
+      wordCount: finalWordCount,
+      status: finalVersionPassed ? "passed" : "needs_revision",
+      createdAt: now2
+    }
+  ];
+  const manifest = {
+    version: 1,
+    chapterNumber: input.task.chapterNumber,
+    chapterTitle: input.task.title,
+    publishedVersionId: "final",
+    locked: finalVersionPassed,
+    status: finalVersionPassed ? "published" : "needs_review",
+    writingMode: input.writingMode,
+    targetWords: input.task.targetWords,
+    wordCount: finalWordCount,
+    updatedAt: now2,
+    qualityGate: input.finalGate,
+    aigcDetection: input.aigcDetection,
+    chapterInheritanceAdapter: input.chapterInheritanceAdapter || null,
+    styleInheritanceVerification: input.styleInheritanceVerification || null,
+    styleConformanceDrift: input.styleConformanceDrift || null,
+    artifacts: {
+      report: relativeArtifactPath(input.projectRoot, input.reportPath),
+      memory: relativeArtifactPath(input.projectRoot, input.memoryPath)
+    },
+    versions
+  };
+  const manifestPath = import_node_path8.default.join(import_node_path8.default.dirname(input.finalPath), `${input.chapterId}.versions.json`);
+  await writeJsonFileAtomic(manifestPath, manifest);
+  await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_version_manifest",
+    publishedVersionId: manifest.publishedVersionId,
+    status: manifest.status,
+    locked: manifest.locked,
+    versionCount: versions.length,
+    qualityGate: input.finalGate,
+    chapterInheritanceAdapter: input.chapterInheritanceAdapter || null,
+    styleInheritanceVerification: input.styleInheritanceVerification || null,
+    styleConformanceDrift: input.styleConformanceDrift || null
+  });
+  return manifestPath;
+}
+async function fileHasContent(filePath) {
+  try {
+    const stat = await import_promises5.default.stat(filePath);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+async function buildChapterStyleInheritanceVerification(input) {
+  const contract = input.approvedStyleContext.contract || null;
+  const approvedVersion = Number(contract?.loop?.approvalVersion || contract?.approval?.approvedVersion || 0);
+  const contractApproved = input.approvedStyleContext.status === "ready" && Boolean(contract?.approvedAt || approvedVersion);
+  const inheritanceStatus = String(contract?.inheritance?.status || "");
+  const inheritedRules = Array.isArray(contract?.inheritance?.inheritedRules) ? contract.inheritance.inheritedRules : [];
+  const inheritedArtifacts = Array.isArray(contract?.inheritance?.inheritedArtifacts) ? contract.inheritance.inheritedArtifacts : [];
+  const chapterInheritanceAdapter = input.approvedStyleContext.chapterInheritanceAdapter || buildChapterInheritanceAdapterPayload(contract);
+  const adapterReady = chapterInheritanceAdapter?.status === "ready";
+  const freezerVerdict = chapterInheritanceAdapter?.freezerVerdict || contract?.freezer?.verdict || "missing";
+  const freezeAssetsReady = Boolean(contract?.approvedSample?.trim() && contract?.frozenBasePrompt?.trim() && contract?.styleContract);
+  const inheritanceAssetsReady = Boolean(
+    await fileHasContent(input.paths.styleRulebookPath) && await fileHasContent(input.paths.styleReferencesPath) && await fileHasContent(input.paths.styleAntiPatternsPath)
+  );
+  const currentFingerprint = input.extractedStyleFingerprint || "";
+  const styleFingerprintReady = Boolean(
+    currentFingerprint || input.task.chapterNumber > 1 && contractApproved
+  );
+  const aigcStatus = input.aigcDetection.status;
+  const highRiskCount = Array.isArray(input.aigcDetection.highRiskSegments) ? input.aigcDetection.highRiskSegments.length : 0;
+  const styleConformanceDrift = input.styleConformanceDrift;
+  const styleDriftBlocked = styleConformanceDrift.status === "drifted";
+  const styleDriftWarning = styleConformanceDrift.status === "warning" || styleConformanceDrift.status === "pending";
+  const evidence = [
+    contractApproved ? approvedVersion > 0 ? `\u6574\u4E66\u5199\u6CD5\u5408\u540C\u5DF2\u51BB\u7ED3\u4E3A v${approvedVersion}` : "\u6574\u4E66\u5199\u6CD5\u5408\u540C\u5DF2\u51BB\u7ED3" : "",
+    inheritanceStatus === "enforced" ? "\u7AE0\u8282\u7EE7\u627F\u94FE\u5DF2\u6807\u8BB0\u4E3A enforced" : "",
+    adapterReady ? "Chapter Inheritance Adapter \u5DF2\u7ED1\u5B9A\u51BB\u7ED3\u5408\u540C\u3001Freezer \u4E0E\u9A8C\u8BC1\u8BC1\u636E" : "",
+    freezerVerdict === "ready" ? "Style Contract Freezer \u5DF2 ready" : "",
+    freezeAssetsReady ? "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u3001\u57FA\u7840 prompt \u4E0E style contract \u5DF2\u5B58\u5728" : "",
+    inheritanceAssetsReady ? "style/rulebook\u3001references\u3001anti-patterns \u5DF2\u540C\u6B65\u5230\u7AE0\u8282\u8D44\u4EA7" : "",
+    input.finalGate.status === "passed" ? "\u672C\u7AE0\u8D28\u91CF\u95E8\u5DF2\u901A\u8FC7" : "",
+    aigcStatus === "passed" ? "\u672C\u7AE0 AIGC \u68C0\u6D4B\u5DF2\u901A\u8FC7" : "",
+    styleFingerprintReady ? "\u7AE0\u8282\u5199\u6CD5\u5DF2\u6709\u53EF\u8FFD\u8E2A\u7EE7\u627F\u53C2\u7167" : "",
+    styleConformanceDrift.status === "conformant" ? styleConformanceDrift.reason : "",
+    ...styleConformanceDrift.evidence.slice(0, 5)
+  ].filter(Boolean);
+  const risks = [
+    !contractApproved ? "\u6574\u4E66\u5199\u6CD5\u5408\u540C\u5C1A\u672A\u51BB\u7ED3\u3002" : "",
+    contractApproved && inheritanceStatus !== "enforced" ? `\u5199\u6CD5\u7EE7\u627F\u72B6\u6001\u4ECD\u4E3A ${inheritanceStatus || "pending"}\u3002` : "",
+    !adapterReady ? "Chapter Inheritance Adapter \u5C1A\u672A ready\uFF0C\u51BB\u7ED3\u5408\u540C\u4E0D\u80FD\u4F5C\u4E3A\u7AE0\u8282\u786C\u57FA\u7EBF\u3002" : "",
+    freezerVerdict !== "ready" ? `Style Contract Freezer verdict \u4E3A ${freezerVerdict}\u3002` : "",
+    !freezeAssetsReady ? "\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u8D44\u4EA7\u4E0D\u5B8C\u6574\u3002" : "",
+    !inheritanceAssetsReady ? "\u7AE0\u8282\u7EE7\u627F\u8D44\u4EA7\u672A\u5B8C\u5168\u540C\u6B65\u3002" : "",
+    input.finalGate.status === "blocked" ? `\u8D28\u91CF\u95E8\u963B\u585E\uFF1A${input.finalGate.reason}` : "",
+    aigcStatus === "blocked" ? `AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${highRiskCount} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\u3002` : "",
+    aigcStatus === "unavailable" || aigcStatus === "skipped" ? `AIGC \u68C0\u6D4B\u72B6\u6001\u4E3A ${aigcStatus}\uFF1A${input.aigcDetection.reason}` : "",
+    !styleFingerprintReady ? "\u7AE0\u8282\u5199\u6CD5\u7EE7\u627F\u53C2\u7167\u5C1A\u4E0D\u5B8C\u6574\u3002" : "",
+    styleDriftBlocked || styleDriftWarning ? styleConformanceDrift.reason : "",
+    ...styleConformanceDrift.risks.slice(0, 5)
+  ].filter(Boolean);
+  let status = "ready";
+  if (!contractApproved) {
+    status = "pending";
+  } else if (inheritanceStatus !== "enforced" || !adapterReady || input.finalGate.status === "blocked" || aigcStatus === "blocked" || styleDriftBlocked) {
+    status = "blocked";
+  } else if (!freezeAssetsReady || !inheritanceAssetsReady || !styleFingerprintReady || aigcStatus !== "passed" || styleDriftWarning) {
+    status = "warning";
+  }
+  const summary = status === "ready" ? "\u672C\u7AE0\u5DF2\u7EE7\u627F\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\uFF0C\u5E76\u901A\u8FC7\u8D28\u91CF\u95E8\u3001AIGC \u4E0E\u98CE\u683C\u6F02\u79FB\u751F\u4EA7\u9A8C\u8BC1\u3002" : status === "warning" ? "\u672C\u7AE0\u5DF2\u63A5\u5165\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\uFF0C\u4F46\u4ECD\u6709\u98CE\u683C\u7EE7\u627F\u8BC1\u636E\u6216\u6F02\u79FB\u98CE\u9669\u9700\u8981\u8865\u5F3A\u3002" : status === "blocked" ? "\u672C\u7AE0\u5199\u6CD5\u7EE7\u627F\u9A8C\u8BC1\u672A\u653E\u884C\uFF0C\u9700\u5148\u5904\u7406\u963B\u585E\u9879\u3002" : "\u672C\u7AE0\u8FD8\u6CA1\u6709\u53EF\u786E\u8BA4\u7684\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u7EE7\u627F\u57FA\u7EBF\u3002";
+  return {
+    status,
+    summary,
+    chapterNumber: input.task.chapterNumber,
+    contractVersion: approvedVersion,
+    contractApproved,
+    approvedAt: String(contract?.approvedAt || contract?.approval?.approvedAt || ""),
+    inheritanceStatus,
+    chapterInheritanceAdapter,
+    adapterReady,
+    freezerVerdict,
+    inheritedRuleCount: inheritedRules.length,
+    inheritedArtifactCount: inheritedArtifacts.length,
+    freezeAssetsReady,
+    inheritanceAssetsReady,
+    styleFingerprintReady,
+    styleFingerprint: currentFingerprint,
+    styleConformanceDrift,
+    styleDrift: {
+      status: styleConformanceDrift.status,
+      conformanceScore: Math.round(styleConformanceDrift.conformanceScore * 10),
+      driftScore: Math.round(styleConformanceDrift.driftScore * 10),
+      threshold: 72,
+      rawConformanceScore: styleConformanceDrift.conformanceScore,
+      rawDriftScore: styleConformanceDrift.driftScore,
+      forbiddenHitCount: styleConformanceDrift.metrics.forbiddenHitCount,
+      matchedTerms: styleConformanceDrift.matchedContractRules,
+      missingTerms: styleConformanceDrift.missingContractRules,
+      summary: styleConformanceDrift.reason
+    },
+    qualityGateStatus: input.finalGate.status,
+    qualityGateReason: input.finalGate.reason,
+    aigc: {
+      status: aigcStatus,
+      score: input.aigcDetection.score,
+      threshold: input.aigcDetection.threshold,
+      highRiskCount,
+      reason: input.aigcDetection.reason
+    },
+    verificationStatus: String(contract?.verification?.status || contract?.loop?.verificationStatus || ""),
+    verificationSummary: String(contract?.verification?.summary || contract?.loop?.verificationSummary || ""),
+    checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    evidence,
+    risks
+  };
+}
+var STYLE_CONFORMANCE_STOPWORDS = /* @__PURE__ */ new Set([
+  "\u4E00\u4E2A",
+  "\u4E00\u79CD",
+  "\u8FD9\u4E00",
+  "\u8FD9\u4E2A",
+  "\u8FD9\u4E9B",
+  "\u90A3\u4E9B",
+  "\u5FC5\u987B",
+  "\u4E0D\u5F97",
+  "\u4E0D\u8981",
+  "\u4E0D\u80FD",
+  "\u5E94\u8BE5",
+  "\u4FDD\u6301",
+  "\u540E\u7EED",
+  "\u7AE0\u8282",
+  "\u6B63\u6587",
+  "\u5199\u6CD5",
+  "\u98CE\u683C",
+  "\u5408\u540C",
+  "\u89C4\u5219",
+  "\u7528\u6237",
+  "\u786E\u8BA4",
+  "\u51BB\u7ED3",
+  "\u5168\u4E66",
+  "\u6837\u6BB5",
+  "\u6587\u672C",
+  "\u8FDB\u884C",
+  "\u901A\u8FC7",
+  "\u9700\u8981",
+  "\u907F\u514D",
+  "\u51CF\u5C11",
+  "\u589E\u52A0",
+  "\u5448\u73B0",
+  "\u4F7F\u7528",
+  "\u63A8\u52A8",
+  "\u4E0D\u8981\u5199",
+  "\u4E0D\u5F97\u5199"
+]);
+function roundStyleScore(value) {
+  return Math.max(0, Math.min(10, Math.round(value * 10) / 10));
+}
+function averageNarrativeSentenceLength(text = "") {
+  const sentences = text.split(/[。！？!?；;\n]+/u).map((sentence) => sentence.replace(/\s+/gu, "").trim()).filter(Boolean);
+  if (!sentences.length) return 0;
+  return Math.round(sentences.reduce((sum, sentence) => sum + sentence.length, 0) / sentences.length * 10) / 10;
+}
+function dialogueStats(text = "") {
+  const quoted = text.match(/[「“][^」”]{1,160}[」”]/gu) || [];
+  const colonLines = text.match(/^[\p{Script=Han}A-Za-z0-9_·]{1,12}[：:][^\n]{1,120}$/gmu) || [];
+  const dialogue = [...quoted, ...colonLines];
+  const chars = dialogue.reduce((sum, line) => sum + line.replace(/[「」“”：:\s]/gu, "").length, 0);
+  const avgLength = dialogue.length ? Math.round(chars / dialogue.length * 10) / 10 : 0;
+  return {
+    count: dialogue.length,
+    chars,
+    avgLength,
+    ratio: text.length ? Math.round(chars / text.length * 1e3) / 1e3 : 0
+  };
+}
+function extractStyleEvidenceTokens(text = "", limit = 80) {
+  const normalized = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/gu, " ");
+  const raw = normalized.match(/[\p{Script=Han}A-Za-z0-9]{2,8}/gu) || [];
+  const tokens = raw.map((token) => token.trim()).filter((token) => token.length >= 2).filter((token) => !STYLE_CONFORMANCE_STOPWORDS.has(token)).filter((token) => !/^(pending|style|contract|prompt|rule|rules|chapter|voice)$/iu.test(token));
+  return uniqueStrings(tokens).slice(0, limit);
+}
+function styleEvidenceWindow(text, token, limit = 90) {
+  const compactToken = token.trim();
+  if (!compactToken) return "";
+  const index = text.indexOf(compactToken);
+  if (index < 0) return "";
+  const start = Math.max(0, index - 36);
+  const end = Math.min(text.length, index + compactToken.length + 36);
+  return conciseEvidence(text.slice(start, end), limit);
+}
+function countLiteralPatternHits(text, pattern) {
+  const normalized = pattern.trim();
+  if (!normalized || normalized.length < 2) return 0;
+  const escaped = escapeRegExpLiteral(normalized);
+  return (text.match(new RegExp(escaped, "gu")) || []).length;
+}
+function collectForbiddenStyleHits(text, patterns = []) {
+  return uniqueStrings(patterns).map((pattern) => {
+    const literalCount = countLiteralPatternHits(text, pattern);
+    const tokens = extractStyleEvidenceTokens(pattern, 8);
+    const tokenHits = tokens.map((token) => ({ token, count: countLiteralPatternHits(text, token) })).filter((hit) => hit.count > 0);
+    const count = literalCount || tokenHits.reduce((sum, hit) => sum + hit.count, 0);
+    const evidence = uniqueStrings([
+      ...literalCount > 0 ? [styleEvidenceWindow(text, pattern)] : [],
+      ...tokenHits.map((hit) => styleEvidenceWindow(text, hit.token))
+    ].filter(Boolean)).slice(0, 3);
+    return { pattern, count, evidence };
+  }).filter((hit) => hit.count > 0).slice(0, 12);
+}
+function styleRuleMatchesText(input) {
+  const rule = input.rule.trim();
+  if (!rule) return false;
+  const tokens = extractStyleEvidenceTokens(rule, 12);
+  const tokenMatches = tokens.filter((token) => input.body.includes(token));
+  if (tokenMatches.length >= Math.min(2, Math.max(1, Math.ceil(tokens.length * 0.25)))) return true;
+  if (/短句|句子短|短促|冷感|克制|白描/u.test(rule) && input.avgSentenceLength > 0 && input.avgSentenceLength <= 24) return true;
+  if (/长短|错落|节奏/u.test(rule) && input.avgSentenceLength >= 10 && input.avgSentenceLength <= 34) return true;
+  if (/对白|对话/u.test(rule)) {
+    if (/短|压力|留白|不解释|少解释/u.test(rule)) {
+      return input.dialogue.count > 0 && (input.dialogue.avgLength === 0 || input.dialogue.avgLength <= 34);
+    }
+    return input.dialogue.count > 0;
+  }
+  if (/动作|物件|器物|声音|感官|身体|场景|细节|白描/u.test(rule)) {
+    return input.actionSignals + input.sensorySignals + input.objectSignals >= 8;
+  }
+  if (/情绪|克制|外化|不解释|少解释/u.test(rule)) {
+    return input.actionSignals >= Math.max(3, input.emotionLabelSignals);
+  }
+  if (/视角|POV|主角|第三人称|第一人称/iu.test(rule)) {
+    return input.body.length >= 120;
+  }
+  return false;
+}
+function evaluateChapterStyleConformanceDrift(input) {
+  const contract = input.approvedStyleContext.contract;
+  const style = contract?.styleContract;
+  const body = extractNarrativeBody(input.chapterText);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const styleQuality = evaluateNarrativeStyleQuality(body);
+  const bodyChars = body.trim().length;
+  if (input.approvedStyleContext.status !== "ready" || !contract?.approvedAt || !style) {
+    return {
+      status: "pending",
+      conformanceScore: 0,
+      driftScore: 10,
+      score: 0,
+      reason: "\u98CE\u683C\u6F02\u79FB\u8BC4\u5206\u5F85\u5B9A\uFF1A\u7F3A\u5C11\u5DF2\u51BB\u7ED3\u5E76\u83B7\u6279\u7684 style contract\uFF0C\u65E0\u6CD5\u8BA1\u7B97\u771F\u5B9E\u7EE7\u627F\u57FA\u7EBF\u3002",
+      evidence: [],
+      risks: ["\u7F3A\u5C11\u53EF\u8BC4\u5206\u7684 frozen style contract\u3002"],
+      metrics: {
+        bodyChars,
+        contractRuleCount: 0,
+        matchedRuleCount: 0,
+        approvedSampleOverlap: 0,
+        positiveExampleHitCount: 0,
+        allowedDeviceHitCount: 0,
+        forbiddenHitCount: 0,
+        narrativeStyleStatus: styleQuality.status,
+        averageSentenceLength: averageNarrativeSentenceLength(body),
+        dialogueRatio: dialogueStats(body).ratio
+      },
+      forbiddenHits: [],
+      matchedContractRules: [],
+      missingContractRules: [],
+      checkedAt
+    };
+  }
+  const avgSentenceLength = averageNarrativeSentenceLength(body);
+  const dialogue = dialogueStats(body);
+  const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|写|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length;
+  const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉|光|影/gu) || []).length;
+  const objectSignals = (body.match(/账册|账本|密信|官印|印章|钥匙|玉佩|粮袋|银钱|文书|案卷|药包|伤口|马车|城门|坊门|县衙|市集|粮仓|名单|证据|刀|剑|灯|门|桌|碗|纸|窗|袖/gu) || []).length;
+  const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然|痛苦|焦虑/gu) || []).length;
+  const ruleCandidates = uniqueStrings([
+    style.voice || "",
+    style.sentenceRhythm || "",
+    ...style.dialogueRules || [],
+    ...style.descriptionRules || [],
+    ...style.emotionRules || [],
+    ...style.pacingRules || [],
+    ...style.povRules || [],
+    ...style.openingRules || [],
+    ...style.endingHookRules || []
+  ]).filter((rule) => !isPlaceholderProfileText(rule));
+  const matchedContractRules = ruleCandidates.filter((rule) => styleRuleMatchesText({
+    rule,
+    body,
+    avgSentenceLength,
+    dialogue,
+    actionSignals,
+    sensorySignals,
+    objectSignals,
+    emotionLabelSignals
+  })).slice(0, 16);
+  const missingContractRules = ruleCandidates.filter((rule) => !matchedContractRules.includes(rule)).slice(0, 16);
+  const approvedSampleTokens = extractStyleEvidenceTokens(contract.approvedSample || "", 80);
+  const approvedSampleMatched = approvedSampleTokens.filter((token) => body.includes(token));
+  const approvedSampleOverlap = approvedSampleTokens.length ? Math.round(approvedSampleMatched.length / approvedSampleTokens.length * 1e3) / 1e3 : 0;
+  const positiveExamples = style.positiveExamples || [];
+  const positiveExampleHits = positiveExamples.filter(
+    (example) => extractStyleEvidenceTokens(example, 12).some((token) => body.includes(token))
+  );
+  const allowedDevices = style.allowedDevices || [];
+  const allowedDeviceHits = allowedDevices.filter(
+    (device) => extractStyleEvidenceTokens(device, 8).some((token) => body.includes(token))
+  );
+  const forbiddenHits = collectForbiddenStyleHits(body, [
+    ...style.forbiddenPatterns || [],
+    ...style.negativeExamples || [],
+    ...contract.antiPatterns || []
+  ]);
+  const forbiddenHitCount = forbiddenHits.reduce((sum, hit) => sum + hit.count, 0);
+  const ruleRatio = ruleCandidates.length ? matchedContractRules.length / ruleCandidates.length : 0;
+  const styleQualityPenalty = styleQuality.status === "quarantined" ? 1.6 : 0;
+  const forbiddenPenalty = Math.min(4, forbiddenHitCount * 1.15);
+  const sampleScore = approvedSampleTokens.length ? Math.min(1.4, approvedSampleOverlap * 3.2) : 0.4;
+  const positiveScore = Math.min(1.2, (positiveExampleHits.length + allowedDeviceHits.length) * 0.35);
+  const signalScore = Math.min(1.2, (actionSignals + sensorySignals + objectSignals) / 26);
+  const ruleScore = ruleCandidates.length ? ruleRatio * 6.2 : 3;
+  const conformanceScore = roundStyleScore(ruleScore + sampleScore + positiveScore + signalScore - forbiddenPenalty - styleQualityPenalty);
+  const driftScore = roundStyleScore(10 - conformanceScore);
+  const risks = [
+    ...missingContractRules.length ? [`\u5408\u540C\u89C4\u5219\u7F3A\u5C11\u6B63\u6587\u8BC1\u636E\uFF1A${missingContractRules.slice(0, 4).map((rule) => conciseEvidence(rule, 64)).join("\uFF1B")}`] : [],
+    ...forbiddenHits.length ? [`\u547D\u4E2D\u51BB\u7ED3\u7981\u5FCC\u6A21\u5F0F\uFF1A${forbiddenHits.slice(0, 4).map((hit) => `${hit.pattern}(${hit.count})`).join("\uFF1B")}`] : [],
+    ...styleQuality.status === "quarantined" ? [styleQuality.reason] : [],
+    ...approvedSampleTokens.length && approvedSampleOverlap < 0.08 ? ["\u4E0E approved sample \u7684\u53EF\u590D\u6838\u98CE\u683C token \u91CD\u53E0\u504F\u4F4E\u3002"] : [],
+    ...dialogue.count === 0 && /对白|对话/u.test(ruleCandidates.join("\n")) ? ["\u5408\u540C\u8981\u6C42\u5BF9\u767D\u8D28\u611F\uFF0C\u4F46\u6B63\u6587\u672A\u68C0\u6D4B\u5230\u5BF9\u767D\u3002"] : []
+  ].slice(0, 10);
+  const evidence = uniqueStrings([
+    matchedContractRules.length ? `\u547D\u4E2D\u5408\u540C\u89C4\u5219 ${matchedContractRules.length}/${Math.max(1, ruleCandidates.length)}\uFF1A${matchedContractRules.slice(0, 4).map((rule) => conciseEvidence(rule, 64)).join("\uFF1B")}` : "",
+    approvedSampleMatched.length ? `approved sample token \u547D\u4E2D\uFF1A${approvedSampleMatched.slice(0, 8).join("\u3001")}` : "",
+    positiveExampleHits.length ? `\u6B63\u4F8B/\u5141\u8BB8\u88C5\u7F6E\u547D\u4E2D ${positiveExampleHits.length + allowedDeviceHits.length} \u9879\u3002` : "",
+    `\u53E5\u957F\u5747\u503C ${avgSentenceLength}\uFF1B\u5BF9\u767D ${dialogue.count} \u6BB5\uFF1B\u52A8\u4F5C/\u611F\u5B98/\u7269\u4EF6\u4FE1\u53F7 ${actionSignals}/${sensorySignals}/${objectSignals}\u3002`,
+    input.extractedStyleFingerprint ? `\u5F53\u524D\u7AE0\u8282\u98CE\u683C\u6307\u7EB9\uFF1A${conciseEvidence(input.extractedStyleFingerprint, 120)}` : "",
+    styleQuality.status === "eligible" ? styleQuality.reason : ""
+  ].filter(Boolean)).slice(0, 10);
+  const status = conformanceScore >= 7.2 && risks.length === 0 ? "conformant" : conformanceScore < 5.8 || forbiddenHitCount >= 2 || styleQuality.status === "quarantined" ? "drifted" : "warning";
+  return {
+    status,
+    conformanceScore,
+    driftScore,
+    score: conformanceScore,
+    reason: status === "conformant" ? `\u98CE\u683C\u7EE7\u627F\u8BC4\u5206\u901A\u8FC7\uFF1Aconformance=${conformanceScore}/10\uFF0Cdrift=${driftScore}/10\uFF0C\u6B63\u6587\u8BC1\u636E\u8986\u76D6\u51BB\u7ED3\u5408\u540C\u4E14\u672A\u547D\u4E2D\u7981\u5FCC\u3002` : status === "warning" ? `\u98CE\u683C\u7EE7\u627F\u8BC4\u5206\u9884\u8B66\uFF1Aconformance=${conformanceScore}/10\uFF0Cdrift=${driftScore}/10\uFF0C\u5B58\u5728\u53EF\u4FEE\u590D\u7684\u7EE7\u627F\u8BC1\u636E\u7F3A\u53E3\u3002` : `\u98CE\u683C\u6F02\u79FB\u8BC4\u5206\u963B\u585E\uFF1Aconformance=${conformanceScore}/10\uFF0Cdrift=${driftScore}/10\uFF0C\u6B63\u6587\u8BC1\u636E\u663E\u793A\u504F\u79BB\u51BB\u7ED3\u5408\u540C\u3002`,
+    evidence,
+    risks,
+    metrics: {
+      bodyChars,
+      contractRuleCount: ruleCandidates.length,
+      matchedRuleCount: matchedContractRules.length,
+      approvedSampleOverlap,
+      positiveExampleHitCount: positiveExampleHits.length,
+      allowedDeviceHitCount: allowedDeviceHits.length,
+      forbiddenHitCount,
+      narrativeStyleStatus: styleQuality.status,
+      averageSentenceLength: avgSentenceLength,
+      dialogueRatio: dialogue.ratio
+    },
+    forbiddenHits,
+    matchedContractRules,
+    missingContractRules,
+    checkedAt
+  };
+}
+function formatStyleConformanceDriftReport(report) {
+  return [
+    "## Style Conformance Drift",
+    `- Status: ${report.status}`,
+    `- Conformance score: ${report.conformanceScore}/10`,
+    `- Drift score: ${report.driftScore}/10`,
+    `- Reason: ${report.reason}`,
+    `- Contract rule evidence: ${report.metrics.matchedRuleCount}/${report.metrics.contractRuleCount}`,
+    `- Approved sample overlap: ${report.metrics.approvedSampleOverlap}`,
+    `- Forbidden hits: ${report.metrics.forbiddenHitCount}`,
+    report.evidence.length ? "### Evidence" : "",
+    ...report.evidence.map((item) => `- ${item}`),
+    report.risks.length ? "### Risks" : "",
+    ...report.risks.map((item) => `- ${item}`)
+  ].filter(Boolean).join("\n");
 }
 function compactList(values = [], limit = 3) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
+}
+function clipPromptSection(value = "", maxLength = 800) {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength).trimEnd()}
+...[prompt section clipped; full text saved in chapter context package]`;
+}
+function summarizePromptSection(value = "", maxLength = 700) {
+  const normalized = value.split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
+  return clipPromptSection(normalized, maxLength);
 }
 function escapeRegExpLiteral(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -5186,6 +6995,53 @@ function formatCharacterDossiersMarkdown(dossiers) {
     "This file is generated from the structured production character dossier state.",
     "",
     summarizeCharacterDossiers(dossiers, 12) || "- no structured dossiers available"
+  ].join("\n");
+}
+function createCharacterRelationshipGraph(dossiers, updatedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const nodes = dossiers.map((dossier) => ({
+    id: dossier.id,
+    name: dossier.canonicalName,
+    role: dossier.role,
+    aliases: dossier.aliases || [],
+    relationshipState: dossier.relationshipState,
+    currentChapterDelta: dossier.currentChapterDelta,
+    updatedAt: dossier.updatedAt || updatedAt
+  }));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = dossiers.flatMap((dossier) => (dossier.relationshipEdges || []).map((edge) => ({
+    sourceId: dossier.id,
+    sourceName: dossier.canonicalName,
+    targetId: edge.targetId,
+    targetName: nodes.find((node) => node.id === edge.targetId)?.name || edge.targetId,
+    label: edge.label,
+    pressure: edge.pressure,
+    status: nodeIds.has(edge.targetId) ? "linked" : "unresolved",
+    updatedAt: dossier.updatedAt || updatedAt
+  })));
+  return {
+    version: 1,
+    updatedAt,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    nodes,
+    edges
+  };
+}
+function formatCharacterRelationshipGraphMarkdown(graph) {
+  return [
+    "# Character Relationship Graph",
+    "",
+    `Updated at: ${graph.updatedAt}`,
+    "",
+    "## Nodes",
+    ...graph.nodes.length ? graph.nodes.slice(0, 24).map(
+      (node) => `- ${node.id} (${node.role}) ${node.name}: ${node.relationshipState || "relationship pending"}`
+    ) : ["- no character nodes available"],
+    "",
+    "## Edges",
+    ...graph.edges.length ? graph.edges.slice(0, 48).map(
+      (edge) => `- ${edge.sourceId} -> ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}; status: ${edge.status}`
+    ) : ["- no relationship edges available"]
   ].join("\n");
 }
 function appendUnique(values, next, limit = 8) {
@@ -5342,7 +7198,7 @@ ${input.memoryUpdate}`,
   return nextDossiers;
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return import_node_path7.default.relative(projectRoot, absolutePath).replaceAll(import_node_path7.default.sep, "/");
+  return import_node_path8.default.relative(projectRoot, absolutePath).replaceAll(import_node_path8.default.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -5718,7 +7574,8 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
     };
   }
   const styleQuality = evaluateNarrativeStyleQuality(finalDraft);
-  if (styleQuality.status === "quarantined") {
+  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality);
+  if (styleQuality.status === "quarantined" && !softStyleIssue) {
     return {
       ...gate,
       passed: false,
@@ -5767,7 +7624,7 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
   }
   return {
     ...gate,
-    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
+    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${softStyleIssue ? "\u8BE5\u98CE\u683C\u95EE\u9898\u5DF2\u4F5C\u4E3A\u540E\u7EED\u6DA6\u8272\u5EFA\u8BAE\u8BB0\u5F55\uFF0C\u4E0D\u963B\u65AD\u7AE0\u8282\u63A8\u8FDB\u3002" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
     wordCount: finalWordCount,
     targetWords
   };
@@ -5875,7 +7732,7 @@ async function updateStyleFingerprintFromFirstChapter(input) {
       styleFingerprint: extracted
     }
   };
-  const currentStyleProfile = await readOptionalText(input.paths.styleProfilePath);
+  const currentStyleProfile = await readOptionalText2(input.paths.styleProfilePath);
   const updatedStyleProfile = currentStyleProfile ? currentStyleProfile.replace(/- style fingerprint: .*/i, `- style fingerprint: ${extracted}`) : [
     "# Style Profile",
     "",
@@ -5884,9 +7741,371 @@ async function updateStyleFingerprintFromFirstChapter(input) {
     "Production selection contract:",
     `- style fingerprint: ${extracted}`
   ].join("\n");
-  await import_promises4.default.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
+  await import_promises5.default.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
 `);
   return extracted;
+}
+function compactStyleList(values, limit = 4) {
+  return (values || []).map((value) => value.trim()).filter(Boolean).slice(0, limit);
+}
+function compactStyleValue(value, maxLength = 160) {
+  return value?.trim().replace(/\s+/gu, " ").slice(0, maxLength) || "";
+}
+function buildChapterInheritanceAdapterPayload(contract) {
+  if (!contract?.approvedAt || !contract.styleContract) {
+    return null;
+  }
+  const style = contract.styleContract;
+  const inheritedArtifacts = contract.inheritance?.inheritedArtifacts?.length ? contract.inheritance.inheritedArtifacts : ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"];
+  const inheritedRules = contract.inheritance?.inheritedRules?.length ? contract.inheritance.inheritedRules : [
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F\u7528\u6237\u51BB\u7ED3\u540E\u7684 base writing prompt\u3002",
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F style contract \u4E2D\u7684 voice\u3001\u8282\u594F\u3001\u5BF9\u767D\u4E0E\u7981\u5FCC\u7EA6\u675F\u3002"
+  ];
+  const styleContractFields = [
+    style.voice ? "voice" : "",
+    style.sentenceRhythm ? "sentenceRhythm" : "",
+    compactStyleList(style.dialogueRules, 1).length ? "dialogueRules" : "",
+    compactStyleList(style.descriptionRules, 1).length ? "descriptionRules" : "",
+    compactStyleList(style.emotionRules, 1).length ? "emotionRules" : "",
+    compactStyleList(style.pacingRules, 1).length ? "pacingRules" : "",
+    compactStyleList(style.povRules, 1).length ? "povRules" : "",
+    compactStyleList(style.openingRules, 1).length ? "openingRules" : "",
+    compactStyleList(style.endingHookRules, 1).length ? "endingHookRules" : "",
+    Array.isArray(style.allowedDevices) ? "allowedDevices" : "",
+    compactStyleList(style.forbiddenPatterns, 1).length ? "forbiddenPatterns" : "",
+    compactStyleList(style.positiveExamples, 1).length ? "positiveExamples" : "",
+    Array.isArray(style.negativeExamples) ? "negativeExamples" : ""
+  ].filter(Boolean);
+  const contractVersion = Number(contract.loop?.approvalVersion || contract.approval?.approvedVersion || 0);
+  const freezerVerdict = contract.freezer?.verdict || "missing";
+  const verificationStatus = String(contract.verification?.status || contract.loop?.verificationStatus || "");
+  const loopProtocol = contract.loopProtocol;
+  const requiredLoopStages = Array.isArray(loopProtocol?.requiredStages) ? loopProtocol.requiredStages : [];
+  const completedLoopStages = Array.isArray(loopProtocol?.completedStages) ? loopProtocol.completedStages : [];
+  const blockedLoopStages = Array.isArray(loopProtocol?.blockedStages) ? loopProtocol.blockedStages : [];
+  const loopProtocolReady = loopProtocol?.status === "approved" && requiredLoopStages.length > 0 && requiredLoopStages.every((stage) => completedLoopStages.includes(stage));
+  const adapterReady = freezerVerdict === "ready" && verificationStatus === "passed" && loopProtocolReady && contract.inheritance?.status === "enforced" && inheritedArtifacts.length > 0 && inheritedRules.length > 0;
+  return {
+    name: "Chapter Inheritance Adapter",
+    status: adapterReady ? "ready" : "blocked",
+    contractVersion,
+    approvedAt: String(contract.approvedAt || contract.approval?.approvedAt || ""),
+    freezerVerdict,
+    freezerSummary: String(contract.freezer?.summary || ""),
+    verificationStatus,
+    verificationSummary: String(contract.verification?.summary || contract.loop?.verificationSummary || ""),
+    inheritedArtifacts,
+    inheritedRules,
+    styleContractFields,
+    loopProtocolStatus: loopProtocol?.status || "missing",
+    loopProtocolStages: {
+      required: requiredLoopStages,
+      completed: completedLoopStages,
+      blocked: blockedLoopStages
+    },
+    loopProtocolEvidence: (loopProtocol?.evidence || []).filter((item) => item.status === "passed").map((item) => `${item.label}: ${item.summary}`).slice(0, 9),
+    promptSections: [
+      "User Approved Writing Style Contract",
+      "Style Rulebook",
+      "Style References",
+      "Style Anti-Patterns"
+    ],
+    requiredChapterEvidence: [
+      "quality gate passed",
+      "AIGC detection passed",
+      "style conformance drift conformant",
+      "styleInheritanceVerification ready"
+    ],
+    approvedSampleExcerpt: compactStyleValue(contract.approvedSample, 240)
+  };
+}
+function formatStyleRulebook(contract) {
+  const style = contract?.styleContract;
+  if (!contract?.approvedAt || !style) {
+    return "";
+  }
+  const dialogueRules = style.dialogueRules || [];
+  const descriptionRules = style.descriptionRules || [];
+  const emotionRules = style.emotionRules || [];
+  const pacingRules = style.pacingRules || [];
+  const povRules = style.povRules || [];
+  const openingRules = style.openingRules || [];
+  const endingHookRules = style.endingHookRules || [];
+  return [
+    "# Style Rulebook",
+    "",
+    "This asset is frozen from the approved Style Evolution contract and must be inherited by every chapter draft, review, and polish pass.",
+    "",
+    `Approved at: ${contract.approvedAt}`,
+    contract.approval?.approvedVersion ? `Approved version: v${contract.approval.approvedVersion}` : "",
+    contract.approval?.freezeSummary ? `Freeze summary: ${contract.approval.freezeSummary}` : "",
+    "",
+    "## Voice",
+    style.voice || "- pending",
+    "",
+    "## Sentence Rhythm",
+    style.sentenceRhythm || "- pending",
+    "",
+    "## Dialogue Rules",
+    ...dialogueRules.length ? dialogueRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Description Rules",
+    ...descriptionRules.length ? descriptionRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Emotion Rules",
+    ...emotionRules.length ? emotionRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Pacing Rules",
+    ...pacingRules.length ? pacingRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## POV Rules",
+    ...povRules.length ? povRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Opening Rules",
+    ...openingRules.length ? openingRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Ending Hook Rules",
+    ...endingHookRules.length ? endingHookRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Retry Policy",
+    `- Approval threshold: ${Number(contract.retryPolicy?.approvalScoreThreshold || 8.6).toFixed(1)}`,
+    `- Approval min rounds: ${Math.max(1, Number(contract.retryPolicy?.approvalMinRounds || 2))}`,
+    `- Stability min rounds: ${Math.max(1, Number(contract.retryPolicy?.stabilityMinRounds || 2))}`,
+    `- Max forbidden hits: ${Math.max(0, Number(contract.retryPolicy?.maxForbiddenHitCount || 1))}`
+  ].filter(Boolean).join("\n");
+}
+function formatStyleReferences(contract) {
+  const style = contract?.styleContract;
+  if (!contract?.approvedAt || !style) {
+    return "";
+  }
+  const positiveExamples = style.positiveExamples || [];
+  const allowedDevices = style.allowedDevices || [];
+  return [
+    "# Style References",
+    "",
+    "These are the positive references frozen from the approved style loop. They are not to be copied mechanically, but they define the acceptable writing band for the whole book.",
+    "",
+    "## Positive Examples",
+    ...positiveExamples.length ? positiveExamples.map((example) => `- ${example}`) : ["- pending"],
+    "",
+    "## Allowed Devices",
+    ...allowedDevices.length ? allowedDevices.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Approved Sample Excerpt",
+    contract.approvedSample?.trim() || "- pending"
+  ].join("\n");
+}
+function formatStyleAntiPatterns(contract) {
+  const style = contract?.styleContract;
+  if (!contract?.approvedAt || !style) {
+    return "";
+  }
+  const forbiddenPatterns = [.../* @__PURE__ */ new Set([...style.forbiddenPatterns || [], ...contract.antiPatterns || []])];
+  const negativeExamples = style.negativeExamples || [];
+  const inheritedRules = contract.inheritance?.inheritedRules || [];
+  return [
+    "# Style Anti-Patterns",
+    "",
+    "These patterns are frozen as disallowed or high-risk writing moves for subsequent chapter production.",
+    "",
+    "## Forbidden Patterns",
+    ...forbiddenPatterns.length ? forbiddenPatterns.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Negative Examples",
+    ...negativeExamples.length ? negativeExamples.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Inheritance Rules",
+    ...inheritedRules.length ? inheritedRules.map((rule) => `- ${rule}`) : ["- pending"]
+  ].join("\n");
+}
+function formatApprovedWritingStylePrompt(contract) {
+  const approvedAt = contract?.approvedAt;
+  const approvedSample = contract?.approvedSample?.trim();
+  const style = contract?.styleContract;
+  if (!approvedAt || !approvedSample || !style) {
+    return "";
+  }
+  const acceptedAsBookStyle = contract.approval?.acceptedAsBookStyle !== false;
+  const inheritedArtifacts = contract.inheritance?.inheritedArtifacts?.length ? contract.inheritance.inheritedArtifacts : ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"];
+  const inheritedRules = contract.inheritance?.inheritedRules?.length ? contract.inheritance.inheritedRules : [
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F\u7528\u6237\u51BB\u7ED3\u540E\u7684 base writing prompt\u3002",
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F style contract \u4E2D\u7684 voice\u3001\u8282\u594F\u3001\u5BF9\u767D\u4E0E\u7981\u5FCC\u7EA6\u675F\u3002"
+  ];
+  const verification = contract.verification;
+  const chapterInheritanceAdapter = buildChapterInheritanceAdapterPayload(contract);
+  const lines = [
+    "## User Approved Writing Style Contract",
+    "\u8FD9\u662F\u7528\u6237\u786E\u8BA4\u540E\u51BB\u7ED3\u7684\u5168\u4E66\u57FA\u7840\u5199\u6CD5\uFF0C\u4F18\u5148\u7EA7\u9AD8\u4E8E\u901A\u7528\u5199\u4F5C\u6307\u5357\u3002\u6B63\u6587\u3001\u8D28\u68C0\u3001\u6DA6\u8272\u90FD\u5FC5\u987B\u6267\u884C\u3002",
+    `- Approved at: ${approvedAt}`,
+    contract.approval?.approvedVersion ? `- Approved version: v${contract.approval.approvedVersion}` : "",
+    contract.loop?.stableVersion ? `- Stable version before freeze: v${contract.loop.stableVersion}` : "",
+    contract.loop?.stableRounds ? `- Stable rounds before freeze: ${contract.loop.stableRounds}` : "",
+    contract.approval?.freezeSummary ? `- Freeze summary: ${contract.approval.freezeSummary}` : "",
+    acceptedAsBookStyle ? "- Acceptance scope: this approval applies to the whole book, not a single sample." : "",
+    contract.runtime?.engine ? `- Style engine: ${contract.runtime.engine}` : "",
+    contract.runtime?.runtime ? `- Loop runtime: ${contract.runtime.runtime}` : "",
+    contract.runtime?.gate ? `- Freeze gate: ${contract.runtime.gate}` : "",
+    contract.runtime?.verificationGate ? `- Verification gate: ${contract.runtime.verificationGate}` : "",
+    contract.freezer?.verdict ? `- Freezer verdict: ${contract.freezer.verdict}` : "",
+    contract.freezer?.summary ? `- Freezer summary: ${contract.freezer.summary}` : "",
+    ...(contract.loop?.stabilityReasons || []).map((reason) => `- Stability reason: ${reason}`),
+    verification?.summary ? `- Verification summary: ${verification.summary}` : "",
+    verification?.status ? `- Verification status: ${verification.status}` : "",
+    ...(verification?.reasons || []).map((reason) => `- Verification reason: ${reason}`),
+    typeof verification?.score === "number" ? `- AIGC verification score: ${verification.score.toFixed(3)}` : "",
+    typeof verification?.threshold === "number" ? `- AIGC verification threshold: ${verification.threshold.toFixed(3)}` : "",
+    verification?.highRiskCount ? `- High risk segments before freeze: ${verification.highRiskCount}` : "",
+    verification?.forbiddenHitCount ? `- Forbidden hits before freeze: ${verification.forbiddenHitCount}` : "",
+    style.voice ? `- Voice: ${style.voice}` : "",
+    style.sentenceRhythm ? `- Sentence rhythm: ${style.sentenceRhythm}` : "",
+    ...compactStyleList(style.dialogueRules).map((rule) => `- Dialogue rule: ${rule}`),
+    ...compactStyleList(style.descriptionRules).map((rule) => `- Description rule: ${rule}`),
+    ...compactStyleList(style.emotionRules).map((rule) => `- Emotion rule: ${rule}`),
+    ...compactStyleList(style.pacingRules).map((rule) => `- Pacing rule: ${rule}`),
+    ...compactStyleList(style.povRules, 3).map((rule) => `- POV rule: ${rule}`),
+    ...compactStyleList(style.openingRules, 3).map((rule) => `- Opening rule: ${rule}`),
+    ...compactStyleList(style.endingHookRules, 3).map((rule) => `- Ending hook rule: ${rule}`),
+    compactStyleList(style.allowedDevices, 8).length ? `- Allowed devices: ${compactStyleList(style.allowedDevices, 8).join("\u3001")}` : "",
+    compactStyleList([...style.forbiddenPatterns || [], ...contract.antiPatterns || []], 10).length ? `- Forbidden patterns: ${compactStyleList([...style.forbiddenPatterns || [], ...contract.antiPatterns || []], 10).join("\uFF1B")}` : "",
+    compactStyleList(style.positiveExamples, 2).length ? `- Positive examples: ${compactStyleList(style.positiveExamples, 2).join(" / ")}` : "",
+    compactStyleList(style.negativeExamples, 2).length ? `- Negative examples to avoid: ${compactStyleList(style.negativeExamples, 2).join(" / ")}` : "",
+    contract.frozenBasePrompt?.trim() ? `- Frozen base prompt: ${contract.frozenBasePrompt.trim().replace(/\s+/gu, " ").slice(0, 480)}` : "",
+    contract.retryPolicy?.approvalScoreThreshold ? `- Retry policy: approval threshold ${Number(contract.retryPolicy.approvalScoreThreshold).toFixed(1)} / min rounds ${Math.max(1, Number(contract.retryPolicy.approvalMinRounds || 2))} / max forbidden hits ${Math.max(0, Number(contract.retryPolicy.maxForbiddenHitCount || 1))}` : "",
+    ...inheritedArtifacts.map((artifact) => `- Inherited artifact: ${artifact}`),
+    ...inheritedRules.map((rule) => `- Inheritance rule: ${rule}`),
+    chapterInheritanceAdapter?.status ? `- Chapter Inheritance Adapter: ${chapterInheritanceAdapter.status}` : "",
+    chapterInheritanceAdapter?.loopProtocolStatus ? `- Loop protocol status: ${chapterInheritanceAdapter.loopProtocolStatus}` : "",
+    chapterInheritanceAdapter?.loopProtocolStages?.completed?.length ? `- Loop protocol completed stages: ${chapterInheritanceAdapter.loopProtocolStages.completed.join(", ")}` : "",
+    ...(chapterInheritanceAdapter?.loopProtocolEvidence || []).slice(0, 4).map((item) => `- Loop protocol evidence: ${item}`),
+    `- Approved sample excerpt: ${approvedSample.replace(/\s+/gu, " ").slice(0, 360)}`
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+async function loadApprovedWritingStyleContext(projectRoot) {
+  try {
+    const snapshot = await loadStyleEvolution(projectRoot);
+    const prompt = formatApprovedWritingStylePrompt(snapshot.contract);
+    const gate = evaluateStyleEvolutionGate(snapshot.contract);
+    const rulebook = formatStyleRulebook(snapshot.contract);
+    const references = formatStyleReferences(snapshot.contract);
+    const antiPatterns = formatStyleAntiPatterns(snapshot.contract);
+    const chapterInheritanceAdapter = buildChapterInheritanceAdapterPayload(snapshot.contract);
+    return prompt && gate.canProceed ? { status: "ready", prompt, contract: snapshot.contract, rulebook, references, antiPatterns, chapterInheritanceAdapter: chapterInheritanceAdapter || void 0 } : { status: "missing", prompt: "" };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { status: "missing", prompt: "" };
+    }
+    throw error;
+  }
+}
+function summarizeApprovedStyleCarryover(approvedStyleContext) {
+  if (approvedStyleContext.status !== "ready") {
+    return "";
+  }
+  const contract = approvedStyleContext.contract;
+  const style = contract?.styleContract;
+  if (!contract?.approvedAt || !style) {
+    return summarizePromptSection(approvedStyleContext.prompt, 900);
+  }
+  const forbiddenPatterns = compactStyleList(uniqueStrings([...style.forbiddenPatterns || [], ...contract.antiPatterns || []]), 4);
+  const positiveExamples = compactStyleList(style.positiveExamples, 1);
+  const negativeExamples = compactStyleList(style.negativeExamples, 1);
+  const dialogueRules = compactStyleList(style.dialogueRules, 1);
+  const descriptionRules = compactStyleList(style.descriptionRules, 1);
+  const emotionRules = compactStyleList(style.emotionRules, 1);
+  const pacingRules = compactStyleList(style.pacingRules, 1);
+  const povRules = compactStyleList(style.povRules, 1);
+  const openingRules = compactStyleList(style.openingRules, 1);
+  const endingHookRules = compactStyleList(style.endingHookRules, 1);
+  const allowedDevices = compactStyleList(style.allowedDevices, 3);
+  const inheritedRules = compactStyleList(contract.inheritance?.inheritedRules, 1);
+  const adapter = approvedStyleContext.chapterInheritanceAdapter || buildChapterInheritanceAdapterPayload(contract);
+  const lines = [
+    "## User Approved Writing Style Contract",
+    "\u51BB\u7ED3\u5168\u4E66\u57FA\u7840\u5199\u6CD5\uFF1B\u540E\u7EED\u7AE0\u8282\u5FC5\u987B\u7EE7\u627F\uFF0C\u4E0D\u5F97\u91CD\u7F6E\u6210\u901A\u7528\u6A21\u677F\u8154\u3002",
+    `- Approved at: ${contract.approvedAt}`,
+    adapter?.contractVersion ? `- Adapter contract version: v${adapter.contractVersion}` : "",
+    adapter?.loopProtocolStatus ? `- Loop protocol: ${adapter.loopProtocolStatus} (${adapter.loopProtocolStages?.completed?.length || 0}/${adapter.loopProtocolStages?.required?.length || 0} stages)` : "",
+    adapter?.freezerVerdict ? `- Freezer verdict: ${adapter.freezerVerdict}` : "",
+    contract.runtime?.verificationGate ? `- Verification gate: ${contract.runtime.verificationGate}` : "",
+    contract.verification?.status ? `- Verification status: ${contract.verification.status}` : "",
+    compactStyleValue(style.voice, 140) ? `- Voice: ${compactStyleValue(style.voice, 140)}` : "",
+    compactStyleValue(style.sentenceRhythm, 100) ? `- Sentence rhythm: ${compactStyleValue(style.sentenceRhythm, 100)}` : "",
+    ...dialogueRules.map((rule) => `- Dialogue rule: ${rule}`),
+    ...descriptionRules.map((rule) => `- Description rule: ${rule}`),
+    ...emotionRules.map((rule) => `- Emotion rule: ${rule}`),
+    ...pacingRules.map((rule) => `- Pacing rule: ${rule}`),
+    ...povRules.map((rule) => `- POV rule: ${rule}`),
+    ...openingRules.map((rule) => `- Opening rule: ${rule}`),
+    ...endingHookRules.map((rule) => `- Ending hook rule: ${rule}`),
+    allowedDevices.length ? `- Allowed devices: ${allowedDevices.join("\u3001")}` : "",
+    forbiddenPatterns.length ? `- Forbidden patterns: ${forbiddenPatterns.join("\uFF1B")}` : "",
+    positiveExamples.length ? `- Positive example: ${positiveExamples[0]}` : "",
+    negativeExamples.length ? `- Negative example to avoid: ${negativeExamples[0]}` : "",
+    compactStyleValue(contract.frozenBasePrompt, 160) ? `- Frozen base prompt focus: ${compactStyleValue(contract.frozenBasePrompt, 160)}` : "",
+    ...inheritedRules.map((rule) => `- Inheritance rule: ${rule}`),
+    compactStyleValue(contract.approvedSample, 180) ? `- Approved sample excerpt: ${compactStyleValue(contract.approvedSample, 180)}` : ""
+  ].filter(Boolean);
+  return summarizePromptSection(lines.join("\n"), 980);
+}
+async function persistApprovedWritingStyleAssets(projectRoot, paths, approvedStyleContext, options = {}) {
+  if (approvedStyleContext.status !== "ready") {
+    return;
+  }
+  await import_promises5.default.mkdir(paths.styleDir, { recursive: true });
+  const writes = [
+    [paths.styleRulebookPath, approvedStyleContext.rulebook || "", "style_rulebook"],
+    [paths.styleReferencesPath, approvedStyleContext.references || "", "style_references"],
+    [paths.styleAntiPatternsPath, approvedStyleContext.antiPatterns || "", "style_anti_patterns"]
+  ];
+  for (const [filePath, content, kind] of writes) {
+    if (!content.trim()) continue;
+    await import_promises5.default.writeFile(filePath, `${content.trimEnd()}
+`);
+    await recordPipelineArtifact(projectRoot, filePath, "style", options, {
+      kind,
+      source: "approved_style_contract"
+    });
+  }
+}
+async function enforceApprovedWritingStyleGate(options, task, approvedStyleContext) {
+  if (approvedStyleContext.status === "ready") {
+    return;
+  }
+  const message = "\u672C\u4E66\u5199\u6CD5\u5C1A\u672A\u83B7\u5F97\u7528\u6237\u786E\u8BA4\uFF0C\u6B63\u6587\u751F\u4EA7\u5DF2\u963B\u585E\u3002\u8BF7\u5148\u5728 Style Evolution Engine \u4E2D\u751F\u6210\u6837\u6BB5\uFF0C\u5E76\u901A\u8FC7 Style Contract Freeze Gate \u786E\u8BA4\u4E00\u4E2A\u7248\u672C\u3002";
+  await emitWritingProgress(options, {
+    step: "production_readiness_blocked",
+    role: "Showrunner",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: "blocked",
+    message,
+    preview: "Blocked gate: style_approval"
+  });
+  throw new ProductionReadinessBlockedError(message);
+}
+function normalizeTailParagraph(paragraph) {
+  return paragraph.replace(/\s+/gu, "").replace(/[，。、“”‘’：；！？,.!?:"'()\[\]【】《》]/gu, "").slice(0, 160);
+}
+function compactPreviousSegmentTail(text, maxChars = 800) {
+  const paragraphs = text.split(/\n{2,}/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const selected = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let index = paragraphs.length - 1; index >= 0; index -= 1) {
+    const paragraph = paragraphs[index];
+    const fingerprint = normalizeTailParagraph(paragraph);
+    if (!fingerprint || seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    selected.unshift(paragraph);
+    if (selected.join("\n\n").length >= maxChars) {
+      break;
+    }
+  }
+  const compacted = selected.join("\n\n");
+  return compacted.length > maxChars ? compacted.slice(-maxChars).trim() : compacted;
 }
 function sceneTypeForChapter(state, chapterNumber) {
   const genre = inferGenreProfile(state);
@@ -6052,7 +8271,8 @@ function createVocabularyUsagePrompt(input) {
       "## Vocabulary Skill Guidance",
       "",
       "- \u8BCD\u6C47\u7D22\u5F15\u6682\u672A\u547D\u4E2D\uFF1B\u4F18\u5148\u4F7F\u7528\u5177\u4F53\u52A8\u4F5C\u3001\u7269\u4EF6\u3001\u611F\u5B98\u548C\u4EBA\u7269\u5173\u7CFB\u63A8\u52A8\u573A\u666F\u3002",
-      "- \u6210\u8BED\u53EA\u80FD\u5728\u603B\u7ED3\u3001\u5BF9\u6BD4\u3001\u5F3A\u8C03\u5904\u70B9\u5230\u4E3A\u6B62\uFF0C\u6BCF\u7AE0\u4E0D\u8D85\u8FC7 3-5 \u4E2A\u3002"
+      "- \u6210\u8BED\u53EA\u80FD\u5728\u603B\u7ED3\u3001\u5BF9\u6BD4\u3001\u5F3A\u8C03\u5904\u70B9\u5230\u4E3A\u6B62\uFF0C\u6BCF\u7AE0\u4E0D\u8D85\u8FC7 3-5 \u4E2A\u3002",
+      "- \u6210\u8BED\u5173\u8054\u6027\u68C0\u67E5\uFF1A\u6BCF\u4E2A\u6210\u8BED\u524D\u540E\u5FC5\u987B\u6709\u573A\u666F\u94FA\u57AB\u3001\u4EBA\u7269\u5224\u65AD\u6216\u56E0\u679C\u53D8\u5316\u652F\u6491\u3002"
     ].join("\n");
   }
   const base = entries.slice(0, 10);
@@ -6066,6 +8286,7 @@ function createVocabularyUsagePrompt(input) {
     "- \u4E0D\u8981\u5B64\u96F6\u96F6\u5730\u4F7F\u7528\uFF0C\u4E0D\u8981\u5806\u780C\u53E0\u52A0\uFF0C\u4E0D\u8981\u5F3A\u884C\u690D\u5165\u3002",
     "- \u8BCD\u6C47\u91D1\u5B57\u5854\uFF1A\u57FA\u7840\u8BCD\u6C47\u7EA6 50%\uFF0C\u8FDB\u9636\u8BCD\u6C47\u7EA6 30%\uFF0C\u9AD8\u7EA7\u8BCD\u6C47\u7EA6 15%\uFF0C\u7A00\u6709/\u6210\u8BED\u7EA6 5%\u3002",
     "- \u6BCF\u6BB5\u6700\u591A 1 \u4E2A\u6210\u8BED\uFF0C\u6BCF\u7AE0\u901A\u5E38\u4E0D\u8D85\u8FC7 3-5 \u4E2A\uFF1B\u66F4\u91CD\u8981\u7684\u662F\u52A8\u4F5C\u3001\u611F\u5B98\u548C\u56E0\u679C\u53E5\u3002",
+    "- \u6210\u8BED\u5173\u8054\u6027\u68C0\u67E5\uFF1A\u6BCF\u4E2A\u6210\u8BED\u524D\u540E\u5FC5\u987B\u6709\u573A\u666F\u94FA\u57AB\u3001\u4EBA\u7269\u5224\u65AD\u6216\u56E0\u679C\u53D8\u5316\u652F\u6491\u3002",
     "",
     "### \u5173\u952E\u8BCD\u6765\u6E90",
     keywords.length ? `- ${keywords.slice(0, 12).join("\u3001")}` : "- \u6682\u65E0\u660E\u786E\u5173\u952E\u8BCD\uFF0C\u6309\u573A\u666F\u7C7B\u578B\u63A8\u8350\u3002",
@@ -6272,11 +8493,37 @@ function extractContinuityAnchors(input) {
   return uniqueStrings(uniqueAnchors).slice(0, input.limit ?? 10);
 }
 function evaluateNarrativeStyleQuality(text = "") {
-  return {
-    status: "eligible",
-    reason: "\u98CE\u683C\u786C\u95E8\u69DB\u901A\u8FC7\uFF1A\u672A\u53D1\u73B0\u9AD8\u9891\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u91CD\u590D\u3002",
-    fragments: []
+  const body = text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0] || "";
+  const paragraphs = body.split(/\n+/u).map((p) => p.trim()).filter(Boolean);
+  const ultraShortParagraphs = paragraphs.filter((p) => p.length > 0 && p.length <= 6);
+  const fragments = [];
+  if (paragraphs.length >= 10 && ultraShortParagraphs.length / paragraphs.length > 0.15) {
+    fragments.push(`\u8D85\u77ED\u6BB5\u843D\uFF08\u6BB5\u843D\u5B57\u6570\u22646\uFF09\u6570\u91CF\u8FBE ${ultraShortParagraphs.length} \u5904\uFF0C\u6BB5\u843D\u788E\u7247\u5316\u5806\u53E0\u4E25\u91CD\uFF08\u5360\u6BD4\u8FBE ${Math.round(ultraShortParagraphs.length / paragraphs.length * 100)}%\uFF09\u3002`);
+  }
+  const bodyNoPunc = body.replace(/[\s\p{Punctuation}\p{Script=Common}]/gu, "");
+  const matchFrequencies = {
+    "\u4E00\u50F5": (bodyNoPunc.match(/一僵/g) || []).length,
+    "\u4E00\u6EDE": (bodyNoPunc.match(/一滞/g) || []).length,
+    "\u4E00\u7F29": (bodyNoPunc.match(/一缩/g) || []).length,
+    "\u4E00\u9707": (bodyNoPunc.match(/一震/g) || []).length,
+    "\u8EAB\u4F53\u50F5": (bodyNoPunc.match(/身体.{0,2}僵/g) || []).length,
+    "\u77B3\u5B54\u7F29": (bodyNoPunc.match(/瞳孔.{0,2}缩/g) || []).length
   };
+  const highFreqs = Object.entries(matchFrequencies).filter(([_, count]) => count >= 3).map(([word, count]) => `\u300C${word}\u300D\u91CD\u590D\u8FBE ${count} \u6B21`);
+  if (highFreqs.length > 0) {
+    fragments.push(`\u5957\u8DEF\u6027\u8EAB\u4F53\u6216\u611F\u77E5\u63CF\u5199\u9AD8\u9891\u91CD\u590D\uFF1A${highFreqs.join("\uFF1B")}\u3002`);
+  }
+  const isQuarantined = fragments.length > 0;
+  return {
+    status: isQuarantined ? "quarantined" : "eligible",
+    reason: isQuarantined ? `\u98CE\u683C\u95E8\u7981\u62E6\u622A\uFF1A${fragments.join(" ")} \u8BF7\u7CBE\u7B80\u788E\u7247\u5316\u6C1B\u56F4\u8BCD\u4E0E\u9AD8\u9891\u808C\u8089/\u611F\u77E5\u5957\u8DEF\u3002` : "\u98CE\u683C\u786C\u95E8\u69DB\u901A\u8FC7\uFF1A\u672A\u53D1\u73B0\u9AD8\u9891\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u91CD\u590D\u6216\u9AD8\u9891\u5957\u8DEF\u63CF\u5199\u3002",
+    fragments
+  };
+}
+function isSoftNarrativeStyleIssue(styleQuality) {
+  return styleQuality.status === "quarantined" && styleQuality.fragments.length > 0 && styleQuality.fragments.every(
+    (fragment) => /超短段落|段落碎片|套路性身体|感知描写|高频重复/u.test(fragment)
+  );
 }
 function evaluateWritingResourceUsage(text = "", state, task, blueprint = "", continuityContract) {
   const body = text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0];
@@ -6418,9 +8665,10 @@ function createNaturalnessReport(input) {
   const dialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length;
   const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length;
   const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length;
-  const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心深处|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length;
+  const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心开阔|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length;
   const analyticSignals = (body.match(/第一|第二|首先|其次|最后|原因是|从.*角度|可以看出|体现了|说明了|证明了/gu) || []).length;
   const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然/gu) || []).length;
+  const fatigueWordSignals = (body.match(/突然|忽然|猛然|竟然|居然|渐渐|逐渐|然而|与此同时|似乎|也许|大概|仿佛/gu) || []).length;
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract);
   const styleQuality = evaluateNarrativeStyleQuality(input.afterDraft);
   const plotContinuity = evaluatePlotContinuityBridge(input.afterDraft, input.task, input.continuityContract);
@@ -6446,11 +8694,12 @@ function createNaturalnessReport(input) {
     ...analyticSignals >= 5 ? [`\u5206\u6790\u62A5\u544A\u8154\u4FE1\u53F7\u8FC7\u591A\uFF1A${analyticSignals}`] : [],
     ...emotionLabelSignals > Math.max(8, Math.floor(wordTotal / 450)) && actionSignals < emotionLabelSignals ? [`\u60C5\u7EEA\u6807\u7B7E\u591A\u4E8E\u52A8\u4F5C\u5916\u5316\uFF1Aemotion=${emotionLabelSignals}, action=${actionSignals}`] : [],
     ...dialogueCount === 0 && wordTotal > 900 ? ["\u957F\u7AE0\u8282\u7F3A\u5C11\u5BF9\u767D\uFF0C\u89D2\u8272\u58F0\u97F3\u4E0D\u591F\u81EA\u7136\u3002"] : [],
-    ...actionSignals + sensorySignals < Math.max(6, Math.floor(wordTotal / 350)) ? ["\u52A8\u4F5C/\u611F\u5B98\u4FE1\u53F7\u4E0D\u8DB3\uFF0C\u6587\u672C\u53EF\u80FD\u504F\u6458\u8981\u3002"] : []
+    ...actionSignals + sensorySignals < Math.max(6, Math.floor(wordTotal / 350)) ? ["\u52A8\u4F5C/\u611F\u5B98\u4FE1\u53F7\u4E0D\u8DB3\uFF0C\u6587\u672C\u53EF\u80FD\u504F\u6458\u8981\u3002"] : [],
+    ...fatigueWordSignals >= 5 ? [`AI \u5199\u4F5C\u75B2\u52B3\u8BCD\uFF08\u7A81\u7136/\u7136\u800C/\u4E0E\u6B64\u540C\u65F6/\u4EFF\u4F5B\u7B49\uFF09\u9AD8\u9891\u5806\u79EF\u8FBE ${fatigueWordSignals} \u6B21`] : []
   ];
   const changedBlocks = input.beforeDraft === input.afterDraft ? 0 : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length) + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)));
-  const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)));
-  const status = semanticPreservation.status === "drifted" ? "blocked" : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞|角色差异化不足|同质化/u.test(flag)) ? "blocked" : score >= 7 ? "passed" : "needs_revision";
+  const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3) - Math.max(0, Math.floor(fatigueWordSignals / 2))));
+  const status = semanticPreservation.status === "drifted" ? "blocked" : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag)) ? "blocked" : riskFlags.length > 0 ? "needs_revision" : score >= 7 ? "passed" : "needs_revision";
   return {
     status,
     score,
@@ -6699,11 +8948,618 @@ function formatForeshadowingPayoffSchedule(state, limit = Number.POSITIVE_INFINI
     return `- \u7B2C ${task.chapterNumber} \u7AE0\uFF1A${plan.foreshadowingOperation}`;
   });
 }
+function formatVolumeStrategy(state) {
+  const volumeSize = Math.max(6, Math.ceil(state.plan.totalChapters / 3));
+  const volumes = Array.from({ length: Math.ceil(state.plan.totalChapters / volumeSize) }, (_, index) => {
+    const start = index * volumeSize + 1;
+    const end = Math.min(state.plan.totalChapters, start + volumeSize - 1);
+    const firstTask = state.plan.chapterTasks[start - 1];
+    const lastTask = state.plan.chapterTasks[end - 1];
+    const firstPlan = firstTask ? getTaskCausalPlan(state, firstTask) : null;
+    const lastPlan = lastTask ? getTaskCausalPlan(state, lastTask) : null;
+    return [
+      `### \u7B2C ${index + 1} \u5377\uFF1A\u7B2C ${start}-${end} \u7AE0`,
+      `- \u5377\u76EE\u6807\uFF1A\u4ECE\u300C${firstPlan?.previousInput || state.project.idea}\u300D\u63A8\u8FDB\u5230\u300C${lastPlan?.nextHandoff || state.project.idea}\u300D\u3002`,
+      `- \u8BFB\u8005\u5151\u73B0\uFF1A\u6BCF\u5377\u5FC5\u987B\u5B8C\u6210\u4E00\u6B21\u5C40\u90E8\u7B54\u6848\uFF0C\u540C\u65F6\u628A\u66F4\u5927\u95EE\u9898\u63A8\u5411\u4E0B\u4E00\u5377\u3002`,
+      `- \u89D2\u8272\u538B\u529B\uFF1A\u672C\u5377\u81F3\u5C11\u8BA9\u4E3B\u89D2\u4ED8\u51FA\u4E00\u6B21\u8D44\u6E90\u3001\u5173\u7CFB\u3001\u8EAB\u4EFD\u6216\u4FE1\u5FF5\u4EE3\u4EF7\u3002`,
+      `- \u4F0F\u7B14\u7B56\u7565\uFF1A\u672C\u5377\u81F3\u5C11\u65B0\u589E 2 \u4E2A\u4F0F\u7B14\uFF0C\u56DE\u6536\u6216\u53D8\u5F62\u5151\u73B0 1 \u4E2A\u4F0F\u7B14\u3002`
+    ].join("\n");
+  });
+  return volumes;
+}
+var PRODUCTION_STORY_MARKDOWN_ASSET_FILES = [
+  "world-matrix.md",
+  "plot-architecture.md",
+  "story-bible.md",
+  "volume-strategy.md",
+  "foreshadowing-ledger.md",
+  "character-dynamics.md"
+];
+var PRODUCTION_STORY_STRUCTURED_ASSET_FILES = [
+  "story-foundation-contract.json",
+  "world-matrix.json",
+  "plot-architecture.json",
+  "story-bible.json",
+  "volume-strategy.json",
+  "foreshadowing-ledger.json",
+  "character-dynamics.json"
+];
+var PRODUCTION_STORY_ASSET_FILES = [
+  ...PRODUCTION_STORY_MARKDOWN_ASSET_FILES,
+  ...PRODUCTION_STORY_STRUCTURED_ASSET_FILES
+];
+function extractStoryAssetRelevantLines(content, task, maxLines = 18) {
+  const chapterNumber = task.chapterNumber;
+  const trimmed = content.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const matchingChapter = [
+        ...Array.isArray(parsed?.plot?.chapters) ? parsed.plot.chapters : [],
+        ...Array.isArray(parsed?.chapters) ? parsed.chapters : [],
+        ...Array.isArray(parsed?.timeline) ? parsed.timeline : []
+      ].find((entry) => Number(entry?.chapterNumber) === chapterNumber);
+      const matchingForeshadowing = [
+        ...Array.isArray(parsed?.foreshadowing?.entries) ? parsed.foreshadowing.entries : [],
+        ...Array.isArray(parsed?.entries) ? parsed.entries : []
+      ].filter((entry) => Number(entry?.sourceChapter || entry?.chapterNumber) === chapterNumber);
+      const matchingCharacterDelta = [
+        ...Array.isArray(parsed?.characters?.stateDeltas) ? parsed.characters.stateDeltas : [],
+        ...Array.isArray(parsed?.characterStateDeltas) ? parsed.characterStateDeltas : [],
+        ...Array.isArray(parsed?.chapterStateDeltas) ? parsed.chapterStateDeltas : []
+      ].find((entry) => Number(entry?.chapterNumber) === chapterNumber);
+      const lines2 = [
+        parsed?.project?.title ? `- Project: ${parsed.project.title}` : "",
+        parsed?.genre?.readerPromise ? `- Reader Promise: ${parsed.genre.readerPromise}` : "",
+        parsed?.readerPromise ? `- Reader Promise: ${parsed.readerPromise}` : "",
+        matchingChapter?.title ? `- Chapter: ${matchingChapter.chapterNumber} ${matchingChapter.title}` : "",
+        matchingChapter?.sceneObjective ? `- Causal Objective: ${matchingChapter.sceneObjective}` : "",
+        matchingChapter?.previousInput ? `- Previous Input: ${matchingChapter.previousInput}` : "",
+        matchingChapter?.protagonistDecision ? `- Protagonist Decision: ${matchingChapter.protagonistDecision}` : "",
+        matchingChapter?.irreversibleConsequence ? `- Irreversible Change: ${matchingChapter.irreversibleConsequence}` : "",
+        matchingChapter?.nextHandoff ? `- Next Handoff: ${matchingChapter.nextHandoff}` : "",
+        matchingCharacterDelta?.delta ? `- Character Delta: ${matchingCharacterDelta.delta}` : "",
+        ...matchingForeshadowing.slice(0, 3).map((entry) => `- Foreshadowing: ${entry.operation || entry.expectedAdvance || entry.status}`),
+        ...Array.isArray(parsed?.rules) ? parsed.rules.slice(0, 3).map((rule) => `- Rule: ${typeof rule === "string" ? rule : rule.rule || rule.execution || JSON.stringify(rule)}`) : []
+      ].filter(Boolean);
+      return uniqueStrings(lines2).slice(0, maxLines);
+    } catch {
+      return [];
+    }
+  }
+  const chapterPatterns = [
+    new RegExp(`\u7B2C\\s*${chapterNumber}\\s*\u7AE0`, "u"),
+    new RegExp(`Chapter\\s*${chapterNumber}\\b`, "iu"),
+    new RegExp(`\\|\\s*${chapterNumber}\\s*\\|`, "u")
+  ];
+  const importantPattern = /Frozen World Rules|Non-Negotiable|Causal Spine|Chapter Causality Matrix|Continuity Anchor|Foreshadowing|Character State|Core Relationship|Volume Contract|Reader Promise|Style Contract|Protagonist|Ledger Rules|Escalation Rules|Required Dossier/u;
+  const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
+  const selected = [];
+  for (const line of lines) {
+    const isHeading = /^#{1,3}\s+/u.test(line) && importantPattern.test(line);
+    const isChapterLine = chapterPatterns.some((pattern) => pattern.test(line));
+    const isRuleLine = /^[-*]\s+/u.test(line) && importantPattern.test(line);
+    if (isHeading || isChapterLine || isRuleLine) {
+      selected.push(line);
+    }
+    if (selected.length >= maxLines) break;
+  }
+  if (selected.length === 0) {
+    return lines.filter((line) => /^#{1,3}\s+/u.test(line) || /^[-*]\s+/u.test(line)).slice(0, Math.max(6, Math.floor(maxLines / 2)));
+  }
+  return selected;
+}
+async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
+  const sections = [];
+  const files = [];
+  for (const filename of PRODUCTION_STORY_ASSET_FILES) {
+    const content = await readOptionalText2(import_node_path8.default.join(paths.plansDir, filename));
+    if (!content) continue;
+    const relevant = extractStoryAssetRelevantLines(content, task);
+    if (!relevant.length) continue;
+    files.push(filename);
+    const section = [
+      `### ${filename}`,
+      ...relevant
+    ].join("\n");
+    sections.push(section.length > 520 ? `${section.slice(0, 520).trim()}
+...[${filename} clipped]` : section);
+  }
+  if (!sections.length) {
+    return { prompt: "", files: [] };
+  }
+  const prompt = [
+    "## Production Story Asset Context",
+    "",
+    "\u8FD9\u4E9B\u5185\u5BB9\u6765\u81EA\u5DF2\u51BB\u7ED3\u7684\u524D\u7F6E\u6545\u4E8B\u8D44\u4EA7\u3002\u84DD\u56FE\u548C\u6B63\u6587\u5FC5\u987B\u670D\u4ECE\u5B83\u4EEC\uFF1B\u5982\u4E0E\u4E34\u65F6\u4E0A\u4E0B\u6587\u51B2\u7A81\uFF0C\u4EE5\u672C\u8D44\u4EA7\u6458\u8981\u4E3A\u51C6\u3002",
+    "",
+    ...sections
+  ].join("\n\n");
+  return {
+    prompt: prompt.length > maxChars ? `${prompt.slice(0, maxChars).trim()}
+...[story assets clipped]` : prompt,
+    files
+  };
+}
+function createProductionStoryBibleAssets(state, context, resources) {
+  const genre = inferGenreProfile(state);
+  const consensus = context.consensus || "\u5C1A\u65E0\u989D\u5916\u5171\u8BC6\uFF1B\u4EE5\u9879\u76EE\u521D\u59CB\u76EE\u6807\u4F5C\u4E3A\u6700\u9AD8\u7EA6\u675F\u3002";
+  const protagonist = context.protagonist || "\u4E3B\u89D2\u6863\u6848\u5F85\u8865\u9F50\uFF1B\u672C\u9636\u6BB5\u5FC5\u987B\u81F3\u5C11\u51BB\u7ED3\u4E3B\u89D2\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u548C\u884C\u52A8\u65B9\u5F0F\u3002";
+  const style = context.style || "\u5199\u6CD5\u5C1A\u672A\u5B8C\u5168\u51BB\u7ED3\uFF1B\u8FDB\u5165\u6B63\u6587\u524D\u4ECD\u5FC5\u987B\u5B8C\u6210\u7528\u6237\u786E\u8BA4\u7684\u5199\u6CD5\u6837\u6BB5\u3002";
+  const chapterMatrix = formatChapterCausalityMatrix(state);
+  const continuityPlan = formatContinuityAnchorPlan(state);
+  const characterLedgerPlan = formatCharacterStateLedgerPlan(state);
+  const foreshadowingPlan = formatForeshadowingPayoffSchedule(state);
+  const volumeStrategy = formatVolumeStrategy(state);
+  const projectKey = stableAssetId(`${state.project.title}-${state.project.createdAt}`, "project");
+  const resourceSignals = [
+    `- Style guide loaded: ${resources.styleGuide ? "yes" : "no"}`,
+    `- Vocabulary resources loaded: ${resources.vocabularySamples.length}`,
+    `- Few-shot examples loaded: ${resources.examples.length}`
+  ];
+  const protagonistName = lockedProtagonistFromState(state, protagonist) || extractChinesePersonNames(protagonist, 1)[0] || "\u5F85\u51BB\u7ED3\u4E3B\u89D2";
+  const chapterContracts = state.plan.chapterTasks.map((task) => {
+    const causalPlan = getTaskCausalPlan(state, task);
+    return {
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: task.status,
+      targetWords: task.targetWords,
+      summary: task.summary,
+      previousInput: causalPlan.previousInput,
+      sceneObjective: causalPlan.sceneObjective,
+      protagonistDecision: causalPlan.protagonistDecision,
+      irreversibleConsequence: causalPlan.irreversibleConsequence,
+      characterStateDelta: causalPlan.characterStateDelta,
+      requiredContinuityAnchors: causalPlan.requiredContinuityAnchors,
+      foreshadowingOperation: causalPlan.foreshadowingOperation,
+      nextHandoff: causalPlan.nextHandoff
+    };
+  });
+  const continuityAnchors = uniqueStrings(chapterContracts.flatMap((chapter) => chapter.requiredContinuityAnchors)).slice(0, 80);
+  const structuredWorldRules = [
+    {
+      id: "core-idea-boundary",
+      rule: "\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002",
+      execution: "\u6BCF\u6B21\u65B0\u589E\u8BBE\u5B9A\u90FD\u8981\u843D\u5230\u4EBA\u7269\u9009\u62E9\u3001\u8D44\u6E90\u4EE3\u4EF7\u6216\u793E\u4F1A\u538B\u529B\u3002",
+      source: "world-matrix.md"
+    },
+    {
+      id: "scene-first-worldbuilding",
+      rule: "\u4E0D\u5141\u8BB8\u6574\u6BB5\u89E3\u91CA\u4E16\u754C\u89C2\u3002",
+      execution: "\u8BBE\u5B9A\u5FC5\u987B\u5D4C\u5165\u51B2\u7A81\u3001\u5BF9\u8BDD\u3001\u8BC1\u636E\u6216\u884C\u52A8\u3002",
+      source: "world-matrix.md"
+    },
+    {
+      id: "chapter-cost-rule",
+      rule: "\u6BCF\u7AE0\u81F3\u5C11\u8BA9\u4E00\u4E2A\u4E16\u754C\u89C4\u5219\u6539\u53D8\u89D2\u8272\u7684\u9009\u62E9\u6210\u672C\u3002",
+      execution: "\u7AE0\u8282\u84DD\u56FE\u5FC5\u987B\u8BF4\u660E\u8BE5\u89C4\u5219\u5982\u4F55\u5236\u9020\u4EE3\u4EF7\u3002",
+      source: "world-matrix.md"
+    }
+  ];
+  const foreshadowingEntries = chapterContracts.map((chapter) => ({
+    id: `foreshadowing-${String(chapter.chapterNumber).padStart(3, "0")}`,
+    sourceChapter: chapter.chapterNumber,
+    sourceTitle: chapter.title,
+    operation: chapter.foreshadowingOperation,
+    status: "planned",
+    expectedAdvance: chapter.nextHandoff,
+    payoffMode: chapter.chapterNumber >= state.plan.totalChapters ? "final_payoff" : chapter.chapterNumber >= Math.max(1, state.plan.totalChapters - 1) ? "late_payoff" : "advance_or_reframe",
+    linkedAnchors: chapter.requiredContinuityAnchors
+  }));
+  const timelineEntries = chapterContracts.map((chapter) => ({
+    id: `chapter-${String(chapter.chapterNumber).padStart(3, "0")}`,
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    previousInput: chapter.previousInput,
+    event: chapter.sceneObjective,
+    decision: chapter.protagonistDecision,
+    irreversibleChange: chapter.irreversibleConsequence,
+    nextState: chapter.nextHandoff
+  }));
+  const relationshipEntries = [
+    {
+      id: stableAssetId(protagonistName, "protagonist"),
+      name: protagonistName,
+      role: "protagonist",
+      desire: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u5FC5\u987B\u4E0E\u6838\u5FC3\u521B\u610F\u548C\u7AE0\u8282\u56E0\u679C\u94FE\u4E00\u81F4\u3002",
+      woundOrFear: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u6B63\u6587\u524D\u5FC5\u987B\u8865\u9F50\u3002",
+      behaviorHabit: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u4E0D\u5F97\u5728\u7AE0\u8282\u95F4\u91CD\u7F6E\u3002",
+      speechMarker: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u7528\u4E8E\u533A\u5206\u5BF9\u767D\u58F0\u97F3\u3002",
+      relationshipPressure: "\u7531\u6BCF\u7AE0 characterStateDelta \u63A8\u8FDB\u3002"
+    }
+  ];
+  const characterStateDeltas = chapterContracts.map((chapter) => ({
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    delta: chapter.characterStateDelta,
+    requiredMemoryWrite: true
+  }));
+  const volumeContracts = volumeStrategy.map((summary, index) => ({
+    id: `volume-${index + 1}`,
+    title: summary.match(/^###\s+(.+)$/mu)?.[1] || `\u7B2C ${index + 1} \u5377`,
+    summary,
+    status: "planned",
+    requiredChange: "\u5377\u5C3E\u5FC5\u987B\u6539\u53D8\u4E3B\u89D2\u4F4D\u7F6E\u3001\u5173\u7CFB\u7F51\u7EDC\u6216\u4E16\u754C\u8BA4\u77E5\u3002"
+  }));
+  const storyFoundationContract = {
+    version: 1,
+    generatedBy: "production-story-bible-assets",
+    project: {
+      key: projectKey,
+      title: state.project.title,
+      idea: state.project.idea,
+      totalChapters: state.plan.totalChapters,
+      chapterWordTarget: state.plan.chapterWordTarget
+    },
+    genre: {
+      profile: genre.genre,
+      readerPromise: genre.readerPromise,
+      pointOfView: genre.pointOfView,
+      tone: genre.tone
+    },
+    gates: {
+      markdownAssets: PRODUCTION_STORY_MARKDOWN_ASSET_FILES,
+      structuredAssets: PRODUCTION_STORY_STRUCTURED_ASSET_FILES,
+      mustPassBeforeDrafting: [
+        "core_consensus",
+        "story_foundation",
+        "character_dynamics",
+        "chapter_blueprints",
+        "style_approval"
+      ]
+    },
+    consensus: {
+      text: consensus,
+      protagonist,
+      styleCarryover: style
+    },
+    world: {
+      rules: structuredWorldRules,
+      continuityAnchors
+    },
+    plot: {
+      causalModel: "previous_input -> scene_objective -> protagonist_decision -> irreversible_change -> next_handoff",
+      chapters: chapterContracts,
+      timeline: timelineEntries
+    },
+    characters: {
+      protagonist: protagonistName,
+      relationshipEntries,
+      stateDeltas: characterStateDeltas,
+      requiredDossierFields: [
+        "canonical name",
+        "identity and role function",
+        "core desire",
+        "fear or wound",
+        "behavior habit",
+        "speech marker",
+        "appearance or body marker",
+        "skill, limitation, and cost",
+        "relationship state"
+      ]
+    },
+    foreshadowing: {
+      ledgerRules: [
+        "\u6BCF\u6761\u4F0F\u7B14\u5FC5\u987B\u6709\u6765\u6E90\u7AE0\u8282\u3001\u5F53\u524D\u72B6\u6001\u3001\u9884\u8BA1\u63A8\u8FDB\u70B9\u548C\u56DE\u6536\u65B9\u5F0F\u3002",
+        "\u4F0F\u7B14\u53EF\u4EE5\u5EF6\u540E\uFF0C\u4F46\u4E0D\u80FD\u65E0\u9650\u60AC\u7A7A\uFF1B\u5EF6\u540E\u5FC5\u987B\u589E\u52A0\u538B\u529B\u6216\u6539\u53D8\u8BFB\u8005\u7406\u89E3\u3002",
+        "\u4F0F\u7B14\u56DE\u6536\u5FC5\u987B\u901A\u8FC7\u573A\u666F\u4E8B\u5B9E\u5151\u73B0\uFF0C\u4E0D\u80FD\u53EA\u8BA9\u89D2\u8272\u53E3\u5934\u89E3\u91CA\u3002"
+      ],
+      entries: foreshadowingEntries
+    },
+    volumes: volumeContracts,
+    resources: {
+      styleGuideLoaded: Boolean(resources.styleGuide),
+      vocabularySamples: resources.vocabularySamples.length,
+      examples: resources.examples.length
+    }
+  };
+  const structuredAssets = [
+    {
+      filename: "story-foundation-contract.json",
+      title: "Story Foundation Contract",
+      stage: "story_foundation_contract",
+      value: storyFoundationContract
+    },
+    {
+      filename: "world-matrix.json",
+      title: "World Matrix JSON",
+      stage: "world_matrix_structured",
+      value: {
+        version: 1,
+        projectKey,
+        title: state.project.title,
+        genre: storyFoundationContract.genre,
+        rules: structuredWorldRules,
+        continuityAnchors,
+        sourceConsensus: consensus,
+        protagonistPressureInterface: protagonist
+      }
+    },
+    {
+      filename: "plot-architecture.json",
+      title: "Plot Architecture JSON",
+      stage: "plot_architecture_structured",
+      value: {
+        version: 1,
+        causalModel: storyFoundationContract.plot.causalModel,
+        chapters: chapterContracts,
+        timeline: timelineEntries,
+        escalationRules: [
+          "\u6BCF 3-5 \u7AE0\u5FC5\u987B\u8BA9\u5916\u90E8\u538B\u529B\u5347\u7EA7\u4E00\u6B21\uFF0C\u4E0D\u80FD\u53EA\u6362\u5730\u70B9\u91CD\u590D\u540C\u7C7B\u4E8B\u4EF6\u3002",
+          "\u4E2D\u6BB5\u5FC5\u987B\u8BA9\u4E3B\u89D2\u7684\u65E7\u65B9\u6CD5\u5931\u6548\uFF0C\u903C\u51FA\u65B0\u7684\u9009\u62E9\u6216\u8054\u76DF\u3002",
+          "\u7ED3\u5C40\u524D\u5FC5\u987B\u56DE\u6536\u6838\u5FC3\u7F3A\u53E3\u3001\u4E3B\u8981\u5173\u7CFB\u503A\u548C\u81F3\u5C11\u4E00\u6761\u65E9\u671F\u4F0F\u7B14\u3002"
+        ]
+      }
+    },
+    {
+      filename: "story-bible.json",
+      title: "Story Bible JSON",
+      stage: "story_bible_structured",
+      value: {
+        version: 1,
+        title: state.project.title,
+        coreIdea: state.project.idea,
+        readerPromise: genre.readerPromise,
+        nonNegotiableContracts: [
+          "\u4E0D\u5141\u8BB8\u6F02\u79FB\u9898\u6750\uFF0C\u4E0D\u5141\u8BB8\u8131\u79BB\u6838\u5FC3\u521B\u610F\u6539\u5199\u6210\u53E6\u4E00\u90E8\u5C0F\u8BF4\u3002",
+          "\u4E0D\u5141\u8BB8\u6B63\u6587\u5148\u884C\u518D\u8865\u8BBE\u5B9A\uFF1B\u7AE0\u8282\u5FC5\u987B\u670D\u4ECE\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u4EBA\u7269\u72B6\u6001\u548C\u4F0F\u7B14\u8D26\u672C\u3002",
+          "\u4EFB\u4F55\u65B0\u589E\u4EBA\u7269\u3001\u5730\u70B9\u3001\u7EC4\u7EC7\u3001\u7269\u4EF6\u3001\u89C4\u5219\uFF0C\u90FD\u8981\u80FD\u8BF4\u660E\u5B83\u627F\u62C5\u7684\u5267\u60C5\u529F\u80FD\u3002"
+        ],
+        styleCarryover: style,
+        protagonist,
+        characterStateDeltas
+      }
+    },
+    {
+      filename: "volume-strategy.json",
+      title: "Volume Strategy JSON",
+      stage: "volume_strategy_structured",
+      value: {
+        version: 1,
+        volumes: volumeContracts,
+        contractRules: [
+          "\u6BCF\u5377\u90FD\u8981\u6709\u6E05\u6670\u7684\u9636\u6BB5\u76EE\u6807\u3001\u9636\u6BB5\u5931\u8D25\u98CE\u9669\u548C\u9636\u6BB5\u5151\u73B0\u3002",
+          "\u5377\u5C3E\u4E0D\u80FD\u53EA\u662F\u4E8B\u4EF6\u7ED3\u675F\uFF0C\u5FC5\u987B\u6539\u53D8\u4E3B\u89D2\u4F4D\u7F6E\u3001\u5173\u7CFB\u7F51\u7EDC\u6216\u4E16\u754C\u8BA4\u77E5\u3002"
+        ]
+      }
+    },
+    {
+      filename: "foreshadowing-ledger.json",
+      title: "Foreshadowing Ledger JSON",
+      stage: "foreshadowing_ledger_structured",
+      value: {
+        version: 1,
+        rules: storyFoundationContract.foreshadowing.ledgerRules,
+        entries: foreshadowingEntries
+      }
+    },
+    {
+      filename: "character-dynamics.json",
+      title: "Character Dynamics JSON",
+      stage: "character_dynamics_structured",
+      value: {
+        version: 1,
+        protagonist: protagonistName,
+        relationshipEntries,
+        chapterStateDeltas: characterStateDeltas,
+        requiredDossierFields: storyFoundationContract.characters.requiredDossierFields,
+        relationshipRules: [
+          "\u4EBA\u7269\u5173\u7CFB\u4E0D\u662F\u59D3\u540D\u5217\u8868\uFF0C\u800C\u662F\u6B32\u671B\u3001\u503A\u52A1\u3001\u6050\u60E7\u3001\u5229\u76CA\u548C\u8BEF\u89E3\u7684\u52A8\u6001\u7CFB\u7EDF\u3002",
+          "\u6BCF\u4E2A\u5173\u952E\u4EBA\u7269\u90FD\u5FC5\u987B\u6709\u4ED6\u81EA\u5DF1\u7684\u76EE\u6807\uFF0C\u4E0D\u80FD\u53EA\u670D\u52A1\u4E3B\u89D2\u8BE2\u95EE\u6216\u63A8\u52A8\u60C5\u8282\u3002",
+          "\u5173\u7CFB\u53D8\u5316\u5FC5\u987B\u8FDB\u5165\u7AE0\u8282\u8BB0\u5FC6\uFF0C\u540E\u7EED\u7AE0\u8282\u4E0D\u80FD\u91CD\u7F6E\u3002"
+        ]
+      }
+    }
+  ];
+  const worldMatrix = [
+    "# World Matrix",
+    "",
+    `Project: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    "",
+    "## Frozen World Rules",
+    "- \u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002",
+    "- \u6BCF\u6761\u89C4\u5219\u90FD\u8981\u5728\u4EBA\u7269\u9009\u62E9\u3001\u8D44\u6E90\u4EE3\u4EF7\u6216\u793E\u4F1A\u538B\u529B\u4E2D\u4F53\u73B0\uFF0C\u4E0D\u80FD\u53EA\u505A\u767E\u79D1\u8BF4\u660E\u3002",
+    "- \u65B0\u589E\u8BBE\u5B9A\u5FC5\u987B\u80FD\u843D\u5230\u7269\u4EF6\u3001\u5730\u70B9\u3001\u5236\u5EA6\u3001\u79F0\u547C\u3001\u7981\u5FCC\u6216\u5177\u4F53\u884C\u52A8\u3002",
+    "",
+    "## Source Consensus",
+    consensus,
+    "",
+    "## Protagonist Pressure Interface",
+    protagonist,
+    "",
+    "## Setting Execution Rules",
+    "- \u9996\u7AE0\u5EFA\u7ACB\u4E16\u754C\u7684\u5F02\u5E38\u5165\u53E3\uFF0C\u7B2C\u4E8C\u7AE0\u4EE5\u540E\u7528\u540E\u679C\u5C55\u793A\u89C4\u5219\u3002",
+    "- \u6BCF\u7AE0\u81F3\u5C11\u8BA9\u4E00\u4E2A\u4E16\u754C\u89C4\u5219\u6539\u53D8\u89D2\u8272\u7684\u9009\u62E9\u6210\u672C\u3002",
+    "- \u4E0D\u5141\u8BB8\u6574\u6BB5\u89E3\u91CA\u4E16\u754C\u89C2\uFF1B\u8BBE\u5B9A\u5FC5\u987B\u5D4C\u5165\u51B2\u7A81\u3001\u5BF9\u8BDD\u3001\u8BC1\u636E\u6216\u884C\u52A8\u3002"
+  ].join("\n");
+  const plotArchitecture = [
+    "# Plot Architecture",
+    "",
+    "## Causal Spine",
+    "- \u5168\u4E66\u91C7\u7528\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\u94FE\u3002",
+    "- \u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F\u4E0A\u4E00\u7AE0\u81F3\u5C11\u4E00\u4E2A\u72B6\u6001\u3001\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u4EE3\u4EF7\u6216\u672A\u89E3\u95EE\u9898\u3002",
+    "- \u6BCF\u7AE0\u7ED3\u5C3E\u5FC5\u987B\u4EA7\u751F\u4E0B\u4E00\u7AE0\u4E0D\u80FD\u7ED5\u5F00\u7684\u65B0\u72B6\u6001\u3002",
+    "",
+    "## Chapter Causality Matrix",
+    ...chapterMatrix,
+    "",
+    "## Continuity Anchor Plan",
+    ...continuityPlan,
+    "",
+    "## Escalation Rules",
+    "- \u6BCF 3-5 \u7AE0\u5FC5\u987B\u8BA9\u5916\u90E8\u538B\u529B\u5347\u7EA7\u4E00\u6B21\uFF0C\u4E0D\u80FD\u53EA\u6362\u5730\u70B9\u91CD\u590D\u540C\u7C7B\u4E8B\u4EF6\u3002",
+    "- \u4E2D\u6BB5\u5FC5\u987B\u8BA9\u4E3B\u89D2\u7684\u65E7\u65B9\u6CD5\u5931\u6548\uFF0C\u903C\u51FA\u65B0\u7684\u9009\u62E9\u6216\u8054\u76DF\u3002",
+    "- \u7ED3\u5C40\u524D\u5FC5\u987B\u56DE\u6536\u6838\u5FC3\u7F3A\u53E3\u3001\u4E3B\u8981\u5173\u7CFB\u503A\u548C\u81F3\u5C11\u4E00\u6761\u65E9\u671F\u4F0F\u7B14\u3002"
+  ].join("\n");
+  const storyBible = [
+    "# Story Bible",
+    "",
+    `Title: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Target chapters: ${state.plan.totalChapters}`,
+    `Chapter word target: ${state.plan.chapterWordTarget}`,
+    "",
+    "## Non-Negotiable Story Contract",
+    "- \u4E0D\u5141\u8BB8\u6F02\u79FB\u9898\u6750\uFF0C\u4E0D\u5141\u8BB8\u8131\u79BB\u6838\u5FC3\u521B\u610F\u6539\u5199\u6210\u53E6\u4E00\u90E8\u5C0F\u8BF4\u3002",
+    "- \u4E0D\u5141\u8BB8\u6B63\u6587\u5148\u884C\u518D\u8865\u8BBE\u5B9A\uFF1B\u7AE0\u8282\u5FC5\u987B\u670D\u4ECE\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u4EBA\u7269\u72B6\u6001\u548C\u4F0F\u7B14\u8D26\u672C\u3002",
+    "- \u4EFB\u4F55\u65B0\u589E\u4EBA\u7269\u3001\u5730\u70B9\u3001\u7EC4\u7EC7\u3001\u7269\u4EF6\u3001\u89C4\u5219\uFF0C\u90FD\u8981\u80FD\u8BF4\u660E\u5B83\u627F\u62C5\u7684\u5267\u60C5\u529F\u80FD\u3002",
+    "",
+    "## Reader Promise",
+    genre.readerPromise,
+    "",
+    "## Style Contract Carryover",
+    style,
+    "",
+    "## Character Spine",
+    protagonist,
+    "",
+    "## Character State Ledger Plan",
+    ...characterLedgerPlan,
+    "",
+    "## Planning Resource Signals",
+    ...resourceSignals
+  ].join("\n");
+  const volumeStrategyContent = [
+    "# Volume Strategy",
+    "",
+    "## Volume Contract",
+    "- \u6BCF\u5377\u90FD\u8981\u6709\u6E05\u6670\u7684\u9636\u6BB5\u76EE\u6807\u3001\u9636\u6BB5\u5931\u8D25\u98CE\u9669\u548C\u9636\u6BB5\u5151\u73B0\u3002",
+    "- \u5377\u5C3E\u4E0D\u80FD\u53EA\u662F\u4E8B\u4EF6\u7ED3\u675F\uFF0C\u5FC5\u987B\u6539\u53D8\u4E3B\u89D2\u4F4D\u7F6E\u3001\u5173\u7CFB\u7F51\u7EDC\u6216\u4E16\u754C\u8BA4\u77E5\u3002",
+    "",
+    ...volumeStrategy
+  ].join("\n");
+  const foreshadowingLedger = [
+    "# Foreshadowing Ledger",
+    "",
+    "## Ledger Rules",
+    "- \u6BCF\u6761\u4F0F\u7B14\u5FC5\u987B\u6709\u6765\u6E90\u7AE0\u8282\u3001\u5F53\u524D\u72B6\u6001\u3001\u9884\u8BA1\u63A8\u8FDB\u70B9\u548C\u56DE\u6536\u65B9\u5F0F\u3002",
+    "- \u4F0F\u7B14\u53EF\u4EE5\u5EF6\u540E\uFF0C\u4F46\u4E0D\u80FD\u65E0\u9650\u60AC\u7A7A\uFF1B\u5EF6\u540E\u5FC5\u987B\u589E\u52A0\u538B\u529B\u6216\u6539\u53D8\u8BFB\u8005\u7406\u89E3\u3002",
+    "- \u4F0F\u7B14\u56DE\u6536\u5FC5\u987B\u901A\u8FC7\u573A\u666F\u4E8B\u5B9E\u5151\u73B0\uFF0C\u4E0D\u80FD\u53EA\u8BA9\u89D2\u8272\u53E3\u5934\u89E3\u91CA\u3002",
+    "",
+    "## Initial Schedule",
+    ...foreshadowingPlan
+  ].join("\n");
+  const characterDynamics = [
+    "# Character Dynamics",
+    "",
+    "## Core Relationship Contract",
+    "- \u4EBA\u7269\u5173\u7CFB\u4E0D\u662F\u59D3\u540D\u5217\u8868\uFF0C\u800C\u662F\u6B32\u671B\u3001\u503A\u52A1\u3001\u6050\u60E7\u3001\u5229\u76CA\u548C\u8BEF\u89E3\u7684\u52A8\u6001\u7CFB\u7EDF\u3002",
+    "- \u6BCF\u4E2A\u5173\u952E\u4EBA\u7269\u90FD\u5FC5\u987B\u6709\u4ED6\u81EA\u5DF1\u7684\u76EE\u6807\uFF0C\u4E0D\u80FD\u53EA\u670D\u52A1\u4E3B\u89D2\u8BE2\u95EE\u6216\u63A8\u52A8\u60C5\u8282\u3002",
+    "- \u5173\u7CFB\u53D8\u5316\u5FC5\u987B\u8FDB\u5165\u7AE0\u8282\u8BB0\u5FC6\uFF0C\u540E\u7EED\u7AE0\u8282\u4E0D\u80FD\u91CD\u7F6E\u3002",
+    "",
+    "## Protagonist",
+    protagonist,
+    "",
+    "## Per-Chapter State Delta",
+    ...characterLedgerPlan,
+    "",
+    "## Required Dossier Fields",
+    "- canonical name",
+    "- identity and role function",
+    "- core desire",
+    "- fear or wound",
+    "- behavior habit",
+    "- speech marker",
+    "- appearance or body marker",
+    "- skill, limitation, and cost",
+    "- relationship state"
+  ].join("\n");
+  return [
+    { filename: "world-matrix.md", title: "World Matrix", content: worldMatrix, stage: "world_matrix" },
+    { filename: "plot-architecture.md", title: "Plot Architecture", content: plotArchitecture, stage: "plot_architecture" },
+    { filename: "story-bible.md", title: "Story Bible", content: storyBible, stage: "story_bible" },
+    { filename: "volume-strategy.md", title: "Volume Strategy", content: volumeStrategyContent, stage: "volume_strategy" },
+    { filename: "foreshadowing-ledger.md", title: "Foreshadowing Ledger", content: foreshadowingLedger, stage: "foreshadowing_ledger" },
+    { filename: "character-dynamics.md", title: "Character Dynamics", content: characterDynamics, stage: "character_dynamics" },
+    ...structuredAssets.map((asset) => ({
+      filename: asset.filename,
+      title: asset.title,
+      content: JSON.stringify(asset.value, null, 2),
+      stage: asset.stage,
+      format: "json"
+    }))
+  ];
+}
+function createProductionWritingPlanContract(state) {
+  const chapters = state.plan.chapterTasks.map((task) => {
+    const qualityGate = task.qualityGate || null;
+    const status = task.status === "complete" ? "completed" : task.status === "in_progress" ? "in_progress" : task.status === "blocked" ? "blocked" : "pending";
+    return {
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      filePath: `.ai-novel/chapters/chapter-${String(task.chapterNumber).padStart(3, "0")}.final.md`,
+      status,
+      wordCount: qualityGate?.wordCount ?? null,
+      qualityPass: qualityGate ? qualityGate.status === "passed" : null,
+      retryCount: Math.max(0, Number(task.recoveryAttempts || qualityGate?.attempts || 0)),
+      selectedVersionId: qualityGate?.status === "passed" ? "final" : null
+    };
+  });
+  const completedCount = chapters.filter((chapter) => chapter.status === "completed").length;
+  const blockedCount = chapters.filter((chapter) => chapter.status === "blocked").length;
+  const inProgressCount = chapters.filter((chapter) => chapter.status === "in_progress").length;
+  return {
+    version: 1,
+    novelName: state.project.title,
+    totalChapters: state.plan.totalChapters,
+    minWordsPerChapter: state.plan.chapterWordTarget,
+    status: blockedCount > 0 ? "blocked" : completedCount >= state.plan.totalChapters && chapters.length >= state.plan.totalChapters ? "completed" : inProgressCount > 0 ? "in_progress" : "planning",
+    writingMode: "serial",
+    chapters
+  };
+}
+async function writeProductionWritingPlan(projectRoot, paths, state, options = {}) {
+  const writingPlan = createProductionWritingPlanContract(state);
+  const writingPlanPath = import_node_path8.default.join(paths.plansDir, "writing-plan.json");
+  await writeJsonFileAtomic(writingPlanPath, writingPlan);
+  await recordPipelineArtifact(projectRoot, writingPlanPath, "plan", options, {
+    stage: "writing_plan",
+    production: true,
+    title: "Writing Plan",
+    totalChapters: writingPlan.totalChapters,
+    status: writingPlan.status
+  });
+  return writingPlanPath;
+}
 function hasCausalBlueprint(blueprint = "") {
   return blueprint.includes("# Detailed Chapter Blueprint") && blueprint.includes("## Previous Inputs") && blueprint.includes("## Causal Objective") && blueprint.includes("## Irreversible Change") && blueprint.includes("## Character State Delta") && blueprint.includes("## Required Continuity Anchors") && blueprint.includes("## Next Chapter Handoff");
 }
+function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
+  const body = extractNarrativeBody(draft);
+  const protagonist = continuityContract?.lockedProtagonistName || "";
+  const anchors = [
+    ...task.causalPlan?.requiredContinuityAnchors || [],
+    ...continuityContract?.continuityAnchors || []
+  ].filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist));
+  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => body.includes(anchor))).slice(0, 8);
+  const protagonistActionPattern = protagonist ? new RegExp(`${escapeRegExpLiteral(protagonist)}.{0,40}(\u8D70|\u7AD9|\u4F38\u624B|\u62FF|\u63A8|\u6263|\u6309|\u62AC|\u4F4E\u5934|\u8F6C\u8EAB|\u95EE|\u7B54|\u8BF4|\u9012|\u6536|\u85CF|\u7FFB|\u5199|\u6572|\u62E6|\u907F|\u505C|\u51B3\u5B9A|\u9009\u62E9|\u62D2\u7EDD|\u7B54\u5E94|\u5439\u706D|\u585E\u8FDB|\u8E72|\u770B|\u542C)`, "u") : /(主角|他|她).{0,40}(决定|选择|拒绝|答应|伸手|转身|递|藏|问|说|停)/u;
+  const hasVisibleDecision = protagonistActionPattern.test(body) || /必须|只好|不能|来不及|没有选择|需要|决定|选择|拒绝|答应/u.test(body);
+  const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body);
+  const ending = body.slice(Math.max(0, body.length - 700));
+  const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending);
+  const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length;
+  return {
+    status: score >= 3 ? "eligible" : "quarantined",
+    score,
+    matchedAnchors,
+    hasVisibleDecision,
+    hasConsequence,
+    hasHandoff,
+    reason: score >= 3 ? `\u6B63\u6587\u4EE5\u53EF\u89C1\u4E8B\u4EF6\u6267\u884C\u56E0\u679C\u5408\u540C\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u9690\u6027\u627F\u63A5"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002` : `\u56E0\u679C\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002`
+  };
+}
 function uniqueStrings(values) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+function stableAssetId(value, fallback) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/giu, "-").replace(/^-+|-+$/gu, "");
+  return normalized.slice(0, 72) || fallback;
 }
 function lockedProtagonistFromState(state, protagonistProfile = "") {
   return state.plan.chapterTasks.map((candidate) => candidate.qualityGate?.reason?.match(/沿用「([^」]+)」|首章候选主角识别为「([^」]+)」/u)).map((match) => match?.[1] || match?.[2] || "").find(Boolean) || inferLockedProtagonistName(protagonistProfile);
@@ -6809,10 +9665,40 @@ function extractKeywords(list) {
   }
   return keywords;
 }
+function extractCharacterEvidenceWindow(body, index, nameLength) {
+  const leftBoundary = Math.max(
+    body.lastIndexOf("\n", index),
+    body.lastIndexOf("\u3002", index),
+    body.lastIndexOf("\uFF01", index),
+    body.lastIndexOf("\uFF1F", index),
+    body.lastIndexOf("\uFF1B", index),
+    body.lastIndexOf(";", index)
+  );
+  const rightCandidates = ["\n", "\u3002", "\uFF01", "\uFF1F", "\uFF1B", ";"].map((delimiter) => body.indexOf(delimiter, index + nameLength)).filter((position) => position >= 0);
+  const sentenceStart = leftBoundary >= 0 ? leftBoundary + 1 : Math.max(0, index - 24);
+  const sentenceEnd = rightCandidates.length ? Math.min(...rightCandidates) : Math.min(body.length, index + nameLength + 48);
+  return body.slice(sentenceStart, sentenceEnd);
+}
 function evaluateCharacterVoiceDifferentiation(draft, contract) {
   const body = extractNarrativeBody(draft);
   const dossiers = contract.characterDossiers || [];
-  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && body.includes(name)).slice(0, 6);
+  const abstractCastTerms = /* @__PURE__ */ new Set([
+    "\u5173\u7CFB",
+    "\u5173\u7CFB\u7F51\u7EDC",
+    "\u5173\u7CFB\u88C2\u7F1D",
+    "\u4E0A\u7AE0\u627F\u63A5",
+    "\u7AE0\u8282\u6865\u63A5",
+    "\u7AE0\u672B\u94A9\u5B50",
+    "\u9AD8\u6F6E",
+    "\u7A0B\u5E8F",
+    "\u5173\u952E\u65B9\u6CD5",
+    "\u65B9\u5757",
+    "\u4EFB\u4F55\u4E3B\u89D2",
+    "\u5355\u7AE0\u5B57\u6570",
+    "\u6210\u8BED",
+    "\u7AE0\u4EE5\u540E"
+  ]);
+  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && !abstractCastTerms.has(name) && body.includes(name)).slice(0, 6);
   if (cast.length < 2) {
     return {
       status: "eligible",
@@ -6847,30 +9733,16 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     }
     const localWindows = [];
     for (const index of occurrences) {
-      let start = Math.max(0, index - 80);
-      let end = Math.min(body.length, index + name.length + 100);
-      const otherCast = cast.filter((c) => c !== name);
-      for (const other of otherCast) {
-        const otherEscaped = escapeRegExpLiteral(other);
-        const otherRegex = new RegExp(otherEscaped, "gu");
-        let otherMatch;
-        while ((otherMatch = otherRegex.exec(body)) !== null) {
-          const oIndex = otherMatch.index;
-          if (oIndex < index && oIndex >= start) {
-            start = Math.max(start, oIndex + other.length);
-          }
-          if (oIndex > index && oIndex < end) {
-            end = Math.min(end, oIndex);
-          }
-        }
-      }
-      if (start < end) {
-        localWindows.push(body.slice(start, end));
+      const window = extractCharacterEvidenceWindow(body, index, name.length);
+      if (window) {
+        localWindows.push(window);
       }
     }
     const windows = localWindows.join("\n");
     const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
     const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
+    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows);
+    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows);
     const dialogues = [];
     const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]*?[\u8BF4\u95EE\u9053\u558A\u7B11\u53F9\u58F0\u9053][^\u300D\u201D]*?[\u300C\u201C]([^\u300D\u201D]+?)[\u300D\u201D]`, "gu");
     for (const match2 of body.matchAll(dialoguePattern)) {
@@ -6884,6 +9756,8 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     let hasSpeechEvidence = false;
     let hasRelationEvidence = false;
     let hasSkillLimitationEvidence = false;
+    let hasGoalPressureEvidence = hasGoalPressure;
+    let hasActiveStanceEvidence = hasActiveStance;
     let matchedHabits = [];
     let matchedSpeech = [];
     let matchedRelations = [];
@@ -6910,64 +9784,101 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       const skillKeywords = extractKeywords(skillsAndLimits);
       matchedSkills = skillKeywords.filter((k) => windows.includes(k));
       hasSkillLimitationEvidence = matchedSkills.length > 0;
+      hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence;
+      hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence;
     } else {
       hasHabitEvidence = hasGeneralHabit;
       hasSpeechEvidence = hasDialogue;
       hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows);
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
+      hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence;
+      hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence;
     }
     const evidenceCount = [
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
       hasHabitEvidence,
       hasSpeechEvidence,
       hasRelationEvidence,
       hasSkillLimitationEvidence
     ].filter(Boolean).length;
+    const dramaticEvidenceCount = [
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence,
+      hasSpeechEvidence
+    ].filter(Boolean).length;
+    const isCoreChapterRole = occurrences.length >= 2 || hasSpeechEvidence || hasGoalPressureEvidence || hasRelationEvidence || hasSkillLimitationEvidence;
     return {
       name,
       score: evidenceCount,
+      dramaticScore: dramaticEvidenceCount,
+      occurrenceCount: occurrences.length,
+      isCoreChapterRole,
       hasHabitEvidence,
       hasSpeechEvidence,
       hasRelationEvidence,
       hasSkillLimitationEvidence,
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
       matchedSkills
     };
   });
-  const weak = scored.filter((entry) => entry.score < 2);
-  const habitCarriers = scored.filter((entry) => entry.hasHabitEvidence).length;
-  const speechCarriers = scored.filter((entry) => entry.hasSpeechEvidence).length;
-  const relationCarriers = scored.filter((entry) => entry.hasRelationEvidence).length;
-  const missing = [];
-  if (speechCarriers < 2) missing.push("\u591A\u89D2\u8272\u5BF9\u767D/\u53E3\u8BED\u4E60\u60EF\u5DEE\u5F02");
-  if (habitCarriers < 2) missing.push("\u591A\u89D2\u8272\u884C\u4E3A\u4E60\u60EF\u5DEE\u5F02");
-  if (relationCarriers < 2) missing.push("\u591A\u89D2\u8272\u5173\u7CFB\u7F51\u7EDC\u5DEE\u5F02");
-  if (weak.length) {
-    missing.push(`\u5F31\u89D2\u8272\u4FE1\u53F7\uFF08\u672A\u4F53\u73B0\u6863\u6848\u7279\u8D28\uFF09\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`);
+  const coreRoles = scored.filter((entry) => entry.isCoreChapterRole);
+  const cameoRoles = scored.filter((entry) => !entry.isCoreChapterRole);
+  if (coreRoles.length < 2) {
+    return {
+      status: "eligible",
+      reason: cameoRoles.length ? `\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u964D\u7EA7\uFF1A${cameoRoles.map((entry) => entry.name).join("\u3001")} \u4EC5\u77ED\u6682\u51FA\u73B0\uFF0C\u672A\u627F\u62C5\u672C\u7AE0\u51B2\u7A81\u6216\u9009\u62E9\uFF0C\u4E0D\u4F5C\u4E3A\u786C\u95E8\u69DB\u3002` : "\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u8DF3\u8FC7\uFF1A\u6B63\u6587\u4E2D\u5C11\u4E8E\u4E24\u4E2A\u6838\u5FC3\u51FA\u573A\u4EBA\u7269\u627F\u62C5\u51B2\u7A81\u6216\u9009\u62E9\u3002",
+      observedCast: cast,
+      missing: []
+    };
   }
-  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || scored.filter((s) => s.score >= 2).length < 2);
-  const totalWeakProportion = weak.length / cast.length;
-  const isFlattenedDialogue = clearlyFlattened || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1);
+  const weak = coreRoles.filter((entry) => entry.dramaticScore < 2);
+  const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length;
+  const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length;
+  const relationCarriers = coreRoles.filter((entry) => entry.hasRelationEvidence).length;
+  const goalCarriers = coreRoles.filter((entry) => entry.hasGoalPressureEvidence).length;
+  const stanceCarriers = coreRoles.filter((entry) => entry.hasActiveStanceEvidence).length;
+  const missing = [];
+  if (goalCarriers < 2) missing.push("\u6838\u5FC3\u89D2\u8272\u76EE\u6807/\u538B\u529B\u5DEE\u5F02");
+  if (stanceCarriers < 2) missing.push("\u6838\u5FC3\u89D2\u8272\u884C\u52A8\u9009\u62E9\u5DEE\u5F02");
+  if (speechCarriers < 2 && habitCarriers < 2) missing.push("\u6838\u5FC3\u89D2\u8272\u8868\u8FBE\u65B9\u5F0F\u6216\u884C\u4E3A\u5448\u73B0\u4E0D\u8DB3");
+  if (relationCarriers < 2) missing.push("\u6838\u5FC3\u89D2\u8272\u5173\u7CFB\u7F51\u7EDC\u5DEE\u5F02");
+  if (cameoRoles.length) {
+    missing.push(`\u77ED\u6682\u51FA\u573A\u89D2\u8272\u4E0D\u4F5C\u786C\u95E8\u69DB\uFF1A${cameoRoles.map((entry) => entry.name).join("\u3001")}`);
+  }
+  if (weak.length) {
+    missing.push(`\u5F31\u6838\u5FC3\u89D2\u8272\u4FE1\u53F7\uFF08\u7F3A\u5C11\u76EE\u6807/\u9009\u62E9/\u5173\u7CFB\u538B\u529B\uFF09\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`);
+  }
+  const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || coreRoles.filter((s) => s.dramaticScore >= 2).length < 2);
+  const totalWeakProportion = weak.length / coreRoles.length;
+  const isFlattenedDialogue = clearlyFlattened || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
   if (isFlattenedDialogue) {
-    const weakDetails = weak.map((entry) => {
+    const flaggedRoles = weak.length ? weak : coreRoles;
+    const weakDetails = flaggedRoles.map((entry) => {
       const missingDims = [];
-      if (!entry.hasHabitEvidence) missingDims.push("\u65E5\u5E38\u884C\u4E3A/\u5C0F\u52A8\u4F5C\u4E60\u60EF");
-      if (!entry.hasSpeechEvidence) missingDims.push("\u53E3\u8BED\u5BF9\u767D\u4E60\u60EF/\u7279\u5F81\u8BCD");
-      if (!entry.hasRelationEvidence) missingDims.push("\u4F53\u73B0\u4E0E\u5176\u4ED6\u89D2\u8272\u4FE1\u4EFB/\u654C\u5BF9\u7684\u5173\u7CFB\u7EBD\u5E26");
-      if (!entry.hasSkillLimitationEvidence) missingDims.push("\u4E3B\u52A8\u52A8\u4F5C\u9009\u62E9/\u7279\u5B9A\u80FD\u529B\u7684\u9650\u5236\u6027\u6D41\u9732");
+      if (!entry.hasGoalPressureEvidence) missingDims.push("\u672C\u7AE0\u76EE\u6807/\u538B\u529B");
+      if (!entry.hasActiveStanceEvidence) missingDims.push("\u63A8\u52A8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9");
+      if (!entry.hasRelationEvidence) missingDims.push("\u4E0E\u5176\u4ED6\u89D2\u8272\u7684\u4FE1\u4EFB/\u654C\u5BF9/\u503A\u52A1\u5173\u7CFB");
+      if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("\u81EA\u7136\u5BF9\u767D\u6216\u53EF\u89C1\u884C\u4E3A\u5448\u73B0");
+      if (missingDims.length === 0) missingDims.push("\u8868\u8FBE\u65B9\u5F0F\u8FC7\u4E8E\u540C\u8D28\u5316\uFF0C\u7F3A\u5C11\u5177\u4F53\u573A\u666F\u5206\u6B67");
       return `${entry.name}(\u7F3A\u5C11: ${missingDims.join("\u3001")})`;
     }).join("; ");
     return {
       status: "quarantined",
-      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A\u767B\u573A\u4EBA\u7269\u4E2D ${weak.map((w) => w.name).join("\u3001")} \u7F3A\u4E4F\u72EC\u7279\u7684\u8A00\u884C\u4E60\u60EF\u6216\u5FC3\u5883\u7279\u8D28\uFF0C\u88AB\u6982\u62EC\u4E3A\u6241\u5E73\u6A21\u677F\u5BF9\u767D\u3002\u5177\u4F53\u7EC6\u8282: ${weakDetails}`,
+      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A\u6838\u5FC3\u51FA\u573A\u4EBA\u7269\u4E2D ${flaggedRoles.map((w) => w.name).join("\u3001")} \u7F3A\u5C11\u76EE\u6807\u3001\u9009\u62E9\u6216\u5173\u7CFB\u538B\u529B\uFF0C\u88AB\u6982\u62EC\u4E3A\u540C\u8D28\u5316\u6A21\u677F\u5BF9\u767D\u3002\u5177\u4F53\u7EC6\u8282: ${weakDetails}`,
       observedCast: cast,
       missing
     };
   }
   return {
     status: "eligible",
-    reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u901A\u8FC7\uFF1A${cast.join("\u3001")} \u5404\u6B21\u5448\u73B0\u4E86\u7B26\u5408\u6863\u6848\u7684\u52A8\u4F5C\u7EC6\u8282\u3001\u7279\u5B9A\u53E3\u53E3\u543B\u6216\u5173\u7CFB\u8109\u7EDC\u3002`,
+    reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u901A\u8FC7\uFF1A${coreRoles.map((entry) => entry.name).join("\u3001")} \u901A\u8FC7\u76EE\u6807\u3001\u884C\u52A8\u9009\u62E9\u3001\u5BF9\u767D\u6216\u5173\u7CFB\u538B\u529B\u5F62\u6210\u533A\u5206${cameoRoles.length ? `\uFF1B${cameoRoles.map((entry) => entry.name).join("\u3001")} \u4E3A\u77ED\u6682\u51FA\u573A\uFF0C\u4E0D\u4F5C\u786C\u95E8\u69DB` : ""}\u3002`,
     observedCast: cast,
     missing
   };
@@ -7162,9 +10073,9 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir();
   const candidates = [
-    import_node_path7.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path7.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path7.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    import_node_path8.default.resolve(bundleDir, "..", "resources", "writing"),
+    import_node_path8.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    import_node_path8.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
@@ -7176,7 +10087,7 @@ async function loadProductionWritingResources(rootDir) {
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText(import_node_path7.default.join(candidate, relativePath));
+        const text = await readOptionalText2(import_node_path8.default.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -7215,9 +10126,9 @@ async function loadProductionWritingResources(rootDir) {
 async function writeProductionWritingResourceArtifacts(projectRoot, paths, state, options = {}) {
   invalidateWritingResourcesCache();
   const resources = await loadProductionWritingResources(projectRoot);
-  const resourceDir = import_node_path7.default.join(paths.styleDir, "production-resources");
-  await import_promises4.default.mkdir(resourceDir, { recursive: true });
-  const guidePath = import_node_path7.default.join(resourceDir, "production-writing-assets.md");
+  const resourceDir = import_node_path8.default.join(paths.styleDir, "production-resources");
+  await import_promises5.default.mkdir(resourceDir, { recursive: true });
+  const guidePath = import_node_path8.default.join(resourceDir, "production-writing-assets.md");
   const genre = inferGenreProfile(state);
   const content = [
     "# Production Writing Resources",
@@ -7243,7 +10154,7 @@ async function writeProductionWritingResourceArtifacts(projectRoot, paths, state
     ensureMarkdownSection("Style Controller Guide", resources.styleControllerGuide || "Production style controller guide not found."),
     ensureMarkdownSection("Consistency Guide", resources.consistencyGuide || "Production consistency guide not found.")
   ].join("\n");
-  await import_promises4.default.writeFile(guidePath, content);
+  await import_promises5.default.writeFile(guidePath, content);
   if (options.factoryRootDir && options.projectId) {
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordArtifact({
@@ -7512,7 +10423,7 @@ ${generated}`;
   });
   return result;
 }
-function createDetailedChapterBlueprint(state, task, context, resources, continuityContract = createContinuityContract({ state, task, context })) {
+function createDetailedChapterBlueprint(state, task, context, resources, continuityContract = createContinuityContract({ state, task, context }), storyAssetContext = { prompt: "", files: [] }) {
   const genre = inferGenreProfile(state);
   const sceneType = sceneTypeForChapter(state, task.chapterNumber);
   const arcLabel = getArcLabel(state, task.chapterNumber);
@@ -7545,6 +10456,84 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     continuityContract,
     blueprint: context.consensus
   });
+  const sceneCardCount = Math.min(6, Math.max(4, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)));
+  const sceneCardTemplates = [
+    {
+      goal: `\u7528\u5177\u4F53\u5F02\u5E38\u6253\u5F00\u672C\u7AE0\u95EE\u9898\uFF1A${causalPlan.previousInput}`,
+      conflict: "\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u73B0\u573A\u538B\u529B\u6216\u5173\u7CFB\u538B\u529B\u3002",
+      turn: effectiveAnchors.length ? `\u81F3\u5C11\u8BA9\u951A\u70B9\u8FDB\u5165\u4E8B\u4EF6\uFF1A${effectiveAnchors.slice(0, 2).join("\u3001")}` : "\u5EFA\u7ACB\u540E\u7EED\u53EF\u8FFD\u8E2A\u7684\u7269\u4EF6\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u3002",
+      endHook: "\u8BFB\u8005\u660E\u786E\u77E5\u9053\u672C\u7AE0\u5C40\u90E8\u95EE\u9898\u662F\u4EC0\u4E48\u3002",
+      requiredFacts: effectiveAnchors.slice(0, 2)
+    },
+    {
+      goal: `\u63A8\u8FDB\u672C\u7AE0\u76EE\u6807\uFF1A${causalPlan.sceneObjective}`,
+      conflict: "\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB\uFF0C\u81F3\u5C11\u4E00\u540D\u914D\u89D2\u66B4\u9732\u7ACB\u573A\u6216\u5229\u76CA\u3002",
+      turn: "\u51FA\u73B0\u65B0\u8BC1\u636E\u3001\u65B0\u963B\u529B\u6216\u65B0\u4EE3\u4EF7\u3002",
+      endHook: "\u4E3B\u89D2\u88AB\u8FEB\u63A5\u8FD1\u9009\u62E9\u70B9\u3002",
+      requiredFacts: effectiveAnchors.slice(1, 4)
+    },
+    {
+      goal: `\u628A\u4E3B\u89D2\u9009\u62E9\u5199\u6210\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
+      conflict: "\u9009\u62E9\u5FC5\u987B\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u80FD\u529B\u8FB9\u754C\u6216\u4EF7\u503C\u53D6\u820D\u3002",
+      turn: `\u89D2\u8272\u72B6\u6001\u53D1\u751F\u53D8\u5316\uFF1A${causalPlan.characterStateDelta}`,
+      endHook: "\u9009\u62E9\u5E26\u6765\u7684\u4EE3\u4EF7\u5F00\u59CB\u663E\u5F62\u3002",
+      requiredFacts: effectiveAnchors.slice(2, 5)
+    },
+    {
+      goal: `\u8BA9\u4E0D\u53EF\u9006\u53D8\u5316\u6210\u4E3A\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
+      conflict: "\u963B\u529B\u5151\u73B0\uFF0C\u5C40\u9762\u4E0D\u80FD\u65E0\u635F\u56DE\u5230\u5F00\u573A\u72B6\u6001\u3002",
+      turn: `\u4F0F\u7B14\u64CD\u4F5C\u8FDB\u5165\u6B63\u6587\uFF1A${causalPlan.foreshadowingOperation}`,
+      endHook: "\u7559\u4E0B\u53EF\u88AB\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u753B\u9762\u3001\u7269\u4EF6\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u538B\u529B\u3002",
+      requiredFacts: effectiveAnchors.slice(3, 6)
+    },
+    {
+      goal: `\u5B8C\u6210\u4E0B\u4E00\u7AE0\u4EA4\u68D2\uFF1A${causalPlan.nextHandoff}`,
+      conflict: "\u4F59\u6CE2\u4E0D\u80FD\u7528\u603B\u7ED3\u4EE3\u66FF\uFF0C\u5FC5\u987B\u6709\u73B0\u573A\u52A8\u4F5C\u6216\u5BF9\u767D\u3002",
+      turn: "\u672C\u7AE0\u5C40\u90E8\u7ED3\u679C\u843D\u5B9A\uFF0C\u540C\u65F6\u4EA7\u751F\u4E0B\u4E00\u7AE0\u65E0\u6CD5\u7ED5\u5F00\u7684\u538B\u529B\u3002",
+      endHook: causalPlan.nextHandoff,
+      requiredFacts: effectiveAnchors.slice(-3)
+    }
+  ];
+  const executionContract = {
+    version: 1,
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    chapterRole: task.summary || `${arcLabel} chapter`,
+    chapterPurpose: causalPlan.sceneObjective,
+    macroBeat: task.chapterNumber === 1 ? "E" : "P",
+    suspenseLevel: task.chapterNumber === state.plan.totalChapters ? "payoff" : "active",
+    foreshadowingOperation: causalPlan.foreshadowingOperation,
+    plotTwistLevel: task.chapterNumber % 4 === 0 ? 3 : 2,
+    emotionTarget: "\u7D27\u5F20/\u7591\u95EE -> \u538B\u529B\u52A0\u6DF1 -> \u9009\u62E9\u4EE3\u4EF7 -> \u7AE0\u672B\u671F\u5F85",
+    conflictLevel: Math.min(5, Math.max(2, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 5))))),
+    revealLevel: task.chapterNumber === state.plan.totalChapters ? 5 : Math.min(4, Math.max(1, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 4))))),
+    targetWordCount: task.targetWords,
+    mustAvoid: [
+      "\u7981\u6B62\u7528\u5267\u60C5\u6458\u8981\u66FF\u4EE3\u6B63\u6587",
+      "\u7981\u6B62\u8DF3\u8FC7\u4E0A\u4E00\u7AE0\u4EE3\u4EF7\u53E6\u8D77\u5267\u60C5",
+      "\u7981\u6B62\u63D0\u524D\u6CC4\u9732\u672A\u5230\u573A\u771F\u76F8",
+      "\u7981\u6B62\u6240\u6709\u89D2\u8272\u4F7F\u7528\u540C\u4E00\u79CD\u89E3\u91CA\u8154"
+    ],
+    allowedCharacters: continuityContract.knownCast.length ? continuityContract.knownCast : ["\u4E3B\u89D2", "\u5BF9\u6297\u529B\u91CF", "\u5173\u952E\u5173\u7CFB\u5BF9\u8C61"],
+    forbiddenCharacters: [],
+    allowedNewCharacters: task.chapterNumber === 1 ? ["\u670D\u52A1\u9996\u7AE0\u4E8B\u4EF6\u7684\u5173\u7CFB\u89D2\u8272"] : ["\u4EC5\u5141\u8BB8\u670D\u52A1\u672C\u7AE0\u51B2\u7A81\u4E14\u8FDB\u5165\u8BB0\u5FC6\u8D26\u672C\u7684\u65B0\u89D2\u8272"],
+    entranceProtocol: {
+      newCharacterStage: task.chapterNumber === 1 ? "meet" : "need-based",
+      requiredIntroElements: ["\u8EAB\u4EFD\u7EBF\u7D22", "\u4E0E\u4E3B\u89D2\u7684\u5173\u7CFB\u538B\u529B", "\u53EF\u8BB0\u5FC6\u7684\u52A8\u4F5C/\u79F0\u547C/\u4F53\u6001"]
+    },
+    sceneCards: sceneCardTemplates.slice(0, sceneCardCount).map((card, index) => ({
+      index: index + 1,
+      goal: card.goal,
+      conflict: card.conflict,
+      turn: card.turn,
+      endHook: card.endHook,
+      requiredCharacters: continuityContract.knownCast.slice(0, 4),
+      requiredFacts: card.requiredFacts,
+      forbiddenFacts: ["\u672A\u6765\u7AE0\u8282\u771F\u76F8", "\u672A\u767B\u573A\u5E55\u540E\u4E3B\u4F7F\u8EAB\u4EFD", "\u672A\u51BB\u7ED3\u4E16\u754C\u89C4\u5219"]
+    })),
+    endingHook: causalPlan.nextHandoff,
+    nextChapterEntryState: causalPlan.nextHandoff
+  };
   return [
     "# Detailed Chapter Blueprint",
     "",
@@ -7560,6 +10549,13 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     `Target words: ${task.targetWords}`,
     `Primary scene type: ${sceneType}`,
     "",
+    "## Chapter Execution Contract",
+    "```json",
+    JSON.stringify(executionContract, null, 2),
+    "```",
+    "",
+    storyAssetContext.prompt,
+    storyAssetContext.prompt ? "" : "",
     continuityContract.prompt,
     "",
     characterProfileContract.prompt,
@@ -7681,7 +10677,7 @@ ${context.protagonist.slice(0, 900)}` : "",
 ${context.style.slice(0, 900)}` : ""
   ].filter(Boolean).join("\n");
 }
-async function createChapterBlueprintContent(state, task, context, resources, options) {
+async function createChapterBlueprintContent(state, task, context, resources, options, storyAssetContext = { prompt: "", files: [] }) {
   throwIfPipelineAborted(options);
   const continuityContract = createContinuityContract({ state, task, context });
   const characterProfileContract = buildCharacterProfileContract({
@@ -7690,7 +10686,7 @@ async function createChapterBlueprintContent(state, task, context, resources, op
     protagonistProfile: context.protagonist,
     continuityContract
   });
-  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract);
+  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract, storyAssetContext);
   await emitWritingProgress(options, {
     step: "chapter_blueprint_started",
     role: "Chapter Planner",
@@ -7790,6 +10786,9 @@ async function createChapterBlueprintContent(state, task, context, resources, op
       "Knowledge/RAG References:",
       knowledgeContext.prompt,
       "",
+      storyAssetContext.prompt ? `Production Story Assets:
+${storyAssetContext.prompt}` : "",
+      storyAssetContext.prompt ? "" : "",
       continuityContract.prompt,
       "",
       characterProfileContract.prompt,
@@ -7810,6 +10809,9 @@ async function createChapterBlueprintContent(state, task, context, resources, op
       "",
       "## Master/Consensus Context",
       context.consensus || "(empty)",
+      "",
+      "## Production Story Assets",
+      storyAssetContext.prompt || "(empty)",
       "",
       "## Character Context",
       context.protagonist || "(empty)",
@@ -7912,6 +10914,82 @@ function createDraftBodyFromBlueprint(state, task, blueprint, resources, continu
     `- Next handoff: ${causalPlan.nextHandoff}`,
     `- Blueprint basis: ${blueprint.includes("Detailed Chapter Blueprint") ? "detailed-blueprint" : "fallback"}`
   ].join("\n\n");
+}
+function createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext) {
+  const title = task.title || `\u7B2C ${task.chapterNumber} \u7AE0`;
+  const protagonistName = continuityContract.lockedProtagonistName || "\u6C88\u781A";
+  const causalPlan = getTaskCausalPlan(state, task);
+  const style = approvedStyleContext.contract?.styleContract;
+  const requiredAnchors = uniqueStrings([
+    ...task.causalPlan?.requiredContinuityAnchors || [],
+    ...continuityContract.continuityAnchors || [],
+    "\u8D26\u518C",
+    "\u96E8\u58F0",
+    "\u706F\u706B",
+    "\u95E8\u5916\u811A\u6B65"
+  ].filter(Boolean)).slice(0, 8);
+  const anchorSentence = requiredAnchors.length ? `\u672C\u7AE0\u627F\u63A5${requiredAnchors.slice(0, 4).join("\u3001")}\uFF0C\u4E0D\u6362\u4E3B\u89D2\uFF0C\u4E0D\u6362\u7EBF\u7D22\u3002` : "\u672C\u7AE0\u627F\u63A5\u8D26\u518C\u3001\u96E8\u58F0\u3001\u706F\u706B\u548C\u95E8\u5916\u811A\u6B65\uFF0C\u4E0D\u6362\u4E3B\u89D2\uFF0C\u4E0D\u6362\u7EBF\u7D22\u3002";
+  const chapterShift = task.chapterNumber <= 1 ? "\u7F3A\u9875\u5904\u9732\u51FA\u6D45\u58A8\uFF0C\u5B98\u4ED3\u6DFB\u4E03\uFF0C\u6C11\u6237\u51CF\u4E09\u3002" : `\u4E0A\u4E00\u7AE0\u7559\u4E0B\u7684${requiredAnchors.slice(0, 3).join("\u3001") || "\u8D26\u518C\u4E0E\u95E8\u5916\u811A\u6B65"}\u8FD8\u5728\uFF0C\u5C11\u5C39\u7684\u4EBA\u5DF2\u7ECF\u5230\u4E86\u5ECA\u4E0B\u3002`;
+  const positiveExample = style?.positiveExamples?.[0] || "\u6C88\u781A\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u4E00\u53E5\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F";
+  const baseParagraphs = [
+    `\u5F00\u573A\u843D\u5728\u5177\u4F53\u5F02\u5E38\u4E0E\u73B0\u573A\u538B\u529B\u4E0A\u3002\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875\u8D26\u518C\u63A8\u5230\u706F\u4E0B\u3002\u7EB8\u8FB9\u9F50\u5F97\u8FC7\u5206\uFF0C\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002\u706F\u706B\u4E00\u8DF3\uFF0C\u95E8\u5916\u811A\u6B65\u505C\u5728\u69DB\u5916\u3002`,
+    `\u8001\u5468\u7AD9\u5728\u90A3\u91CC\uFF0C\u8896\u53E3\u538B\u7740\u534A\u679A\u6E7F\u5370\u3002${protagonistName}\u770B\u89C1\u4E86\uFF0C\u6CA1\u6709\u7ACB\u523B\u95EE\u3002${anchorSentence}`,
+    `\u201C\u8C01\u52A8\u8FC7\uFF1F\u201D${protagonistName}\u95EE\u3002`,
+    "\u8001\u5468\u6CA1\u7B54\u3002\u978B\u5C16\u5F80\u540E\u6536\u4E86\u534A\u5BF8\u3002\u96E8\u58F0\u538B\u4F4F\u4ED6\u7684\u547C\u5438\uFF0C\u4E5F\u538B\u4F4F\u5ECA\u4E0B\u90A3\u4E2A\u4EBA\u7684\u5F71\u5B50\u3002",
+    `${chapterShift}${protagonistName}\u60F3\u8981\u67E5\u6E05\u7A0E\u518C\uFF0C\u4E0D\u662F\u4E3A\u4E86\u6E05\u767D\u3002\u4ED6\u6B20\u8FC7\u4E00\u6761\u547D\uFF0C\u6B20\u5728\u540C\u4E00\u518C\u8D26\u91CC\u3002\u8FD9\u6761\u7EBF\u7D22\u63A8\u8FDB\u5173\u7CFB\uFF0C\u4E5F\u63A8\u8FDB\u4EE3\u4EF7\uFF1B\u8FD9\u4E2A\u5F31\u70B9\u4E0D\u80FD\u7ED9\u5C11\u5C39\u770B\u89C1\u3002`,
+    `\u4ED6\u4F38\u624B\u6309\u4F4F\u8D26\u518C\uFF0C\u6307\u8282\u5F88\u767D\u3002${protagonistName}\u64C5\u957F\u770B\u6570\u5B57\u7684\u7F1D\uFF0C\u5374\u4E0D\u4F1A\u5728\u6743\u52BF\u9762\u524D\u8BF4\u8F6F\u8BDD\u3002\u8001\u5468\u77E5\u9053\u8FD9\u70B9\uFF0C\u6240\u4EE5\u6CA1\u6709\u5E2E\u4ED6\uFF0C\u53EA\u62E6\u5728\u95E8\u53E3\u3002`,
+    `\u201C\u522B\u7FFB\u4E86\u3002\u201D\u8001\u5468\u4F4E\u58F0\u8BF4\u3002`,
+    `\u201C\u4F60\u6015\u8C01\uFF1F\u201D`,
+    "\u8001\u5468\u62AC\u773C\u3002\u80A9\u4E0A\u7684\u65E7\u8863\u6E7F\u4E86\u4E00\u7EBF\u3002\u90A3\u4E00\u7EBF\u6C34\u4ECE\u80A9\u5934\u6ED1\u5230\u8896\u8FB9\uFF0C\u50CF\u6709\u4EBA\u521A\u4ECE\u96E8\u91CC\u6293\u8FC7\u4ED6\u3002",
+    `\u95E8\u5916\u7684\u4EBA\u6572\u4E86\u4E24\u4E0B\u3002\u5F88\u8F7B\u3002${protagonistName}\u628A\u7F3A\u9875\u5939\u8FDB\u8896\u91CC\uFF0C\u5439\u4F4E\u706F\u706B\u3002\u6BCF\u6BB5\u90FD\u5FC5\u987B\u63A8\u8FDB\u7EBF\u7D22\u3001\u5173\u7CFB\u6216\u4EE3\u4EF7\uFF1B\u5173\u7CFB\u88C2\u7F1D\u5C31\u5728\u8FD9\u4E00\u606F\u91CC\u5F00\u4E86\u53E3\uFF1A\u8001\u5468\u5E2E\u4ED6\u85CF\u8D26\uFF0C\u4E5F\u628A\u4ED6\u5356\u7ED9\u4E86\u95E8\u5916\u7684\u4EBA\u3002`,
+    positiveExample,
+    `\u7EB8\u9875\u8D34\u7740\u638C\u5FC3\u53D1\u51C9\u3002${protagonistName}\u6CA1\u6709\u9000\u3002\u4ED6\u51B3\u5B9A\u5148\u5F00\u95E8\u3002\u53EA\u5F00\u534A\u6247\u3002\u95E8\u7F1D\u91CC\u9732\u51FA\u4E00\u679A\u5B98\u5370\uFF0C\u5370\u9762\u5012\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\u3002`,
+    "\u201C\u5C11\u5C39\u8BF7\u4F60\u8D70\u4E00\u8D9F\u3002\u201D\u95E8\u5916\u7684\u4EBA\u8BF4\u3002",
+    `\u201C\u8D26\u5462\uFF1F\u201D`,
+    "\u201C\u5E26\u4E0A\u3002\u201D",
+    `${protagonistName}\u542C\u89C1\u8001\u5468\u5728\u8EAB\u540E\u5438\u6C14\u3002\u4ED6\u6CA1\u56DE\u5934\u3002\u4ED6\u628A\u8D26\u518C\u6536\u8FDB\u6000\u91CC\uFF0C\u53C8\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002\u90A3\u4E00\u9875\u7A7A\u7740\uFF0C\u5374\u6BD4\u5199\u6EE1\u66F4\u50CF\u8BC1\u636E\u3002`,
+    `\u5DF7\u53E3\u7684\u9F13\u58F0\u8FC7\u4E86\u4E09\u4E0B\u3002\u96E8\u6CA1\u6709\u505C\u3002${protagonistName}\u77E5\u9053\u81EA\u5DF1\u53EA\u80FD\u9009\u4E00\u8FB9\uFF1A\u4EA4\u8D26\uFF0C\u8001\u5468\u6D3B\uFF1B\u85CF\u9875\uFF0C\u4ED6\u81EA\u5DF1\u6D3B\u3002`,
+    "\u4ED6\u628A\u95E8\u63A8\u5F00\u3002\u51B7\u98CE\u8FDB\u5C4B\uFF0C\u706F\u706B\u5411\u540E\u4E00\u4F0F\u3002\u8001\u5468\u4F38\u624B\u8981\u62E6\uFF0C\u624B\u5230\u534A\u8DEF\u53C8\u505C\u4F4F\u3002",
+    `\u201C\u6C88\u781A\u3002\u201D\u8001\u5468\u7B2C\u4E00\u6B21\u53EB\u4ED6\u7684\u540D\u5B57\uFF0C\u201C\u4F60\u4E0D\u80FD\u53BB\u3002\u201D`,
+    `\u201C\u6211\u4E0D\u53BB\uFF0C\u4ED6\u4EEC\u4F1A\u6765\u95EE\u4F60\u3002\u201D`,
+    "\u8001\u5468\u7684\u8138\u8272\u7070\u4E0B\u53BB\u3002\u90A3\u4E0D\u662F\u5BB3\u6015\uFF0C\u662F\u65E9\u77E5\u9053\u8FD9\u53E5\u8BDD\u4F1A\u6765\u3002\u5173\u7CFB\u5230\u8FD9\u91CC\u5DF2\u7ECF\u4E0D\u80FD\u8865\u56DE\u539F\u6837\u3002",
+    `${protagonistName}\u8DE8\u8FC7\u95E8\u69DB\u3002\u95E8\u5916\u811A\u6B65\u8BA9\u5F00\u534A\u6B65\uFF0C\u5B98\u5370\u5374\u6CA1\u6709\u6536\u3002\u96E8\u70B9\u6253\u5728\u8D26\u518C\u5C01\u76AE\u4E0A\uFF0C\u58A8\u5473\u4ECE\u65E7\u7EBF\u91CC\u6CDB\u51FA\u6765\u3002`,
+    `\u4ED6\u628A\u7F3A\u9875\u7559\u7ED9\u8001\u5468\uFF0C\u4E5F\u628A\u6000\u7591\u7559\u5728\u5C4B\u91CC\u3002\u7ED3\u5C3E\u7559\u4E0B\u53EF\u8FFD\u8E2A\u95EE\u9898\u3001\u5173\u7CFB\u88C2\u7F1D\u6216\u7EBF\u7D22\u4F59\u6CE2\uFF1A\u8001\u5468\u62FF\u7740\u7A7A\u767D\u8BC1\u636E\uFF0C\u5C11\u5C39\u62FF\u7740\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u5269\u8896\u4E2D\u4E00\u884C\u6D45\u58A8\u3002`
+  ];
+  const expansionSeeds = [
+    `\u5ECA\u4E0B\u7684\u6C34\u805A\u6210\u7A84\u7EBF\u3002${protagonistName}\u4F4E\u5934\u770B\u4E86\u4E00\u773C\uFF0C\u6C34\u7EBF\u4ECE\u8001\u5468\u811A\u8FB9\u7ED5\u5F00\uFF0C\u8BF4\u660E\u4ED6\u7AD9\u4E86\u5F88\u4E45\u3002`,
+    "\u8D26\u518C\u7684\u7EBF\u88C5\u677E\u4E86\u4E00\u6263\u3002\u677E\u6263\u91CC\u5939\u7740\u7EC6\u5C0F\u7C73\u7C92\uFF0C\u4E0D\u662F\u4E66\u623F\u91CC\u7684\u4E1C\u897F\uFF0C\u662F\u4ED3\u95E8\u53E3\u7684\u788E\u7CAE\u3002",
+    `\u8001\u5468\u8BF4\u8BDD\u603B\u6162\u534A\u62CD\u3002\u4ECA\u5929\u4E0D\u662F\u6162\uFF0C\u662F\u5728\u7B49\u95E8\u5916\u7684\u4EBA\u66FF\u4ED6\u5F00\u53E3\u3002${protagonistName}\u770B\u61C2\u4E86\uFF0C\u53EA\u628A\u58F0\u97F3\u538B\u5F97\u66F4\u4F4E\u3002`,
+    "\u706F\u706B\u7167\u5230\u5B98\u5370\u8FB9\u7F18\u3002\u5370\u6CE5\u672A\u5E72\uFF0C\u7EA2\u8272\u5728\u96E8\u6C14\u91CC\u53D1\u6697\u3002\u90A3\u679A\u5370\u672C\u4E0D\u8BE5\u51FA\u73B0\u5728\u5C0F\u540F\u95E8\u524D\u3002",
+    `${protagonistName}\u7684\u77ED\u677F\u4E5F\u5728\u8FD9\u91CC\u3002\u4ED6\u80FD\u7B97\u51FA\u7A0E\u518C\u7F3A\u53E3\uFF0C\u5374\u7B97\u4E0D\u51FA\u4E00\u4E2A\u65E7\u53CB\u4F1A\u5728\u51E0\u6B65\u4E4B\u5185\u7AD9\u5230\u54EA\u8FB9\u3002`,
+    "\u95E8\u5916\u7684\u4EBA\u4E0D\u50AC\u3002\u6743\u529B\u4E0D\u6025\u7684\u65F6\u5019\uFF0C\u66F4\u50CF\u5200\u80CC\u3002\u5B83\u8D34\u5728\u9888\u540E\uFF0C\u4E0D\u89C1\u8840\uFF0C\u4E5F\u4E0D\u80AF\u79BB\u5F00\u3002",
+    `\u6C88\u781A\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u4E00\u53E5\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F\u8FD9\u53E5\u8BDD\u843D\u4E0B\uFF0C\u5C4B\u91CC\u4E09\u4E2A\u4EBA\u90FD\u6CA1\u6709\u518D\u52A8\u3002`,
+    "\u96E8\u58F0\u66F4\u5BC6\u3002\u5C4B\u6A90\u4E0B\u7684\u9ED1\u5F71\u5411\u524D\u534A\u5BF8\uFF0C\u53C8\u505C\u4F4F\u3002\u90A3\u534A\u5BF8\u591F\u4E86\uFF0C\u591F\u628A\u65E7\u4FE1\u4EFB\u5272\u5F00\u3002"
+  ];
+  const paragraphs = [...baseParagraphs];
+  let index = 0;
+  while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
+    paragraphs.push(expansionSeeds[index % expansionSeeds.length]);
+    index += 1;
+  }
+  const body = paragraphs.join("\n\n");
+  return [
+    `# ${title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Target words: ${task.targetWords}`,
+    `- Estimated production words: ${wordCount(body)}`,
+    "- Draft source: deterministic style-contract test fixture",
+    `- Continuity status: ${continuityContract.status}`,
+    `- Locked protagonist: ${continuityContract.lockedProtagonistName || "(first chapter pending)"}`,
+    `- Causal objective: ${causalPlan.sceneObjective}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`
+  ].join("\n");
 }
 async function generateProductionTextWithLlm({
   roleName,
@@ -8050,27 +11128,94 @@ Current stage: ${state.runtime.stage}`,
     throw error;
   }
 }
+function createActiveWorldSlice(input) {
+  const causalPlan = getTaskCausalPlan(input.state, input.task);
+  const knownCast = Array.isArray(input.continuityContract.knownCast) ? input.continuityContract.knownCast : [];
+  const continuityAnchors = Array.isArray(input.continuityContract.continuityAnchors) ? input.continuityContract.continuityAnchors : [];
+  const keywords = uniqueStrings([
+    input.state.project.title,
+    input.state.project.idea,
+    input.continuityContract.lockedProtagonistName,
+    ...knownCast.slice(0, 8),
+    ...continuityAnchors.slice(0, 8),
+    ...causalPlan.requiredContinuityAnchors,
+    ...String(input.task.title || "").match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/gu) || [],
+    ...causalPlan.sceneObjective.match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/gu) || []
+  ].filter(Boolean).map((item) => String(item).trim()).filter((item) => item.length >= 2));
+  const chapterPatterns = [
+    new RegExp(`\u7B2C\\s*${input.task.chapterNumber}\\s*\u7AE0`, "u"),
+    new RegExp(`Chapter\\s*${input.task.chapterNumber}\\b`, "iu"),
+    new RegExp(`\\|\\s*${input.task.chapterNumber}\\s*\\|`, "u")
+  ];
+  const alwaysRelevant = /Frozen World Rules|Non-Negotiable|Causal Spine|Chapter Causality Matrix|Continuity Anchor|Foreshadowing|Character|Relationship|World|Rule|Pressure|Ledger|主角|配角|人物|关系|世界|规则|设定|伏笔|线索|代价|压力|承接|交棒/u;
+  const sources = [
+    ["Story Assets", input.storyAssets],
+    ["Consensus", input.consensus],
+    ["Blueprint", input.blueprint]
+  ];
+  const rows = [];
+  for (const [label, text] of sources) {
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const picked = lines.filter(
+      (line) => chapterPatterns.some((pattern) => pattern.test(line)) || alwaysRelevant.test(line) || keywords.some((keyword) => line.includes(keyword))
+    ).slice(0, 28);
+    if (picked.length) {
+      rows.push(`## ${label}`);
+      rows.push(...picked.map((line) => `- ${line.replace(/^[-#]\s*/u, "")}`));
+    }
+  }
+  const fallback = [
+    "## Causal Focus",
+    `- Scene objective: ${causalPlan.sceneObjective}`,
+    `- Required anchors: ${causalPlan.requiredContinuityAnchors.join("\u3001") || "none"}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`
+  ];
+  const content = [
+    "# Active World Slice",
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter: ${input.task.chapterNumber}`,
+    "",
+    ...rows.length ? rows : fallback
+  ].join("\n");
+  const maxChars = input.maxChars || 1600;
+  return content.length > maxChars ? `${content.slice(0, maxChars).trimEnd()}
+...[active world slice clipped]` : content;
+}
 async function loadAndPruneGlobalContext(params) {
   const { state, task, blueprint, resources, continuityContract, paths } = params;
   let previousDraftFragment = "";
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
   if (paths && previousChapterId) {
-    const previousFinalDraft = await readOptionalText(import_node_path7.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
+    const previousFinalDraft = await readOptionalText2(import_node_path8.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
     if (previousFinalDraft) {
       previousDraftFragment = previousFinalDraft.slice(-1200);
     }
   }
   let rawOutline = "";
   if (paths) {
-    rawOutline = await readOptionalText(paths.masterOutlinePath);
+    rawOutline = await readOptionalText2(paths.masterOutlinePath);
+  }
+  let rawStoryAssets = "";
+  if (paths) {
+    const storyAssets = await loadProductionStoryAssetContext(paths, task, 1800);
+    rawStoryAssets = storyAssets.prompt;
   }
   let rawConsensus = "";
   if (paths) {
-    rawConsensus = await readOptionalText(paths.consensusPath);
+    rawConsensus = await readOptionalText2(paths.consensusPath);
   }
+  const activeWorldSlice = createActiveWorldSlice({
+    state,
+    task,
+    blueprint,
+    storyAssets: rawStoryAssets,
+    consensus: rawConsensus,
+    continuityContract
+  });
   let rawMemory = "";
   if (paths && previousChapterId) {
-    rawMemory = await readOptionalText(import_node_path7.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
+    rawMemory = await readOptionalText2(import_node_path8.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
   }
   const recalledMemory = await retrieveFactoryMemoryContext({
     state,
@@ -8091,6 +11236,9 @@ async function loadAndPruneGlobalContext(params) {
   }
   if (rawMemory.length > 1200) {
     rawMemory = rawMemory.slice(0, 1200) + "\n...[\u89D2\u8272\u4E0E\u53EC\u56DE\u8BB0\u5FC6\u8D85\u989D\u5C40\u90E8\u88C1\u526A]";
+  }
+  if (rawStoryAssets.length > 1800) {
+    rawStoryAssets = rawStoryAssets.slice(0, 1800) + "\n...[\u6545\u4E8B\u8D44\u4EA7\u6458\u8981\u8D85\u989D\u5C40\u90E8\u88C1\u526A]";
   }
   if (ledgerList.join("\n").length > 1500) {
     const tempLedger = [];
@@ -8115,6 +11263,7 @@ async function loadAndPruneGlobalContext(params) {
   let prunedLedgerList = [...ledgerList];
   let prunedConsensus = rawConsensus;
   let prunedOutline = rawOutline;
+  let prunedStoryAssets = rawStoryAssets;
   if (prunedConsensus) {
     const keywordSet = /* @__PURE__ */ new Set();
     if (protagonistName) keywordSet.add(protagonistName);
@@ -8167,26 +11316,30 @@ async function loadAndPruneGlobalContext(params) {
   }
   const getDynamicLength = () => {
     const ledgerText = prunedLedgerList.join("\n");
-    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length;
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length + prunedStoryAssets.length;
   };
   let wRag = 5;
   let wMemory = 4;
   let wLedger = 3;
   let wOutline = 2;
+  let wStoryAssets = 0.8;
   let wConsensus = 1;
   if (/案件|线索|疑点|记忆|上一章/i.test(prioritiesText)) {
     wMemory = 1.5;
     wLedger = 1;
     wConsensus = 4;
     wOutline = 3.5;
+    wStoryAssets = 1.2;
   } else if (/境界|功法|世界观|设定|法则|物理/i.test(prioritiesText)) {
     wConsensus = 0.5;
+    wStoryAssets = 0.4;
     wRag = 5;
     wMemory = 4;
   } else if (/关系|情感|创伤|角色/i.test(prioritiesText)) {
     wMemory = 1;
     wLedger = 2;
     wConsensus = 4;
+    wStoryAssets = 1;
   }
   const partitions = [
     { name: "Rag", get: () => prunedRag, set: (val) => prunedRag = val, weight: wRag },
@@ -8195,6 +11348,7 @@ async function loadAndPruneGlobalContext(params) {
       prunedLedgerList = val ? val.split("\n") : [];
     }, weight: wLedger },
     { name: "Outline", get: () => prunedOutline, set: (val) => prunedOutline = val, weight: wOutline },
+    { name: "StoryAssets", get: () => prunedStoryAssets, set: (val) => prunedStoryAssets = val, weight: wStoryAssets },
     { name: "Consensus", get: () => prunedConsensus, set: (val) => prunedConsensus = val, weight: wConsensus }
   ];
   partitions.sort((a, b) => b.weight - a.weight);
@@ -8225,6 +11379,8 @@ async function loadAndPruneGlobalContext(params) {
   return {
     prunedConsensus,
     prunedOutline,
+    prunedStoryAssets,
+    activeWorldSlice,
     prunedRag,
     prunedMemory,
     prunedLedger: prunedLedgerList.join("\n"),
@@ -8233,6 +11389,10 @@ async function loadAndPruneGlobalContext(params) {
 }
 function trimBlueprintForDrafting(blueprint) {
   let trimmed = blueprint;
+  trimmed = trimmed.replace(
+    /## Chapter Execution Contract\s+```json\s+[\s\S]*?```\s*/u,
+    "## Chapter Execution Contract\n- \u7ED3\u6784\u5316\u573A\u666F\u5361\u5DF2\u4F5C\u4E3A\u5F53\u524D\u7247\u6BB5\u5408\u540C\u5355\u72EC\u6CE8\u5165\u3002\n\n"
+  );
   const carryoverIndex = trimmed.indexOf("## Consensus Carryover");
   if (carryoverIndex > 0) {
     trimmed = trimmed.slice(0, carryoverIndex).trim();
@@ -8243,7 +11403,1074 @@ function trimBlueprintForDrafting(blueprint) {
   }
   return trimmed;
 }
-async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
+function extractJsonArrayAfterKey(text, key) {
+  const keyIndex = text.indexOf(`"${key}"`);
+  if (keyIndex < 0) return "";
+  const start = text.indexOf("[", keyIndex);
+  if (start < 0) return "";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "[") {
+      depth += 1;
+    } else if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+  return "";
+}
+function extractSceneCardsFromBlueprint(blueprint) {
+  const sceneCardsJson = extractJsonArrayAfterKey(blueprint, "sceneCards");
+  if (!sceneCardsJson) return [];
+  try {
+    const parsed = JSON.parse(sceneCardsJson);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((card, cardIndex) => {
+      if (!card || typeof card !== "object") return null;
+      const rawCard = card;
+      const requiredCharacters = Array.isArray(rawCard.requiredCharacters) ? rawCard.requiredCharacters.map((item) => String(item).trim()).filter(Boolean) : [];
+      const requiredFacts = Array.isArray(rawCard.requiredFacts) ? rawCard.requiredFacts.map((item) => String(item).trim()).filter(Boolean) : [];
+      const forbiddenFacts = Array.isArray(rawCard.forbiddenFacts) ? rawCard.forbiddenFacts.map((item) => String(item).trim()).filter(Boolean) : [];
+      const goal = String(rawCard.goal || "").trim();
+      const conflict = String(rawCard.conflict || "").trim();
+      const turn = String(rawCard.turn || "").trim();
+      const endHook = String(rawCard.endHook || "").trim();
+      if (!goal && !conflict && !turn && !endHook) return null;
+      return {
+        index: Number(rawCard.index) || cardIndex + 1,
+        goal,
+        conflict,
+        turn,
+        endHook,
+        requiredCharacters,
+        requiredFacts,
+        forbiddenFacts
+      };
+    }).filter((card) => Boolean(card));
+  } catch {
+    return [];
+  }
+}
+function createDraftSegmentPlan(state, task, continuityContract = createContinuityContract({ state, task, blueprint: "" }), blueprint = "") {
+  const causalPlan = getTaskCausalPlan(state, task);
+  const targetWords = Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500);
+  const protagonist = continuityContract.lockedProtagonistName || "\u4E3B\u89D2";
+  const anchors = continuityContract.continuityAnchors.length ? continuityContract.continuityAnchors : causalPlan.requiredContinuityAnchors;
+  const sceneCards = extractSceneCardsFromBlueprint(blueprint).slice(0, 8);
+  if (sceneCards.length >= 2) {
+    const baseTarget2 = Math.max(260, Math.floor(targetWords / sceneCards.length));
+    return sceneCards.map((card, index) => ({
+      index: index + 1,
+      total: sceneCards.length,
+      label: `\u573A\u666F\u5361 ${card.index}`,
+      timelinePosition: `\u6309\u7AE0\u8282\u4EFB\u52A1\u5355\u63A8\u8FDB\u7B2C ${card.index} \u4E2A\u573A\u666F`,
+      narrativeFocus: [
+        card.goal ? `\u76EE\u6807\uFF1A${card.goal}` : "",
+        card.conflict ? `\u51B2\u7A81\uFF1A${card.conflict}` : "",
+        card.turn ? `\u8F6C\u6298\uFF1A${card.turn}` : ""
+      ].filter(Boolean).join("\uFF1B") || `${protagonist}\u5FC5\u987B\u5728\u672C\u573A\u666F\u4E2D\u5B8C\u6210\u4E00\u6B21\u53EF\u89C1\u63A8\u8FDB\u3002`,
+      requiredBeats: [
+        card.goal ? `Scene Goal \u843D\u5730\uFF1A${card.goal}` : "",
+        card.conflict ? `Scene Conflict \u5FC5\u987B\u5199\u6210\u73B0\u573A\u538B\u529B\uFF1A${card.conflict}` : "",
+        card.turn ? `Scene Turn \u5FC5\u987B\u6539\u53D8\u5C40\u9762\uFF1A${card.turn}` : "",
+        card.endHook ? `Scene End Hook \u6536\u675F\u5230\uFF1A${card.endHook}` : "",
+        card.requiredCharacters.length ? `Required Characters: ${card.requiredCharacters.join("\u3001")}` : "",
+        card.requiredFacts.length ? `Required Facts: ${card.requiredFacts.join("\u3001")}` : "",
+        card.forbiddenFacts.length ? `Forbidden Facts \u4E0D\u5F97\u6CC4\u9732\uFF1A${card.forbiddenFacts.join("\u3001")}` : ""
+      ].filter(Boolean),
+      continuityFocus: [.../* @__PURE__ */ new Set([...card.requiredFacts, ...anchors.slice(index, index + 2)])],
+      targetWords: index === sceneCards.length - 1 ? Math.max(240, targetWords - baseTarget2 * (sceneCards.length - 1)) : baseTarget2,
+      source: "scene_card",
+      sceneCard: card
+    }));
+  }
+  const segmentCount = Math.min(6, Math.max(4, Math.round(targetWords / 650)));
+  const baseSegments = [
+    {
+      label: "\u5F00\u573A\u627F\u63A5",
+      timelinePosition: "\u672C\u7AE0\u5F00\u573A\uFF0C\u7D27\u63A5\u4E0A\u4E00\u7AE0\u4F59\u6CE2",
+      narrativeFocus: `\u8BA9${protagonist}\u5728\u5177\u4F53\u573A\u666F\u91CC\u78B0\u5230\u4E0A\u4E00\u7AE0\u7559\u4E0B\u7684\u95EE\u9898\uFF0C\u5148\u5199\u52A8\u4F5C\u548C\u538B\u529B\uFF0C\u518D\u5199\u5224\u65AD\u3002`,
+      requiredBeats: [
+        `Previous Input \u843D\u5730\uFF1A${causalPlan.previousInput}`,
+        "\u7528\u7269\u4EF6\u3001\u58F0\u97F3\u3001\u6C14\u5473\u6216\u8EAB\u4F53\u53CD\u5E94\u5EFA\u7ACB\u7B2C\u4E00\u573A\u51B2\u7A81\u3002"
+      ],
+      continuityFocus: anchors.slice(0, 2)
+    },
+    {
+      label: "\u538B\u529B\u5347\u7EA7",
+      timelinePosition: "\u5F00\u573A\u4E4B\u540E\uFF0C\u77DB\u76FE\u4ECE\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB",
+      narrativeFocus: "\u8BA9\u65C1\u767D\u8D34\u8FD1\u73B0\u573A\uFF0C\u63A8\u52A8\u914D\u89D2\u7ACB\u573A\u3001\u8BEF\u4F1A\u3001\u8BD5\u63A2\u6216\u5A01\u80C1\u663E\u5F62\u3002",
+      requiredBeats: [
+        `Causal Objective \u5F00\u59CB\u88AB\u4E8B\u4EF6\u63A8\u8FDB\uFF1A${causalPlan.sceneObjective}`,
+        "\u81F3\u5C11\u8BA9\u4E00\u540D\u914D\u89D2\u901A\u8FC7\u79F0\u547C\u3001\u505C\u987F\u3001\u52A8\u4F5C\u6216\u5229\u76CA\u9009\u62E9\u8868\u73B0\u5DEE\u5F02\u3002"
+      ],
+      continuityFocus: anchors.slice(1, 4)
+    },
+    {
+      label: "\u4E3B\u89D2\u51B3\u7B56",
+      timelinePosition: "\u4E2D\u6BB5\u8F6C\u6298\uFF0C\u4E3B\u89D2\u5FC5\u987B\u4E3B\u52A8\u9009\u62E9",
+      narrativeFocus: `${protagonist}\u4E0D\u80FD\u53EA\u65C1\u89C2\uFF0C\u5FC5\u987B\u7528\u53EF\u89C1\u884C\u52A8\u6539\u53D8\u5C40\u52BF\uFF0C\u5E76\u66B4\u9732\u80FD\u529B\u8FB9\u754C\u6216\u77ED\u677F\u3002`,
+      requiredBeats: [
+        `Protagonist Decision \u5199\u6210\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
+        `Character State Delta \u5FC5\u987B\u51FA\u73B0\uFF1A${causalPlan.characterStateDelta}`
+      ],
+      continuityFocus: anchors.slice(2, 5)
+    },
+    {
+      label: "\u4E0D\u53EF\u9006\u540E\u679C",
+      timelinePosition: "\u9AD8\u6F6E\u6216\u4E34\u8FD1\u7AE0\u672B\uFF0C\u9009\u62E9\u5E26\u6765\u4EE3\u4EF7",
+      narrativeFocus: "\u5199\u51FA\u53CD\u51FB\u3001\u5151\u73B0\u3001\u66B4\u9732\u3001\u635F\u5931\u6216\u5173\u7CFB\u88C2\u7F1D\uFF0C\u4E0D\u7528\u89E3\u91CA\u603B\u7ED3\u4EE3\u66FF\u4E8B\u4EF6\u3002",
+      requiredBeats: [
+        `Irreversible Change \u6210\u4E3A\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
+        `Foreshadowing Operation \u63A8\u8FDB\u6216\u56DE\u6536\uFF1A${causalPlan.foreshadowingOperation}`
+      ],
+      continuityFocus: anchors.slice(3, 6)
+    },
+    {
+      label: "\u7AE0\u672B\u4EA4\u63A5",
+      timelinePosition: "\u7AE0\u672B\u4F59\u6CE2\uFF0C\u7559\u4E0B\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u7684\u5177\u4F53\u95EE\u9898",
+      narrativeFocus: "\u6536\u4F4F\u672C\u7AE0\u5C40\u90E8\u7ED3\u679C\uFF0C\u4FDD\u7559\u4E00\u4E2A\u5177\u4F53\u753B\u9762\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u538B\u529B\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
+      requiredBeats: [
+        `Next Chapter Handoff \u81EA\u7136\u4EA7\u751F\uFF1A${causalPlan.nextHandoff}`,
+        "\u4E0D\u8981\u628A\u7B54\u6848\u8BB2\u5B8C\uFF0C\u6700\u540E\u4E00\u6BB5\u5FC5\u987B\u6709\u53EF\u8FFD\u8E2A\u7684\u753B\u9762\u6216\u7269\u4EF6\u3002"
+      ],
+      continuityFocus: anchors.slice(-3)
+    }
+  ];
+  const selected = segmentCount <= 4 ? [baseSegments[0], baseSegments[1], baseSegments[2], baseSegments[4]] : baseSegments.slice(0, segmentCount);
+  const baseTarget = Math.max(260, Math.floor(targetWords / selected.length));
+  return selected.map((segment, index) => ({
+    ...segment,
+    index: index + 1,
+    total: selected.length,
+    targetWords: index === selected.length - 1 ? Math.max(240, targetWords - baseTarget * (selected.length - 1)) : baseTarget,
+    source: "timeline"
+  }));
+}
+function createDraftSegmentCompositionPlan(segment, continuityContract) {
+  const sceneCard = segment.sceneCard;
+  const continuityFocus = segment.continuityFocus.length ? segment.continuityFocus : continuityContract.continuityAnchors.slice(0, 3);
+  const protagonist = continuityContract.lockedProtagonistName || "\u4E3B\u89D2";
+  return {
+    plot: [
+      sceneCard?.goal || segment.narrativeFocus,
+      sceneCard?.conflict || "\u628A\u538B\u529B\u5199\u6210\u73B0\u573A\u4E8B\u4EF6\uFF0C\u800C\u4E0D\u662F\u89E3\u91CA\u6027\u6982\u8FF0\u3002",
+      sceneCard?.turn || "\u8BA9\u672C\u7247\u6BB5\u81F3\u5C11\u53D1\u751F\u4E00\u6B21\u53EF\u89C1\u5C40\u9762\u53D8\u5316\u3002",
+      sceneCard?.endHook || "\u4EE5\u5177\u4F53\u95EE\u9898\u3001\u7269\u4EF6\u3001\u5173\u7CFB\u538B\u529B\u6216\u672A\u5B8C\u6210\u52A8\u4F5C\u6536\u675F\u3002"
+    ].filter(Boolean),
+    narration: [
+      "\u65C1\u767D\u53EA\u670D\u52A1\u73B0\u573A\u63A8\u8FDB\u3001\u611F\u5B98\u843D\u70B9\u548C\u89D2\u8272\u9009\u62E9\uFF0C\u4E0D\u63D0\u524D\u89E3\u91CA\u540E\u7EED\u771F\u76F8\u3002",
+      "\u5148\u5199\u7269\u4EF6\u3001\u52A8\u4F5C\u3001\u58F0\u97F3\u3001\u6C14\u5473\u6216\u8EAB\u4F53\u53CD\u5E94\uFF0C\u518D\u7ED9\u6781\u5C11\u91CF\u5224\u65AD\u3002",
+      "\u6BCF\u6BB5\u81F3\u5C11\u6709\u4E00\u4E2A\u53EF\u89C1\u52A8\u4F5C\u6216\u53EF\u8FFD\u8E2A\u7269\u4EF6\uFF0C\u907F\u514D\u7EAF\u5FC3\u7406\u603B\u7ED3\u3002"
+    ],
+    dialogue: [
+      "\u5BF9\u767D\u5FC5\u987B\u77ED\u3001\u6709\u538B\u529B\uFF0C\u5E76\u4F53\u73B0\u5173\u7CFB\u6216\u5229\u76CA\uFF0C\u4E0D\u7528\u5BF9\u767D\u89E3\u91CA\u4E16\u754C\u89C2\u80CC\u666F\u3002",
+      "\u6BCF\u4E2A\u91CD\u8981\u8BF4\u8BDD\u8005\u81F3\u5C11\u5E26\u4E00\u4E2A\u79F0\u547C\u3001\u505C\u987F\u3001\u52A8\u4F5C\u6216\u8BED\u6C14\u5DEE\u5F02\u3002",
+      sceneCard?.requiredCharacters.length ? `\u5BF9\u767D\u4F18\u5148\u670D\u52A1\u8FD9\u4E9B\u89D2\u8272\uFF1A${sceneCard.requiredCharacters.join("\u3001")}\u3002` : `\u5BF9\u767D\u5FC5\u987B\u56F4\u7ED5${protagonist}\u7684\u9009\u62E9\u548C\u73B0\u573A\u538B\u529B\u5C55\u5F00\u3002`
+    ],
+    characterAction: [
+      continuityContract.lockedProtagonistName ? `${continuityContract.lockedProtagonistName}\u5FC5\u987B\u901A\u8FC7\u884C\u52A8\u3001\u611F\u77E5\u6216\u9009\u62E9\u63A8\u8FDB\u672C\u7247\u6BB5\u3002` : "\u9996\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u552F\u4E00\u53EF\u8FFD\u8E2A\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
+      "\u91CD\u8981\u914D\u89D2\u4E0D\u80FD\u53EA\u8D34\u6027\u683C\u6807\u7B7E\uFF0C\u5FC5\u987B\u7528\u52A8\u4F5C\u3001\u79F0\u547C\u3001\u4E60\u60EF\u6216\u5229\u76CA\u9009\u62E9\u5448\u73B0\u3002",
+      "\u81F3\u5C11\u8BA9\u4E00\u4E2A\u89D2\u8272\u7684\u6B32\u671B\u3001\u77ED\u677F\u3001\u5173\u7CFB\u72B6\u6001\u6216\u98CE\u9669\u4EE3\u4EF7\u9732\u51FA\u75D5\u8FF9\u3002"
+    ],
+    continuity: [
+      ...continuityFocus.map((item) => `\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${item}`),
+      sceneCard?.forbiddenFacts.length ? `\u4E0D\u5F97\u6CC4\u9732\uFF1A${sceneCard.forbiddenFacts.join("\u3001")}` : "",
+      "\u4E0D\u5F97\u65B0\u589E\u4E0E\u672C\u7247\u6BB5\u76EE\u6807\u65E0\u5173\u7684\u4E3B\u7EBF\u771F\u76F8\u3001\u5E55\u540E\u8EAB\u4EFD\u6216\u672A\u51BB\u7ED3\u4E16\u754C\u89C4\u5219\u3002"
+    ].filter(Boolean),
+    assemblyRules: [
+      "\u7EC4\u88C5\u987A\u5E8F\u5EFA\u8BAE\uFF1A\u73B0\u573A\u951A\u70B9 -> \u538B\u529B/\u5BF9\u767D -> \u4E3B\u89D2\u52A8\u4F5C\u9009\u62E9 -> \u8F6C\u6298\u540E\u679C -> \u7247\u6BB5\u94A9\u5B50\u3002",
+      "\u5BF9\u8BDD\u3001\u52A8\u4F5C\u3001\u65C1\u767D\u5FC5\u987B\u4EA4\u9519\uFF0C\u4E0D\u8981\u8FDE\u7EED\u8F93\u51FA\u8BBE\u5B9A\u8BF4\u660E\u6216\u8BA8\u8BBA\u5F0F\u6BB5\u843D\u3002",
+      "\u672C\u7247\u6BB5\u53EA\u80FD\u5B8C\u6210\u5F53\u524D segment contract\uFF0C\u4E0D\u63D0\u524D\u5199\u5B8C\u540E\u7EED segment\u3002",
+      "\u6700\u7EC8\u7247\u6BB5\u8981\u80FD\u548C\u4E0A\u4E00\u7247\u6BB5\u5C3E\u5DF4\u81EA\u7136\u8854\u63A5\uFF0C\u5E76\u7ED9\u4E0B\u4E00\u7247\u6BB5\u7559\u4E0B\u53EF\u627F\u63A5\u72B6\u6001\u3002"
+    ]
+  };
+}
+function formatChapterContextPackage(input) {
+  const causalPlan = getTaskCausalPlan(input.state, input.task);
+  const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card") ? "scene_card" : "timeline";
+  const budgetRows = [
+    ["basePrompt", input.basePromptText.length],
+    ["fixedDynamicPrompt", input.fixedDynamicPromptText.length],
+    ["chapterGuardrails", input.trimmedBlueprint.length],
+    ["activeWorldSlice", input.prunedContext.activeWorldSlice.length],
+    ["storyAssets", input.prunedContext.prunedStoryAssets.length],
+    ["consensus", input.prunedContext.prunedConsensus.length],
+    ["outline", input.prunedContext.prunedOutline.length],
+    ["memory", input.prunedContext.prunedMemory.length],
+    ["ledger", input.prunedContext.prunedLedger.length],
+    ["rag", input.prunedContext.prunedRag.length],
+    ["previousTail", input.prunedContext.previousDraftFragment.length],
+    ["vocabularyPrompt", input.cappedVocabularyPrompt.length],
+    ["skillExamples", input.cappedVocabularySkillExamples.length],
+    ["resourceManifest", input.cappedResourceManifest.length],
+    ["approvedStyle", input.approvedStyleContext.prompt.length],
+    ["continuityContract", input.continuityContract.prompt.length],
+    ["characterProfileContract", input.characterProfileContract.prompt.length]
+  ];
+  const segmentRows = input.segmentPlan.map((segment) => [
+    `### Segment ${segment.index}/${segment.total}: ${segment.label}`,
+    `- Source: ${segment.source || "timeline"}`,
+    `- Target words: ${segment.targetWords}`,
+    `- Timeline: ${segment.timelinePosition}`,
+    `- Focus: ${segment.narrativeFocus}`,
+    segment.continuityFocus.length ? `- Continuity focus: ${segment.continuityFocus.join("\u3001")}` : "",
+    segment.sceneCard?.requiredCharacters.length ? `- Required characters: ${segment.sceneCard.requiredCharacters.join("\u3001")}` : "",
+    segment.sceneCard?.requiredFacts.length ? `- Required facts: ${segment.sceneCard.requiredFacts.join("\u3001")}` : "",
+    segment.sceneCard?.forbiddenFacts.length ? `- Forbidden facts: ${segment.sceneCard.forbiddenFacts.join("\u3001")}` : "",
+    "- Required beats:",
+    ...segment.requiredBeats.map((beat) => `  - ${beat}`)
+  ].filter(Boolean).join("\n"));
+  const compositionRows = input.segmentPlan.map((segment) => {
+    const composition = createDraftSegmentCompositionPlan(segment, input.continuityContract);
+    return [
+      `### Segment ${segment.index}/${segment.total}: ${segment.label}`,
+      "#### Plot",
+      ...composition.plot.map((item) => `- ${item}`),
+      "#### Narration",
+      ...composition.narration.map((item) => `- ${item}`),
+      "#### Dialogue",
+      ...composition.dialogue.map((item) => `- ${item}`),
+      "#### Character Action",
+      ...composition.characterAction.map((item) => `- ${item}`),
+      "#### Continuity",
+      ...composition.continuity.map((item) => `- ${item}`),
+      "#### Assembly Rules",
+      ...composition.assemblyRules.map((item) => `- ${item}`)
+    ].join("\n");
+  });
+  return [
+    "# Chapter Context Package",
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter: ${input.task.chapterNumber}`,
+    `Title: ${input.task.title}`,
+    `Writing mode: ${input.writingMode}`,
+    `Genre: ${input.genre.genre}`,
+    `Scene type: ${input.sceneType}`,
+    `Segmentation source: ${segmentationSource}`,
+    `Generated at: ${(/* @__PURE__ */ new Date()).toISOString()}`,
+    "",
+    "## Prompt Budget",
+    "| Section | Chars |",
+    "|---|---:|",
+    ...budgetRows.map(([label, value]) => `| ${label} | ${value} |`),
+    "",
+    "## Chapter Causal Plan",
+    `- Previous Input: ${causalPlan.previousInput}`,
+    `- Causal Objective: ${causalPlan.sceneObjective}`,
+    `- Protagonist Decision: ${causalPlan.protagonistDecision}`,
+    `- Irreversible Change: ${causalPlan.irreversibleConsequence}`,
+    `- Character State Delta: ${causalPlan.characterStateDelta}`,
+    `- Foreshadowing Operation: ${causalPlan.foreshadowingOperation}`,
+    `- Next Chapter Handoff: ${causalPlan.nextHandoff}`,
+    `- Required Continuity Anchors: ${causalPlan.requiredContinuityAnchors.join("\u3001") || "none"}`,
+    "",
+    "## Segment Plan",
+    ...segmentRows,
+    "",
+    "## Segment Composition Plans",
+    ...compositionRows,
+    "",
+    "## Approved Style Contract",
+    input.approvedStyleContext.prompt || "(missing)",
+    "",
+    "## Active World Slice",
+    input.prunedContext.activeWorldSlice || "(empty)",
+    "",
+    "## Story Assets",
+    input.prunedContext.prunedStoryAssets || "(empty)",
+    "",
+    "## Consensus And Setting Freeze",
+    input.prunedContext.prunedConsensus || "(empty)",
+    "",
+    "## Character Memory",
+    input.prunedContext.prunedMemory || "(empty)",
+    "",
+    "## Previous Chapter Ledger",
+    input.prunedContext.prunedLedger || "(empty)",
+    "",
+    "## Knowledge/RAG References",
+    input.prunedContext.prunedRag || "(empty)",
+    "",
+    "## Continuity Contract",
+    input.continuityContract.prompt,
+    "",
+    "## Character Profile Contract",
+    input.characterProfileContract.prompt.slice(0, 2400),
+    "",
+    "## Chapter Guardrails",
+    input.trimmedBlueprint
+  ].join("\n");
+}
+async function writeChapterContextPackage(input) {
+  const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
+  const checkpointsRoot = import_node_path8.default.join(input.paths.workspaceDir, "checkpoints");
+  const contextDir = import_node_path8.default.join(checkpointsRoot, "chapter-contexts");
+  const contextPath = import_node_path8.default.join(contextDir, `${chapterId}-context.md`);
+  const activeWorldSliceDir = import_node_path8.default.join(checkpointsRoot, "active-world-slices");
+  const activeWorldSlicePath = import_node_path8.default.join(activeWorldSliceDir, `${chapterId}-world-slice.md`);
+  await import_promises5.default.mkdir(contextDir, { recursive: true });
+  await import_promises5.default.mkdir(activeWorldSliceDir, { recursive: true });
+  const content = formatChapterContextPackage(input);
+  await import_promises5.default.writeFile(contextPath, `${content.trimEnd()}
+`);
+  await import_promises5.default.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}
+`);
+  const relativePath = relativeArtifactPath(input.projectRoot, contextPath);
+  const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card") ? "scene_card" : "timeline";
+  await recordPipelineArtifact(input.projectRoot, contextPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_context_package",
+    segmentationSource,
+    segmentCount: input.segmentPlan.length,
+    promptBudget: {
+      basePromptChars: input.basePromptText.length,
+      fixedDynamicPromptChars: input.fixedDynamicPromptText.length,
+      guardrailsChars: input.trimmedBlueprint.length,
+      activeWorldSliceChars: input.prunedContext.activeWorldSlice.length,
+      storyAssetsChars: input.prunedContext.prunedStoryAssets.length,
+      consensusChars: input.prunedContext.prunedConsensus.length,
+      memoryChars: input.prunedContext.prunedMemory.length,
+      ledgerChars: input.prunedContext.prunedLedger.length,
+      ragChars: input.prunedContext.prunedRag.length
+    }
+  });
+  await recordPipelineArtifact(input.projectRoot, activeWorldSlicePath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "active_world_slice",
+    chars: input.prunedContext.activeWorldSlice.length
+  });
+  return {
+    path: contextPath,
+    relativePath,
+    promptBudget: {
+      basePromptChars: input.basePromptText.length,
+      fixedDynamicPromptChars: input.fixedDynamicPromptText.length,
+      guardrailsChars: input.trimmedBlueprint.length,
+      activeWorldSliceChars: input.prunedContext.activeWorldSlice.length,
+      storyAssetsChars: input.prunedContext.prunedStoryAssets.length,
+      consensusChars: input.prunedContext.prunedConsensus.length,
+      memoryChars: input.prunedContext.prunedMemory.length,
+      ledgerChars: input.prunedContext.prunedLedger.length,
+      ragChars: input.prunedContext.prunedRag.length
+    },
+    segmentCount: input.segmentPlan.length,
+    segmentationSource
+  };
+}
+function formatSegmentBriefArtifact(input) {
+  const roleLabel = input.kind.replace("character_action", "character action").replace("_", " ");
+  return [
+    `# ${input.title}`,
+    "",
+    `Chapter: ${input.task.chapterNumber}`,
+    `Segment: ${input.segment.index}/${input.segment.total}`,
+    `Kind: ${input.kind}`,
+    `Label: ${input.segment.label}`,
+    `Timeline: ${input.segment.timelinePosition}`,
+    `Target words: ${input.segment.targetWords}`,
+    `Suggested prompt budget: ${input.promptBudgetChars} chars`,
+    "",
+    "## Brief",
+    ...input.items.map((item) => `- ${item}`),
+    "",
+    "## LLM Execution Prompt",
+    `\u4F60\u662F\u672C\u7247\u6BB5\u7684 ${roleLabel} \u5B50\u4EFB\u52A1\u6267\u884C\u5668\u3002`,
+    "\u53EA\u5904\u7406\u672C brief \u8986\u76D6\u7684\u804C\u8D23\uFF0C\u4E0D\u6269\u5199\u5B8C\u6574\u7AE0\u8282\uFF0C\u4E0D\u63D0\u524D\u6CC4\u9732\u540E\u7EED\u5267\u60C5\u3002",
+    ...input.executionPrompt.map((line) => `- ${line}`),
+    "",
+    "## Expected Output Contract",
+    "- \u8FD4\u56DE\u53EF\u88AB\u7EC4\u88C5\u5668\u4F7F\u7528\u7684\u6B63\u6587\u7D20\u6750\u6216\u7EA6\u675F\u6E05\u5355\u3002",
+    "- \u4E0D\u8981\u8F93\u51FA\u89E3\u91CA\u3001\u8BA1\u5212\u6807\u9898\u3001Markdown \u8868\u683C\u6216\u4E0E\u672C\u7247\u6BB5\u65E0\u5173\u7684\u4E16\u754C\u89C2\u8865\u5145\u3002",
+    "- \u5FC5\u987B\u670D\u4ECE Segment Focus\u3001Required Beats \u548C\u8FDE\u7EED\u6027\u7EA6\u675F\u3002",
+    "",
+    "## Segment Focus",
+    input.segment.narrativeFocus,
+    "",
+    input.segment.requiredBeats.length ? ["## Required Beats", ...input.segment.requiredBeats.map((beat) => `- ${beat}`)].join("\n") : "",
+    "",
+    input.generatedBody ? `## Assembled Segment Body
+${input.generatedBody.trim()}` : ""
+  ].filter(Boolean).join("\n");
+}
+function formatSegmentMaterialArtifact(input) {
+  const bodyPreview = input.generatedBody.trim().slice(0, 1800);
+  const materialLabel = input.kind.replace("character_action", "character action").replace("_", " ");
+  return [
+    `# ${input.title.replace("Brief", "Material")}`,
+    "",
+    `Chapter: ${input.task.chapterNumber}`,
+    `Segment: ${input.segment.index}/${input.segment.total}`,
+    `Kind: ${input.kind}`,
+    `Material mode: deterministic-placeholder`,
+    "",
+    "## Source Brief",
+    ...input.items.map((item) => `- ${item}`),
+    "",
+    "## Material Contract",
+    `- This file is the ${materialLabel} result slot for future per-part LLM execution.`,
+    "- \u5F53\u524D\u7248\u672C\u4F7F\u7528\u786E\u5B9A\u6027\u5360\u4F4D\u5185\u5BB9\uFF0C\u4E0D\u989D\u5916\u8C03\u7528\u6A21\u578B\u3002",
+    "- \u540E\u7EED\u53EF\u4EE5\u628A\u672C\u6587\u4EF6\u7684\u751F\u6210\u66FF\u6362\u4E3A\u5BF9\u5E94 brief \u7684\u72EC\u7ACB\u6A21\u578B\u8C03\u7528\u3002",
+    "",
+    "## Deterministic Material",
+    input.kind === "assembly" ? "\u5F53\u524D\u7EC4\u88C5\u7ED3\u679C\u76F4\u63A5\u5F15\u7528\u5DF2\u751F\u6210\u7247\u6BB5\u6B63\u6587\uFF1B\u672A\u6765\u4F1A\u7531\u591A\u7C7B\u7D20\u6750\u7EC4\u88C5\u751F\u6210\u3002" : `\u5F53\u524D ${materialLabel} \u7D20\u6750\u6765\u81EA\u7EC4\u5408\u8BA1\u5212\u548C\u5DF2\u751F\u6210\u7247\u6BB5\u6458\u8981\uFF0C\u7528\u4E8E\u5360\u4F4D\u548C\u5BA1\u8BA1\u3002`,
+    "",
+    "## Segment Body Reference",
+    bodyPreview || "(empty)"
+  ].join("\n");
+}
+async function writeDraftSegmentSubArtifacts(input) {
+  const briefs = [
+    {
+      kind: "plot",
+      filename: "brief-plot.md",
+      materialFilename: "material-plot.md",
+      title: "Plot Turn Brief",
+      items: input.composition.plot,
+      promptBudgetChars: 1200,
+      executionPrompt: [
+        "\u628A\u672C\u7247\u6BB5\u7684\u73B0\u573A\u538B\u529B\u3001\u9009\u62E9\u3001\u8F6C\u6298\u548C\u94A9\u5B50\u538B\u6210 3-5 \u4E2A\u53EF\u6267\u884C\u60C5\u8282\u62CD\u70B9\u3002",
+        "\u6BCF\u4E2A\u62CD\u70B9\u5FC5\u987B\u80FD\u88AB\u5199\u6210\u52A8\u4F5C\u3001\u5BF9\u767D\u6216\u7269\u4EF6\u53D8\u5316\u3002",
+        "\u4E0D\u8981\u65B0\u589E\u5E55\u540E\u771F\u76F8\uFF0C\u53EA\u660E\u786E\u672C\u7247\u6BB5\u5185\u90E8\u56E0\u679C\u3002"
+      ]
+    },
+    {
+      kind: "narration",
+      filename: "brief-narration.md",
+      materialFilename: "material-narration.md",
+      title: "Narration Brief",
+      items: input.composition.narration,
+      promptBudgetChars: 1600,
+      executionPrompt: [
+        "\u751F\u6210\u672C\u7247\u6BB5\u53EF\u7528\u7684\u65C1\u767D\u7D20\u6750\uFF0C\u4F18\u5148\u5199\u7269\u4EF6\u3001\u58F0\u97F3\u3001\u89E6\u611F\u3001\u7A7A\u95F4\u79FB\u52A8\u548C\u8EAB\u4F53\u53CD\u5E94\u3002",
+        "\u65C1\u767D\u5FC5\u987B\u8D34\u8FD1\u5F53\u524D\u89C6\u89D2\uFF0C\u4E0D\u603B\u7ED3\u672A\u6765\uFF0C\u4E0D\u89E3\u91CA\u8C1C\u5E95\u3002",
+        "\u8F93\u51FA\u5E94\u80FD\u7A7F\u63D2\u5230\u5BF9\u767D\u548C\u52A8\u4F5C\u4E4B\u95F4\uFF0C\u800C\u4E0D\u662F\u6574\u6BB5\u8BF4\u660E\u3002"
+      ]
+    },
+    {
+      kind: "dialogue",
+      filename: "brief-dialogue.md",
+      materialFilename: "material-dialogue.md",
+      title: "Dialogue Brief",
+      items: input.composition.dialogue,
+      promptBudgetChars: 1400,
+      executionPrompt: [
+        "\u751F\u6210\u672C\u7247\u6BB5\u53EF\u7528\u7684\u77ED\u5BF9\u767D\u7D20\u6750\uFF0C\u6BCF\u53E5\u5BF9\u767D\u90FD\u8981\u5E26\u73B0\u573A\u538B\u529B\u6216\u5173\u7CFB\u4FE1\u606F\u3002",
+        "\u6BCF\u4E2A\u8BF4\u8BDD\u8005\u7528\u79F0\u547C\u3001\u505C\u987F\u3001\u52A8\u4F5C\u6216\u8BED\u6C14\u533A\u5206\uFF0C\u4E0D\u8981\u540C\u4E00\u79CD\u89E3\u91CA\u8154\u3002",
+        "\u5BF9\u767D\u4E0D\u8981\u627F\u62C5\u5927\u6BB5\u8BBE\u5B9A\u8BF4\u660E\u3002"
+      ]
+    },
+    {
+      kind: "character_action",
+      filename: "brief-character-action.md",
+      materialFilename: "material-character-action.md",
+      title: "Character Action Brief",
+      items: input.composition.characterAction,
+      promptBudgetChars: 1400,
+      executionPrompt: [
+        "\u5217\u51FA\u4E3B\u89D2\u548C\u5173\u952E\u914D\u89D2\u5728\u672C\u7247\u6BB5\u5FC5\u987B\u53D1\u751F\u7684\u53EF\u89C1\u884C\u52A8\u3002",
+        "\u884C\u52A8\u8981\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u98CE\u9669\u4EE3\u4EF7\u6216\u5173\u7CFB\u53D8\u5316\u3002",
+        "\u4E0D\u8981\u53EA\u5199\u5FC3\u7406\u6807\u7B7E\uFF0C\u5FC5\u987B\u843D\u5230\u624B\u3001\u773C\u3001\u6B65\u4F10\u3001\u7269\u4EF6\u5904\u7406\u6216\u5177\u4F53\u9009\u62E9\u3002"
+      ]
+    },
+    {
+      kind: "continuity",
+      filename: "brief-continuity.md",
+      materialFilename: "material-continuity.md",
+      title: "Continuity Brief",
+      items: input.composition.continuity,
+      promptBudgetChars: 1e3,
+      executionPrompt: [
+        "\u63D0\u70BC\u672C\u7247\u6BB5\u5FC5\u987B\u547D\u4E2D\u7684\u8FDE\u7EED\u6027\u951A\u70B9\u3001\u7981\u5199\u4E8B\u5B9E\u548C\u4E0D\u53EF\u65B0\u589E\u4FE1\u606F\u3002",
+        "\u53EA\u4FDD\u7559\u4F1A\u5F71\u54CD\u672C\u7247\u6BB5\u751F\u6210\u7684\u786C\u7EA6\u675F\u3002",
+        "\u8F93\u51FA\u8981\u80FD\u4F5C\u4E3A\u7EC4\u88C5\u524D\u7684\u68C0\u67E5\u6E05\u5355\u3002"
+      ]
+    },
+    {
+      kind: "assembly",
+      filename: "brief-assembly.md",
+      materialFilename: "material-assembly.md",
+      title: "Assembly Brief",
+      items: input.composition.assemblyRules,
+      promptBudgetChars: 1800,
+      executionPrompt: [
+        "\u6839\u636E\u60C5\u8282\u3001\u65C1\u767D\u3001\u5BF9\u767D\u3001\u52A8\u4F5C\u548C\u8FDE\u7EED\u6027\u7D20\u6750\u7EC4\u88C5\u4E3A\u4E00\u4E2A\u8FDE\u7EED\u6B63\u6587\u7247\u6BB5\u3002",
+        "\u6B63\u6587\u5FC5\u987B\u52A8\u4F5C\u3001\u5BF9\u767D\u3001\u65C1\u767D\u4EA4\u9519\uFF0C\u4E0D\u8F93\u51FA\u5B50\u4EFB\u52A1\u75D5\u8FF9\u3002",
+        "\u7ED3\u5C3E\u7ED9\u4E0B\u4E00\u7247\u6BB5\u7559\u4E0B\u53EF\u627F\u63A5\u72B6\u6001\u3002"
+      ],
+      body: input.generatedBody
+    }
+  ];
+  const written = [];
+  for (const brief of briefs) {
+    const briefPath = import_node_path8.default.join(input.segmentDir, brief.filename);
+    const content = formatSegmentBriefArtifact({
+      title: brief.title,
+      kind: brief.kind,
+      items: brief.items,
+      segment: input.segment,
+      task: input.task,
+      promptBudgetChars: brief.promptBudgetChars,
+      executionPrompt: brief.executionPrompt,
+      generatedBody: brief.body
+    });
+    await import_promises5.default.writeFile(briefPath, `${content.trimEnd()}
+`);
+    const relativePath = relativeArtifactPath(input.projectRoot, briefPath);
+    await recordPipelineArtifact(input.projectRoot, briefPath, "checkpoint", input.options, {
+      chapterNumber: input.task.chapterNumber,
+      kind: "chapter_draft_segment_brief",
+      segmentIndex: input.segment.index,
+      segmentTotal: input.segment.total,
+      briefKind: brief.kind,
+      chars: content.length
+    });
+    written.push({
+      kind: brief.kind,
+      role: "brief",
+      path: briefPath,
+      relativePath,
+      chars: content.length
+    });
+    const materialPath = import_node_path8.default.join(input.segmentDir, brief.materialFilename);
+    const override = input.materialOverrides?.[brief.kind]?.trim();
+    const materialContent = override ? [
+      `# ${brief.title.replace("Brief", "Material")}`,
+      "",
+      `Chapter: ${input.task.chapterNumber}`,
+      `Segment: ${input.segment.index}/${input.segment.total}`,
+      `Kind: ${brief.kind}`,
+      `Material mode: llm-subcall`,
+      "",
+      "## Source Brief",
+      ...brief.items.map((item) => `- ${item}`),
+      "",
+      "## LLM Material",
+      override
+    ].join("\n") : formatSegmentMaterialArtifact({
+      title: brief.title,
+      kind: brief.kind,
+      items: brief.items,
+      segment: input.segment,
+      task: input.task,
+      generatedBody: input.generatedBody
+    });
+    await import_promises5.default.writeFile(materialPath, `${materialContent.trimEnd()}
+`);
+    const materialRelativePath = relativeArtifactPath(input.projectRoot, materialPath);
+    await recordPipelineArtifact(input.projectRoot, materialPath, "checkpoint", input.options, {
+      chapterNumber: input.task.chapterNumber,
+      kind: "chapter_draft_segment_material",
+      segmentIndex: input.segment.index,
+      segmentTotal: input.segment.total,
+      materialKind: brief.kind,
+      chars: materialContent.length,
+      mode: override ? "llm-subcall" : "deterministic-placeholder"
+    });
+    written.push({
+      kind: brief.kind,
+      role: "material",
+      path: materialPath,
+      relativePath: materialRelativePath,
+      chars: materialContent.length
+    });
+  }
+  return written;
+}
+async function generateDraftSegmentDialogueMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("dialogue")) {
+    return null;
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Dialogue",
+    state: input.state,
+    options: input.options,
+    temperature: 0.55,
+    progress: {
+      step: `draft_dialogue_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Dialogue \u6B63\u5728\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u5BF9\u767D\u7D20\u6750\u3002`,
+      completeMessage: `Dialogue \u5DF2\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u5BF9\u767D\u7D20\u6750\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u5BF9\u767D\u7D20\u6750\u751F\u6210\u5668\u3002",
+      "\u53EA\u751F\u6210\u672C\u7247\u6BB5\u53EF\u4F9B\u7EC4\u88C5\u5668\u4F7F\u7528\u7684\u5BF9\u767D\u7D20\u6750\uFF0C\u4E0D\u5199\u5B8C\u6574\u7AE0\u8282\u3002",
+      "\u5BF9\u767D\u5FC5\u987B\u77ED\u3001\u6709\u538B\u529B\uFF0C\u5E76\u4F53\u73B0\u5173\u7CFB\u3001\u5229\u76CA\u6216\u73B0\u573A\u9009\u62E9\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Dialogue Brief",
+      ...input.composition.dialogue.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE 4-8 \u6761\u53EF\u7528\u5BF9\u767D\u7D20\u6750\uFF1B\u53EF\u4EE5\u9644\u6781\u77ED\u52A8\u4F5C\u63D0\u793A\uFF1B\u4E0D\u8981\u89E3\u91CA\u8BBE\u5B9A\uFF1B\u4E0D\u8981\u5199\u6807\u9898\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u751F\u6210\u5F53\u524D\u7247\u6BB5\u7684\u5BF9\u767D\u7D20\u6750\uFF0C\u4F9B\u540E\u7EED assembly \u7EC4\u88C5\u4F7F\u7528\u3002"
+  });
+}
+async function generateDraftSegmentPlotMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("plot")) {
+    return null;
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Plot Turn",
+    state: input.state,
+    options: input.options,
+    temperature: 0.45,
+    progress: {
+      step: `draft_plot_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Plot Turn \u6B63\u5728\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u60C5\u8282\u62CD\u70B9\u7D20\u6750\u3002`,
+      completeMessage: `Plot Turn \u5DF2\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u60C5\u8282\u62CD\u70B9\u7D20\u6750\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u60C5\u8282\u62CD\u70B9\u7D20\u6750\u751F\u6210\u5668\u3002",
+      "\u53EA\u751F\u6210\u672C\u7247\u6BB5\u53EF\u4F9B\u7EC4\u88C5\u5668\u4F7F\u7528\u7684\u60C5\u8282\u62CD\u70B9\uFF0C\u4E0D\u5199\u5B8C\u6574\u7AE0\u8282\u3002",
+      "\u6BCF\u4E2A\u62CD\u70B9\u5FC5\u987B\u5305\u542B\u73B0\u573A\u538B\u529B\u3001\u4EBA\u7269\u9009\u62E9\u3001\u8F6C\u6298\u540E\u679C\u6216\u7247\u6BB5\u94A9\u5B50\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Plot Brief",
+      ...input.composition.plot.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE 3-5 \u4E2A\u53EF\u6267\u884C\u60C5\u8282\u62CD\u70B9\uFF1B\u6BCF\u4E2A\u62CD\u70B9\u80FD\u843D\u5230\u52A8\u4F5C\u3001\u5BF9\u767D\u6216\u7269\u4EF6\u53D8\u5316\uFF1B\u4E0D\u8981\u5199\u6807\u9898\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u751F\u6210\u5F53\u524D\u7247\u6BB5\u7684\u60C5\u8282\u62CD\u70B9\u7D20\u6750\uFF0C\u4F9B\u540E\u7EED assembly \u7EC4\u88C5\u4F7F\u7528\u3002"
+  });
+}
+async function generateDraftSegmentNarrationMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("narration")) {
+    return null;
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Narration",
+    state: input.state,
+    options: input.options,
+    temperature: 0.58,
+    progress: {
+      step: `draft_narration_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Narration \u6B63\u5728\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u65C1\u767D\u7D20\u6750\u3002`,
+      completeMessage: `Narration \u5DF2\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u65C1\u767D\u7D20\u6750\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u65C1\u767D\u7D20\u6750\u751F\u6210\u5668\u3002",
+      "\u53EA\u751F\u6210\u672C\u7247\u6BB5\u53EF\u4F9B\u7EC4\u88C5\u5668\u4F7F\u7528\u7684\u65C1\u767D\u7D20\u6750\uFF0C\u4E0D\u5199\u5B8C\u6574\u7AE0\u8282\u3002",
+      "\u65C1\u767D\u5FC5\u987B\u8D34\u8FD1\u89C6\u89D2\uFF0C\u7528\u7269\u4EF6\u3001\u58F0\u97F3\u3001\u89E6\u611F\u3001\u7A7A\u95F4\u79FB\u52A8\u548C\u8EAB\u4F53\u53CD\u5E94\u63A8\u52A8\u573A\u666F\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Narration Brief",
+      ...input.composition.narration.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE 3-6 \u6761\u53EF\u7A7F\u63D2\u65C1\u767D\u7D20\u6750\uFF1B\u4E0D\u8981\u603B\u7ED3\u672A\u6765\uFF1B\u4E0D\u8981\u89E3\u91CA\u8BBE\u5B9A\uFF1B\u4E0D\u8981\u5199\u6807\u9898\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u751F\u6210\u5F53\u524D\u7247\u6BB5\u7684\u65C1\u767D\u7D20\u6750\uFF0C\u4F9B\u540E\u7EED assembly \u7EC4\u88C5\u4F7F\u7528\u3002"
+  });
+}
+async function generateDraftSegmentCharacterActionMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("character_action")) {
+    return null;
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Character Action",
+    state: input.state,
+    options: input.options,
+    temperature: 0.52,
+    progress: {
+      step: `draft_character_action_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Character Action \u6B63\u5728\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u4EBA\u7269\u884C\u52A8\u7D20\u6750\u3002`,
+      completeMessage: `Character Action \u5DF2\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u4EBA\u7269\u884C\u52A8\u7D20\u6750\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u4EBA\u7269\u884C\u52A8\u7D20\u6750\u751F\u6210\u5668\u3002",
+      "\u53EA\u751F\u6210\u672C\u7247\u6BB5\u53EF\u4F9B\u7EC4\u88C5\u5668\u4F7F\u7528\u7684\u4EBA\u7269\u884C\u52A8\u7D20\u6750\uFF0C\u4E0D\u5199\u5B8C\u6574\u7AE0\u8282\u3002",
+      "\u884C\u52A8\u5FC5\u987B\u53EF\u89C1\u3001\u5177\u4F53\uFF0C\u5E76\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u98CE\u9669\u4EE3\u4EF7\u6216\u5173\u7CFB\u53D8\u5316\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Character Action Brief",
+      ...input.composition.characterAction.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE 4-8 \u6761\u4EBA\u7269\u884C\u52A8\u7D20\u6750\uFF1B\u6BCF\u6761\u5FC5\u987B\u843D\u5230\u624B\u3001\u773C\u3001\u6B65\u4F10\u3001\u7269\u4EF6\u5904\u7406\u6216\u5177\u4F53\u9009\u62E9\uFF1B\u4E0D\u8981\u5199\u6807\u9898\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u751F\u6210\u5F53\u524D\u7247\u6BB5\u7684\u4EBA\u7269\u884C\u52A8\u7D20\u6750\uFF0C\u4F9B\u540E\u7EED assembly \u7EC4\u88C5\u4F7F\u7528\u3002"
+  });
+}
+async function generateDraftSegmentContinuityMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("continuity")) {
+    return null;
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Continuity",
+    state: input.state,
+    options: input.options,
+    temperature: 0.2,
+    progress: {
+      step: `draft_continuity_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Continuity \u6B63\u5728\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u8FDE\u7EED\u6027\u7D20\u6750\u3002`,
+      completeMessage: `Continuity \u5DF2\u751F\u6210\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u8FDE\u7EED\u6027\u7D20\u6750\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u8FDE\u7EED\u6027\u7D20\u6750\u751F\u6210\u5668\u3002",
+      "\u53EA\u751F\u6210\u672C\u7247\u6BB5\u7EC4\u88C5\u524D\u5FC5\u987B\u9075\u5B88\u7684\u8FDE\u7EED\u6027\u6E05\u5355\uFF0C\u4E0D\u5199\u5B8C\u6574\u7AE0\u8282\u3002",
+      "\u5FC5\u987B\u660E\u786E\u5FC5\u5199\u951A\u70B9\u3001\u7981\u5199\u4E8B\u5B9E\u3001\u4E0D\u80FD\u63D0\u524D\u6CC4\u9732\u7684\u5185\u5BB9\u548C\u7247\u6BB5\u7ED3\u675F\u72B6\u6001\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Continuity Brief",
+      ...input.composition.continuity.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE\u68C0\u67E5\u6E05\u5355\uFF1B\u5305\u542B must-hit\u3001must-not-write\u3001handoff-state \u4E09\u7C7B\uFF1B\u4E0D\u8981\u5199\u6807\u9898\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u751F\u6210\u5F53\u524D\u7247\u6BB5\u7684\u8FDE\u7EED\u6027\u68C0\u67E5\u7D20\u6750\uFF0C\u4F9B\u540E\u7EED assembly \u7EC4\u88C5\u4F7F\u7528\u3002"
+  });
+}
+async function generateDraftSegmentAssemblyMaterial(input) {
+  if (!input.options.draftSubcallRoles?.includes("assembly")) {
+    return null;
+  }
+  const materialBlock = (kind, content) => content?.trim() ? [`## ${kind} material`, content.trim()].join("\n") : "";
+  return generateProductionTextWithLlm({
+    roleName: "Assembly",
+    state: input.state,
+    options: input.options,
+    temperature: 0.64,
+    progress: {
+      step: `draft_assembly_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Assembly \u6B63\u5728\u7EC4\u88C5\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u5019\u9009\u6B63\u6587\u3002`,
+      completeMessage: `Assembly \u5DF2\u7EC4\u88C5\u7B2C ${input.task.chapterNumber} \u7AE0\u7247\u6BB5 ${input.segment.index}/${input.segment.total} \u7684\u5019\u9009\u6B63\u6587\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u5C0F\u8BF4\u7247\u6BB5\u7EC4\u88C5\u5668\u3002",
+      "\u6839\u636E\u60C5\u8282\u3001\u65C1\u767D\u3001\u5BF9\u767D\u3001\u4EBA\u7269\u884C\u52A8\u548C\u8FDE\u7EED\u6027\u7D20\u6750\uFF0C\u7EC4\u88C5\u4E3A\u4E00\u4E2A\u8FDE\u7EED\u6B63\u6587\u7247\u6BB5\u3002",
+      "\u53EA\u8F93\u51FA\u5C0F\u8BF4\u6B63\u6587\uFF0C\u4E0D\u8F93\u51FA\u6807\u9898\u3001\u89E3\u91CA\u3001\u6E05\u5355\u6216 Markdown\u3002"
+    ].join("\n"),
+    dynamicPrompt: [
+      `\u7AE0\u8282\uFF1A\u7B2C ${input.task.chapterNumber} \u7AE0`,
+      `\u6807\u9898\uFF1A${input.task.title}`,
+      `\u7247\u6BB5\uFF1A${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `\u65F6\u95F4\u7EBF\uFF1A${input.segment.timelinePosition}`,
+      `\u7247\u6BB5\u76EE\u6807\u5B57\u6570\uFF1A${input.segment.targetWords}`,
+      `\u7247\u6BB5\u7126\u70B9\uFF1A${input.segment.narrativeFocus}`,
+      "",
+      "## Assembly Rules",
+      ...input.composition.assemblyRules.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail
+${input.previousSegmentTail}` : "",
+      "",
+      materialBlock("plot", input.materials.plot),
+      "",
+      materialBlock("narration", input.materials.narration),
+      "",
+      materialBlock("dialogue", input.materials.dialogue),
+      "",
+      materialBlock("character_action", input.materials.character_action),
+      "",
+      materialBlock("continuity", input.materials.continuity),
+      "",
+      input.fallbackBody ? `## Existing Author Segment For Reference
+${clipPromptSection(input.fallbackBody, 1400)}` : "",
+      "",
+      "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE\u8FDE\u7EED\u5C0F\u8BF4\u6B63\u6587\uFF1B\u52A8\u4F5C\u3001\u5BF9\u767D\u3001\u65C1\u767D\u5FC5\u987B\u4EA4\u9519\uFF1B\u4E0D\u5F97\u63D0\u524D\u5199\u540E\u7EED\u7247\u6BB5\uFF1B\u4E0D\u5F97\u6CC4\u9732 continuity \u7981\u5199\u4E8B\u5B9E\u3002"
+    ].filter(Boolean).join("\n"),
+    message: "\u8BF7\u6839\u636E\u5206\u9879\u7D20\u6750\u7EC4\u88C5\u5F53\u524D\u7247\u6BB5\u5019\u9009\u6B63\u6587\uFF0C\u53EA\u8FD4\u56DE\u5C0F\u8BF4\u6B63\u6587\u3002"
+  });
+}
+function cleanDraftAssemblyBody(text = "") {
+  return text.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").replace(/^#+\s+.*$/gmu, "").replace(/^(片段|Segment)\s*\d+[\s\S]*?\n/iu, "").trim();
+}
+function isUsableDraftAssemblyBody(text = "", fallbackBody = "") {
+  const normalized = text.trim();
+  const fallbackLength = fallbackBody.trim().length;
+  const minimumLength = fallbackLength > 0 ? Math.min(24, Math.max(8, Math.floor(fallbackLength * 0.08))) : 8;
+  if (normalized.length < minimumLength) {
+    return false;
+  }
+  if (!/[。！？!?」”]/u.test(normalized)) {
+    return false;
+  }
+  if (/^\s*[{[]/u.test(normalized)) {
+    return false;
+  }
+  const lines = normalized.split(/\n+/u).map((line) => line.trim()).filter(Boolean);
+  const listLikeLines = lines.filter((line) => /^([-*]|\d+[.)、]|must-|##|#|```)/iu.test(line)).length;
+  if (lines.length > 0 && listLikeLines / lines.length > 0.4) {
+    return false;
+  }
+  if (/^(以下|下面|这里|这是|根据|组装|候选正文|输出|正文如下)[:：]/u.test(normalized)) {
+    return false;
+  }
+  if (/^(我将|我会|可以|无法|不能|抱歉|作为|说明|分析)/u.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+async function writeDraftSegmentManifest(input) {
+  const manifestPath = import_node_path8.default.join(input.segmentDir, "segment-manifest.json");
+  const byKind = input.subArtifacts.reduce((acc, artifact) => {
+    const current = acc[artifact.kind] || {};
+    current[artifact.role] = artifact.relativePath;
+    acc[artifact.kind] = current;
+    return acc;
+  }, {});
+  const manifest = {
+    version: 1,
+    mode: Object.values(input.materialModes || {}).some((mode) => mode === "llm-subcall") ? "mixed" : "deterministic-placeholder",
+    project: input.state.project.title,
+    chapterNumber: input.task.chapterNumber,
+    chapterTitle: input.task.title,
+    segment: {
+      index: input.segment.index,
+      total: input.segment.total,
+      label: input.segment.label,
+      source: input.segment.source || input.segmentationSource,
+      targetWords: input.segment.targetWords,
+      timeline: input.segment.timelinePosition,
+      focus: input.segment.narrativeFocus,
+      chars: input.chars
+    },
+    files: {
+      body: input.segmentRelativePath,
+      subArtifacts: input.subArtifacts.map((artifact) => ({
+        kind: artifact.kind,
+        role: artifact.role,
+        path: artifact.relativePath,
+        chars: artifact.chars,
+        mode: artifact.role === "material" ? input.materialModes?.[artifact.kind] || "deterministic-placeholder" : "prompt-brief"
+      })),
+      byKind
+    },
+    execution: {
+      current: Object.values(input.materialModes || {}).some((mode) => mode === "llm-subcall") ? "single_author_call_with_selected_llm_submaterials" : "single_author_call_with_deterministic_submaterials",
+      nextReadyStep: "replace_one_material_role_with_llm_call",
+      recommendedFirstRoles: ["dialogue", "narration", "character_action"],
+      assemblyRole: "assembly",
+      assembly: input.assemblyUsage || {
+        requested: false,
+        decision: "not_requested",
+        reason: "assembly role was not enabled for this segment",
+        materialChars: 0,
+        finalChars: input.chars,
+        fallbackChars: input.chars
+      }
+    }
+  };
+  await import_promises5.default.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
+`);
+  const relativePath = relativeArtifactPath(input.projectRoot, manifestPath);
+  await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_draft_segment_manifest",
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    segmentSource: input.segment.source || input.segmentationSource,
+    subArtifactCount: input.subArtifacts.length,
+    mode: manifest.mode
+  });
+  return { path: manifestPath, relativePath };
+}
+async function writeDraftSegmentArtifact(input) {
+  const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
+  const segmentId = `segment-${String(input.segment.index).padStart(2, "0")}`;
+  const segmentsRoot = import_node_path8.default.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId);
+  const segmentDir = import_node_path8.default.join(segmentsRoot, segmentId);
+  const segmentPath = import_node_path8.default.join(segmentDir, `${segmentId}.md`);
+  await import_promises5.default.mkdir(segmentDir, { recursive: true });
+  const sceneCardLines = input.segment.sceneCard ? [
+    "## Scene Card",
+    `- Index: ${input.segment.sceneCard.index}`,
+    `- Goal: ${input.segment.sceneCard.goal}`,
+    `- Conflict: ${input.segment.sceneCard.conflict}`,
+    `- Turn: ${input.segment.sceneCard.turn}`,
+    `- End hook: ${input.segment.sceneCard.endHook}`,
+    input.segment.sceneCard.requiredCharacters.length ? `- Required characters: ${input.segment.sceneCard.requiredCharacters.join("\u3001")}` : "",
+    input.segment.sceneCard.requiredFacts.length ? `- Required facts: ${input.segment.sceneCard.requiredFacts.join("\u3001")}` : "",
+    input.segment.sceneCard.forbiddenFacts.length ? `- Forbidden facts: ${input.segment.sceneCard.forbiddenFacts.join("\u3001")}` : ""
+  ].filter(Boolean) : [];
+  const composition = createDraftSegmentCompositionPlan(input.segment, input.continuityContract);
+  const content = [
+    `# Chapter ${input.task.chapterNumber} Segment ${input.segment.index}/${input.segment.total}`,
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter title: ${input.task.title}`,
+    `Source: ${input.segment.source || input.segmentationSource}`,
+    `Label: ${input.segment.label}`,
+    `Target words: ${input.segment.targetWords}`,
+    `Timeline: ${input.segment.timelinePosition}`,
+    `Focus: ${input.segment.narrativeFocus}`,
+    input.segment.continuityFocus.length ? `Continuity focus: ${input.segment.continuityFocus.join("\u3001")}` : "Continuity focus: none",
+    "",
+    "## Required Beats",
+    ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+    "",
+    ...sceneCardLines,
+    sceneCardLines.length ? "" : "",
+    "## Composition Plan",
+    "### Plot",
+    ...composition.plot.map((item) => `- ${item}`),
+    "### Narration",
+    ...composition.narration.map((item) => `- ${item}`),
+    "### Dialogue",
+    ...composition.dialogue.map((item) => `- ${item}`),
+    "### Character Action",
+    ...composition.characterAction.map((item) => `- ${item}`),
+    "### Continuity",
+    ...composition.continuity.map((item) => `- ${item}`),
+    "### Assembly Rules",
+    ...composition.assemblyRules.map((item) => `- ${item}`),
+    "",
+    input.previousSegmentTail ? `## Previous Segment Tail
+${input.previousSegmentTail}
+` : "",
+    "## Generated Body",
+    input.content.trim()
+  ].filter((line) => line !== void 0).join("\n");
+  await import_promises5.default.writeFile(segmentPath, `${content.trimEnd()}
+`);
+  const subArtifacts = await writeDraftSegmentSubArtifacts({
+    projectRoot: input.projectRoot,
+    options: input.options,
+    task: input.task,
+    segment: input.segment,
+    segmentDir,
+    composition,
+    generatedBody: input.content,
+    materialOverrides: input.materialOverrides
+  });
+  const relativePath = relativeArtifactPath(input.projectRoot, segmentPath);
+  const manifest = await writeDraftSegmentManifest({
+    projectRoot: input.projectRoot,
+    options: input.options,
+    state: input.state,
+    task: input.task,
+    segment: input.segment,
+    segmentDir,
+    segmentPath,
+    segmentRelativePath: relativePath,
+    subArtifacts,
+    segmentationSource: input.segmentationSource,
+    materialModes: input.materialModes,
+    assemblyUsage: input.assemblyUsage,
+    chars: input.content.length
+  });
+  await recordPipelineArtifact(input.projectRoot, segmentPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_draft_segment",
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    segmentSource: input.segment.source || input.segmentationSource,
+    label: input.segment.label,
+    chars: input.content.length,
+    subArtifactCount: subArtifacts.length,
+    manifestPath: manifest.relativePath
+  });
+  return {
+    path: segmentPath,
+    relativePath,
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    source: input.segment.source || input.segmentationSource,
+    chars: input.content.length,
+    manifestPath: manifest.path,
+    manifestRelativePath: manifest.relativePath,
+    subArtifacts
+  };
+}
+async function createDraftBody(state, task, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   if (options.projectId) {
     invalidateProjectCache(options.projectId);
@@ -8299,15 +12526,13 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     title: task.title,
     rows: knowledgeContext.rows
   });
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return fallback;
-  }
-  const cappedVocabularyPrompt = vocabularyPrompt.slice(0, 1e3);
-  const cappedVocabularySkillExamples = vocabularySkillExamples.slice(0, 800);
-  const cappedResourceManifest = resourceManifest.slice(0, 500);
-  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
-  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);
-  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500);
+  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 650);
+  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 420);
+  const cappedResourceManifest = summarizePromptSection(resourceManifest, 280);
+  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 620);
+  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 340);
+  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 300);
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
   const basePromptLines = [
     cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
     "",
@@ -8318,7 +12543,8 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     "\u914D\u89D2\u3001\u60C5\u8282\u3001\u4F0F\u7B14\u548C\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u9075\u5FAA Canon Continuity Contract\u3002",
     "\u89D2\u8272\u6863\u6848\u662F\u751F\u4EA7\u786C\u7EA6\u675F\uFF1A\u91CD\u8981\u89D2\u8272\u5FC5\u987B\u6709\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u7279\u957F\u77ED\u677F\u548C\u5173\u7CFB\u72B6\u6001\u3002",
     "\u7B2C 2 \u7AE0\u4EE5\u540E\u4E0D\u80FD\u53EA\u6CBF\u7528\u4E3B\u89D2\u59D3\u540D\uFF1B\u5FC5\u987B\u8BA9\u4E0A\u4E00\u7AE0\u951A\u70B9\u5728\u6B63\u6587\u4E8B\u4EF6\u4E2D\u53D1\u751F\u4F5C\u7528\u3002",
-    "\u7981\u6B62 AI \u5316\u788E\u7247\u5199\u6CD5\uFF1A\u4E0D\u5F97\u8BA9\u5355\u4E2A\u5B57\u6216 1-4 \u5B57\u77ED\u8BCD\u53CD\u590D\u72EC\u7ACB\u6210\u53E5/\u6210\u884C\u5806\u573A\u666F\u3002"
+    "\u7981\u6B62 AI \u5316\u788E\u7247\u5199\u6CD5\uFF1A\u4E0D\u5F97\u8BA9\u5355\u4E2A\u5B57\u6216 1-4 \u5B57\u77ED\u8BCD\u53CD\u590D\u72EC\u7ACB\u6210\u53E5/\u6210\u884C\u5806\u573A\u666F\u3002",
+    hasApprovedStyleSummaryPrompt(approvedStyleContext) ? "\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u662F\u786C\u7EA6\u675F\uFF1A\u5FC5\u987B\u6A21\u4EFF\u5176\u53D9\u8FF0\u58F0\u97F3\u3001\u53E5\u5F0F\u8282\u594F\u3001\u5BF9\u767D\u5BC6\u5EA6\u3001\u63CF\u5199\u987A\u5E8F\u548C\u7981\u7528\u6A21\u5F0F\u3002" : ""
   ];
   if (cappedAntiHallucination) {
     basePromptLines.push("", `\u3010\u53CD\u5E7B\u89C9\u4E0E\u7EC6\u8282\u7559\u767D\u7EA6\u675F\u3011
@@ -8346,9 +12572,11 @@ ${cappedConflictStrategy}`);
     "",
     cappedResourceManifest,
     "",
+    approvedStyleCarryover,
+    "",
     continuityContract.prompt,
     "",
-    characterProfileContract.prompt.slice(0, 1800),
+    clipPromptSection(characterProfileContract.prompt, 700),
     "",
     "\u8D44\u6E90\u4F7F\u7528\u786C\u8981\u6C42\uFF1A",
     "- \u81F3\u5C11\u81EA\u7136\u5438\u6536 3 \u4E2A\u8BCD\u6C47/\u573A\u666F\u8D44\u6E90\u63D0\u793A\uFF0C\u4F46\u4E0D\u80FD\u5806\u780C\u6210\u8BED\u3002",
@@ -8387,89 +12615,339 @@ ${cappedConflictStrategy}`);
     additionalFixedLength
   });
   console.log(
-    `[WRITING CTX] Chapter ${task.chapterNumber} Author Draft \u4E0A\u4E0B\u6587\u5206\u5E03: writerGuide=${(resources.writerGuide || "").length}\u5B57 vocabPrompt=${cappedVocabularyPrompt.length}\u5B57 skillExamples=${cappedVocabularySkillExamples.length}\u5B57 manifest=${cappedResourceManifest.length}\u5B57 consensus=${prunedContext.prunedConsensus.length}\u5B57 outline=${prunedContext.prunedOutline.length}\u5B57 memory=${prunedContext.prunedMemory.length}\u5B57 ledger=${prunedContext.prunedLedger.length}\u5B57 prevFragment=${prunedContext.previousDraftFragment.length}\u5B57 rag=${prunedContext.prunedRag.length}\u5B57`
+    `[WRITING CTX] Chapter ${task.chapterNumber} Author Draft \u4E0A\u4E0B\u6587\u5206\u5E03: writerGuide=${(resources.writerGuide || "").length}\u5B57 vocabPrompt=${cappedVocabularyPrompt.length}\u5B57 skillExamples=${cappedVocabularySkillExamples.length}\u5B57 manifest=${cappedResourceManifest.length}\u5B57 activeWorldSlice=${prunedContext.activeWorldSlice.length}\u5B57 consensus=${prunedContext.prunedConsensus.length}\u5B57 outline=${prunedContext.prunedOutline.length}\u5B57 storyAssets=${prunedContext.prunedStoryAssets.length}\u5B57 memory=${prunedContext.prunedMemory.length}\u5B57 ledger=${prunedContext.prunedLedger.length}\u5B57 prevFragment=${prunedContext.previousDraftFragment.length}\u5B57 rag=${prunedContext.prunedRag.length}\u5B57`
   );
-  const generated = await generateProductionTextWithLlm({
-    roleName: "Author",
-    state,
+  const segmentPlan = createDraftSegmentPlan(state, task, continuityContract, blueprint);
+  const usesSceneCards = segmentPlan.some((segment) => segment.source === "scene_card");
+  const activeWorldSlicePrompt = prunedContext.activeWorldSlice ? `## Active World Slice
+${prunedContext.activeWorldSlice}` : "";
+  const compactStoryAssetsPrompt = prunedContext.prunedStoryAssets ? `## Story Assets Audit Summary
+${prunedContext.prunedStoryAssets.slice(0, 900)}` : "";
+  const blueprintGuardrails = activeWorldSlicePrompt || compactStoryAssetsPrompt ? trimBlueprintForDrafting(blueprint).replace(
+    /## Production Story Asset Context[\s\S]*?(?=\n## Canon Continuity Contract|\n## Character Profile Contract|\n## Chapter Position|$)/u,
+    [activeWorldSlicePrompt, compactStoryAssetsPrompt].filter(Boolean).join("\n\n")
+  ) : trimBlueprintForDrafting(blueprint);
+  const trimmedBlueprint = blueprintGuardrails.slice(0, usesSceneCards ? 2200 : 5e3);
+  const contextPackage = paths && projectRoot ? await writeChapterContextPackage({
+    projectRoot,
+    paths,
     options,
-    temperature: 0.8,
-    progress: {
-      step: "draft_generation",
-      role: "Author",
+    state,
+    task,
+    genre,
+    sceneType,
+    writingMode: productionWritingMode(options),
+    segmentPlan,
+    continuityContract,
+    characterProfileContract,
+    approvedStyleContext,
+    prunedContext,
+    trimmedBlueprint,
+    basePromptText,
+    fixedDynamicPromptText,
+    cappedVocabularyPrompt,
+    cappedVocabularySkillExamples,
+    cappedResourceManifest
+  }) : null;
+  if (contextPackage) {
+    await emitWritingProgress(options, {
+      step: "chapter_context_package_saved",
+      role: "Showrunner",
       chapterNumber: task.chapterNumber,
       title: task.title,
-      startMessage: `Author \u6B63\u5728\u6839\u636E\u7B2C ${task.chapterNumber} \u7AE0\u84DD\u56FE\u751F\u6210\u6B63\u6587\u521D\u7A3F\u3002`,
-      completeMessage: `Author \u5DF2\u8FD4\u56DE\u7B2C ${task.chapterNumber} \u7AE0\u521D\u7A3F\uFF0C\u51C6\u5907\u8FDB\u5165\u8D28\u68C0\u3002`
-    },
-    basePrompt: basePromptText,
-    dynamicPrompt: [
-      `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
-      `\u6807\u9898\uFF1A${task.title}`,
-      `\u76EE\u6807\u5B57\u6570\uFF1A${task.targetWords}`,
-      `\u7C7B\u578B\uFF1A${genre.genre}`,
-      `\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
-      `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
-      "",
-      cappedVocabularyPrompt,
-      "",
-      cappedVocabularySkillExamples,
-      "",
-      cappedResourceManifest,
-      "",
-      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
-${prunedContext.prunedConsensus}` : "",
-      "",
-      prunedContext.prunedOutline ? `Master Outline:
-${prunedContext.prunedOutline}` : "",
-      "",
-      prunedContext.prunedMemory ? `Character Memory:
-${prunedContext.prunedMemory}` : "",
-      "",
-      prunedContext.prunedLedger ? `Previous Chapter Ledger:
-${prunedContext.prunedLedger}` : "",
-      "",
-      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (\u672B\u5C3E\u627F\u63A5\u6BB5):
-${prunedContext.previousDraftFragment}` : "",
-      "",
-      "Knowledge/RAG References:",
-      prunedContext.prunedRag,
-      "",
-      continuityContract.prompt,
-      "",
-      characterProfileContract.prompt.slice(0, 1800),
-      "",
-      "\u8D44\u6E90\u4F7F\u7528\u786C\u8981\u6C42\uFF1A",
-      "- \u81F3\u5C11\u81EA\u7136\u5438\u6536 3 \u4E2A\u8BCD\u6C47/\u573A\u666F\u8D44\u6E90\u63D0\u793A\uFF0C\u4F46\u4E0D\u80FD\u5806\u780C\u6210\u8BED\u3002",
-      "- \u5FC5\u987B\u5B66\u4E60 Migrated Vocabulary Skill Examples \u7684\u6B63\u786E\u793A\u8303\u65B9\u6CD5\uFF1A\u57FA\u7840\u8BCD\u6C47\u5199\u6E05\u5185\u5BB9\uFF0C\u5C11\u91CF\u6210\u8BED\u53EA\u505A\u70B9\u775B\u3002",
-      "- \u5FC5\u987B\u907F\u5F00 Anti Patterns\uFF1A\u8FDE\u7EED\u6210\u8BED\u3001\u5B64\u7ACB\u6210\u8BED\u3001\u5355\u5B57\u77ED\u8BCD\u8FDE\u53D1\u3001\u53EA\u6709\u6C1B\u56F4\u6CA1\u6709\u52A8\u4F5C\u3002",
-      "- \u573A\u666F\u5FC5\u987B\u6709\u5177\u4F53\u52A8\u4F5C\u3001\u7269\u4EF6\u3001\u6C14\u5473/\u58F0\u97F3/\u89E6\u611F\u4E2D\u7684\u81F3\u5C11\u4E24\u7C7B\u7EC6\u8282\u3002",
-      "- \u7AE0\u8282\u5FC5\u987B\u56F4\u7ED5\u84DD\u56FE\u63A8\u8FDB\uFF0C\u4E0D\u5F97\u8F93\u51FA\u4FEE\u6539\u8BF4\u660E\u6216\u6CDB\u5316\u6A21\u677F\u6BB5\u843D\u3002",
-      `- Previous Input \u5FC5\u987B\u8FDB\u5165\u5F00\u573A\u6216\u7B2C\u4E00\u573A\u51B2\u7A81\uFF1A${causalPlan.previousInput}`,
-      `- Causal Objective \u5FC5\u987B\u5728\u6B63\u6587\u4E2D\u88AB\u4E8B\u4EF6\u63A8\u8FDB\uFF1A${causalPlan.sceneObjective}`,
-      `- Protagonist Decision \u5FC5\u987B\u5199\u6210\u53EF\u89C1\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
-      `- Irreversible Change \u5FC5\u987B\u6210\u4E3A\u7AE0\u672B\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
-      `- Next Chapter Handoff \u5FC5\u987B\u4ECE\u672C\u7AE0\u540E\u679C\u81EA\u7136\u4EA7\u751F\uFF1A${causalPlan.nextHandoff}`,
-      continuityContract.lockedProtagonistName ? `- \u6B63\u6587\u5FC5\u987B\u591A\u6B21\u56F4\u7ED5\u300C${continuityContract.lockedProtagonistName}\u300D\u7684\u884C\u52A8\u3001\u611F\u77E5 and \u9009\u62E9\u63A8\u8FDB\u3002` : "- \u6B63\u6587\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
-      "- \u4E0D\u5F97\u51ED\u7A7A\u66FF\u6362\u5DF2\u77E5\u914D\u89D2\uFF1B\u65B0\u589E\u914D\u89D2\u5FC5\u987B\u4EA4\u4EE3\u8EAB\u4EFD\u3001\u7ACB\u573A\u548C\u4E0E\u4E3B\u89D2\u5173\u7CFB\u3002",
-      "- \u65B0\u589E\u6216\u6CBF\u7528\u7684\u91CD\u8981\u89D2\u8272\u5FC5\u987B\u901A\u8FC7\u52A8\u4F5C\u3001\u79F0\u547C\u3001\u505C\u987F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u4E60\u60EF\u548C\u5229\u76CA\u9009\u62E9\u5448\u73B0\u4EBA\u683C\uFF0C\u4E0D\u80FD\u53EA\u8D34\u6027\u683C\u6807\u7B7E\u3002",
-      "- \u6B63\u6587\u5FC5\u987B\u4F53\u73B0\u81F3\u5C11\u4E00\u4E2A\u89D2\u8272\u7684\u7279\u957F/\u77ED\u677F\u6216\u80FD\u529B\u8FB9\u754C\uFF0C\u4EE5\u53CA\u81F3\u5C11\u4E00\u4E2A\u5173\u7CFB\u72B6\u6001\u53D8\u5316\u3002",
-      "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002",
-      continuityContract.continuityAnchors.length ? `- \u6B63\u6587\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "- \u6B63\u6587\u5FC5\u987B\u5EFA\u7ACB\u53EF\u4F9B\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u5177\u4F53\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
-      "- \u4E0D\u8981\u628A\u63A8\u8350\u8BCD\u3001\u6210\u8BED\u6216\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\uFF1B\u6240\u6709\u8BCD\u90FD\u5FC5\u987B\u5D4C\u5165\u5B8C\u6574\u52A8\u4F5C\u3001\u5BF9\u8BDD\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002"
-    ].join("\n"),
-    message: [
-      "\u8BF7\u6309\u4EE5\u4E0B\u8BE6\u7EC6\u7AE0\u8282\u84DD\u56FE\u751F\u6210\u672C\u7AE0\u6B63\u6587\u8349\u7A3F\u3002",
-      "\u8F93\u51FA Markdown\uFF0C\u5FC5\u987B\u5305\u542B `# \u7AE0\u8282\u6807\u9898` \u548C `## Draft Body`\u3002",
-      "\u4E0D\u8981\u5199\u89E3\u91CA\uFF0C\u4E0D\u8981\u8BA9\u7528\u6237\u9009\u62E9\uFF0C\u4E0D\u8981\u8DF3\u7AE0\u3002",
-      "",
-      "## Causal Chapter Plan",
-      ...formatCausalPlanBullets(state, task),
-      "",
-      trimBlueprintForDrafting(blueprint)
-    ].join("\n")
-  });
-  return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n");
+      status: "completed",
+      message: `\u7B2C ${task.chapterNumber} \u7AE0\u4E0A\u4E0B\u6587\u5305\u5DF2\u4FDD\u5B58\uFF1A${contextPackage.segmentCount} \u4E2A\u7247\u6BB5\uFF0C${contextPackage.segmentationSource === "scene_card" ? "\u573A\u666F\u5361" : "\u65F6\u95F4\u7EBF"}\u5206\u6BB5\u3002`,
+      artifactPath: contextPackage.relativePath,
+      preview: [
+        `segmentation=${contextPackage.segmentationSource}`,
+        `segments=${contextPackage.segmentCount}`,
+        `guardrails=${contextPackage.promptBudget.guardrailsChars} chars`,
+        `activeWorldSlice=${contextPackage.promptBudget.activeWorldSliceChars} chars`,
+        `storyAssets=${contextPackage.promptBudget.storyAssetsChars} chars`
+      ].join(" | ")
+    });
+  }
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return approvedStyleContext.status === "ready" ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext) : fallback;
+  }
+  const generatedSegments = [];
+  const segmentArtifacts = [];
+  let previousSegmentTail = compactPreviousSegmentTail(prunedContext.previousDraftFragment);
+  for (const segment of segmentPlan) {
+    throwIfPipelineAborted(options);
+    const priorSegmentTail = previousSegmentTail;
+    const sceneCardPrompt = segment.sceneCard ? [
+      "## Current Scene Card",
+      `- Scene card: ${segment.sceneCard.index}`,
+      segment.sceneCard.goal ? `- Goal: ${segment.sceneCard.goal}` : "",
+      segment.sceneCard.conflict ? `- Conflict: ${segment.sceneCard.conflict}` : "",
+      segment.sceneCard.turn ? `- Turn: ${segment.sceneCard.turn}` : "",
+      segment.sceneCard.endHook ? `- End hook: ${segment.sceneCard.endHook}` : "",
+      segment.sceneCard.requiredCharacters.length ? `- Required characters: ${segment.sceneCard.requiredCharacters.join("\u3001")}` : "",
+      segment.sceneCard.requiredFacts.length ? `- Required facts: ${segment.sceneCard.requiredFacts.join("\u3001")}` : "",
+      segment.sceneCard.forbiddenFacts.length ? `- Forbidden facts: ${segment.sceneCard.forbiddenFacts.join("\u3001")}` : "",
+      "- \u53EA\u5199\u5F53\u524D\u573A\u666F\u5361\u8986\u76D6\u7684\u65F6\u95F4\u6BB5\uFF0C\u4E0D\u8981\u63D0\u524D\u5B8C\u6210\u540E\u7EED\u573A\u666F\u5361\u3002"
+    ].filter(Boolean).join("\n") : "";
+    const compositionPlan = createDraftSegmentCompositionPlan(segment, continuityContract);
+    const compositionPrompt = [
+      "## Segment Composition Contract",
+      "### Plot",
+      ...compositionPlan.plot.map((item) => `- ${item}`),
+      "### Narration",
+      ...compositionPlan.narration.map((item) => `- ${item}`),
+      "### Dialogue",
+      ...compositionPlan.dialogue.map((item) => `- ${item}`),
+      "### Character Action",
+      ...compositionPlan.characterAction.map((item) => `- ${item}`),
+      "### Continuity",
+      ...compositionPlan.continuity.map((item) => `- ${item}`),
+      "### Assembly Rules",
+      ...compositionPlan.assemblyRules.map((item) => `- ${item}`)
+    ].join("\n");
+    const generated = await generateProductionTextWithLlm({
+      roleName: "Author",
+      state,
+      options,
+      temperature: 0.78,
+      progress: {
+        step: `draft_generation_segment_${segment.index}`,
+        role: "Author",
+        chapterNumber: task.chapterNumber,
+        title: task.title,
+        startMessage: `Author \u6B63\u5728\u751F\u6210\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total}\uFF1A${segment.label}\u3002`,
+        completeMessage: `Author \u5DF2\u8FD4\u56DE\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total}\uFF1A${segment.label}\u3002`
+      },
+      basePrompt: basePromptText,
+      dynamicPrompt: [
+        `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
+        `\u6807\u9898\uFF1A${task.title}`,
+        `\u7C7B\u578B\uFF1A${genre.genre}`,
+        `\u573A\u666F\u7C7B\u578B\uFF1A${sceneType}`,
+        `\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
+        `\u672C\u6B21\u53EA\u5199\u7247\u6BB5\uFF1A${segment.index}/${segment.total} - ${segment.label}`,
+        `\u7247\u6BB5\u76EE\u6807\u5B57\u6570\uFF1A${segment.targetWords}`,
+        `\u65F6\u95F4\u7EBF\u4F4D\u7F6E\uFF1A${segment.timelinePosition}`,
+        `\u53D9\u4E8B\u7126\u70B9\uFF1A${segment.narrativeFocus}`,
+        "",
+        sceneCardPrompt,
+        "",
+        "\u672C\u7247\u6BB5\u5FC5\u987B\u5B8C\u6210\uFF1A",
+        ...segment.requiredBeats.map((beat) => `- ${beat}`),
+        "",
+        segment.continuityFocus.length ? `\u672C\u7247\u6BB5\u4F18\u5148\u627F\u63A5\u8FD9\u4E9B\u951A\u70B9\uFF1A${segment.continuityFocus.join("\u3001")}` : "\u672C\u7247\u6BB5\u5FC5\u987B\u5EFA\u7ACB\u53EF\u8FFD\u8E2A\u7684\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
+        "",
+        cappedVocabularyPrompt,
+        "",
+        cappedVocabularySkillExamples,
+        "",
+        cappedResourceManifest,
+        "",
+        approvedStyleCarryover,
+        "",
+        prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
+${clipPromptSection(prunedContext.prunedConsensus, 900)}` : "",
+        "",
+        prunedContext.prunedOutline ? `Master Outline:
+${clipPromptSection(prunedContext.prunedOutline, 700)}` : "",
+        "",
+        prunedContext.prunedStoryAssets ? `Story Assets:
+${clipPromptSection(prunedContext.prunedStoryAssets, 900)}` : "",
+        "",
+        prunedContext.prunedMemory ? `Character Memory:
+${clipPromptSection(prunedContext.prunedMemory, 520)}` : "",
+        "",
+        prunedContext.prunedLedger ? `Previous Chapter Ledger:
+${clipPromptSection(prunedContext.prunedLedger, 520)}` : "",
+        "",
+        prunedContext.prunedRag ? `Knowledge/RAG References:
+${clipPromptSection(prunedContext.prunedRag, 520)}` : "",
+        "",
+        clipPromptSection(continuityContract.prompt, 1050),
+        "",
+        clipPromptSection(characterProfileContract.prompt, 760),
+        "",
+        "\u7247\u6BB5\u5199\u4F5C\u786C\u8981\u6C42\uFF1A",
+        "- \u53EA\u8F93\u51FA\u8FD9\u4E00\u6BB5\u5C0F\u8BF4\u6B63\u6587\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown \u6807\u9898\u3001\u7247\u6BB5\u7F16\u53F7\u3001\u8BF4\u660E\u6216\u603B\u7ED3\u3002",
+        "- \u4ECE\u4E0A\u4E00\u7247\u6BB5\u5C3E\u5DF4\u81EA\u7136\u63A5\u7EED\uFF0C\u4F46\u4E0D\u8981\u590D\u8FF0\u4E0A\u4E00\u7247\u6BB5\u3002",
+        "- \u6BCF\u6BB5\u90FD\u5FC5\u987B\u5305\u542B\u52A8\u4F5C\u3001\u5BF9\u8BDD\u6216\u611F\u5B98\u7EC6\u8282\uFF0C\u4E0D\u80FD\u53EA\u5199\u65C1\u767D\u6982\u8FF0\u3002",
+        "- \u5BF9\u8BDD\u3001\u65C1\u767D\u548C\u52A8\u4F5C\u8981\u670D\u52A1\u672C\u7247\u6BB5\u65F6\u95F4\u7EBF\uFF0C\u4E0D\u8981\u63D0\u524D\u5199\u5B8C\u540E\u7EED\u7247\u6BB5\u3002",
+        "- \u4E0D\u80FD\u5806\u780C\u6210\u8BED\uFF0C\u4E0D\u80FD\u628A\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\u3002",
+        hasApprovedStyleSummaryPrompt(approvedStyleContext) ? "- \u5FC5\u987B\u8D34\u5408 User Approved Writing Style Contract\uFF1B\u5982\u679C\u901A\u7528\u5199\u4F5C\u6307\u5357\u4E0E\u8BE5\u5408\u540C\u51B2\u7A81\uFF0C\u4EE5\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u4E3A\u51C6\u3002" : "",
+        continuityContract.lockedProtagonistName ? `- \u5FC5\u987B\u4FDD\u6301\u4E3B\u89D2\u300C${continuityContract.lockedProtagonistName}\u300D\u4E00\u81F4\u3002` : "- \u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002"
+      ].filter(Boolean).join("\n"),
+      message: [
+        "\u8BF7\u6309\u65F6\u95F4\u7EBF\u751F\u6210\u672C\u7AE0\u7684\u4E00\u4E2A\u8FDE\u7EED\u6B63\u6587\u7247\u6BB5\u3002",
+        "\u53EA\u8FD4\u56DE\u5C0F\u8BF4\u6B63\u6587\uFF0C\u4E0D\u8981\u8FD4\u56DE\u6807\u9898\u3001\u8BA1\u5212\u3001\u89E3\u91CA\u3001\u5217\u8868\u6216\u4EE3\u7801\u5757\u3002",
+        "",
+        "## Chapter Causal Plan",
+        ...formatCausalPlanBullets(state, task),
+        "",
+        "## Segment Contract",
+        `- Segment: ${segment.index}/${segment.total} ${segment.label}`,
+        `- Timeline: ${segment.timelinePosition}`,
+        `- Focus: ${segment.narrativeFocus}`,
+        `- Target words: ${segment.targetWords}`,
+        ...segment.requiredBeats.map((beat) => `- ${beat}`),
+        "",
+        compositionPrompt,
+        "",
+        previousSegmentTail ? `## Previous Tail
+${previousSegmentTail}` : "",
+        "",
+        usesSceneCards ? "## Chapter Guardrails (Trimmed)" : "## Trimmed Chapter Blueprint",
+        trimmedBlueprint
+      ].filter(Boolean).join("\n")
+    });
+    const cleanedSegment = generated.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").replace(/^#+\s+.*$/gmu, "").replace(/^(片段|Segment)\s*\d+[\s\S]*?\n/iu, "").trim();
+    const segmentBody = cleanedSegment || generated.trim();
+    const plotMaterial = await generateDraftSegmentPlotMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail
+    });
+    const dialogueMaterial = await generateDraftSegmentDialogueMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail
+    });
+    const narrationMaterial = await generateDraftSegmentNarrationMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail
+    });
+    const characterActionMaterial = await generateDraftSegmentCharacterActionMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail
+    });
+    const continuityMaterial = await generateDraftSegmentContinuityMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail
+    });
+    const materialOverrides = {};
+    const materialModes = {};
+    if (plotMaterial) {
+      materialOverrides.plot = plotMaterial;
+      materialModes.plot = "llm-subcall";
+    }
+    if (dialogueMaterial) {
+      materialOverrides.dialogue = dialogueMaterial;
+      materialModes.dialogue = "llm-subcall";
+    }
+    if (narrationMaterial) {
+      materialOverrides.narration = narrationMaterial;
+      materialModes.narration = "llm-subcall";
+    }
+    if (characterActionMaterial) {
+      materialOverrides.character_action = characterActionMaterial;
+      materialModes.character_action = "llm-subcall";
+    }
+    if (continuityMaterial) {
+      materialOverrides.continuity = continuityMaterial;
+      materialModes.continuity = "llm-subcall";
+    }
+    const assemblyMaterial = await generateDraftSegmentAssemblyMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+      materials: materialOverrides,
+      fallbackBody: segmentBody
+    });
+    if (assemblyMaterial) {
+      materialOverrides.assembly = assemblyMaterial;
+      materialModes.assembly = "llm-subcall";
+    }
+    const cleanedAssemblySegment = cleanDraftAssemblyBody(assemblyMaterial || "");
+    const usesAssemblySegment = isUsableDraftAssemblyBody(cleanedAssemblySegment, segmentBody);
+    const finalSegmentBody = usesAssemblySegment ? cleanedAssemblySegment : segmentBody;
+    const assemblyUsage = assemblyMaterial ? {
+      requested: true,
+      decision: usesAssemblySegment ? "used" : "fallback_author",
+      reason: usesAssemblySegment ? "assembly material passed fiction-body guard and replaced the author segment" : "assembly material was saved for audit but rejected by fiction-body guard",
+      materialChars: cleanedAssemblySegment.length,
+      finalChars: finalSegmentBody.length,
+      fallbackChars: segmentBody.length
+    } : {
+      requested: false,
+      decision: "not_requested",
+      reason: "assembly role was not enabled or returned no material",
+      materialChars: 0,
+      finalChars: finalSegmentBody.length,
+      fallbackChars: segmentBody.length
+    };
+    const hasMaterialOverrides = Object.keys(materialOverrides).length > 0;
+    const segmentArtifact = paths && projectRoot ? await writeDraftSegmentArtifact({
+      projectRoot,
+      paths,
+      options,
+      state,
+      task,
+      segment,
+      content: finalSegmentBody,
+      previousSegmentTail: priorSegmentTail,
+      segmentationSource: usesSceneCards ? "scene_card" : "timeline",
+      continuityContract,
+      materialOverrides: hasMaterialOverrides ? materialOverrides : void 0,
+      materialModes: hasMaterialOverrides ? materialModes : void 0,
+      assemblyUsage
+    }) : null;
+    if (segmentArtifact) {
+      segmentArtifacts.push(segmentArtifact);
+      await emitWritingProgress(options, {
+        step: `draft_segment_artifact_saved_${segment.index}`,
+        role: "Author",
+        chapterNumber: task.chapterNumber,
+        title: task.title,
+        status: "completed",
+        message: `\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total} \u5DF2\u4FDD\u5B58\u4E3A\u72EC\u7ACB\u4EA7\u7269\u3002`,
+        artifactPath: segmentArtifact.relativePath,
+        preview: [
+          `source=${segmentArtifact.source}`,
+          `chars=${segmentArtifact.chars}`,
+          `briefs=${segmentArtifact.subArtifacts.filter((artifact) => artifact.role === "brief").length}`,
+          `materials=${segmentArtifact.subArtifacts.filter((artifact) => artifact.role === "material").length}`,
+          `path=${segmentArtifact.relativePath}`
+        ].join(" | ")
+      });
+    }
+    generatedSegments.push(finalSegmentBody);
+    previousSegmentTail = compactPreviousSegmentTail(generatedSegments.join("\n\n"));
+  }
+  const body = generatedSegments.join("\n\n");
+  return [
+    `# ${task.title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Target words: ${task.targetWords}`,
+    `- Segmented drafting: ${segmentPlan.length} LLM calls`,
+    usesSceneCards ? "- Draft segmentation source: scene cards" : "- Draft segmentation source: timeline fallback",
+    `- Segment artifacts: ${segmentArtifacts.map((artifact) => artifact.relativePath).join(", ") || "none"}`,
+    `- Estimated production words: ${wordCount(body)}`
+  ].join("\n");
 }
 async function repairAigcHighRiskDraft(state, task, finalDraft, aigcReport, resources, options, continuityContract, characterDossiers) {
   if (process.env.AI_NOVEL_TEST_MODE === "1" || aigcReport.status !== "blocked" || aigcReport.highRiskSegments.length === 0) {
@@ -8579,13 +13057,14 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
   const characterProfileQuality = evaluateCharacterProfilePresence(draft, characterProfileContract);
   const wordScore = wordCountBlockingIssue ? 4 : 8;
   const hasHook = /钩子|问题|章末|最后|门|信|名字|表情/u.test(draft);
-  const hasConflict = /冲突|压力|选择|代价|反击|局势/u.test(draft);
+  const hasConflict = /冲突|压力|选择|代价|反击|局势|刀|密信|伤口|怀疑|拦|问|追|藏|风险|少尹|兵曹|官|火|流民/u.test(draft);
   const hasBlueprint = blueprint.includes("Event Sequence");
   const hasCausalContract = hasCausalBlueprint(blueprint);
-  const hasCausalSignals = /承接|上一章|前文|选择|代价|不可逆|交给|下一章|后果/u.test(draft);
-  const hasCausalExecution = hasCausalContract && (hasCausalSignals || hasBlueprint && hasConflict && hasHook);
+  const causalExecution = evaluateCausalExecutionEvidence(draft, task, continuityContract);
+  const hasCausalExecution = hasCausalContract && causalExecution.status === "eligible";
   const resourceUsageScore = resourceUsage.status === "eligible" ? 8 : resourceUsage.status === "warning" ? 6 : 4;
-  const hardBlocked = wordCountBlockingIssue || plotContinuity.status === "quarantined" || styleQuality.status === "quarantined" || resourceUsage.status === "quarantined" || characterProfileQuality.status === "quarantined" || !hasCausalContract || !hasCausalExecution;
+  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality);
+  const hardBlocked = wordCountBlockingIssue || plotContinuity.status === "quarantined" || styleQuality.status === "quarantined" && !softStyleIssue || resourceUsage.status === "quarantined" || characterProfileQuality.status === "quarantined" || !hasCausalContract || !hasCausalExecution;
   const score = hardBlocked ? Math.min(5, wordScore) : Math.min(10, Math.round((wordScore + (hasHook ? 8 : 5) + (hasConflict ? 8 : 5) + (hasBlueprint ? 8 : 5)) / 4));
   return [
     "# Chapter Quality Report",
@@ -8602,7 +13081,7 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     `| \u60C5\u8282\u63A8\u8FDB | ${hasConflict ? 8 : 5}/10 | ${hasConflict ? "\u5305\u542B\u51B2\u7A81\u3001\u538B\u529B\u6216\u9009\u62E9\u3002" : "\u51B2\u7A81\u4FE1\u53F7\u4E0D\u8DB3\uFF0C\u9700\u8981\u8FD4\u5DE5\u3002"} |`,
     `| \u7AE0\u672B\u94A9\u5B50 | ${hasHook ? 8 : 5}/10 | ${hasHook ? "\u5305\u542B\u94A9\u5B50\u6216\u540E\u7EED\u671F\u5F85\u3002" : "\u7AE0\u672B\u671F\u5F85\u4E0D\u8DB3\u3002"} |`,
     `| \u84DD\u56FE\u6267\u884C | ${hasBlueprint ? 8 : 5}/10 | ${hasBlueprint ? "\u57FA\u4E8E\u8BE6\u7EC6\u7AE0\u8282\u84DD\u56FE\u6267\u884C\u3002" : "\u7F3A\u5C11\u8BE6\u7EC6\u84DD\u56FE\u4F9D\u636E\u3002"} |`,
-    `| \u56E0\u679C\u5408\u540C\u6267\u884C | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${hasCausalContract && hasCausalExecution ? "\u84DD\u56FE\u5305\u542B\u56E0\u679C\u5408\u540C\uFF0C\u6B63\u6587\u4F53\u73B0\u627F\u63A5\u3001\u9009\u62E9\u3001\u4EE3\u4EF7\u6216\u4EA4\u68D2\u3002" : "\u7F3A\u5C11\u6E05\u6670\u56E0\u679C\u5408\u540C\u6216\u6B63\u6587\u672A\u6267\u884C\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\u3002"} |`,
+    `| \u56E0\u679C\u5408\u540C\u6267\u884C | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${sanitizeMarkdownCell(hasCausalContract && hasCausalExecution ? causalExecution.reason : `\u7F3A\u5C11\u6E05\u6670\u56E0\u679C\u5408\u540C\u6216\u6B63\u6587\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A${causalExecution.reason}`)} |`,
     `| \u5199\u4F5C\u8D44\u6E90\u5438\u6536 | ${resourceUsageScore}/10 | ${sanitizeMarkdownCell(resourceUsage.reason)} |`,
     `| \u89D2\u8272\u9C9C\u660E\u5EA6 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${sanitizeMarkdownCell(characterProfileQuality.reason)} |`,
     `| \u7EFC\u5408\u8BC4\u5206 | ${score}/10 | ${score >= 7 ? "\u53EF\u8FDB\u5165\u6DA6\u8272\u3002" : "\u9700\u8981\u8FD4\u5DE5\u3002"} |`,
@@ -8614,7 +13093,7 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     "- Consistency Checker: \u68C0\u67E5\u8BBE\u5B9A\u3001\u65F6\u95F4\u7EBF\u3001\u4F0F\u7B14\u548C\u4EBA\u7269\u5173\u7CFB\u3002",
     "- Style Controller: \u68C0\u67E5\u6587\u98CE\u3001\u6210\u8BED\u5BC6\u5EA6\u3001\u6587\u8A00\u6BD4\u4F8B\u3001\u5BF9\u767D\u5DEE\u5F02\u3002",
     "- Prose Stylist: \u53BB\u9664\u6A21\u677F\u611F\uFF0C\u589E\u5F3A\u5177\u4F53\u573A\u666F\u548C\u81EA\u7136\u8868\u8FBE\u3002",
-    `- Causal Contract: ${hasCausalContract && hasCausalExecution ? "\u901A\u8FC7\uFF1A\u7AE0\u8282\u4E0D\u662F\u5B64\u7ACB\u4E8B\u4EF6\uFF0C\u5DF2\u6709\u627F\u63A5\u3001\u9009\u62E9\u3001\u4EE3\u4EF7\u6216\u4EA4\u68D2\u3002" : "\u5931\u8D25\uFF1A\u7AE0\u8282\u53EF\u80FD\u53D8\u6210\u6D41\u6C34\u8D26\u6216\u5B64\u7ACB\u4E8B\u4EF6\u3002"}`,
+    `- Causal Contract: ${hasCausalContract && hasCausalExecution ? `\u901A\u8FC7\uFF1A${causalExecution.reason}` : `\u5931\u8D25\uFF1A${causalExecution.reason}`}`,
     `- Plot Continuity: ${plotContinuity.reason}`,
     `- Style Hard Gate: ${styleQuality.reason}`,
     `- Resource Usage Gate: ${resourceUsage.reason}`,
@@ -8624,11 +13103,12 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     ...score >= 7 && !hardBlocked ? ["- \u6682\u65E0\u963B\u585E\u6027\u95EE\u9898\uFF1B\u6DA6\u8272\u65F6\u7EE7\u7EED\u538B\u4F4E AI \u6A21\u677F\u53E5\u3002"] : [
       ...wordCountBlockingIssue ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`] : [],
       ...plotContinuity.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${plotContinuity.reason}`] : [],
-      ...styleQuality.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${styleQuality.reason}`] : [],
+      ...styleQuality.status === "quarantined" && !softStyleIssue ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${styleQuality.reason}`] : [],
+      ...softStyleIssue ? [`- \u6DA6\u8272\u5EFA\u8BAE\uFF1A${styleQuality.reason}`] : [],
       ...resourceUsage.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${resourceUsage.reason}`] : [],
       ...characterProfileQuality.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${characterProfileQuality.reason}`] : [],
       ...!hasCausalContract ? ["- \u9700\u8981\u8FD4\u5DE5\uFF1A\u84DD\u56FE\u7F3A\u5C11 Causal Objective / Irreversible Change / Next Chapter Handoff\uFF0C\u4E0D\u80FD\u652F\u6491\u8FDE\u7EED\u5199\u4F5C\u3002"] : [],
-      ...!hasCausalExecution ? ["- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6CA1\u6709\u6E05\u6670\u6267\u884C\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\uFF0C\u5BB9\u6613\u53D8\u6210\u6D41\u6C34\u8D26\u3002"] : [],
+      ...!hasCausalExecution ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${causalExecution.reason}`] : [],
       ...count < target ? ["- \u6269\u5199\u6B63\u6587\u573A\u666F\u3002"] : [],
       ...!hasConflict ? ["- \u589E\u5F3A\u51B2\u7A81\u52A8\u4F5C\u3002"] : [],
       ...!hasHook ? ["- \u8865\u8DB3\u7AE0\u672B\u94A9\u5B50\u3002"] : []
@@ -8649,9 +13129,11 @@ function appendQualityHardChecks(report, task, draft, continuityContract, state,
     previousFinalDraft: draft
   }) : null;
   const characterProfileQuality = characterProfileContract ? evaluateCharacterProfilePresence(draft, characterProfileContract) : null;
+  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality);
   const narrativeFixes = [
     ...plotContinuity?.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${plotContinuity.reason}`] : [],
-    ...styleQuality.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${styleQuality.reason}`] : [],
+    ...styleQuality.status === "quarantined" && !softStyleIssue ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${styleQuality.reason}`] : [],
+    ...softStyleIssue ? [`- \u6DA6\u8272\u5EFA\u8BAE\uFF1A${styleQuality.reason}`] : [],
     ...characterProfileQuality?.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${characterProfileQuality.reason}`] : []
   ];
   const resourceUsage = continuityContract ? evaluateWritingResourceUsage(draft, void 0, task, "", continuityContract) : evaluateWritingResourceUsage(draft);
@@ -8679,7 +13161,27 @@ function appendQualityHardChecks(report, task, draft, continuityContract, state,
   ];
   return [report.trimEnd(), ...hardFixes].join("\n");
 }
-async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers) {
+function extractQualityRepairChecklist(report) {
+  const lines = report.split("\n");
+  const fixes = [];
+  let inRequiredFixes = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^##\s+Required Fixes/u.test(trimmed)) {
+      inRequiredFixes = true;
+      continue;
+    }
+    if (inRequiredFixes && /^##\s+/u.test(trimmed)) {
+      inRequiredFixes = false;
+    }
+    if (inRequiredFixes && /^-\s+/u.test(trimmed)) {
+      fixes.push(trimmed);
+    }
+  }
+  const scoreFixes = lines.filter((line) => /^\|\s*(情节推进|因果合同执行|写作资源吸收|角色鲜明度)\s*\|/u.test(line)).filter((line) => /[1-6]\/10/u.test(line)).map((line) => `- \u4F4E\u5206\u9879\uFF1A${line.replace(/^\|\s*|\s*\|$/g, "").replace(/\s*\|\s*/g, " - ")}`);
+  return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10);
+}
+async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
     state,
@@ -8693,6 +13195,7 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
   if (process.env.AI_NOVEL_TEST_MODE === "1" || !shouldUseLlmQualityPass(options)) {
     return fallback;
   }
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
   const generated = await generateProductionTextWithLlm({
     roleName: "Editor",
     state,
@@ -8721,6 +13224,7 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
       "\u7B2C 2 \u7AE0\u4EE5\u540E\u5982\u679C\u53EA\u590D\u7528\u4E3B\u89D2\u59D3\u540D\uFF0C\u5374\u6CA1\u6709\u627F\u63A5\u4E0A\u4E00\u7AE0\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u3001\u4EE3\u4EF7\u6216\u672A\u89E3\u51B3\u95EE\u9898\uFF0C\u5FC5\u987B\u5224\u4E3A\u4E0D\u901A\u8FC7\u3002",
       "\u5982\u679C\u7AE0\u8282\u53EA\u662F\u6309\u65F6\u95F4\u7F57\u5217\u4E8B\u4EF6\uFF0C\u6CA1\u6709\u8BA9\u4E0A\u4E00\u7AE0\u8F93\u5165\u5BFC\u81F4\u672C\u7AE0\u9009\u62E9\u3001\u4EE3\u4EF7\u548C\u4E0B\u4E00\u7AE0\u4EA4\u68D2\uFF0C\u5FC5\u987B\u5224\u4E3A\u4E0D\u901A\u8FC7\u3002",
       "\u5982\u679C\u6B63\u6587\u50CF\u84DD\u56FE\u3001\u8BA1\u5212\u3001\u4FEE\u6539\u8BF4\u660E\u6216\u6A21\u677F\u6BB5\u843D\uFF0C\u800C\u4E0D\u662F\u5C0F\u8BF4\u6B63\u6587\uFF0C\u5FC5\u987B\u5224\u4E3A\u4E0D\u901A\u8FC7\u3002",
+      approvedStyleCarryover ? "\u5982\u679C\u6B63\u6587\u660E\u663E\u8FDD\u80CC\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u4E2D\u7684\u58F0\u97F3\u3001\u8282\u594F\u3001\u5BF9\u767D\u89C4\u5219\u3001\u63CF\u5199\u89C4\u5219\u6216\u7981\u7528\u6A21\u5F0F\uFF0C\u5FC5\u987B\u8981\u6C42\u8FD4\u5DE5\u3002" : "",
       "\u5982\u679C\u770B\u4E0D\u51FA\u5199\u4F5C\u8D44\u6E90\u3001\u8BCD\u6C47/\u6210\u8BED\u7B56\u7565\u548C\u573A\u666F\u8D44\u6E90\u7684\u81EA\u7136\u5438\u6536\uFF0C\u5FC5\u987B\u8981\u6C42\u8FD4\u5DE5\u3002",
       "\u5982\u679C\u51FA\u73B0\u5355\u5B57/\u77ED\u8BCD\u9891\u7E41\u72EC\u7ACB\u6210\u53E5\u6216\u6210\u884C\u3001\u63A8\u8350\u8BCD\u5B64\u7ACB\u5806\u780C\u3001\u6C1B\u56F4\u8BCD\u8FDE\u53D1\uFF0C\u5FC5\u987B\u5224\u4E3A\u4E0D\u901A\u8FC7\u3002"
     ].join("\n"),
@@ -8731,6 +13235,8 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
       blueprint,
       "",
       continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
       "",
       characterProfileContract.prompt,
       "",
@@ -8746,7 +13252,7 @@ async function createProductionQualityReport(state, task, draft, blueprint, reso
 ${generated}`;
   return appendQualityHardChecks(report, task, draft, continuityContract, state, characterDossiers);
 }
-async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
+async function reviseDraftForQualityGate(state, task, draft, report, blueprint, resources, options, attempt, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   console.log(`
 
@@ -8771,6 +13277,7 @@ ${report}`);
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
   const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);
   const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500);
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
   const basePromptLines = [
     cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
     "\u4F60\u6B63\u5728\u6267\u884C\u8D28\u91CF\u95E8\u7981\u8FD4\u5DE5\u3002\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u76EE\u6807\uFF0C\u4E0D\u5F97\u8DF3\u7AE0\uFF0C\u4E0D\u5F97\u6539\u53D8\u5DF2\u51BB\u7ED3\u8BBE\u5B9A\u3002",
@@ -8779,7 +13286,8 @@ ${report}`);
     "\u5FC5\u987B\u4FEE\u590D\u914D\u89D2\u5173\u7CFB\u3001\u524D\u5E8F\u60C5\u8282\u627F\u63A5\u3001\u4F0F\u7B14\u72B6\u6001\u3001\u8D44\u6E90\u4F7F\u7528\u3001\u60C5\u8282\u63A8\u8FDB\u548C\u6B63\u6587\u6BD4\u4F8B\u95EE\u9898\u3002",
     "\u5FC5\u987B\u4FEE\u590D\u7AE0\u8282\u65AD\u88C2\uFF1A\u4E0A\u4E00\u7AE0\u951A\u70B9\u8981\u8FDB\u5165\u672C\u7AE0\u4E8B\u4EF6\u56E0\u679C\uFF0C\u4E0D\u5F97\u53EA\u6362\u573A\u666F\u91CD\u5F00\u3002",
     "\u5FC5\u987B\u4FEE\u590D\u6D41\u6C34\u8D26\u95EE\u9898\uFF1A\u4E0D\u8981\u53EA\u6309\u65F6\u95F4\u7F57\u5217\uFF0C\u6240\u6709\u573A\u666F\u90FD\u8981\u56E0\u9009\u62E9\u3001\u4EE3\u4EF7\u3001\u4FE1\u606F\u53D8\u5316\u6216\u5173\u7CFB\u53D8\u5316\u800C\u53D1\u751F\u3002",
-    "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002"
+    "\u5FC5\u987B\u4FEE\u590D AI \u5316\u788E\u7247\uFF1A\u628A\u5B64\u7ACB\u77ED\u8BCD\u6539\u6210\u5B8C\u6574\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u8BDD\u6216\u56E0\u679C\u53E5\u3002",
+    approvedStyleCarryover ? "\u5FC5\u987B\u540C\u65F6\u4FEE\u590D\u4E0E\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u4E0D\u4E00\u81F4\u7684\u58F0\u97F3\u3001\u53E5\u5F0F\u3001\u5BF9\u767D\u3001\u63CF\u5199\u548C\u7981\u7528\u6A21\u5F0F\u95EE\u9898\u3002" : ""
   ];
   if (cappedAntiHallucination) {
     basePromptLines.push(`\u3010\u53CD\u5E7B\u89C9\u4E0E\u7EC6\u8282\u7559\u767D\u7EA6\u675F\u3011
@@ -8797,6 +13305,7 @@ ${cappedConflictStrategy}`);
     previousFinalDraft: draft,
     blueprint
   });
+  const repairChecklist = extractQualityRepairChecklist(report);
   const fixedDynamicPromptLines = [
     `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
     `\u6807\u9898\uFF1A${task.title}`,
@@ -8806,12 +13315,14 @@ ${cappedConflictStrategy}`);
     "",
     `[Correction Observation (\u7EA0\u504F\u89C2\u5BDF)]
 \u4E0A\u4E00\u8F6E\u5199\u4F5C\u5B58\u5728\u4EE5\u4E0B\u7F3A\u9677\uFF1A
-${report.slice(0, 1500)}
+${repairChecklist.join("\n") || report.slice(0, 1200)}
 \u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
+    "",
+    approvedStyleCarryover,
     "",
     continuityContract.prompt,
     "",
-    characterProfileContract.prompt
+    characterProfileContract.prompt.slice(0, 1e3)
   ];
   const basePromptText = basePromptLines.join("\n\n");
   const fixedDynamicPromptText = fixedDynamicPromptLines.join("\n");
@@ -8847,11 +13358,14 @@ ${report.slice(0, 1500)}
       `\u6807\u9898\uFF1A${task.title}`,
       `\u8FD4\u5DE5\u8F6E\u6B21\uFF1A${attempt}`,
       "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+      "\u5FC5\u987B\u628A\u4F4E\u5206\u9879\u8F6C\u5316\u4E3A\u53EF\u89C1\u6B63\u6587\u8BC1\u636E\uFF1A\u4E0A\u4E00\u7AE0\u951A\u70B9\u8FDB\u5165\u5F00\u573A\u4E8B\u4EF6\uFF1B\u4E3B\u89D2\u505A\u4E00\u4E2A\u4F1A\u6539\u53D8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9\uFF1B\u9009\u62E9\u5E26\u6765\u8EAB\u4EFD/\u5173\u7CFB/\u7EBF\u7D22/\u8D44\u6E90\u540E\u679C\uFF1B\u7ED3\u5C3E\u628A\u8FD9\u4E2A\u540E\u679C\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
+      "\u5982\u679C\u89D2\u8272\u9C9C\u660E\u5EA6\u4F4E\uFF0C\u53EA\u8865\u5F3A\u672C\u7AE0\u627F\u62C5\u51B2\u7A81\u3001\u9009\u62E9\u6216\u5173\u7CFB\u53D8\u5316\u7684\u6838\u5FC3\u4EBA\u7269\uFF1B\u4E0D\u8981\u786C\u585E\u53E3\u7656\u548C\u6807\u5FD7\u52A8\u4F5C\uFF0C\u800C\u662F\u8BA9\u4EBA\u7269\u901A\u8FC7\u76EE\u6807\u3001\u7ACB\u573A\u3001\u9009\u62E9\u4EE3\u4EF7\u3001\u5BF9\u4E3B\u89D2\u5173\u7CFB\u7684\u53CD\u5E94\u4EA7\u751F\u5DEE\u5F02\u3002",
+      "\u5982\u679C\u5199\u4F5C\u8D44\u6E90\u5438\u6536\u4F4E\uFF0C\u628A\u77ED\u8BCD/\u6210\u8BED\u6539\u6210\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u7269\u4EF6\u548C\u56E0\u679C\u53E5\uFF0C\u4E0D\u8981\u5199\u5B64\u7ACB\u6210\u8BED\u6216\u56DB\u5B57\u77ED\u53E5\u3002",
       "\u5FC5\u987B\u8F93\u51FA Markdown\uFF0C\u4FDD\u7559 `## Draft Body`\u3002",
       "",
       `[Correction Observation (\u7EA0\u504F\u89C2\u5BDF)]
 \u4E0A\u4E00\u8F6E\u5199\u4F5C\u5B58\u5728\u4EE5\u4E0B\u7F3A\u9677\uFF1A
-${report.slice(0, 1500)}
+${repairChecklist.join("\n") || report.slice(0, 1200)}
 \u8BF7\u5728\u672C\u6B21\u91CD\u5199\u4E2D\u7279\u522B\u6CE8\u610F\u5E76\u4FEE\u590D\u8FD9\u4E9B\u95EE\u9898\u3002`,
       attempt >= 2 ? `
 \u3010WARNING: \u8FDE\u7EED\u8FD4\u5DE5\u786C\u8B66\u544A\u3011\u8FD9\u5DF2\u7ECF\u662F\u7B2C ${attempt} \u8F6E\u91CD\u5199\uFF01\u524D\u51E0\u8F6E\u7684\u91CD\u5199\u7531\u4E8E\u6539\u52A8\u592A\u5C0F\u6216\u672A\u5F7B\u5E95\u7EA0\u504F\u5DF2\u88AB\u6253\u56DE\u3002\u672C\u6B21\u91CD\u5199\u4F60\u5FC5\u987B\u8FDB\u884C\u5927\u8303\u56F4\u3001\u98A0\u8986\u6027\u7684\u6587\u5B57\u91CD\u7EC4\u548C\u53E5\u5F0F\u53D8\u6362\uFF08\u4F8B\u5982\u591A\u4F7F\u7528\u5177\u4F53\u52A8\u4F5C\u548C\u73AF\u5883\u89E6\u611F\u6765\u66FF\u6362\u5355\u8584\u7684\u89E3\u91CA\u53E5\uFF09\uFF0C\u4E25\u7981\u76F4\u63A5\u590D\u7528\u6216\u5FAE\u8C03\u4E0A\u4E00\u8F6E\u88AB\u62D2\u7684\u5185\u5BB9\uFF01
@@ -8872,6 +13386,8 @@ ${prunedContext.prunedLedger}` : "",
       prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (\u672B\u5C3E\u627F\u63A5\u6BB5):
 ${prunedContext.previousDraftFragment}` : "",
       "",
+      approvedStyleCarryover,
+      "",
       continuityContract.prompt
     ].join("\n"),
     message: [
@@ -8881,7 +13397,7 @@ ${prunedContext.previousDraftFragment}` : "",
       trimBlueprintForDrafting(blueprint),
       "",
       "## Quality Report",
-      report,
+      repairChecklist.length ? repairChecklist.join("\n") : report,
       "",
       "## Draft",
       draft
@@ -8889,7 +13405,7 @@ ${prunedContext.previousDraftFragment}` : "",
   });
   return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n");
 }
-async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers) {
+async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   const maxAttempts = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
   let draft = initialDraft;
   let report = "";
@@ -8902,7 +13418,7 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
   };
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options);
-    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers);
+    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers, approvedStyleContext);
     if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
       report = report.replace(/综合评分 \| \d+\/10/u, `\u7EFC\u5408\u8BC4\u5206 | ${options.forceQualityScoreForTest}/10`);
       if (options.forceQualityScoreForTest < 7 && !report.includes("\u9700\u8981\u8FD4\u5DE5")) {
@@ -8926,7 +13442,8 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
       continuityContract,
       paths,
       projectRoot,
-      characterDossiers
+      characterDossiers,
+      approvedStyleContext
     );
   }
   return { draft, report, gate };
@@ -9048,7 +13565,7 @@ function formatAigcWritingDetectionReport(report) {
     ] : []
   ].join("\n");
 }
-async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
+async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
     state,
@@ -9057,6 +13574,7 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
     continuityContract,
     previousFinalDraft: draft
   });
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
   const fallbackNaturalnessReport = createNaturalnessReport({
     beforeDraft: draft,
     afterDraft: draft,
@@ -9093,6 +13611,7 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
     dynamicPrompt: [
       "\u53EA\u5141\u8BB8\u5728\u4E0D\u6539\u53D8\u6838\u5FC3\u5267\u60C5\u3001\u4E0D\u6539\u53D8\u8BBE\u5B9A\u3001\u4E0D\u8DF3\u7AE0\u7684\u524D\u63D0\u4E0B\u6DA6\u8272\u3002",
       "\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u6B63\u6587\u7ED3\u6784\uFF0C\u589E\u5F3A\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u767D\u5DEE\u5F02\u548C\u5177\u4F53\u7EC6\u8282\u3002",
+      approvedStyleCarryover ? "\u5FC5\u987B\u4FDD\u6301\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\uFF0C\u4E0D\u5F97\u628A\u5DF2\u786E\u8BA4\u7684\u6587\u98CE\u6DA6\u8272\u6210\u901A\u7528\u6A21\u677F\u8154\u3002" : "",
       "\u63A7\u5236\u6210\u8BED\u5BC6\u5EA6\uFF0C\u907F\u514D\u5806\u780C\u548C\u6A21\u677F\u5316\u60C5\u7EEA\u89E3\u91CA\u3002",
       "\u5FC5\u987B\u6D88\u9664\u5355\u5B57/\u77ED\u8BCD\u72EC\u7ACB\u6210\u884C\u7684 AI \u5316\u788E\u7247\u611F\uFF1B\u63A8\u8350\u8BCD\u53EA\u80FD\u81EA\u7136\u5D4C\u5165\u53E5\u5B50\u3002",
       "\u5FC5\u987B\u79FB\u9664\u4EFB\u4F55 AI \u75D5\u8FF9\u3001\u903B\u8F91\u8FDE\u8BCD\uFF08\u4E25\u7981\u51FA\u73B0'\u4E0D\u4EC5\u5982\u6B64'\u3001'\u4E0E\u6B64\u540C\u65F6'\u3001'\u7136\u800C'\u3001'\u4E8B\u5B9E\u4E0A'\uFF09\u3001\u62A5\u544A\u8154\u3001\u603B\u7ED3\u8154\u3001\u8FC7\u5EA6\u89E3\u91CA\u3001\u6574\u9F50\u6392\u6BD4\u3001\u60C5\u7EEA\u6807\u7B7E\u5806\u53E0\u548C\u4E07\u80FD\u5347\u534E\u7ED3\u5C3E\u3002\u5F7B\u5E95\u8D2F\u5F7B\u201C\u6444\u50CF\u673A\u9650\u77E5\u5448\u73B0\uFF08Show, don't tell\uFF09\u201D\uFF1A\u7981\u6B62\u65C1\u767D\u5BF9\u5267\u60C5\u7684\u4E25\u91CD\u6027\u3001\u53CD\u8F6C\u3001\u9634\u8C0B\u7B49\u8FDB\u884C\u8DE8\u89C6\u89D2\u7684\u8111\u8865\u4E0E\u4E3B\u89C2\u89E3\u91CA\uFF08\u5982\u4E25\u7981\u51FA\u73B0\u201C\u88AB\u6293\u4F4F\u662F\u901A\u654C\u65A9\u9996\u7684\u91CD\u7F6A\u201D\u3001\u201C\u81EA\u5DF1\u662F\u4E0D\u662F\u88AB\u5356\u4E86\u201D\u7B49\u5267\u900F\u53E5\uFF09\uFF0C\u6240\u6709\u56E0\u679C\u5B8C\u5168\u7559\u767D\u8BA9\u8BFB\u8005\u610F\u4F1A\uFF1B\u53EA\u62CD\u6444\u7269\u7406\u753B\u9762\u3001\u7269\u4EF6\u3001\u53F0\u8BCD\u548C\u751F\u7406\u53CD\u5E94\u3002",
@@ -9102,6 +13621,8 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
       continuityContract.continuityAnchors.length ? `\u6DA6\u8272\u540E\u4ECD\u5FC5\u987B\u4FDD\u7559\u5E76\u81EA\u7136\u4F7F\u7528\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "\u6DA6\u8272\u540E\u5FC5\u987B\u4FDD\u7559\u672C\u7AE0\u5EFA\u7ACB\u7684\u53EF\u8FFD\u8E2A\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
       "",
       continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
       "",
       characterProfileContract.prompt
     ].join("\n"),
@@ -9114,6 +13635,8 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
       report,
       "",
       continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
       "",
       characterProfileContract.prompt,
       "",
@@ -9164,6 +13687,11 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     continuityContract,
     characterProfileContract
   });
+  const foreshadowingLedgerUpdate = createForeshadowingHealthLedger({
+    causalPlan,
+    nextAnchors,
+    plotContinuity
+  });
   return [
     `# Chapter ${task.chapterNumber} Memory Update`,
     "",
@@ -9197,6 +13725,7 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     "## Foreshadowing",
     ...nextAnchors.length ? nextAnchors.slice(0, 8).map((anchor) => `- Continuity anchor: ${anchor}`) : ["- Continuity anchor: \u672C\u7AE0\u672A\u62BD\u53D6\u5230\u660E\u786E\u951A\u70B9\uFF0C\u4E0B\u4E00\u8F6E\u5FC5\u987B\u4EBA\u5DE5/\u6A21\u578B\u8865\u8DB3\u7269\u54C1\u3001\u7EBF\u7D22\u3001\u5173\u7CFB\u6216\u4EE3\u4EF7\u3002"],
     "- \u4E0B\u4E00\u7AE0\u5FC5\u987B\u627F\u63A5\u4E0A\u8FF0 Continuity anchor \u4E2D\u81F3\u5C11\u4E24\u4E2A\uFF0C\u8BA9\u5B83\u4EEC\u8FDB\u5165\u6B63\u6587\u4E8B\u4EF6\u56E0\u679C\u3002",
+    ...foreshadowingLedgerUpdate,
     "",
     "## Style Notes",
     `- ${styleQuality.reason}`,
@@ -9209,6 +13738,20 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     "## Draft Excerpt",
     finalDraft.split("\n").filter(Boolean).slice(0, 8).join("\n")
   ].join("\n");
+}
+function createForeshadowingHealthLedger(input) {
+  const anchorLines = input.nextAnchors.length ? input.nextAnchors.slice(0, 6).map((anchor) => `- Anchor advanced: ${anchor}`) : ["- Anchor advanced: none extracted; \u4E0B\u4E00\u7AE0\u5FC5\u987B\u5148\u8865\u8DB3\u53EF\u8FFD\u8E2A\u7269\u54C1\u3001\u7EBF\u7D22\u3001\u5173\u7CFB\u6216\u4EE3\u4EF7\u3002"];
+  const status = input.nextAnchors.length >= 2 && input.plotContinuity.status === "eligible" ? "active" : "needs_manual_followup";
+  const risk = status === "active" ? "low; \u5DF2\u5F62\u6210\u53EF\u627F\u63A5\u951A\u70B9\u3002" : "high; \u4F0F\u7B14\u53EF\u80FD\u60AC\u7A7A\uFF0C\u4E0B\u4E00\u7AE0\u84DD\u56FE\u5FC5\u987B\u663E\u5F0F\u5904\u7406\u3002";
+  return [
+    "### Foreshadowing Ledger Update",
+    `- Operation: ${input.causalPlan.foreshadowingOperation}`,
+    `- Status: ${status}`,
+    ...anchorLines,
+    `- Expected payoff / next touchpoint: ${input.causalPlan.nextHandoff}`,
+    "- Carryover rule: \u4E0B\u4E00\u7AE0\u5FC5\u987B\u8BA9\u81F3\u5C11\u4E24\u4E2A\u951A\u70B9\u8FDB\u5165\u53EF\u89C1\u4E8B\u4EF6\uFF0C\u5E76\u901A\u8FC7\u884C\u52A8\u3001\u4EE3\u4EF7\u6216\u5173\u7CFB\u53D8\u5316\u5151\u73B0\uFF0C\u4E0D\u80FD\u53EA\u53E3\u5934\u89E3\u91CA\u3002",
+    `- Risk: ${risk}`
+  ];
 }
 async function recordPipelineArtifact(projectRoot, absolutePath, kind, options, metadata = {}) {
   if (!options.factoryRootDir || !options.projectId) {
@@ -9271,8 +13814,8 @@ async function recordPipelineArtifact(projectRoot, absolutePath, kind, options, 
 async function writeProductionMasterOutline(projectRoot, paths, state, context, options = {}) {
   const { resources } = await writeProductionWritingResourceArtifacts(projectRoot, paths, state, options);
   const content = await createMasterOutlineContent(state, context, resources, options);
-  await import_promises4.default.mkdir(paths.plansDir, { recursive: true });
-  await import_promises4.default.writeFile(paths.masterOutlinePath, `${content}
+  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  await import_promises5.default.writeFile(paths.masterOutlinePath, `${content}
 `);
   await recordPipelineArtifact(projectRoot, paths.masterOutlinePath, "plan", options, {
     stage: "master_planning",
@@ -9289,16 +13832,64 @@ async function writeProductionMasterOutline(projectRoot, paths, state, context, 
   });
   return content;
 }
+async function writeProductionStoryBibleAssets(projectRoot, paths, state, context, options = {}) {
+  const resources = await loadProductionWritingResources(projectRoot);
+  const assets = createProductionStoryBibleAssets(state, context, resources);
+  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  const written = [];
+  for (const asset of assets) {
+    const assetPath = import_node_path8.default.join(paths.plansDir, asset.filename);
+    await import_promises5.default.writeFile(assetPath, `${asset.content}
+`);
+    await recordPipelineArtifact(projectRoot, assetPath, "plan", options, {
+      stage: asset.stage,
+      production: true,
+      title: asset.title
+    });
+    written.push(assetPath);
+  }
+  const writingPlanPath = await writeProductionWritingPlan(projectRoot, paths, state, options);
+  written.push(writingPlanPath);
+  await emitWritingProgress(options, {
+    step: "story_bible_assets_saved",
+    role: "Showrunner",
+    status: "completed",
+    message: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\u5DF2\u4FDD\u5B58\u3002",
+    artifactPath: relativeArtifactPath(projectRoot, import_node_path8.default.join(paths.plansDir, "story-bible.md")),
+    preview: [...assets.map((asset) => `- ${asset.filename}`), "- writing-plan.json"].join("\n"),
+    wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n"))
+  });
+  return written;
+}
+async function ensureProductionStoryBibleAssets(projectRoot, paths, state, context, options = {}) {
+  const required = [...PRODUCTION_STORY_ASSET_FILES, "writing-plan.json"];
+  const missing = [];
+  for (const filename of required) {
+    const content = await readOptionalText2(import_node_path8.default.join(paths.plansDir, filename));
+    if (!content.trim()) missing.push(filename);
+  }
+  if (missing.length === 0) return [];
+  await emitWritingProgress(options, {
+    step: "story_bible_assets_repair_started",
+    role: "Showrunner",
+    chapterNumber: void 0,
+    status: "started",
+    message: `\u751F\u4EA7\u524D\u7F6E\u6545\u4E8B\u8D44\u4EA7\u7F3A\u5931 ${missing.length} \u9879\uFF0C\u7CFB\u7EDF\u5C06\u5728\u6B63\u6587\u751F\u4EA7\u524D\u81EA\u52A8\u8865\u9F50\u3002`,
+    preview: missing.map((filename) => `- ${filename}`).join("\n")
+  });
+  return writeProductionStoryBibleAssets(projectRoot, paths, state, context, options);
+}
 async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  await import_promises4.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+  await import_promises5.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
   const written = [];
   for (const task of state.plan.chapterTasks) {
-    const deterministicBlueprint = createDetailedChapterBlueprint(state, task, context, resources);
+    const storyAssetContext = await loadProductionStoryAssetContext(paths, task);
+    const deterministicBlueprint = createDetailedChapterBlueprint(state, task, context, resources, void 0, storyAssetContext);
     const shouldUseLlmPlanner = process.env.AI_NOVEL_TEST_MODE !== "1" && !options.preferDeterministicPlanning && task.chapterNumber <= 3;
     let content = deterministicBlueprint;
     if (shouldUseLlmPlanner) {
-      content = await createChapterBlueprintContent(state, task, context, resources, options);
+      content = await createChapterBlueprintContent(state, task, context, resources, options, storyAssetContext);
     } else {
       await emitWritingProgress(options, {
         step: "chapter_blueprint_started",
@@ -9328,8 +13919,8 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = import_node_path7.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
-    await import_promises4.default.writeFile(blueprintPath, `${content}
+    const blueprintPath = import_node_path8.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    await import_promises5.default.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -9359,18 +13950,26 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   }
   const writingMode = productionWritingMode(options);
   const resources = await loadProductionWritingResources(projectRoot);
-  const protagonistProfile = await readOptionalText(paths.protagonistPath);
+  const approvedStyleContext = await loadApprovedWritingStyleContext(projectRoot);
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
+  await enforceApprovedWritingStyleGate(options, task, approvedStyleContext);
+  await persistApprovedWritingStyleAssets(projectRoot, paths, approvedStyleContext, options);
+  const protagonistProfile = await readOptionalText2(paths.protagonistPath);
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText(import_node_path7.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText(import_node_path7.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = import_node_path7.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText2(import_node_path8.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText2(import_node_path8.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = import_node_path8.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
-    consensus: await readOptionalText(paths.consensusPath),
+    consensus: await readOptionalText2(paths.consensusPath),
     protagonist: protagonistProfile,
-    style: await readOptionalText(paths.styleProfilePath)
+    style: [
+      await readOptionalText2(paths.styleProfilePath),
+      approvedStyleCarryover
+    ].filter(Boolean).join("\n\n")
   };
+  await ensureProductionStoryBibleAssets(projectRoot, paths, state, context, options);
   await emitWritingProgress(options, {
     step: "chapter_started",
     role: "Showrunner",
@@ -9379,8 +13978,9 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     status: "started",
     message: writingMode === "quality" ? `\u7B2C ${task.chapterNumber} \u7AE0\u5F00\u59CB\u751F\u4EA7\uFF1A\u5B8C\u6574\u8D28\u91CF\u6A21\u5F0F\u4F1A\u6267\u884C\u84DD\u56FE\u3001\u521D\u7A3F\u3001LLM \u8D28\u68C0\u3001\u6DA6\u8272\u548C\u8BB0\u5FC6\u66F4\u65B0\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0\u5F00\u59CB\u751F\u4EA7\uFF1A\u5FEB\u901F\u65E0\u4EBA\u503C\u5B88\u6A21\u5F0F\u4F1A\u4F18\u5148\u751F\u6210\u6B63\u6587\uFF0C\u5E76\u7528\u786E\u5B9A\u6027\u786C\u95E8\u7981\u68C0\u67E5\u8FDE\u7EED\u6027\u3001\u6210\u8BED\u8D44\u6E90\u548C\u53BB AI \u5473\u3002`
   });
-  let blueprint = await readOptionalText(blueprintPath);
+  let blueprint = await readOptionalText2(blueprintPath);
   if (!hasCausalBlueprint(blueprint)) {
+    const storyAssetContext = await loadProductionStoryAssetContext(paths, task);
     const planningContract = createContinuityContract({
       state,
       task,
@@ -9389,9 +13989,9 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       previousMemory,
       previousFinalDraft
     });
-    blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract);
-    await import_promises4.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
-    await import_promises4.default.writeFile(blueprintPath, `${blueprint}
+    blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext);
+    await import_promises5.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+    await import_promises5.default.writeFile(blueprintPath, `${blueprint}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -9442,7 +14042,31 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     message: continuityContract.lockedProtagonistName ? `Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u672C\u7AE0\u9501\u5B9A\u4E3B\u89D2\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u5E76\u8FFD\u8E2A\u914D\u89D2\u3001\u60C5\u8282\u548C\u4F0F\u7B14\u3002` : "Canon \u8FDE\u7EED\u6027\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u9996\u7AE0\u5C06\u9501\u5B9A\u552F\u4E00\u4E3B\u89D2\uFF0C\u5E76\u5EFA\u7ACB\u540E\u7EED\u89D2\u8272/\u60C5\u8282\u8D26\u672C\u3002",
     preview: continuityContract.prompt.slice(0, 720)
   });
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers);
+  if (approvedStyleContext.status === "ready") {
+    await emitWritingProgress(options, {
+      step: "approved_style_contract_loaded",
+      role: "Showrunner",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "completed",
+      message: "\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u5DF2\u8F7D\u5165\uFF1A\u6B63\u6587\u751F\u6210\u3001\u8D28\u68C0\u548C\u81EA\u7136\u5316\u4F1A\u4EE5\u51BB\u7ED3\u6837\u6BB5\u4E0E\u89C4\u5219\u4E3A\u6700\u9AD8\u98CE\u683C\u7EA6\u675F\u3002",
+      preview: approvedStyleCarryover.slice(0, 720)
+    });
+    await emitWritingProgress(options, {
+      step: "approved_style_assets_synced",
+      role: "Showrunner",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "completed",
+      message: "\u51BB\u7ED3\u540E\u7684\u5199\u6CD5\u89C4\u5219\u4E66\u3001\u6B63\u5411\u53C2\u8003\u548C\u7981\u5FCC\u6E05\u5355\u5DF2\u540C\u6B65\u5230\u751F\u4EA7\u8D44\u4EA7\uFF0C\u6B63\u6587\u94FE\u8DEF\u4F1A\u5F3A\u5236\u7EE7\u627F\u3002",
+      preview: [
+        relativeArtifactPath(projectRoot, paths.styleRulebookPath),
+        relativeArtifactPath(projectRoot, paths.styleReferencesPath),
+        relativeArtifactPath(projectRoot, paths.styleAntiPatternsPath)
+      ].join("\n")
+    });
+  }
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers, approvedStyleContext);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -9454,7 +14078,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft)
   });
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers);
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers, approvedStyleContext);
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "quality_gate_completed",
@@ -9466,19 +14090,21 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: report.slice(0, 420),
     qualityGate: gate
   });
-  let finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers);
-  let aigcDetection = await runAigcWritingDetection(finalDraft, options);
+  let finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers, approvedStyleContext);
+  const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || options.bypassAigcGate === true;
+  let aigcDetection = isAigcGateBypassed ? skippedAigcWritingDetectionReport("AIGC\u68C0\u6D4B\u5728\u751F\u6210\u9636\u6BB5\u5DF2\u88AB\u65C1\u8DEF\uFF0C\u5C06\u5728\u540E\u7EED\u7EDF\u4E00\u7CBE\u4FEE\u3002") : await runAigcWritingDetection(finalDraft, options);
+  const isAigcBlocked = aigcDetection.status === "blocked" && !isAigcGateBypassed;
   await emitWritingProgress(options, {
     step: "aigc_detection_completed",
     role: "Reviewer",
     chapterNumber: task.chapterNumber,
     title: task.title,
-    status: aigcDetection.status === "blocked" ? "blocked" : "completed",
-    message: aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF0C\u51C6\u5907\u6267\u884C\u5C40\u90E8\u81EA\u7136\u5316\u4FEE\u590D\u3002` : aigcDetection.status === "passed" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u901A\u8FC7\uFF0C\u5E73\u5747\u6982\u7387 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u672A\u542F\u7528\u6216\u4E0D\u53EF\u7528\uFF1A${aigcDetection.reason}`,
+    status: isAigcBlocked ? "blocked" : "completed",
+    message: isAigcBlocked ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF0C\u51C6\u5907\u6267\u884C\u5C40\u90E8\u81EA\u7136\u5316\u4FEE\u590D\u3002` : aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF08\u5DF2\u5F00\u542F AIGC \u95E8\u7981\u65C1\u8DEF\uFF0C\u76F4\u63A5\u901A\u8FC7\uFF09\u3002` : aigcDetection.status === "passed" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u901A\u8FC7\uFF0C\u5E73\u5747\u6982\u7387 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u672A\u542F\u7528\u6216\u4E0D\u53EF\u7528\uFF1A${aigcDetection.reason}`,
     preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
     wordCount: wordCount(finalDraft)
   });
-  if (aigcDetection.status === "blocked" && gate.status !== "blocked") {
+  if (isAigcBlocked && gate.status !== "blocked") {
     finalDraft = await repairAigcHighRiskDraft(state, task, finalDraft, aigcDetection, resources, options, continuityContract, characterDossiers);
     aigcDetection = await runAigcWritingDetection(finalDraft, options);
     await emitWritingProgress(options, {
@@ -9492,15 +14118,12 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       wordCount: wordCount(finalDraft)
     });
   }
-  const reportWithAigcDetection = `${report.trimEnd()}
-
-${formatAigcWritingDetectionReport(aigcDetection)}`;
   const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
-  const finalGate = aigcDetection.status === "blocked" ? {
+  let finalGate = aigcDetection.status !== "passed" && !isAigcGateBypassed ? {
     ...baseFinalGate,
     passed: false,
     status: "blocked",
-    reason: `${baseFinalGate.reason} AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${aigcDetection.highRiskSegments.length} \u4E2A\u7247\u6BB5\u8D85\u8FC7\u9608\u503C\uFF0C\u6700\u9AD8\u6982\u7387 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}\u3002`.trim()
+    reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked" ? `AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${aigcDetection.highRiskSegments.length} \u4E2A\u7247\u6BB5\u8D85\u8FC7\u9608\u503C\uFF0C\u6700\u9AD8\u6982\u7387 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}\u3002` : `AIGC \u68C0\u6D4B\u672A\u901A\u8FC7\uFF1A${aigcDetection.status}\uFF0C${aigcDetection.reason || "\u9700\u8981\u914D\u7F6E\u5E76\u901A\u8FC7 AIGC \u68C0\u6D4B\u540E\u624D\u80FD\u653E\u884C\u3002"}`}`.trim()
   } : baseFinalGate;
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
@@ -9547,36 +14170,93 @@ ${formatAigcWritingDetectionReport(aigcDetection)}`;
     finalDraft,
     finalGate
   });
+  const styleConformanceDrift = evaluateChapterStyleConformanceDrift({
+    approvedStyleContext,
+    chapterText: finalDraft,
+    extractedStyleFingerprint
+  });
+  if (styleConformanceDrift.status === "drifted") {
+    finalGate = {
+      ...finalGate,
+      passed: false,
+      status: "blocked",
+      reason: `${finalGate.reason} \u98CE\u683C\u7EE7\u627F\u6F02\u79FB\u963B\u585E\uFF1A${styleConformanceDrift.reason}`.trim()
+    };
+  }
+  const styleInheritanceVerification = await buildChapterStyleInheritanceVerification({
+    paths,
+    approvedStyleContext,
+    task,
+    finalGate,
+    aigcDetection,
+    styleConformanceDrift,
+    extractedStyleFingerprint
+  });
+  const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null;
+  const reportWithAigcDetection = `${report.trimEnd()}
+
+${formatAigcWritingDetectionReport(aigcDetection)}
+
+${formatStyleConformanceDriftReport(styleConformanceDrift)}`;
   throwIfPipelineAborted(options);
-  const draftPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = import_node_path7.default.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = import_node_path7.default.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = import_node_path7.default.join(paths.memoryDir, `${chapterId}-memory.md`);
-  await import_promises4.default.mkdir(paths.chaptersDir, { recursive: true });
-  await import_promises4.default.mkdir(paths.reportsDir, { recursive: true });
-  await import_promises4.default.mkdir(paths.memoryDir, { recursive: true });
-  await import_promises4.default.writeFile(draftPath, `${draft}
+  const draftPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = import_node_path8.default.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = import_node_path8.default.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const characterRelationshipsPath = paths.characterDossiersPath ? import_node_path8.default.join(import_node_path8.default.dirname(paths.characterDossiersPath), "relationships.json") : "";
+  const characterRelationsMarkdownPath = paths.characterDossiersPath ? import_node_path8.default.join(import_node_path8.default.dirname(paths.characterDossiersPath), "relations.md") : "";
+  const characterRelationshipGraph = updatedCharacterDossiers.length ? createCharacterRelationshipGraph(updatedCharacterDossiers) : null;
+  await import_promises5.default.mkdir(paths.chaptersDir, { recursive: true });
+  await import_promises5.default.mkdir(paths.reportsDir, { recursive: true });
+  await import_promises5.default.mkdir(paths.memoryDir, { recursive: true });
+  await import_promises5.default.writeFile(draftPath, `${draft}
 `);
-  await import_promises4.default.writeFile(reportPath, `${reportWithAigcDetection}
+  await import_promises5.default.writeFile(reportPath, `${reportWithAigcDetection}
 `);
-  await import_promises4.default.writeFile(reviewedPath, `${draft}
+  await import_promises5.default.writeFile(reviewedPath, `${draft}
 
 ---
 
 ${reportWithAigcDetection}
 `);
-  await import_promises4.default.writeFile(finalPath, `${finalDraft}
+  await import_promises5.default.writeFile(finalPath, `${finalDraft}
 `);
-  await import_promises4.default.writeFile(memoryPath, `${memoryUpdate}
+  await import_promises5.default.writeFile(memoryPath, `${memoryUpdate}
 `);
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
   }
   if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
-    await import_promises4.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+    await import_promises5.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
 `);
   }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph);
+  }
+  if (characterRelationsMarkdownPath && characterRelationshipGraph) {
+    await import_promises5.default.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
+`);
+  }
+  const versionManifestPath = await writeChapterVersionManifest({
+    projectRoot,
+    options,
+    chapterId,
+    task,
+    draftPath,
+    reviewedPath,
+    finalPath,
+    reportPath,
+    memoryPath,
+    finalDraft,
+    draft,
+    finalGate,
+    writingMode,
+    aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift
+  });
   await recordPipelineArtifact(projectRoot, draftPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "draft" });
   await recordPipelineArtifact(projectRoot, reviewedPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "reviewed", qualityGate: finalGate });
   await recordPipelineArtifact(projectRoot, finalPath, "chapter", options, {
@@ -9584,15 +14264,25 @@ ${reportWithAigcDetection}
     pass: "final",
     qualityGate: finalGate,
     aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift,
     wordCount: wordCount(finalDraft),
     targetWords: task.targetWords
   });
-  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection });
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection, styleInheritanceVerification, styleConformanceDrift });
   await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate });
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
       chapterNumber: task.chapterNumber,
       kind: "character_dossiers",
+      qualityGate: finalGate
+    });
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await recordPipelineArtifact(projectRoot, characterRelationshipsPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_relationship_graph",
       qualityGate: finalGate
     });
   }
@@ -9618,7 +14308,7 @@ ${reportWithAigcDetection}
     qualityGate: finalGate
   });
   if (options.factoryRootDir && options.projectId) {
-    const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText(paths.styleProfilePath) : "";
+    const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText2(paths.styleProfilePath) : "";
     const characterDossierMemory = updatedCharacterDossiers.length ? formatCharacterDossiersMarkdown(updatedCharacterDossiers) : "";
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordMemory(options.projectId, {
@@ -9677,8 +14367,11 @@ ${reportWithAigcDetection}
         chapterNumber: task.chapterNumber,
         draftPath: relativeArtifactPath(projectRoot, draftPath),
         finalPath: relativeArtifactPath(projectRoot, finalPath),
+        versionManifestPath: relativeArtifactPath(projectRoot, versionManifestPath),
         reportPath: relativeArtifactPath(projectRoot, reportPath),
         qualityGate: finalGate,
+        styleInheritanceVerification,
+        styleConformanceDrift,
         writingMode,
         directorCommandId: options.directorCommandId ?? null
       });
@@ -9688,6 +14381,7 @@ ${reportWithAigcDetection}
     draftPath,
     reviewedPath,
     finalPath,
+    versionManifestPath,
     reportPath,
     memoryPath,
     wordCount: wordCount(finalDraft),
@@ -9695,10 +14389,13 @@ ${reportWithAigcDetection}
     writingMode
   };
 }
+function hasApprovedStyleSummaryPrompt(approvedStyleContext) {
+  return approvedStyleContext.status === "ready" && Boolean(approvedStyleContext.prompt.trim());
+}
 
 // src/context-packet.ts
-var import_promises5 = __toESM(require("fs/promises"), 1);
-var import_node_path8 = __toESM(require("path"), 1);
+var import_promises6 = __toESM(require("fs/promises"), 1);
+var import_node_path9 = __toESM(require("path"), 1);
 function compactList2(values = [], limit = 2) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
@@ -9820,11 +14517,11 @@ function createCurrentContextPacketText(state) {
   ].join("\n");
 }
 async function syncCurrentContextPacketFile(projectRoot, state) {
-  const contextPath = import_node_path8.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
-  const current = await import_promises5.default.readFile(contextPath, "utf8").catch(() => "");
+  const contextPath = import_node_path9.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
+  const current = await import_promises6.default.readFile(contextPath, "utf8").catch(() => "");
   if (!current) {
-    await import_promises5.default.mkdir(import_node_path8.default.dirname(contextPath), { recursive: true });
-    await import_promises5.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
+    await import_promises6.default.mkdir(import_node_path9.default.dirname(contextPath), { recursive: true });
+    await import_promises6.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
 `);
     return;
   }
@@ -9832,7 +14529,7 @@ async function syncCurrentContextPacketFile(projectRoot, state) {
   if (next === current) {
     return;
   }
-  await import_promises5.default.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
+  await import_promises6.default.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
 `);
 }
 
@@ -9863,6 +14560,18 @@ var AGENT_ROLES = [
   "reviewer",
   "prose-stylist"
 ];
+var COVER_IMAGE_PATH = ".ai-novel/assets/cover/cover.png";
+var COVER_METADATA_PATH = ".ai-novel/assets/cover/cover-metadata.json";
+var COVER_PROMPT_PATH = ".ai-novel/assets/cover/cover-prompt.md";
+var DRAFT_SUBCALL_ROLE_VALUES = ["plot", "narration", "dialogue", "character_action", "continuity", "assembly"];
+var STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json";
+function parseDraftSubcallRolesSetting(value) {
+  if (!value) return void 0;
+  const roles = value.split(",").map((role) => role.trim()).filter(
+    (role) => DRAFT_SUBCALL_ROLE_VALUES.includes(role)
+  );
+  return roles.length ? [...new Set(roles)] : void 0;
+}
 function slugifyTitle(title) {
   const cleaned = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return cleaned || "untitled-novel";
@@ -9898,16 +14607,16 @@ function stampRuntimeProgress(state, action, route = stageRoute(state.runtime.st
   state.runtime.lastAction = action;
 }
 function getProjectsPaths(rootDir) {
-  const projectsRoot = import_node_path9.default.join(rootDir, PROJECTS_DIR);
+  const projectsRoot = import_node_path10.default.join(rootDir, PROJECTS_DIR);
   return {
     projectsRoot,
-    registryPath: import_node_path9.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
+    registryPath: import_node_path10.default.join(projectsRoot, PROJECTS_REGISTRY_FILE)
   };
 }
 async function readProjectRegistry(rootDir) {
   const { registryPath } = getProjectsPaths(rootDir);
   try {
-    const raw = await import_promises6.default.readFile(registryPath, "utf8");
+    const raw = await import_promises7.default.readFile(registryPath, "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -9916,8 +14625,8 @@ async function readProjectRegistry(rootDir) {
 }
 async function writeProjectRegistry(rootDir, projects) {
   const { projectsRoot, registryPath } = getProjectsPaths(rootDir);
-  await import_promises6.default.mkdir(projectsRoot, { recursive: true });
-  await import_promises6.default.writeFile(registryPath, `${JSON.stringify(projects, null, 2)}
+  await import_promises7.default.mkdir(projectsRoot, { recursive: true });
+  await import_promises7.default.writeFile(registryPath, `${JSON.stringify(projects, null, 2)}
 `);
 }
 function createUniqueProjectId(baseSlug, projects) {
@@ -9932,15 +14641,15 @@ function createUniqueProjectId(baseSlug, projects) {
   return `${baseSlug}-${suffix}`;
 }
 function resolveProjectRoot(rootDir, projectId) {
-  return import_node_path9.default.join(rootDir, PROJECTS_DIR, projectId);
+  return import_node_path10.default.join(rootDir, PROJECTS_DIR, projectId);
 }
 function resolveStoredProjectRoot(rootDir, projectRoot, projectId) {
-  if (import_node_path9.default.isAbsolute(projectRoot)) {
+  if (import_node_path10.default.isAbsolute(projectRoot)) {
     return projectRoot;
   }
-  const rootRelative = import_node_path9.default.resolve(rootDir, projectRoot);
+  const rootRelative = import_node_path10.default.resolve(rootDir, projectRoot);
   const managedRoot = resolveProjectRoot(rootDir, projectId);
-  if (import_node_path9.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path9.default.sep}`)) {
+  if (import_node_path10.default.normalize(projectRoot).includes(`${PROJECTS_DIR}${import_node_path10.default.sep}`)) {
     return managedRoot;
   }
   return rootRelative;
@@ -10160,7 +14869,8 @@ function buildInitialState(options) {
     assets: {
       cover: {
         status: "pending",
-        briefPath: ".ai-novel/assets/cover/cover-brief.md"
+        briefPath: ".ai-novel/assets/cover/cover-brief.md",
+        promptPath: COVER_PROMPT_PATH
       },
       comic: {
         status: "pending",
@@ -10170,37 +14880,39 @@ function buildInitialState(options) {
   };
 }
 function getWorkspacePaths(rootDir) {
-  const workspaceDir = import_node_path9.default.join(rootDir, WORKSPACE_DIR2);
+  const workspaceDir = import_node_path10.default.join(rootDir, WORKSPACE_DIR2);
   return {
     workspaceDir,
-    statePath: import_node_path9.default.join(workspaceDir, "state.json"),
-    promptsDir: import_node_path9.default.join(workspaceDir, "prompts"),
-    agentPromptsDir: import_node_path9.default.join(workspaceDir, "prompts", "agents"),
-    consensusPath: import_node_path9.default.join(workspaceDir, "prompts", "global-consensus.md"),
-    plansDir: import_node_path9.default.join(workspaceDir, "plans"),
-    reportsDir: import_node_path9.default.join(workspaceDir, "reports"),
-    styleDir: import_node_path9.default.join(workspaceDir, "style"),
-    styleProfilePath: import_node_path9.default.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: import_node_path9.default.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: import_node_path9.default.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: import_node_path9.default.join(workspaceDir, "style", "anti-patterns.md"),
-    chaptersDir: import_node_path9.default.join(workspaceDir, "chapters"),
-    assetsDir: import_node_path9.default.join(workspaceDir, "assets"),
-    coverDir: import_node_path9.default.join(workspaceDir, "assets", "cover"),
-    comicDir: import_node_path9.default.join(workspaceDir, "assets", "comic"),
-    memoryDir: import_node_path9.default.join(workspaceDir, "memory"),
-    charactersDir: import_node_path9.default.join(workspaceDir, "memory", "characters"),
-    characterCoreDir: import_node_path9.default.join(workspaceDir, "memory", "characters", "core"),
-    characterDossiersPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
-    characterDossiersMarkdownPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
-    protagonistPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
-    relationsPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "relations.md"),
-    characterEvolutionPath: import_node_path9.default.join(workspaceDir, "memory", "characters", "evolution.md"),
-    configPath: import_node_path9.default.join(workspaceDir, "config.json"),
-    settingFreezePath: import_node_path9.default.join(workspaceDir, "plans", "setting-freeze.md"),
-    masterOutlinePath: import_node_path9.default.join(workspaceDir, "plans", "master-outline.md"),
-    chapterBlueprintsDir: import_node_path9.default.join(workspaceDir, "plans", "chapter-blueprints"),
-    coverPromptPath: import_node_path9.default.join(workspaceDir, "assets", "cover", "cover-prompt.md")
+    statePath: import_node_path10.default.join(workspaceDir, "state.json"),
+    promptsDir: import_node_path10.default.join(workspaceDir, "prompts"),
+    agentPromptsDir: import_node_path10.default.join(workspaceDir, "prompts", "agents"),
+    consensusPath: import_node_path10.default.join(workspaceDir, "prompts", "global-consensus.md"),
+    plansDir: import_node_path10.default.join(workspaceDir, "plans"),
+    reportsDir: import_node_path10.default.join(workspaceDir, "reports"),
+    styleDir: import_node_path10.default.join(workspaceDir, "style"),
+    styleProfilePath: import_node_path10.default.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: import_node_path10.default.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: import_node_path10.default.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: import_node_path10.default.join(workspaceDir, "style", "anti-patterns.md"),
+    chaptersDir: import_node_path10.default.join(workspaceDir, "chapters"),
+    assetsDir: import_node_path10.default.join(workspaceDir, "assets"),
+    coverDir: import_node_path10.default.join(workspaceDir, "assets", "cover"),
+    comicDir: import_node_path10.default.join(workspaceDir, "assets", "comic"),
+    memoryDir: import_node_path10.default.join(workspaceDir, "memory"),
+    charactersDir: import_node_path10.default.join(workspaceDir, "memory", "characters"),
+    characterCoreDir: import_node_path10.default.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
+    protagonistPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "evolution.md"),
+    configPath: import_node_path10.default.join(workspaceDir, "config.json"),
+    settingFreezePath: import_node_path10.default.join(workspaceDir, "plans", "setting-freeze.md"),
+    masterOutlinePath: import_node_path10.default.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: import_node_path10.default.join(workspaceDir, "plans", "chapter-blueprints"),
+    coverPromptPath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover-prompt.md"),
+    coverImagePath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover.png"),
+    coverMetadataPath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover-metadata.json")
   };
 }
 function formatCharacterDossier(dossier) {
@@ -10245,7 +14957,22 @@ function formatCharacterDossierSummary(dossiers) {
 }
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
-  const llmConfig = loadLlmConfigFromEnv(rootDir);
+  const textLlmConfig = await loadLlmConfigForCapability(rootDir, "text").catch(() => null);
+  const llmConfig = {
+    provider: {
+      baseUrl: textLlmConfig?.provider.baseUrl || "",
+      apiKeyEnv: textLlmConfig ? "DB_ACTIVE_CONFIG" : "unset",
+      modelName: textLlmConfig?.provider.modelName || "",
+      apiMode: textLlmConfig?.provider.apiMode || "chat",
+      timeoutMs: textLlmConfig?.provider.timeoutMs || 12e4,
+      temperature: textLlmConfig?.provider.temperature || 0.1,
+      reactMaxSteps: 25
+    },
+    writing: {
+      chapterWordTarget: state.plan.chapterWordTarget,
+      chapterWordMinimum: MIN_CHAPTER_WORD_TARGET
+    }
+  };
   const creativeProfile = state.project.creativeProfile || buildCreativeProfile({
     rootDir,
     idea: state.project.idea,
@@ -10263,18 +14990,16 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     characterDossiers
   };
   const protagonistDossier = characterDossiers.find((dossier) => dossier.role === "protagonist") || characterDossiers[0];
-  await import_promises6.default.mkdir(paths.promptsDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.agentPromptsDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.plansDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.reportsDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.styleDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.chaptersDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.coverDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.comicDir, { recursive: true });
-  await import_promises6.default.mkdir(paths.characterCoreDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.promptsDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.agentPromptsDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.plansDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.reportsDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.styleDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.chaptersDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.coverDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.comicDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.characterCoreDir, { recursive: true });
   await writeJsonFileAtomic2(paths.statePath, state);
-  llmConfig.writing.chapterWordTarget = state.plan.chapterWordTarget;
-  llmConfig.writing.chapterWordMinimum = MIN_CHAPTER_WORD_TARGET;
   await writeJsonFileAtomic2(paths.configPath, llmConfig);
   await writeJsonFileAtomic2(paths.characterDossiersPath, characterDossiers);
   const reactPrompt = [
@@ -10514,70 +15239,297 @@ Current focus:
 `
     ])
   );
-  await import_promises6.default.writeFile(import_node_path9.default.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
+  await import_promises7.default.writeFile(import_node_path10.default.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
 `);
-  await import_promises6.default.writeFile(import_node_path9.default.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
+  await import_promises7.default.writeFile(import_node_path10.default.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
 `);
-  await import_promises6.default.writeFile(paths.consensusPath, `${globalConsensus}
+  await import_promises7.default.writeFile(paths.consensusPath, `${globalConsensus}
 `);
-  await import_promises6.default.writeFile(paths.styleProfilePath, `${styleProfile}
+  await import_promises7.default.writeFile(paths.styleProfilePath, `${styleProfile}
 `);
-  await import_promises6.default.writeFile(paths.styleRulebookPath, `${styleRulebook}
+  await import_promises7.default.writeFile(paths.styleRulebookPath, `${styleRulebook}
 `);
-  await import_promises6.default.writeFile(paths.styleReferencesPath, `${styleReferences}
+  await import_promises7.default.writeFile(paths.styleReferencesPath, `${styleReferences}
 `);
-  await import_promises6.default.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
+  await import_promises7.default.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
 `);
-  await import_promises6.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
+  await import_promises7.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
 `);
-  await import_promises6.default.writeFile(paths.protagonistPath, `${protagonistSeed}
+  await import_promises7.default.writeFile(paths.protagonistPath, `${protagonistSeed}
 `);
-  await import_promises6.default.writeFile(paths.relationsPath, `${relations}
+  await import_promises7.default.writeFile(paths.relationsPath, `${relations}
 `);
-  await import_promises6.default.writeFile(paths.characterEvolutionPath, `${evolution}
+  await import_promises7.default.writeFile(paths.characterEvolutionPath, `${evolution}
 `);
-  await import_promises6.default.writeFile(import_node_path9.default.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
+  await import_promises7.default.writeFile(import_node_path10.default.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
 `);
-  await import_promises6.default.writeFile(import_node_path9.default.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
+  await import_promises7.default.writeFile(import_node_path10.default.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
 `);
   await Promise.all(
     AGENT_ROLES.flatMap((role) => {
-      const base = import_node_path9.default.join(paths.agentPromptsDir, `${role}.base.md`);
-      const dynamic = import_node_path9.default.join(paths.agentPromptsDir, `${role}.dynamic.md`);
+      const base = import_node_path10.default.join(paths.agentPromptsDir, `${role}.base.md`);
+      const dynamic = import_node_path10.default.join(paths.agentPromptsDir, `${role}.dynamic.md`);
       return [
-        import_promises6.default.writeFile(base, `${basePrompts.get(role) ?? ""}
+        import_promises7.default.writeFile(base, `${basePrompts.get(role) ?? ""}
 `),
-        import_promises6.default.writeFile(dynamic, `${dynamicPrompts.get(role) ?? ""}
+        import_promises7.default.writeFile(dynamic, `${dynamicPrompts.get(role) ?? ""}
 `)
       ];
     })
   );
 }
-async function readOptionalText2(filePath) {
+async function readOptionalText3(filePath) {
   try {
-    return (await import_promises6.default.readFile(filePath, "utf8")).trim();
+    return (await import_promises7.default.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
 }
+async function readOptionalJson2(filePath) {
+  try {
+    const raw = await import_promises7.default.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function fileHasContent2(filePath) {
+  return Boolean((await readOptionalText3(filePath)).trim());
+}
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function hasItems(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function createStoryFoundationFingerprint(payload) {
+  return (0, import_node_crypto3.createHash)("sha256").update(stableJson(payload)).digest("hex").slice(0, 24);
+}
+function buildStoryFoundationFingerprintInput({
+  planningAssetDetails,
+  storyFoundationContract,
+  worldMatrix,
+  plotArchitecture,
+  storyBible,
+  volumeStrategy,
+  foreshadowingLedger,
+  characterDynamics,
+  writingPlan
+}) {
+  return {
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan
+  };
+}
+function planningAssetStructuralIssue(asset, value, totalChapters) {
+  if (!value) return "JSON \u65E0\u6CD5\u89E3\u6790";
+  switch (asset) {
+    case "story-foundation-contract.json": {
+      const plot = value.plot && typeof value.plot === "object" ? value.plot : {};
+      const characters = value.characters && typeof value.characters === "object" ? value.characters : {};
+      if (!nonEmptyString(value.project?.title) && !nonEmptyString(value.project?.idea)) return "\u7F3A\u5C11\u9879\u76EE\u6838\u5FC3\u4FE1\u606F";
+      if (!hasItems(plot.chapters) && !hasItems(plot.causalModel?.chapters)) return "\u7F3A\u5C11\u4E3B\u7EBF\u7AE0\u8282\u56E0\u679C";
+      if (!hasItems(characters.requiredDossierFields)) return "\u7F3A\u5C11\u4EBA\u7269\u6863\u6848\u8981\u6C42";
+      return "";
+    }
+    case "world-matrix.json":
+      return hasItems(value.rules) ? "" : "\u7F3A\u5C11\u4E16\u754C\u89C4\u5219";
+    case "plot-architecture.json":
+      return hasItems(value.chapters) ? "" : "\u7F3A\u5C11\u7AE0\u8282\u56E0\u679C\u67B6\u6784";
+    case "story-bible.json":
+      return nonEmptyString(value.readerPromise) && hasItems(value.nonNegotiableContracts) ? "" : "\u7F3A\u5C11\u8BFB\u8005\u627F\u8BFA\u6216\u6545\u4E8B\u5408\u540C";
+    case "volume-strategy.json":
+      return hasItems(value.volumes) ? "" : "\u7F3A\u5C11\u5206\u5377\u7B56\u7565";
+    case "foreshadowing-ledger.json":
+      return hasItems(value.entries) ? "" : "\u7F3A\u5C11\u4F0F\u7B14\u6761\u76EE";
+    case "character-dynamics.json":
+      return hasItems(value.relationshipEntries) || hasItems(value.dossiers) || hasItems(value.relationships) ? "" : "\u7F3A\u5C11\u4EBA\u7269\u5173\u7CFB\u52A8\u6001";
+    case "writing-plan.json": {
+      const chapters = Array.isArray(value.chapters) ? value.chapters : [];
+      if (!Number.isFinite(Number(value.totalChapters)) || Number(value.totalChapters) <= 0) return "\u7F3A\u5C11\u603B\u7AE0\u8282\u6570";
+      if (chapters.length < Math.max(1, totalChapters)) return "\u5199\u4F5C\u8BA1\u5212\u672A\u8986\u76D6\u5168\u4E66\u7AE0\u8282";
+      return "";
+    }
+    default:
+      return "";
+  }
+}
+async function countMarkdownFiles(dirPath) {
+  try {
+    const entries = await import_promises7.default.readdir(dirPath, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && /\.md$/iu.test(entry.name)).length;
+  } catch {
+    return 0;
+  }
+}
+async function evaluateDraftingStartReadiness(rootDir, paths, state) {
+  const requiredPlanningAssets = [
+    "world-matrix.md",
+    "plot-architecture.md",
+    "story-bible.md",
+    "volume-strategy.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "story-foundation-contract.json",
+    "world-matrix.json",
+    "plot-architecture.json",
+    "story-bible.json",
+    "volume-strategy.json",
+    "foreshadowing-ledger.json",
+    "character-dynamics.json",
+    "writing-plan.json"
+  ];
+  const totalChapters = Math.max(0, Number(state.plan.totalChapters || state.plan.chapterTasks.length || 0));
+  const planningAssetDetails = await Promise.all(requiredPlanningAssets.map(async (asset) => {
+    const assetPath = import_node_path10.default.join(paths.plansDir, asset);
+    const present = await fileHasContent2(assetPath);
+    const issue = present && asset.endsWith(".json") ? planningAssetStructuralIssue(asset, await readOptionalJson2(assetPath), totalChapters) : "";
+    return {
+      key: asset.replace(/\.md$/u, "").replace(/[^a-z0-9]+/giu, "_"),
+      label: asset,
+      path: `.ai-novel/plans/${asset}`,
+      status: present && !issue ? "passed" : "blocked",
+      detail: present ? issue || "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+    };
+  }));
+  const presentPlanningAssets = planningAssetDetails.filter((asset) => asset.status === "passed").map((asset) => asset.label);
+  const storyFoundationApproval = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, STORY_FOUNDATION_APPROVAL_FILE));
+  const storyFoundationApproved = Boolean(storyFoundationApproval?.approved === true && String(storyFoundationApproval.approvedAt || "").trim());
+  const storyFoundationApprovalFingerprint = typeof storyFoundationApproval?.assetFingerprint === "string" ? String(storyFoundationApproval.assetFingerprint) : "";
+  const styleEvolution = await loadStyleEvolution(rootDir).catch(() => null);
+  const hasCharacterDynamicsAsset = await fileHasContent2(import_node_path10.default.join(paths.plansDir, "character-dynamics.json"));
+  const hasDossiers = await fileHasContent2(paths.characterDossiersPath) || hasCharacterDynamicsAsset;
+  const hasRelationships = await fileHasContent2(import_node_path10.default.join(paths.charactersDir, "relationships.json")) || hasCharacterDynamicsAsset;
+  const blueprintCount = await countMarkdownFiles(paths.chapterBlueprintsDir);
+  const consensus = await readOptionalText3(paths.consensusPath);
+  const storyFoundationContract = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "story-foundation-contract.json"));
+  const worldMatrix = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "world-matrix.json"));
+  const plotArchitecture = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "plot-architecture.json"));
+  const storyBible = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "story-bible.json"));
+  const volumeStrategy = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "volume-strategy.json"));
+  const foreshadowingLedger = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "foreshadowing-ledger.json"));
+  const characterDynamics = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "character-dynamics.json"));
+  const writingPlan = await readOptionalJson2(import_node_path10.default.join(paths.plansDir, "writing-plan.json"));
+  const storyFoundationFingerprintInput = buildStoryFoundationFingerprintInput({
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan
+  });
+  const storyFoundationAssetFingerprint = createStoryFoundationFingerprint(storyFoundationFingerprintInput);
+  return evaluateProductionReadiness({
+    consensusText: consensus,
+    planningArtifactCount: presentPlanningAssets.length,
+    planningRequiredAssetCount: presentPlanningAssets.length,
+    planningRequiredAssets: requiredPlanningAssets,
+    planningMissingRequiredAssets: requiredPlanningAssets.filter((asset) => !presentPlanningAssets.includes(asset)),
+    planningAssetDetails,
+    storyFoundationApproved,
+    storyFoundationApprovalPath: `.ai-novel/plans/${STORY_FOUNDATION_APPROVAL_FILE}`,
+    storyFoundationApprovedAt: typeof storyFoundationApproval?.approvedAt === "string" ? storyFoundationApproval.approvedAt : void 0,
+    storyFoundationApprovalFingerprint,
+    storyFoundationAssetFingerprint,
+    characterAssetDetails: [
+      {
+        key: "character_dossiers",
+        label: "\u4EBA\u7269\u6863\u6848",
+        path: ".ai-novel/memory/characters/dossiers.json",
+        status: hasDossiers ? "passed" : "blocked",
+        detail: hasDossiers ? "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+      },
+      {
+        key: "relationship_graph",
+        label: "\u4EBA\u7269\u5173\u7CFB\u56FE",
+        path: ".ai-novel/memory/characters/relationships.json",
+        status: hasRelationships ? "passed" : "blocked",
+        detail: hasRelationships ? "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+      }
+    ],
+    executionAssetDetails: [
+      {
+        key: "chapter_blueprints",
+        label: "\u7AE0\u8282\u84DD\u56FE",
+        path: ".ai-novel/plans/chapter-blueprints/",
+        status: totalChapters > 0 && blueprintCount >= totalChapters ? "passed" : "blocked",
+        detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+      },
+      {
+        key: "style_contract",
+        label: "\u5199\u6CD5\u5408\u540C",
+        path: ".ai-novel/style/evolution/style-contract.json",
+        status: styleEvolution?.gate?.status || "blocked",
+        detail: styleEvolution?.gate?.status === "passed" ? "\u5DF2\u51BB\u7ED3" : styleEvolution?.gate?.blockedReason || "\u5F85\u786E\u8BA4"
+      }
+    ],
+    blueprintCount,
+    totalChapters,
+    characterDossierCount: hasDossiers ? Math.max(1, state.memory?.characterDossiers?.length || 0) : 0,
+    styleGate: styleEvolution?.gate || evaluateStyleEvolutionGate(null),
+    memoryRecallRows: Math.max(0, Number(state.memory?.characterDossiers?.length || 0)),
+    memoryLag: 0,
+    contextBudgetPercent: 0
+  });
+}
+async function blockDraftingUntilReady(rootDir, paths, state, pipelineOptions) {
+  const readiness = await evaluateDraftingStartReadiness(rootDir, paths, state);
+  if (readiness.canProceed) {
+    return false;
+  }
+  state.runtime.stage = "chapter_task_generation";
+  state.runtime.statusMessage = `Drafting is blocked by production readiness: ${readiness.blockedReason || readiness.summary}`;
+  stampRuntimeProgress(state, "drafting_blocked_by_production_readiness");
+  await saveAutonomousState(rootDir, state);
+  await recordWorkflowEvent(pipelineOptions, "DRAFTING_START_BLOCKED_BY_READINESS", {
+    status: readiness.status,
+    score: readiness.score,
+    blockedReason: readiness.blockedReason,
+    issueCodes: readiness.issues.map((issue) => issue.code)
+  });
+  if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+    await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+  }
+  return true;
+}
 async function writeJsonFileAtomic2(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
-  await import_promises6.default.mkdir(import_node_path9.default.dirname(filePath), { recursive: true });
+  await import_promises7.default.mkdir(import_node_path10.default.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const tempPath = import_node_path9.default.join(import_node_path9.default.dirname(filePath), `.${import_node_path9.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
+    const tempPath = import_node_path10.default.join(import_node_path10.default.dirname(filePath), `.${import_node_path10.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
     try {
-      const handle = await import_promises6.default.open(tempPath, "wx");
+      const handle = await import_promises7.default.open(tempPath, "wx");
       try {
         await handle.writeFile(data, "utf8");
         await handle.sync();
       } finally {
         await handle.close();
       }
-      await import_promises6.default.rename(tempPath, filePath);
+      await import_promises7.default.rename(tempPath, filePath);
       return;
     } catch (error) {
-      await import_promises6.default.unlink(tempPath).catch(() => void 0);
+      await import_promises7.default.unlink(tempPath).catch(() => void 0);
       if (attempt === 0 && error instanceof Error && "code" in error && error.code === "ENOENT") {
         continue;
       }
@@ -10612,12 +15564,246 @@ function extractSectionBullets(source, heading, limit = 4) {
   }
   return collected;
 }
+function extractMeaningfulLines(source, limit = 4) {
+  return source.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#")).slice(0, limit);
+}
+function trimForPrompt(source, maxChars) {
+  const normalized = source.trim().replace(/\n{3,}/g, "\n\n");
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars).trim()}
+[truncated]`;
+}
+function getEnvValue(rootDir, name) {
+  return process.env[name] || getProjectEnvStatus(rootDir).values[name] || "";
+}
+function buildFallbackCoverVisualBrief(state, context) {
+  const consensusLines = extractMeaningfulLines(context.consensus, 5);
+  const protagonistLines = extractMeaningfulLines(context.protagonist, 4);
+  const styleLines = extractMeaningfulLines(context.style, 3);
+  const genre = state.project.creativeProfile?.genre || "genre-forward commercial fiction";
+  return [
+    "# Cover Visual Brief",
+    "",
+    `Title: ${state.project.title}`,
+    `Core concept: ${state.project.idea}`,
+    `Genre signal: ${genre}`,
+    "",
+    "Primary cover concept:",
+    "- A single iconic protagonist silhouette or symbolic emblem dominates the cover.",
+    "- The image should feel like a premium illustrated novel cover, not a generic stock poster.",
+    "- The central visual metaphor must communicate the protagonist's pressure, ambition, and story promise at a glance.",
+    "",
+    "Story signals to visualize:",
+    ...consensusLines.length ? consensusLines.map((line) => `- ${line}`) : ["- Use the frozen world assumptions and central conflict."],
+    "",
+    "Character or emblem focus:",
+    ...protagonistLines.length ? protagonistLines.map((line) => `- ${line}`) : ["- Foreground one memorable protagonist silhouette or emblem."],
+    "",
+    "Style direction:",
+    ...styleLines.length ? styleLines.map((line) => `- ${line}`) : ["- Signal the genre promise immediately."],
+    "",
+    "Composition:",
+    "- Vertical 2:3 book-cover layout with a clear foreground, midground, and background.",
+    "- One strong focal shape, dramatic lighting, readable silhouette, and title-safe negative space near the upper third.",
+    "- Avoid busy collage layouts, plastic fantasy armor, random flames, over-rendered faces, and cheap mobile-game poster aesthetics.",
+    "",
+    "Color and finish:",
+    "- Use a disciplined color script with one dominant mood color and one accent color.",
+    "- High-end editorial illustration, cinematic but painterly, crisp edges on the focal subject, atmospheric depth in the background."
+  ].join("\n");
+}
+function buildCoverBriefRequest(state, context) {
+  return [
+    `Novel title: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Genre: ${state.project.creativeProfile?.genre || "unknown"}`,
+    `Reader promise: ${state.project.creativeProfile?.readerPromise || "unknown"}`,
+    "",
+    "Global consensus:",
+    trimForPrompt(context.consensus || "(not finalized)", 3500),
+    "",
+    "Protagonist dossier:",
+    trimForPrompt(context.protagonist || "(not finalized)", 1800),
+    "",
+    "Style profile:",
+    trimForPrompt(context.style || "(not finalized)", 1500)
+  ].join("\n");
+}
+async function generateCoverVisualBrief(rootDir, state, context) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return { brief: buildFallbackCoverVisualBrief(state, context), source: "fallback", error: "test_mode" };
+  }
+  try {
+    const config = await loadLlmConfigForCapability(rootDir, "text");
+    const apiKey = config?._dbApiKey || "";
+    if (!config || !apiKey) {
+      throw new Error("text_llm_config_missing");
+    }
+    const brief = await requestLlmTextCompletion({
+      baseUrl: config.provider.baseUrl,
+      apiKey,
+      modelName: config.provider.modelName,
+      apiMode: config.provider.apiMode,
+      timeoutMs: config.provider.timeoutMs,
+      temperature: 0.35,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a senior commercial book-cover art director.",
+            "Create an English visual brief for a text-to-image model.",
+            "Do not write prose fiction. Do not ask questions. Do not include typography copy.",
+            "Prioritize specific visual anchors, composition, mood, palette, lighting, and negative constraints."
+          ].join(" ")
+        },
+        {
+          role: "user",
+          content: [
+            buildCoverBriefRequest(state, context),
+            "",
+            "Return markdown with exactly these sections:",
+            "1. Core Visual Metaphor",
+            "2. Main Subject",
+            "3. Setting And Background",
+            "4. Composition",
+            "5. Palette And Lighting",
+            "6. Texture And Rendering Style",
+            "7. Must Avoid",
+            "",
+            "Make the brief concrete enough that the generated image will not look like a generic webnovel poster."
+          ].join("\n")
+        }
+      ]
+    });
+    if (!brief) {
+      throw new Error("text_llm_returned_empty_cover_brief");
+    }
+    return { brief, source: "llm" };
+  } catch (error) {
+    return {
+      brief: buildFallbackCoverVisualBrief(state, context),
+      source: "fallback",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+function buildFinalCoverImagePrompt(state, visualBrief) {
+  return [
+    `Create a premium illustrated vertical novel cover for "${state.project.title}".`,
+    `Core story concept: ${state.project.idea}.`,
+    "",
+    "Use this art-direction brief as binding visual guidance:",
+    trimForPrompt(visualBrief, 5e3),
+    "",
+    "Image requirements:",
+    "- Vertical 2:3 book-cover composition, commercial publishing quality, polished editorial illustration.",
+    "- One dominant focal subject or emblem, strong silhouette, cinematic depth, clear foreground/midground/background separation.",
+    "- Leave clean negative space for title and author typography; do not render any letters, pseudo-text, subtitles, logos, or watermarks.",
+    "- Avoid generic stock-poster composition, cheap mobile-game aesthetics, cluttered collage layouts, malformed anatomy, extra limbs, distorted faces, celebrity likeness, and blurry low-detail output."
+  ].join("\n");
+}
+function buildCoverPrompt(state, visualBrief) {
+  const imagePrompt = buildFinalCoverImagePrompt(state, visualBrief.brief);
+  return {
+    markdown: [
+      "# Cover Image Prompt",
+      "",
+      `Project: ${state.project.title}`,
+      `Core idea: ${state.project.idea}`,
+      `Visual brief source: ${visualBrief.source}`,
+      visualBrief.error ? `Visual brief fallback reason: ${visualBrief.error}` : "",
+      "",
+      "## Visual Brief",
+      "",
+      visualBrief.brief,
+      "",
+      "## Final Image Prompt",
+      "",
+      imagePrompt
+    ].filter(Boolean).join("\n"),
+    imagePrompt
+  };
+}
+async function getImageGenerationConfig(rootDir) {
+  const imageConfig = await loadLlmConfigForCapability(rootDir, "image").catch(() => null);
+  const baseUrl = imageConfig?.provider.baseUrl || "";
+  const apiKey = imageConfig?._dbApiKey || "";
+  const model = imageConfig?.provider.modelName || "";
+  const size = getEnvValue(rootDir, "IMAGE_SIZE") || "1024x1536";
+  return { baseUrl, apiKey, model, size };
+}
+async function requestCoverImage(rootDir, prompt) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    throw new Error("image_generation_skipped_in_test_mode");
+  }
+  const config = await getImageGenerationConfig(rootDir);
+  if (!config.apiKey) {
+    throw new Error("image_generation_api_key_missing");
+  }
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/images/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.model,
+      prompt,
+      size: config.size,
+      n: 1
+    })
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || text || response.statusText;
+    throw new Error(`image_generation_failed:${response.status}:${message}`);
+  }
+  const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+  const base64 = first?.b64_json || first?.base64 || first?.image;
+  if (typeof base64 === "string" && base64.trim()) {
+    return {
+      bytes: Buffer.from(base64.replace(/^data:image\/\w+;base64,/, ""), "base64"),
+      mimeType: "image/png",
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size
+      }
+    };
+  }
+  const url = first?.url;
+  if (typeof url === "string" && url.trim()) {
+    const imageResponse = await fetch(url);
+    if (!imageResponse.ok) {
+      throw new Error(`image_download_failed:${imageResponse.status}:${imageResponse.statusText}`);
+    }
+    return {
+      bytes: Buffer.from(await imageResponse.arrayBuffer()),
+      mimeType: imageResponse.headers.get("content-type") || "image/png",
+      sourceUrl: url,
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size
+      }
+    };
+  }
+  throw new Error("image_generation_returned_no_image");
+}
 async function initAutonomousProject(options) {
   const paths = getWorkspacePaths(options.rootDir);
   if (options.chapterWordTarget < MIN_CHAPTER_WORD_TARGET) {
     throw new Error(`Chapter word target must be at least ${MIN_CHAPTER_WORD_TARGET}.`);
   }
-  await import_promises6.default.mkdir(paths.workspaceDir, { recursive: true });
+  await import_promises7.default.mkdir(paths.workspaceDir, { recursive: true });
   const state = buildInitialState(options);
   await writeWorkspaceArtifacts(options.rootDir, state);
   await initializeSuperGraph(options.rootDir, state);
@@ -10633,8 +15819,8 @@ async function deleteManagedAutonomousProject(rootDir, projectId) {
     return null;
   }
   const projectRoot = resolveStoredProjectRoot(rootDir, project.projectRoot, project.id);
-  const expectedProjectRoot = import_node_path9.default.resolve(resolveProjectRoot(rootDir, project.id));
-  if (import_node_path9.default.resolve(projectRoot) !== expectedProjectRoot) {
+  const expectedProjectRoot = import_node_path10.default.resolve(resolveProjectRoot(rootDir, project.id));
+  if (import_node_path10.default.resolve(projectRoot) !== expectedProjectRoot) {
     throw new Error(`Refusing to delete project outside managed workspace: ${projectRoot}`);
   }
   await withFactoryDb(rootDir, async (db) => {
@@ -10646,7 +15832,7 @@ async function deleteManagedAutonomousProject(rootDir, projectId) {
       cancelledJobs
     });
   });
-  await import_promises6.default.rm(projectRoot, { recursive: true, force: true });
+  await import_promises7.default.rm(projectRoot, { recursive: true, force: true });
   await writeProjectRegistry(rootDir, projects.filter((entry) => entry.id !== project.id));
   await withFactoryDb(rootDir, async (db) => {
     db.deleteProject(project.id);
@@ -10739,7 +15925,7 @@ async function createManagedAutonomousProject(options) {
 }
 async function loadAutonomousState(rootDir) {
   const { statePath } = getWorkspacePaths(rootDir);
-  const raw = await import_promises6.default.readFile(statePath, "utf8");
+  const raw = await import_promises7.default.readFile(statePath, "utf8");
   return JSON.parse(raw);
 }
 async function saveAutonomousState(rootDir, state) {
@@ -10888,6 +16074,7 @@ async function produceChapterTask(rootDir, paths, state, task, pipelineOptions) 
     ...produced.qualityGate,
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
+  task.aigcStatus = pipelineOptions.bypassAigcGate ? "pending" : produced.qualityGate.status === "blocked" ? "blocked" : "passed";
   if (task.status === "complete") {
     task.recoveryBlocked = false;
   }
@@ -11051,9 +16238,9 @@ async function recoverIncompleteInProgressChapterTasks(paths, state, pipelineOpt
       continue;
     }
     const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
-    const finalPath = import_node_path9.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+    const finalPath = import_node_path10.default.join(paths.chaptersDir, `${chapterId}.final.md`);
     try {
-      await import_promises6.default.access(finalPath);
+      await import_promises7.default.access(finalPath);
       if (fact?.status === "complete") {
         task.status = "complete";
         task.recoveryBlocked = false;
@@ -11142,7 +16329,20 @@ function createSettingFreeze(state, context) {
   ].join("\n");
 }
 async function advanceAutonomousProject(rootDir, options = {}) {
-  const pipelineOptions = { envRootDir: rootDir, ...options };
+  const dbSettings = await withFactoryDb(options.factoryRootDir || rootDir, async (db) => {
+    return {
+      bypassAigcGate: db.getSystemSetting("bypassAigcGate"),
+      draftSubcallRoles: db.getSystemSetting("draftSubcallRoles")
+    };
+  }).catch(() => null);
+  const bypassAigcGateDb = dbSettings?.bypassAigcGate === "1";
+  const draftSubcallRolesDb = parseDraftSubcallRolesSetting(dbSettings?.draftSubcallRoles);
+  const pipelineOptions = {
+    envRootDir: rootDir,
+    bypassAigcGate: bypassAigcGateDb,
+    ...draftSubcallRolesDb ? { draftSubcallRoles: draftSubcallRolesDb } : {},
+    ...options
+  };
   throwIfStopped(pipelineOptions.signal);
   const state = await loadAutonomousState(rootDir);
   const paths = getWorkspacePaths(rootDir);
@@ -11166,14 +16366,99 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     return state;
   }
   const context = {
-    consensus: await readOptionalText2(paths.consensusPath),
-    protagonist: await readOptionalText2(paths.protagonistPath),
-    style: await readOptionalText2(paths.styleProfilePath)
+    consensus: await readOptionalText3(paths.consensusPath),
+    protagonist: await readOptionalText3(paths.protagonistPath),
+    style: await readOptionalText3(paths.styleProfilePath)
   };
+  if (state.runtime.stage === "aigc_refinement") {
+    throwIfStopped(pipelineOptions.signal);
+    const autoRefineVal = await withFactoryDb(pipelineOptions.factoryRootDir || rootDir, async (db) => {
+      return db.getSystemSetting("autoAigcRefinement");
+    }).catch(() => null);
+    const isAutoRefineEnabled = autoRefineVal === "1";
+    if (!isAutoRefineEnabled) {
+      state.runtime.statusMessage = "All chapter drafts generated. Waiting for manual AIGC batch scanning and refinement.";
+      await saveAutonomousState(rootDir, state);
+      return state;
+    }
+    const refineTask = state.plan.chapterTasks.find(
+      (t) => t.aigcStatus === "pending" || t.aigcStatus === "blocked" || !t.aigcStatus
+    );
+    if (!refineTask) {
+      state.runtime.stage = "complete";
+      state.runtime.statusMessage = "All chapter drafts generated and AIGC batch refinement finalized successfully.";
+      state.runtime.lastRoute = "workflow";
+      state.runtime.lastAction = "workflow_complete";
+      await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
+    const chapterId = `chapter-${String(refineTask.chapterNumber).padStart(3, "0")}`;
+    const finalPath = import_node_path10.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+    let finalDraft = "";
+    try {
+      finalDraft = await import_promises7.default.readFile(finalPath, "utf8");
+    } catch {
+      refineTask.aigcStatus = "skipped";
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} final draft not found, skipping.`;
+      await saveAutonomousState(rootDir, state);
+      return state;
+    }
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} scanning AIGC risk...`;
+    await saveAutonomousState(rootDir, state);
+    try {
+      const detectorConfig = getAigcDetectorConfig(rootDir);
+      const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+      const detectResult = await detectAigcSegments(bodyOnly || finalDraft, detectorConfig);
+      const aigcReport = normalizeAigcWritingDetectionReport(detectResult);
+      if (aigcReport.status === "blocked" && aigcReport.highRiskSegments.length > 0) {
+        state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} has ${aigcReport.highRiskSegments.length} high risk segments, fixing...`;
+        await saveAutonomousState(rootDir, state);
+        const resources = await loadProductionWritingResources(rootDir);
+        const refinedDraft = await repairAigcHighRiskDraft(
+          state,
+          refineTask,
+          finalDraft,
+          aigcReport,
+          resources,
+          pipelineOptions,
+          {},
+          state.memory?.characterDossiers || []
+        );
+        await import_promises7.default.writeFile(finalPath, `${refinedDraft}
+`, "utf8");
+        const finalBodyOnly = refinedDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+        const finalDetectResult = await detectAigcSegments(finalBodyOnly || refinedDraft, detectorConfig);
+        const finalAigcReport = normalizeAigcWritingDetectionReport(finalDetectResult);
+        refineTask.aigcStatus = finalAigcReport.status === "blocked" ? "blocked" : "passed";
+        if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+          await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
+            db.recordEvent(pipelineOptions.projectId, `auto_refine_ch_${refineTask.chapterNumber}`, "AIGC_DETECTION_COMPLETED", {
+              chapterNumber: refineTask.chapterNumber,
+              aigcReport: finalAigcReport
+            });
+          }).catch(() => void 0);
+        }
+      } else {
+        refineTask.aigcStatus = "passed";
+      }
+    } catch (e) {
+      refineTask.aigcStatus = "skipped";
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} failed with error: ${String(e)}, skipping.`;
+    }
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} processed with status ${refineTask.aigcStatus}.`;
+    await saveAutonomousState(rootDir, state);
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+    }
+    return state;
+  }
   if (state.runtime.stage === "worldbuilding_dialogue") {
     throwIfStopped(pipelineOptions.signal);
     await writeProductionWritingResourceArtifacts(rootDir, paths, state, pipelineOptions);
-    await import_promises6.default.writeFile(paths.settingFreezePath, `${createSettingFreeze(state, context)}
+    await import_promises7.default.writeFile(paths.settingFreezePath, `${createSettingFreeze(state, context)}
 `);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
@@ -11185,6 +16470,14 @@ async function advanceAutonomousProject(rootDir, options = {}) {
           metadata: { production: true, stage: state.runtime.stage }
         });
       }).catch(() => void 0);
+    }
+    const coverState = await prepareCoverGeneration(rootDir, {
+      factoryRootDir: pipelineOptions.factoryRootDir,
+      projectId: pipelineOptions.projectId,
+      reason: "worldbuilding_completed"
+    }).catch(() => void 0);
+    if (coverState?.assets?.cover) {
+      state.assets.cover = coverState.assets.cover;
     }
     state.runtime.stage = "setting_review";
     state.runtime.statusMessage = "Setting freeze drafted. Review the frozen world assumptions before outlining.";
@@ -11199,7 +16492,7 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     throwIfStopped(pipelineOptions.signal);
     await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions);
     state.runtime.stage = "master_planning";
-    state.runtime.statusMessage = "Production master outline generated. Next step is to expand detailed chapter blueprints.";
+    state.runtime.statusMessage = "Production master outline generated. Next step is to write story bible assets before chapter blueprints.";
     stampRuntimeProgress(state, "master_outline_generated");
     await saveAutonomousState(rootDir, state);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
@@ -11208,10 +16501,11 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     return state;
   }
   if (state.runtime.stage === "master_planning") {
+    await writeProductionStoryBibleAssets(rootDir, paths, state, context, pipelineOptions);
     await writeAllDetailedChapterBlueprints(rootDir, paths, state, context, pipelineOptions);
-    state.runtime.stage = "drafting";
-    state.runtime.statusMessage = "Detailed chapter blueprints generated for the full book. Drafting has started from the queued chapter tasks.";
-    stampRuntimeProgress(state, "chapter_blueprints_generated");
+    state.runtime.stage = "chapter_task_generation";
+    state.runtime.statusMessage = "Story bible assets and detailed chapter blueprints generated. Review and confirm story foundation and writing style before drafting starts.";
+    stampRuntimeProgress(state, "story_bible_and_chapter_blueprints_generated");
     await saveAutonomousState(rootDir, state);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
@@ -11237,7 +16531,20 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     }
     return state;
   }
-  if (state.runtime.stage === "chapter_task_generation" || state.runtime.stage === "drafting") {
+  if (state.runtime.stage === "chapter_task_generation") {
+    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions);
+    if (blocked) {
+      return state;
+    }
+    state.runtime.stage = "drafting";
+    state.runtime.statusMessage = "Production readiness passed. Drafting has started from the queued chapter tasks.";
+    stampRuntimeProgress(state, "drafting_started_after_readiness");
+    await saveAutonomousState(rootDir, state);
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+    }
+  }
+  if (state.runtime.stage === "drafting") {
     const inProgressTask = state.plan.chapterTasks.find((task) => task.status === "in_progress");
     if (inProgressTask) {
       state.runtime.stage = "drafting";
@@ -11260,11 +16567,26 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     }
     const nextTask = state.plan.chapterTasks.find((task) => task.status === "pending");
     if (!nextTask) {
-      state.runtime.stage = "complete";
-      state.runtime.statusMessage = "All chapter drafts have been generated.";
-      state.plan.pendingChapters = 0;
-      stampRuntimeProgress(state, "workflow_complete");
+      const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || pipelineOptions.bypassAigcGate === true;
+      if (isAigcGateBypassed) {
+        state.runtime.stage = "aigc_refinement";
+        state.runtime.statusMessage = "All chapter drafts have been generated. Waiting for batch AIGC scanning and refinement.";
+        state.plan.pendingChapters = 0;
+        stampRuntimeProgress(state, "aigc_refinement_entered");
+      } else {
+        state.runtime.stage = "complete";
+        state.runtime.statusMessage = "All chapter drafts have been generated.";
+        state.plan.pendingChapters = 0;
+        stampRuntimeProgress(state, "workflow_complete");
+      }
       await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
+    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions);
+    if (blocked) {
       return state;
     }
     return (await produceChapterTask(rootDir, paths, state, nextTask, pipelineOptions)).state;
@@ -11323,30 +16645,112 @@ async function retryChapterProduction(rootDir, chapterNumber, options = {}) {
   }
   return state;
 }
-async function prepareCoverGeneration(rootDir) {
+async function prepareCoverGeneration(rootDir, options = {}) {
   const state = await loadAutonomousState(rootDir);
   const paths = getWorkspacePaths(rootDir);
-  const prompt = [
-    "# Cover Image Prompt",
-    "",
-    `Project: ${state.project.title}`,
-    `Core idea: ${state.project.idea}`,
-    "",
-    "Art direction:",
-    "- foreground one memorable protagonist silhouette or emblem",
-    "- signal genre promise immediately",
-    "- leave clean title space",
-    "- avoid generic stock-poster composition",
-    "",
-    "Image prompt seed:",
-    `"Create a novel cover for '${state.project.title}' inspired by: ${state.project.idea}"`
-  ].join("\n");
-  await import_promises6.default.writeFile(paths.coverPromptPath, `${prompt}
+  const context = {
+    consensus: await readOptionalText3(paths.consensusPath),
+    protagonist: await readOptionalText3(paths.protagonistPath),
+    style: await readOptionalText3(paths.styleProfilePath)
+  };
+  const visualBrief = await generateCoverVisualBrief(rootDir, state, context);
+  const prompt = buildCoverPrompt(state, visualBrief);
+  const requestedAt = (/* @__PURE__ */ new Date()).toISOString();
+  await import_promises7.default.writeFile(import_node_path10.default.join(paths.coverDir, "cover-brief.md"), `${visualBrief.brief}
+`);
+  await import_promises7.default.writeFile(paths.coverPromptPath, `${prompt.markdown}
 `);
   state.assets.cover.status = "in_progress";
-  state.runtime.statusMessage = "Cover prompt prepared. Ready for an image-generation step.";
+  state.assets.cover.briefPath = ".ai-novel/assets/cover/cover-brief.md";
+  state.assets.cover.promptPath = COVER_PROMPT_PATH;
+  state.assets.cover.imagePath = state.assets.cover.imagePath || COVER_IMAGE_PATH;
+  state.assets.cover.metadataPath = COVER_METADATA_PATH;
+  delete state.assets.cover.error;
+  state.runtime.statusMessage = "Cover prompt prepared. Generating cover image...";
   stampRuntimeProgress(state, "cover_prompt_prepared", "cover");
   await saveAutonomousState(rootDir, state);
+  try {
+    const generated = await requestCoverImage(rootDir, prompt.imagePrompt);
+    await import_promises7.default.writeFile(paths.coverImagePath, generated.bytes);
+    const metadata = {
+      status: "complete",
+      requestedAt,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      mimeType: generated.mimeType,
+      sourceUrl: "sourceUrl" in generated ? generated.sourceUrl : void 0,
+      provider: generated.provider,
+      reason: options.reason || "manual"
+    };
+    await writeJsonFileAtomic2(paths.coverMetadataPath, metadata);
+    state.assets.cover.status = "complete";
+    state.assets.cover.imagePath = COVER_IMAGE_PATH;
+    state.assets.cover.metadataPath = COVER_METADATA_PATH;
+    state.assets.cover.generatedAt = metadata.generatedAt;
+    delete state.assets.cover.error;
+    state.runtime.statusMessage = "Cover image generated and saved.";
+    stampRuntimeProgress(state, "cover_image_generated", "cover");
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_IMAGE_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover" }
+        });
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" }
+        });
+        db.recordEvent(options.projectId, null, "COVER_IMAGE_GENERATED", metadata);
+      }).catch(() => void 0);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const metadata = {
+      status: "failed",
+      requestedAt,
+      failedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      reason: options.reason || "manual",
+      error: message
+    };
+    await writeJsonFileAtomic2(paths.coverMetadataPath, metadata);
+    state.assets.cover.status = "failed";
+    state.assets.cover.imagePath = COVER_IMAGE_PATH;
+    state.assets.cover.metadataPath = COVER_METADATA_PATH;
+    state.assets.cover.error = message;
+    state.runtime.statusMessage = `Cover generation failed but workflow can continue: ${message}`;
+    stampRuntimeProgress(state, "cover_image_failed", "cover");
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" }
+        });
+        db.recordEvent(options.projectId, null, "COVER_IMAGE_FAILED", metadata);
+      }).catch(() => void 0);
+    }
+  }
+  await saveAutonomousState(rootDir, state);
+  if (options.factoryRootDir && options.projectId) {
+    await syncManagedProjectState(options.factoryRootDir, options.projectId, state).catch(() => void 0);
+  }
   return state;
 }
 function classifyInterruption(message) {
@@ -11428,21 +16832,21 @@ async function reviewInterruption(options) {
     await syncManagedProjectState(options.factoryRootDir, options.projectId, state).catch(() => void 0);
   }
   const { reportsDir } = getWorkspacePaths(options.rootDir);
-  await import_promises6.default.mkdir(reportsDir, { recursive: true });
-  const logPath = import_node_path9.default.join(reportsDir, "interruptions.log.md");
+  await import_promises7.default.mkdir(reportsDir, { recursive: true });
+  const logPath = import_node_path10.default.join(reportsDir, "interruptions.log.md");
   const header = `## ${review.timestamp}
 - Scope: ${review.scope}
 - Message: ${review.message}
 - Action: ${review.recommendedAction}
 
 `;
-  await import_promises6.default.appendFile(logPath, header);
+  await import_promises7.default.appendFile(logPath, header);
   return review;
 }
 
 // src/discussion.ts
-var import_promises7 = __toESM(require("fs/promises"), 1);
-var import_node_path10 = __toESM(require("path"), 1);
+var import_promises8 = __toESM(require("fs/promises"), 1);
+var import_node_path11 = __toESM(require("path"), 1);
 
 // src/context-budget.ts
 var CONTEXT_BUDGET = {
@@ -11556,12 +16960,12 @@ var AGENT_FLOW = [
 ];
 var SPECIALIST_FLOW = AGENT_FLOW.filter((agent) => agent.id !== "showrunner");
 function workspacePath2(rootDir, ...parts) {
-  return import_node_path10.default.join(rootDir, ".ai-novel", ...parts);
+  return import_node_path11.default.join(rootDir, ".ai-novel", ...parts);
 }
 async function readText(filePath) {
-  return import_promises7.default.readFile(filePath, "utf8");
+  return import_promises8.default.readFile(filePath, "utf8");
 }
-async function readOptionalText3(filePath) {
+async function readOptionalText4(filePath) {
   try {
     return await readText(filePath);
   } catch {
@@ -11577,11 +16981,11 @@ async function readCharacterDossiers2(filePath) {
   }
 }
 async function writeJsonFileAtomic3(filePath, value) {
-  await import_promises7.default.mkdir(import_node_path10.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path10.default.join(import_node_path10.default.dirname(filePath), `.${import_node_path10.default.basename(filePath)}.${Date.now()}.tmp`);
-  await import_promises7.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await import_promises8.default.mkdir(import_node_path11.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path11.default.join(import_node_path11.default.dirname(filePath), `.${import_node_path11.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises8.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await import_promises7.default.rename(tempPath, filePath);
+  await import_promises8.default.rename(tempPath, filePath);
 }
 function appendSection(current, heading, bullet) {
   if (current.includes(heading)) {
@@ -11739,8 +17143,8 @@ function discussionMessageParts(messageId, input) {
 async function writeDiscussionConsensusArchive(rootDir, input) {
   const consensusDir = workspacePath2(rootDir, "consensus");
   const fileName = `discussion-${safeArtifactName(input.runId)}.md`;
-  const archivePath = import_node_path10.default.join(consensusDir, fileName);
-  await import_promises7.default.mkdir(consensusDir, { recursive: true });
+  const archivePath = import_node_path11.default.join(consensusDir, fileName);
+  await import_promises8.default.mkdir(consensusDir, { recursive: true });
   const content = [
     "# Discussion Consensus Archive",
     "",
@@ -11770,7 +17174,7 @@ async function writeDiscussionConsensusArchive(rootDir, input) {
       ""
     ])
   ].join("\n").replace(/\n{4,}/g, "\n\n\n");
-  await import_promises7.default.writeFile(archivePath, `${content.trim()}
+  await import_promises8.default.writeFile(archivePath, `${content.trim()}
 `);
   return {
     absolutePath: archivePath,
@@ -11951,9 +17355,9 @@ function buildContextPacketText(options) {
 }
 async function writeCurrentContextPacket(rootDir, content) {
   const contextDir = workspacePath2(rootDir, "context");
-  const contextPath = import_node_path10.default.join(contextDir, "current-context.md");
-  await import_promises7.default.mkdir(contextDir, { recursive: true });
-  await import_promises7.default.writeFile(contextPath, `${content.trim()}
+  const contextPath = import_node_path11.default.join(contextDir, "current-context.md");
+  await import_promises8.default.mkdir(contextDir, { recursive: true });
+  await import_promises8.default.writeFile(contextPath, `${content.trim()}
 `);
   return contextPath;
 }
@@ -12022,14 +17426,14 @@ async function runMultiAgentDiscussion(rootDir, message, options = {}) {
   const characterDossiersMarkdownPath = workspacePath2(rootDir, "memory", "characters", "dossiers.md");
   const styleProfilePath = workspacePath2(rootDir, "style", "profile.md");
   const discussionDir = workspacePath2(rootDir, "chat");
-  const discussionLogPath = import_node_path10.default.join(discussionDir, "discussion-log.md");
-  await import_promises7.default.mkdir(discussionDir, { recursive: true });
+  const discussionLogPath = import_node_path11.default.join(discussionDir, "discussion-log.md");
+  await import_promises8.default.mkdir(discussionDir, { recursive: true });
   const rawConsensus = await readText(consensusPath);
   const state = JSON.parse(await readText(statePath));
   const discussionTarget = inferDiscussionTarget(message);
   const runId = options.runId ?? makeRunId("discussion");
   const factoryDb = options.factoryRootDir && options.projectId ? await FactoryDb.open(options.factoryRootDir) : null;
-  const priorTranscript = await readOptionalText3(discussionLogPath);
+  const priorTranscript = await readOptionalText4(discussionLogPath);
   const sanitizedConsensus = sanitizeConsensusForDiscussion(rawConsensus);
   const autonomousContext = buildAutonomousContext(state, discussionTarget);
   const recalledMemory = factoryDb && options.projectId ? factoryDb.recallMemory(options.projectId, `${message}
@@ -12097,7 +17501,7 @@ ${state.project.idea}`,
       directorCommandId: options.directorCommandId ?? null
     });
   }
-  await import_promises7.default.appendFile(
+  await import_promises8.default.appendFile(
     discussionLogPath,
     [
       `## ${transcriptStartedAt}`,
@@ -12242,7 +17646,7 @@ ${storyCoreDossierBrief}` : "";
     replies.push({ role: agent.label, content: reply });
     const completedAt = (/* @__PURE__ */ new Date()).toISOString();
     transcriptContext.push(`${agent.label}: ${reply}`);
-    await import_promises7.default.appendFile(
+    await import_promises8.default.appendFile(
       discussionLogPath,
       [`## ${completedAt}`, `${agent.label}: ${reply}`, ""].join("\n")
     );
@@ -12304,11 +17708,11 @@ ${storyCoreDossierBrief}` : "";
       await runAgentTurn(agent, "specialist_turn");
     }
     synthesisReply = await runAgentTurn(showrunner, "closing_synthesis");
-    await import_promises7.default.appendFile(discussionLogPath, "Status: complete\n\n");
+    await import_promises8.default.appendFile(discussionLogPath, "Status: complete\n\n");
     factoryDb?.updateRun(runId, "completed");
   } catch (error) {
     const message2 = error instanceof Error ? error.message : String(error);
-    await import_promises7.default.appendFile(discussionLogPath, `Status: error
+    await import_promises8.default.appendFile(discussionLogPath, `Status: error
 Error: ${message2}
 
 `);
@@ -12331,7 +17735,7 @@ Error: ${message2}
     state.runtime.lastRoute = discussionTarget.kind;
     state.runtime.lastAction = `discussion_guard_blocked:${discussionTarget.kind}`;
     state.runtime.statusMessage = `\u8BA8\u8BBA\u8F93\u51FA\u88AB\u9636\u6BB5\u5B88\u536B\u62E6\u622A\uFF0C\u672A\u5199\u5165\u751F\u4EA7\u5171\u8BC6\uFF1A${stageGuard.reason}`;
-    await import_promises7.default.appendFile(discussionLogPath, `Stage Guard: blocked
+    await import_promises8.default.appendFile(discussionLogPath, `Stage Guard: blocked
 Reason: ${stageGuard.reason}
 
 `);
@@ -12411,14 +17815,14 @@ Reason: ${stageGuard.reason}
   state.runtime.lastRoute = discussionTarget.kind;
   state.runtime.lastAction = `discussion:${discussionTarget.kind}`;
   state.runtime.statusMessage = `\u5DF2\u5B8C\u6210${discussionTarget.label}\uFF0C\u5171\u8BC6\u5DF2\u5199\u56DE ${discussionTarget.assetPath}\u3002`;
-  await import_promises7.default.writeFile(consensusPath, updatedConsensus);
-  await import_promises7.default.writeFile(protagonistPath, updatedProtagonist);
+  await import_promises8.default.writeFile(consensusPath, updatedConsensus);
+  await import_promises8.default.writeFile(protagonistPath, updatedProtagonist);
   if (updatedDossiers.length) {
     await writeJsonFileAtomic3(characterDossiersPath, updatedDossiers);
-    await import_promises7.default.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown2(updatedDossiers)}
+    await import_promises8.default.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown2(updatedDossiers)}
 `);
   }
-  await import_promises7.default.writeFile(styleProfilePath, updatedStyle);
+  await import_promises8.default.writeFile(styleProfilePath, updatedStyle);
   await saveAutonomousState(rootDir, state);
   if (factoryDb && options.projectId) {
     factoryDb.updateProjectState(options.projectId, state);
@@ -12539,6 +17943,5 @@ Reason: ${stageGuard.reason}
   targetToArtifactKind,
   testProviderConnectivity,
   upsertCheckpointInSuperGraph,
-  upsertProjectEnvValues,
   withFactoryDb
 });

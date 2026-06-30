@@ -1,3077 +1,70 @@
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+import {
+  detectAigcSegments,
+  getAigcDetectorConfig
+} from "./chunk-4ND3ONGM.js";
+import {
+  formatKnowledgeForPrompt,
+  ingestProjectArtifact,
+  retrieveKnowledge
+} from "./chunk-Q7A3BTJU.js";
+import {
+  createLocalTextEmbedding,
+  evaluateChapterConsistency,
+  extractChinesePersonNames,
+  inferLockedProtagonistName,
+  withFactoryDb
+} from "./chunk-XEYMG4OS.js";
+import {
+  agentTypeFromLabel,
+  createAgentMessage,
+  createArtifactMessage
+} from "./chunk-GZKJNHMN.js";
 
 // src/writing-pipeline.ts
-var writing_pipeline_exports = {};
-__export(writing_pipeline_exports, {
-  ProductionReadinessBlockedError: () => ProductionReadinessBlockedError,
-  buildChapterInheritanceAdapterPayload: () => buildChapterInheritanceAdapterPayload,
-  compactPreviousSegmentTail: () => compactPreviousSegmentTail,
-  createContinuityContract: () => createContinuityContract,
-  createDetailedChapterBlueprint: () => createDetailedChapterBlueprint,
-  createDraftBodyFromBlueprint: () => createDraftBodyFromBlueprint,
-  createDraftSegmentCompositionPlan: () => createDraftSegmentCompositionPlan,
-  createDraftSegmentPlan: () => createDraftSegmentPlan,
-  createNaturalnessReport: () => createNaturalnessReport,
-  createProductionMasterOutline: () => createProductionMasterOutline,
-  createProductionStoryBibleAssets: () => createProductionStoryBibleAssets,
-  createProductionWritingPlanContract: () => createProductionWritingPlanContract,
-  createQualityReport: () => createQualityReport,
-  evaluateChapterStyleConformanceDrift: () => evaluateChapterStyleConformanceDrift,
-  evaluateCharacterProfilePresence: () => evaluateCharacterProfilePresence,
-  evaluateNarrativeStyleQuality: () => evaluateNarrativeStyleQuality,
-  evaluatePlotContinuityBridge: () => evaluatePlotContinuityBridge,
-  evaluateSemanticPreservation: () => evaluateSemanticPreservation,
-  evaluateWritingResourceUsage: () => evaluateWritingResourceUsage,
-  formatApprovedWritingStylePrompt: () => formatApprovedWritingStylePrompt,
-  inferGenreProfile: () => inferGenreProfile,
-  invalidateAllCaches: () => invalidateAllCaches,
-  invalidateProjectCache: () => invalidateProjectCache,
-  invalidateWritingResourcesCache: () => invalidateWritingResourcesCache,
-  loadAndPruneGlobalContext: () => loadAndPruneGlobalContext,
-  loadApprovedWritingStyleContext: () => loadApprovedWritingStyleContext,
-  loadProductionStoryAssetContext: () => loadProductionStoryAssetContext,
-  loadProductionWritingResources: () => loadProductionWritingResources,
-  memoryCacheTracker: () => memoryCacheTracker,
-  normalizeAigcWritingDetectionReport: () => normalizeAigcWritingDetectionReport,
-  parseQualityGate: () => parseQualityGate,
-  repairAigcHighRiskDraft: () => repairAigcHighRiskDraft,
-  resourcesCacheTracker: () => resourcesCacheTracker,
-  retrieveFactoryMemoryContext: () => retrieveFactoryMemoryContext,
-  runAigcWritingDetection: () => runAigcWritingDetection,
-  runChapterProductionPipeline: () => runChapterProductionPipeline,
-  skippedAigcWritingDetectionReport: () => skippedAigcWritingDetectionReport,
-  writeAllDetailedChapterBlueprints: () => writeAllDetailedChapterBlueprints,
-  writeProductionMasterOutline: () => writeProductionMasterOutline,
-  writeProductionStoryBibleAssets: () => writeProductionStoryBibleAssets,
-  writeProductionWritingPlan: () => writeProductionWritingPlan,
-  writeProductionWritingResourceArtifacts: () => writeProductionWritingResourceArtifacts
-});
-module.exports = __toCommonJS(writing_pipeline_exports);
-var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_node_path6 = __toESM(require("path"), 1);
-
-// src/factory-db.ts
-var import_node_fs = __toESM(require("fs"), 1);
-var import_promises = __toESM(require("fs/promises"), 1);
-var import_node_path = __toESM(require("path"), 1);
-
-// src/chapter-consistency.ts
-var GENERIC_NAMES = /* @__PURE__ */ new Set([
-  "\u4E3B\u89D2",
-  "\u4E3B\u4EBA\u516C",
-  "\u9996\u7AE0\u4E3B\u89D2",
-  "\u5F85\u5B9A",
-  "\u5F85\u547D\u540D",
-  "\u672A\u547D\u540D",
-  "pending",
-  "\u5927\u5510",
-  "\u5510\u672B",
-  "\u540C\u5DDE",
-  "\u957F\u5B89",
-  "\u53BF\u8859",
-  "\u5B8B\u5BB6",
-  "\u738B\u5BB6"
-]);
-var ROLE_TITLE_SUFFIXES = [
-  "\u7BA1\u4E8B",
-  "\u4E3B\u7C3F",
-  "\u91CC\u6B63",
-  "\u574A\u6B63",
-  "\u53BF\u4EE4",
-  "\u53BF\u4E1E",
-  "\u53BF\u5C09",
-  "\u53BF\u8859",
-  "\u8859\u5F79",
-  "\u5DEE\u5F79",
-  "\u5E08\u5085",
-  "\u5927\u5A18",
-  "\u5927\u90CE",
-  "\u4E8C\u90CE",
-  "\u4E09\u90CE",
-  "\u8001\u6C49",
-  "\u8001\u5987",
-  "\u90CE\u541B",
-  "\u5A18\u5B50",
-  "\u963F\u90CE",
-  "\u5A46\u5B50"
-];
-var VIEWPOINT_VERBS = [
-  "\u9192",
-  "\u60CA\u9192",
-  "\u7741\u5F00",
-  "\u770B\u89C1",
-  "\u542C\u89C1",
-  "\u77E5\u9053",
-  "\u610F\u8BC6\u5230",
-  "\u60F3",
-  "\u8BB0\u5F97",
-  "\u89C9\u5F97",
-  "\u4E0D\u6562",
-  "\u4E0D\u80FD",
-  "\u5FC5\u987B",
-  "\u54AC\u4F4F",
-  "\u6491\u7740",
-  "\u7AD9",
-  "\u8D70",
-  "\u95EE",
-  "\u8BF4"
-];
-var TRAILING_NON_NAME_CHARS = /* @__PURE__ */ new Set([
-  "\u662F",
-  "\u5C31",
-  "\u80FD",
-  "\u4F1A",
-  "\u8981",
-  "\u628A",
-  "\u5C06",
-  "\u7ED9",
-  "\u5411",
-  "\u4ECE",
-  "\u5728",
-  "\u8DDF",
-  "\u8FFD",
-  "\u7AD9",
-  "\u8D70",
-  "\u8BF4",
-  "\u95EE",
-  "\u60F3",
-  "\u770B",
-  "\u542C",
-  "\u9192",
-  "\u88AB",
-  "\u4E0D",
-  "\u4E86",
-  "\u7740",
-  "\u7684",
-  "\u5F97",
-  "\u5730"
-]);
-function unique(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-function normalizeChapterBody(text = "") {
-  const finalBodyMatch = text.match(/(?:^|\n)##\s*Final Body\s*\n([\s\S]*)/iu);
-  if (finalBodyMatch?.[1]) {
-    return finalBodyMatch[1].trim();
-  }
-  const chineseFinalBodyMatch = text.match(/(?:^|\n)##\s*(?:正文|终稿正文|最终正文)\s*\n([\s\S]*)/u);
-  if (chineseFinalBodyMatch?.[1]) {
-    return chineseFinalBodyMatch[1].trim();
-  }
-  return text.trim();
-}
-function isRoleOrGenericName(name) {
-  if (!name || GENERIC_NAMES.has(name)) {
-    return true;
-  }
-  if (/[的得地着]/u.test(name)) {
-    return true;
-  }
-  if (/阳光|月光|火光|金手指|黄河|马蹄|树皮|石板|案卷|田册|东西|温吞|官道/u.test(name)) {
-    return true;
-  }
-  if (/(?:家庄|河边|蹄声|木门|土墙|陶碗|草鞋|地铺|县衙|公文|契书)$/u.test(name)) {
-    return true;
-  }
-  return ROLE_TITLE_SUFFIXES.some((suffix) => name.endsWith(suffix));
-}
-function normalizeCandidateName(raw = "") {
-  let name = raw.trim();
-  while (name.length > 2 && TRAILING_NON_NAME_CHARS.has(name.at(-1) || "")) {
-    name = name.slice(0, -1);
-  }
-  return name;
-}
-function extractChinesePersonNames(text = "", limit = 12) {
-  const names = [];
-  const patterns = [
-    /(?:^|[“"'\n。！？；：，、\s])([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:是被|就被|被|睁开|翻身|坐起|抬头|撑着|咬住|开口|问|说|想|知道|意识到|没有|必须|终于|觉得|看见|听见|不敢|不能|需要|站|走|把|将|给|向|从|在))/gu,
-    /[“"'\n。！？；：，、\s]([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})(?=[，。！？；：、\s“”"'\n])/gu,
-    /(?:叫|名叫|唤作|自称|他叫|她叫)([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})/gu,
-    /([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:没有|必须|终于|觉得|看见|听见|知道|意识到|不敢|不能|需要|站|走|醒|说|问|想|把|将|给|向|从|在))/gu
-  ];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const name = normalizeCandidateName(String(match[1] || ""));
-      if (name.length < 2 || name.length > 4 || isRoleOrGenericName(name)) {
-        continue;
-      }
-      names.push(name);
-      if (names.length >= limit * 2) {
-        break;
-      }
-    }
-  }
-  return unique(names).slice(0, limit);
-}
-function sentenceWindow(text, index, radius = 38) {
-  return text.slice(Math.max(0, index - radius), Math.min(text.length, index + radius));
-}
-function viewpointScore(text, name) {
-  if (!name || isRoleOrGenericName(name)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  let score = 0;
-  const firstIndex = text.indexOf(name);
-  if (firstIndex >= 0) {
-    score += Math.max(0, 80 - Math.floor(firstIndex / 12));
-  }
-  const count = countName(text, name);
-  score += Math.min(count, 12) * 4;
-  const opening = text.slice(0, 520);
-  const openingMatches = [
-    new RegExp(`${name}.{0,8}(?:\u662F)?\u88AB.{0,10}(?:\u9192|\u60CA\u9192)`, "u"),
-    new RegExp(`${name}.{0,12}(?:\u7741\u5F00|\u7FFB\u8EAB|\u5750\u8D77|\u62AC\u5934|\u6491\u7740|\u54AC\u4F4F|\u5F00\u53E3|\u95EE|\u8BF4|\u60F3|\u77E5\u9053|\u610F\u8BC6\u5230)`, "u"),
-    new RegExp(`(?:\u9192\u6765|\u60CA\u9192|\u7741\u5F00\u773C|\u56DE\u8FC7\u795E|\u4E0D\u662F\u8FD9\u4E2A\u4E16\u754C\u7684\u4EBA|\u7A7F\u8D8A).{0,24}${name}`, "u")
-  ];
-  for (const pattern of openingMatches) {
-    if (pattern.test(opening)) {
-      score += 90;
-    }
-  }
-  for (let index = text.indexOf(name); index >= 0; index = text.indexOf(name, index + name.length)) {
-    const window = sentenceWindow(text, index);
-    if (VIEWPOINT_VERBS.some((verb) => window.includes(verb))) {
-      score += 8;
-    }
-    if (/他不是这个世界的人|穿越|最后的记忆|不属于他的记忆|脑子里多了些不属于他的记忆/u.test(window)) {
-      score += 35;
-    }
-  }
-  return score;
-}
-function inferDominantProtagonistName(text = "") {
-  const body = normalizeChapterBody(text);
-  const detectedNames = extractChinesePersonNames(body);
-  return detectedNames.map((name) => ({ name, score: viewpointScore(body, name), count: countName(body, name) })).sort((left, right) => right.score - left.score || right.count - left.count)[0]?.name || "";
-}
-function inferLockedProtagonistName(profile = "") {
-  const explicit = profile.match(/(?:主角名|主人公名|姓名|名字|本名|canonicalName|protagonistName|name)\s*[:：]\s*([^\n，。；、\s]{2,4})/iu);
-  if (explicit?.[1] && !isRoleOrGenericName(explicit[1])) {
-    return explicit[1];
-  }
-  return "";
-}
-function countName(text, name) {
-  if (!name) return 0;
-  return text.split(name).length - 1;
-}
-function evaluateChapterConsistency(input) {
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    const isFirst = input.chapterNumber === 1 || !input.previousProtagonistName;
-    const name = input.previousProtagonistName || "\u9996\u7AE0\u4E3B\u89D2";
-    return {
-      status: "eligible",
-      reason: isFirst ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002` : `\u6CBF\u7528\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002`,
-      protagonistName: name,
-      detectedNames: [name]
-    };
-  }
-  const text = normalizeChapterBody(input.text || "");
-  const detectedNames = extractChinesePersonNames(text);
-  const profileName = inferLockedProtagonistName(input.protagonistProfile || "");
-  const expectedName = (input.previousProtagonistName || profileName || "").trim();
-  const dominantName = inferDominantProtagonistName(text);
-  if (expectedName) {
-    if (!text.includes(expectedName)) {
-      return {
-        status: "quarantined",
-        reason: `\u4E3B\u89D2\u4E00\u81F4\u6027\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u672C\u7AE0\u672A\u51FA\u73B0\u5DF2\u9501\u5B9A\u4E3B\u89D2\u300C${expectedName}\u300D\u3002`,
-        protagonistName: expectedName,
-        detectedNames
-      };
-    }
-    const expectedScore = viewpointScore(text, expectedName);
-    const conflicting = detectedNames.filter((name) => name !== expectedName && countName(text, name) >= 2).map((name) => ({ name, score: viewpointScore(text, name), count: countName(text, name) })).sort((left, right) => right.score - left.score || right.count - left.count);
-    if (conflicting.length > 0 && conflicting[0].score >= expectedScore + 24) {
-      return {
-        status: "quarantined",
-        reason: `\u4E3B\u89D2\u4E00\u81F4\u6027\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u7591\u4F3C\u4ECE\u300C${expectedName}\u300D\u6F02\u79FB\u5230\u300C${conflicting[0].name}\u300D\u3002`,
-        protagonistName: expectedName,
-        detectedNames
-      };
-    }
-    return {
-      status: "eligible",
-      reason: `\u4E3B\u89D2\u4E00\u81F4\u6027\u901A\u8FC7\uFF1A\u6CBF\u7528\u300C${expectedName}\u300D\u3002`,
-      protagonistName: expectedName,
-      detectedNames
-    };
-  }
-  if (input.chapterNumber > 1 && dominantName) {
-    return {
-      status: "quarantined",
-      reason: `\u4E3B\u89D2\u4E00\u81F4\u6027\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u524D\u5E8F\u7AE0\u8282\u672A\u9501\u5B9A\u4E3B\u89D2\uFF0C\u4E0D\u80FD\u8BA9\u7B2C ${input.chapterNumber} \u7AE0\u81EA\u884C\u6539\u7528\u300C${dominantName}\u300D\u3002`,
-      protagonistName: dominantName,
-      detectedNames
-    };
-  }
-  return {
-    status: dominantName ? "eligible" : "quarantined",
-    reason: dominantName ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${dominantName}\u300D\uFF0C\u540E\u7EED\u7AE0\u8282\u5FC5\u987B\u6CBF\u7528\u3002` : "\u4E3B\u89D2\u4E00\u81F4\u6027\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u6B63\u6587\u4E2D\u672A\u8BC6\u522B\u51FA\u53EF\u8FFD\u8E2A\u4E3B\u89D2\u59D3\u540D\u3002",
-    protagonistName: dominantName || void 0,
-    detectedNames
-  };
-}
-
-// src/factory-db.ts
-var chapterConsistencyCache = /* @__PURE__ */ new Map();
-function normalizeLlmApiMode(value) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
-}
-var FACTORY_DB_DIR = ".ai-novel-factory";
-var FACTORY_DB_FILE = "factory.sqlite";
-var MIN_CHAPTER_PASS_RATIO = 0.8;
-function nowIso() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-function normalizeLlmCapability(capability) {
-  const normalized = capability.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
-  return normalized || "text";
-}
-function jsonString(value) {
-  return JSON.stringify(value ?? null);
-}
-function stableJsonString(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJsonString(item)).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const record = value;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJsonString(record[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value ?? null);
-}
-function stateChangeFingerprint(state) {
-  if (!state) {
-    return "";
-  }
-  const cloned = JSON.parse(JSON.stringify(state));
-  delete cloned.runtime.lastUpdatedAt;
-  if (cloned.runtime.autopilot) {
-    delete cloned.runtime.autopilot.updatedAt;
-  }
-  return stableJsonString(cloned);
-}
-function readJson(value, fallback) {
-  if (typeof value !== "string" || !value) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-function compactJsonString(value, maxLength = 1600) {
-  const text = typeof value === "string" ? value : jsonString(value);
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}...`;
-}
-function compactDbRow(row) {
-  const compacted = { ...row };
-  if (typeof compacted.payload_json === "string") {
-    compacted.payload_json = compactJsonString(compacted.payload_json);
-  }
-  if (typeof compacted.metadata_json === "string") {
-    compacted.metadata_json = compactJsonString(compacted.metadata_json);
-  }
-  if (typeof compacted.content === "string" && compacted.content.length > 900) {
-    compacted.content = `${compacted.content.slice(0, 900)}...`;
-  }
-  if (typeof compacted.input_json === "string") {
-    compacted.input_json = compactJsonString(compacted.input_json, 900);
-  }
-  if (typeof compacted.output_text === "string" && compacted.output_text.length > 1200) {
-    compacted.output_text = `${compacted.output_text.slice(0, 1200)}...`;
-  }
-  return compacted;
-}
-function makeId(prefix) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-function makeStableId(prefix, value) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${prefix}_${(hash >>> 0).toString(36)}`;
-}
-function addSeconds(date, seconds) {
-  return new Date(date.getTime() + seconds * 1e3);
-}
-function cosineSimilarity(left, right) {
-  if (left.length === 0 || right.length === 0 || left.length !== right.length) {
-    return 0;
-  }
-  let dot = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    dot += left[index] * right[index];
-    leftMagnitude += left[index] * left[index];
-    rightMagnitude += right[index] * right[index];
-  }
-  if (leftMagnitude === 0 || rightMagnitude === 0) {
-    return 0;
-  }
-  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
-}
-function mapJobRow(row) {
-  return {
-    ...row,
-    payload: readJson(row.payload_json, {})
-  };
-}
-function chapterNumberFromPath(value) {
-  const match = String(value || "").match(/chapter-(\d+)/);
-  return match ? Number(match[1]) : null;
-}
-function normalizeQualityGate(value, updatedAt = "") {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const record = value;
-  const status = String(record.status || "");
-  if (status !== "passed" && status !== "needs_revision" && status !== "blocked") {
-    return null;
-  }
-  return {
-    status,
-    score: Number.isFinite(Number(record.score)) ? Number(record.score) : void 0,
-    attempts: Number.isFinite(Number(record.attempts)) ? Number(record.attempts) : void 0,
-    reason: typeof record.reason === "string" ? record.reason : "",
-    wordCount: Number.isFinite(Number(record.wordCount)) ? Number(record.wordCount) : void 0,
-    targetWords: Number.isFinite(Number(record.targetWords)) ? Number(record.targetWords) : void 0,
-    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : updatedAt
-  };
-}
-function evaluateChapterContentQuality(qualityGate, projectTargetWords) {
-  if (!qualityGate) {
-    return null;
-  }
-  const wordCountValue = Number(qualityGate.wordCount);
-  const targetWordsValue = Number(qualityGate.targetWords ?? projectTargetWords);
-  const wordCount2 = Number.isFinite(wordCountValue) ? wordCountValue : void 0;
-  const targetWords = Number.isFinite(targetWordsValue) ? targetWordsValue : void 0;
-  const minimumWords = targetWords ? Math.floor(targetWords * MIN_CHAPTER_PASS_RATIO) : void 0;
-  if (qualityGate.status !== "passed") {
-    return {
-      status: "quarantined",
-      reason: qualityGate.reason || "\u8D28\u91CF\u95E8\u7981\u672A\u901A\u8FC7\u3002",
-      wordCount: wordCount2,
-      targetWords,
-      minimumWords
-    };
-  }
-  const reason = qualityGate.reason || "";
-  if (/主角一致性硬门槛失败|章节连续性检查失败|故事线漂移|主角.*漂移/u.test(reason)) {
-    return {
-      status: "quarantined",
-      reason,
-      wordCount: wordCount2,
-      targetWords,
-      minimumWords
-    };
-  }
-  if (!wordCount2 || !targetWords || !minimumWords) {
-    return {
-      status: "quarantined",
-      reason: "\u7F3A\u5C11\u786E\u5B9A\u6027\u5B57\u6570\u95E8\u7981\uFF0C\u4E0D\u80FD\u8BA1\u5165\u6B63\u5F0F\u5B8C\u6210\u3002",
-      wordCount: wordCount2,
-      targetWords,
-      minimumWords
-    };
-  }
-  if (wordCount2 < minimumWords) {
-    return {
-      status: "quarantined",
-      reason: `\u6B63\u6587\u6709\u6548\u5B57\u6570 ${wordCount2}/${targetWords}\uFF0C\u4F4E\u4E8E ${Math.round(MIN_CHAPTER_PASS_RATIO * 100)}% \u95E8\u69DB\u3002`,
-      wordCount: wordCount2,
-      targetWords,
-      minimumWords
-    };
-  }
-  return {
-    status: "eligible",
-    reason: "\u786E\u5B9A\u6027\u5B57\u6570\u95E8\u7981\u901A\u8FC7\u3002",
-    wordCount: wordCount2,
-    targetWords,
-    minimumWords
-  };
-}
-function isWritingEventActive(payload, now = /* @__PURE__ */ new Date()) {
-  const status = String(payload.status || "");
-  const step = String(payload.step || "");
-  const eventAt = typeof payload.createdAt === "string" ? Date.parse(payload.createdAt) : Number.NaN;
-  const eventAgeMs = Number.isFinite(eventAt) ? now.getTime() - eventAt : 0;
-  const maxActiveMs = 10 * 60 * 1e3;
-  if (eventAgeMs > maxActiveMs) return false;
-  if (/_completed$|_failed$|saved$|artifacts_saved|quality_gate_completed|polish_completed|naturalness_completed|memory_update_completed/.test(step)) {
-    return false;
-  }
-  if (status === "running") return true;
-  if (status === "started") return true;
-  return false;
-}
-function isWritingEventFailed(payload) {
-  const status = String(payload.status || "");
-  const step = String(payload.step || "");
-  return status === "blocked" || status === "failed" || /_failed$/u.test(step);
-}
-function timestampMs(value) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-function normalizeTaskStatus(value) {
-  if (value === "pending" || value === "in_progress" || value === "complete" || value === "blocked") {
-    return value;
-  }
-  return void 0;
-}
-function normalizeChapterNumberList(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((entry) => {
-    if (typeof entry === "number") {
-      return entry;
-    }
-    if (entry && typeof entry === "object" && "chapterNumber" in entry) {
-      return Number(entry.chapterNumber);
-    }
-    return Number(entry);
-  }).filter((entry) => Number.isFinite(entry) && entry > 0);
-}
-function applyQualityGateFact(fact, qualityGate, projectTargetWords) {
-  if (!qualityGate) {
-    return;
-  }
-  const incomingAt = timestampMs(qualityGate.updatedAt);
-  const existingAt = timestampMs(fact.qualityGate?.updatedAt || fact.updatedAt);
-  if (existingAt > 0 && incomingAt > 0 && incomingAt < existingAt) {
-    return;
-  }
-  fact.qualityGate = qualityGate;
-  fact.contentQuality = evaluateChapterContentQuality(qualityGate, projectTargetWords);
-  fact.updatedAt = qualityGate.updatedAt || fact.updatedAt;
-}
-function readTextFileSync(filePath) {
-  try {
-    return import_node_fs.default.readFileSync(filePath, "utf8");
-  } catch {
-    return "";
-  }
-}
-async function loadDatabaseSync() {
-  const dynamicImport = new Function("specifier", "return import(specifier)");
-  const sqlite = await dynamicImport("node:sqlite");
-  return sqlite.DatabaseSync;
-}
-function getFactoryDbPath(rootDir) {
-  return import_node_path.default.join(rootDir, FACTORY_DB_DIR, FACTORY_DB_FILE);
-}
-var FactoryDb = class _FactoryDb {
-  constructor(db) {
-    this.db = db;
-  }
-  db;
-  static async open(rootDir) {
-    const dbPath = getFactoryDbPath(rootDir);
-    await import_promises.default.mkdir(import_node_path.default.dirname(dbPath), { recursive: true });
-    const DatabaseSync = await loadDatabaseSync();
-    const db = new DatabaseSync(dbPath);
-    const store = new _FactoryDb(db);
-    store.migrate();
-    return store;
-  }
-  close() {
-    this.db.close();
-  }
-  migrate() {
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-
-      CREATE TABLE IF NOT EXISTS system_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        slug TEXT NOT NULL,
-        title TEXT NOT NULL,
-        idea TEXT NOT NULL,
-        project_root TEXT NOT NULL,
-        total_chapters INTEGER NOT NULL,
-        chapter_word_target INTEGER NOT NULL,
-        current_stage TEXT NOT NULL,
-        run_status TEXT NOT NULL DEFAULT 'idle',
-        state_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS workflow_runs (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        project_root TEXT NOT NULL,
-        parent_run_id TEXT,
-        kind TEXT NOT NULL,
-        status TEXT NOT NULL,
-        goal TEXT NOT NULL,
-        stage TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        error TEXT,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS workflow_steps (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        status TEXT NOT NULL,
-        stage TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        input_json TEXT,
-        output_json TEXT,
-        error TEXT,
-        FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_turns (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        discussion_stage TEXT NOT NULL,
-        status TEXT NOT NULL,
-        model TEXT,
-        input_json TEXT NOT NULL,
-        output_text TEXT,
-        error TEXT,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS artifacts (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        path TEXT NOT NULL,
-        version INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        metadata_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(project_id, path, version),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS memory_items (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        content TEXT NOT NULL,
-        importance INTEGER NOT NULL DEFAULT 1,
-        embedding_status TEXT NOT NULL DEFAULT 'pending',
-        embedding_id TEXT,
-        metadata_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS embeddings (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        owner_kind TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS knowledge_sources (
-        id TEXT PRIMARY KEY,
-        scope TEXT NOT NULL,
-        project_id TEXT,
-        source_type TEXT NOT NULL,
-        path TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        version TEXT NOT NULL DEFAULT '1',
-        status TEXT NOT NULL DEFAULT 'ready',
-        metadata_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(scope, project_id, path, version),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS knowledge_chunks (
-        id TEXT PRIMARY KEY,
-        source_id TEXT NOT NULL,
-        scope TEXT NOT NULL,
-        project_id TEXT,
-        chunk_index INTEGER NOT NULL,
-        chunk_type TEXT NOT NULL,
-        content TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        embedding_status TEXT NOT NULL DEFAULT 'pending',
-        metadata_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(source_id, chunk_index),
-        FOREIGN KEY(source_id) REFERENCES knowledge_sources(id) ON DELETE CASCADE,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS knowledge_embeddings (
-        id TEXT PRIMARY KEY,
-        chunk_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(chunk_id, model),
-        FOREIGN KEY(chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS knowledge_citations (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        run_id TEXT,
-        message_id TEXT,
-        query TEXT NOT NULL,
-        filters_json TEXT,
-        results_json TEXT NOT NULL,
-        used_chunk_ids_json TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS graph_nodes (
-        id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        label TEXT NOT NULL,
-        metadata_json TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(project_id, id),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS graph_edges (
-        id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        from_node_id TEXT NOT NULL,
-        to_node_id TEXT NOT NULL,
-        metadata_json TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(project_id, id),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS checkpoints (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        run_id TEXT,
-        label TEXT NOT NULL,
-        path TEXT NOT NULL,
-        drift_json TEXT,
-        state_json TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS events (
-        id TEXT PRIMARY KEY,
-        project_id TEXT,
-        run_id TEXT,
-        type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        conversation_id TEXT NOT NULL,
-        run_id TEXT,
-        turn_id TEXT,
-        parent_message_id TEXT,
-        type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        time TEXT NOT NULL,
-        data_json TEXT NOT NULL,
-        metadata_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS message_parts (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        part_index INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        data_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS jobs (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        run_id TEXT,
-        kind TEXT NOT NULL,
-        status TEXT NOT NULL,
-        lease_owner TEXT,
-        lease_expires_at TEXT,
-        payload_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS llm_configs (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        base_url TEXT NOT NULL,
-        api_key TEXT NOT NULL,
-        model_name TEXT NOT NULL,
-        api_mode TEXT NOT NULL DEFAULT 'chat',
-        temperature REAL NOT NULL DEFAULT 0.1,
-        timeout_ms INTEGER NOT NULL DEFAULT 120000,
-        is_active INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS llm_config_routes (
-        capability TEXT PRIMARY KEY,
-        config_id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(config_id) REFERENCES llm_configs(id) ON DELETE CASCADE
-      );
-
-
-      CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_turns_run_started ON agent_turns(run_id, started_at);
-      CREATE INDEX IF NOT EXISTS idx_artifacts_project_updated ON artifacts(project_id, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_jobs_project_status ON jobs(project_id, status);
-      CREATE INDEX IF NOT EXISTS idx_embeddings_project_owner ON embeddings(project_id, owner_kind, owner_id);
-      CREATE INDEX IF NOT EXISTS idx_knowledge_sources_scope ON knowledge_sources(scope, project_id, source_type, status);
-      CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_scope ON knowledge_chunks(scope, project_id, chunk_type, status, embedding_status);
-      CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source ON knowledge_chunks(source_id, chunk_index);
-      CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_chunk ON knowledge_embeddings(chunk_id);
-      CREATE INDEX IF NOT EXISTS idx_knowledge_citations_project ON knowledge_citations(project_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_messages_project_time ON messages(project_id, time);
-      CREATE INDEX IF NOT EXISTS idx_messages_conversation_time ON messages(conversation_id, time);
-      CREATE INDEX IF NOT EXISTS idx_message_parts_message_index ON message_parts(message_id, part_index);
-    `);
-    this.migrateColumn("memory_items", "embedding_id", "TEXT");
-    this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'");
-    this.migrateGraphTablePrimaryKey("graph_nodes", `
-      CREATE TABLE graph_nodes (
-        id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        label TEXT NOT NULL,
-        metadata_json TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(project_id, id),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      )
-    `, "id, project_id, type, label, metadata_json, updated_at");
-    this.migrateGraphTablePrimaryKey("graph_edges", `
-      CREATE TABLE graph_edges (
-        id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        from_node_id TEXT NOT NULL,
-        to_node_id TEXT NOT NULL,
-        metadata_json TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(project_id, id),
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-      )
-    `, "id, project_id, type, from_node_id, to_node_id, metadata_json, updated_at");
-  }
-  migrateColumn(table, column, definition) {
-    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all();
-    if (columns.some((row) => row.name === column)) {
-      return;
-    }
-    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-  migrateGraphTablePrimaryKey(table, createSql, columns) {
-    const info = this.db.prepare(`PRAGMA table_info(${table})`).all();
-    const idPk = info.find((row) => row.name === "id")?.pk;
-    const projectPk = info.find((row) => row.name === "project_id")?.pk;
-    if (idPk && projectPk) {
-      return;
-    }
-    const legacyTable = `${table}_legacy_pk_migration`;
-    this.db.exec(`
-      PRAGMA foreign_keys = OFF;
-      DROP TABLE IF EXISTS ${legacyTable};
-      ALTER TABLE ${table} RENAME TO ${legacyTable};
-      ${createSql};
-      INSERT OR REPLACE INTO ${table} (${columns})
-      SELECT ${columns}
-      FROM ${legacyTable};
-      DROP TABLE ${legacyTable};
-      PRAGMA foreign_keys = ON;
-    `);
-  }
-  upsertProject(record, state) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO projects (
-        id, slug, title, idea, project_root, total_chapters, chapter_word_target,
-        current_stage, run_status, state_json, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        slug = excluded.slug,
-        title = excluded.title,
-        idea = excluded.idea,
-        project_root = excluded.project_root,
-        total_chapters = excluded.total_chapters,
-        chapter_word_target = excluded.chapter_word_target,
-        current_stage = excluded.current_stage,
-        state_json = excluded.state_json,
-        updated_at = excluded.updated_at
-    `).run(
-      record.id,
-      record.slug,
-      record.title,
-      record.idea,
-      record.projectRoot,
-      record.totalChapters,
-      record.chapterWordTarget,
-      state.runtime.stage,
-      state.runtime.autopilot?.running ? "running" : "idle",
-      jsonString(state),
-      record.createdAt,
-      now
-    );
-    this.recordArtifact({
-      projectId: record.id,
-      kind: "state",
-      path: ".ai-novel/state.json",
-      status: "completed",
-      metadata: { stage: state.runtime.stage }
-    });
-  }
-  updateProjectState(projectId, state) {
-    const now = nowIso();
-    const existing = this.db.prepare("SELECT state_json FROM projects WHERE id = ?").get(projectId);
-    if (!existing) {
-      return false;
-    }
-    const existingState = readJson(existing.state_json, null);
-    if (stateChangeFingerprint(existingState) === stateChangeFingerprint(state)) {
-      return false;
-    }
-    this.db.prepare(`
-      UPDATE projects
-      SET current_stage = ?, run_status = ?, state_json = ?, updated_at = ?
-      WHERE id = ?
-    `).run(
-      state.runtime.stage,
-      state.runtime.autopilot?.running ? "running" : "idle",
-      jsonString(state),
-      now,
-      projectId
-    );
-    this.recordEvent(projectId, null, "PROJECT_STATE_UPDATED", {
-      stage: state.runtime.stage,
-      statusMessage: state.runtime.statusMessage,
-      autopilot: state.runtime.autopilot ?? null
-    });
-    return true;
-  }
-  deleteProject(projectId) {
-    this.db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
-    return true;
-  }
-  listProjects() {
-    return this.db.prepare(`
-      SELECT id, slug, title, idea, created_at, total_chapters, chapter_word_target, project_root
-      FROM projects
-      ORDER BY created_at DESC
-    `).all().map((row) => ({
-      id: String(row.id),
-      slug: String(row.slug),
-      title: String(row.title),
-      idea: String(row.idea),
-      createdAt: String(row.created_at),
-      totalChapters: Number(row.total_chapters),
-      chapterWordTarget: Number(row.chapter_word_target),
-      projectRoot: String(row.project_root)
-    }));
-  }
-  pruneProjectsExcept(projectIds) {
-    const keep = new Set(projectIds);
-    const existing = this.listProjects();
-    const removed = [];
-    for (const project of existing) {
-      if (keep.has(project.id)) {
-        continue;
-      }
-      this.db.prepare("DELETE FROM projects WHERE id = ?").run(project.id);
-      removed.push(project.id);
-    }
-    return removed;
-  }
-  getProject(projectId) {
-    return this.listProjects().find((project) => project.id === projectId) ?? null;
-  }
-  createRun(input) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO workflow_runs (
-        id, project_id, project_root, parent_run_id, kind, status, goal, stage,
-        started_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.id,
-      input.projectId,
-      input.projectRoot,
-      input.parentRunId ?? null,
-      input.kind,
-      input.status,
-      input.goal,
-      input.stage,
-      now,
-      now
-    );
-    this.recordEvent(input.projectId, input.id, "WORKFLOW_RUN_STARTED", input);
-  }
-  updateRun(runId, status, patch = {}) {
-    const now = nowIso();
-    this.db.prepare(`
-      UPDATE workflow_runs
-      SET status = ?, stage = COALESCE(?, stage), error = COALESCE(?, error),
-          updated_at = ?, completed_at = CASE WHEN ? IN ('blocked', 'failed', 'completed') THEN ? ELSE completed_at END
-      WHERE id = ?
-    `).run(status, patch.stage ?? null, patch.error ?? null, now, status, now, runId);
-    const run = this.db.prepare("SELECT project_id FROM workflow_runs WHERE id = ?").get(runId);
-    this.recordEvent(typeof run?.project_id === "string" ? run.project_id : null, runId, "WORKFLOW_RUN_UPDATED", {
-      status,
-      error: patch.error ?? null,
-      stage: patch.stage ?? null
-    });
-  }
-  recoverStaleRuns(options = {}) {
-    const now = nowIso();
-    const olderThan = (options.olderThan ?? new Date(Date.now() - 20 * 60 * 1e3)).toISOString();
-    const error = options.error ?? "stale_run_recovered";
-    const rows = this.db.prepare(`
-      SELECT run.*
-      FROM workflow_runs run
-      WHERE run.status IN ('running', 'paused')
-        AND run.updated_at <= ?
-        AND NOT EXISTS (
-          SELECT 1
-          FROM agent_turns turn
-          WHERE turn.run_id = run.id
-            AND turn.updated_at > ?
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM jobs job
-          WHERE job.run_id = run.id
-            AND job.status IN ('running', 'paused')
-            AND (job.lease_expires_at IS NULL OR job.lease_expires_at > ?)
-        )
-      ORDER BY run.updated_at ASC
-    `).all(olderThan, olderThan, now);
-    for (const row of rows) {
-      this.db.prepare(`
-        UPDATE workflow_runs
-        SET status = 'failed', error = ?, updated_at = ?, completed_at = ?
-        WHERE id = ?
-      `).run(error, now, now, String(row.id));
-      this.recordEvent(
-        typeof row.project_id === "string" ? row.project_id : null,
-        typeof row.id === "string" ? row.id : null,
-        "WORKFLOW_RUN_RECOVERED",
-        {
-          id: row.id,
-          previousStatus: row.status,
-          kind: row.kind,
-          stage: row.stage,
-          reason: error
-        }
-      );
-    }
-    return rows.length;
-  }
-  recordAgentTurn(input) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO agent_turns (
-        id, run_id, turn_id, role, discussion_stage, status, model, input_json,
-        output_text, error, started_at, updated_at, completed_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        status = excluded.status,
-        model = excluded.model,
-        input_json = excluded.input_json,
-        output_text = excluded.output_text,
-        error = excluded.error,
-        updated_at = excluded.updated_at,
-        completed_at = excluded.completed_at
-    `).run(
-      input.turnId,
-      input.runId,
-      input.turnId,
-      input.role,
-      input.stage,
-      input.status,
-      input.model ?? null,
-      jsonString(input.input),
-      input.output ?? null,
-      input.error ?? null,
-      now,
-      now,
-      input.status === "completed" || input.status === "failed" ? now : null
-    );
-    this.db.prepare(`
-      UPDATE workflow_runs
-      SET updated_at = ?
-      WHERE id = ?
-    `).run(now, input.runId);
-    const run = this.db.prepare("SELECT project_id FROM workflow_runs WHERE id = ?").get(input.runId);
-    this.recordEvent(typeof run?.project_id === "string" ? run.project_id : null, input.runId, "AGENT_TURN_UPDATED", {
-      turnId: input.turnId,
-      role: input.role,
-      status: input.status,
-      discussionStage: input.stage
-    });
-  }
-  recordArtifact(input) {
-    const now = nowIso();
-    const version = input.version ?? 1;
-    const artifactId = `${input.projectId}:${input.path}:${version}`;
-    this.db.prepare(`
-      INSERT INTO artifacts (id, project_id, kind, path, version, status, metadata_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(project_id, path, version) DO UPDATE SET
-        kind = excluded.kind,
-        status = excluded.status,
-        metadata_json = excluded.metadata_json,
-        updated_at = excluded.updated_at
-    `).run(
-      artifactId,
-      input.projectId,
-      input.kind,
-      input.path,
-      version,
-      input.status ?? "completed",
-      jsonString(input.metadata ?? {}),
-      now,
-      now
-    );
-    this.recordEvent(input.projectId, null, "ARTIFACT_RECORDED", {
-      kind: input.kind,
-      path: input.path,
-      version,
-      status: input.status ?? "completed"
-    });
-  }
-  recordMemory(projectId, input) {
-    const now = nowIso();
-    const metadata = input.metadata ?? {};
-    const metadataPath = typeof metadata === "object" && metadata && "path" in metadata ? String(metadata.path) : "";
-    if (metadataPath) {
-      const existing = this.db.prepare(`
-        SELECT id, embedding_id
-        FROM memory_items
-        WHERE project_id = ?
-          AND source = ?
-          AND kind = ?
-          AND json_extract(metadata_json, '$.path') = ?
-        ORDER BY updated_at DESC
-        LIMIT 1
-      `).get(projectId, input.source, input.kind, metadataPath);
-      if (existing?.id) {
-        const embeddingId2 = typeof existing.embedding_id === "string" ? existing.embedding_id : input.embedding ? makeId("emb") : null;
-        this.db.prepare(`
-          UPDATE memory_items
-          SET content = ?, importance = ?, embedding_status = ?, embedding_id = ?, metadata_json = ?, updated_at = ?
-          WHERE id = ? AND project_id = ?
-        `).run(
-          input.content,
-          input.importance ?? 1,
-          input.embedding ? "ready" : "pending",
-          embeddingId2,
-          jsonString(metadata),
-          now,
-          String(existing.id),
-          projectId
-        );
-        if (input.embedding && embeddingId2) {
-          this.upsertEmbedding(projectId, {
-            id: embeddingId2,
-            ownerKind: "memory",
-            ownerId: String(existing.id),
-            model: input.embedding.model,
-            vector: input.embedding.vector
-          });
-        }
-        this.recordEvent(projectId, null, "MEMORY_ITEM_UPDATED", input);
-        return String(existing.id);
-      }
-    }
-    const id = makeId("mem");
-    const embeddingId = input.embedding ? makeId("emb") : null;
-    this.db.prepare(`
-      INSERT INTO memory_items (
-        id, project_id, source, kind, content, importance, embedding_status,
-        embedding_id, metadata_json, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      projectId,
-      input.source,
-      input.kind,
-      input.content,
-      input.importance ?? 1,
-      input.embedding ? "ready" : "pending",
-      embeddingId,
-      jsonString(metadata),
-      now,
-      now
-    );
-    if (input.embedding && embeddingId) {
-      this.upsertEmbedding(projectId, {
-        id: embeddingId,
-        ownerKind: "memory",
-        ownerId: id,
-        model: input.embedding.model,
-        vector: input.embedding.vector
-      });
-    }
-    this.recordEvent(projectId, null, "MEMORY_ITEM_RECORDED", input);
-    return id;
-  }
-  upsertEmbedding(projectId, input) {
-    const now = nowIso();
-    const id = input.id ?? makeId("emb");
-    this.db.prepare(`
-      INSERT INTO embeddings (
-        id, project_id, owner_kind, owner_id, model, dimensions, vector_json, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        model = excluded.model,
-        dimensions = excluded.dimensions,
-        vector_json = excluded.vector_json,
-        updated_at = excluded.updated_at
-    `).run(
-      id,
-      projectId,
-      input.ownerKind,
-      input.ownerId,
-      input.model,
-      input.vector.length,
-      jsonString(input.vector),
-      now,
-      now
-    );
-    if (input.ownerKind === "memory") {
-      this.db.prepare(`
-        UPDATE memory_items
-        SET embedding_status = 'ready', embedding_id = ?, updated_at = ?
-        WHERE id = ? AND project_id = ?
-      `).run(id, now, input.ownerId, projectId);
-    }
-    this.recordEvent(projectId, null, "EMBEDDING_UPSERTED", {
-      id,
-      ownerKind: input.ownerKind,
-      ownerId: input.ownerId,
-      model: input.model,
-      dimensions: input.vector.length
-    });
-    return id;
-  }
-  markMemoryEmbeddingFailed(projectId, memoryId, error) {
-    this.db.prepare(`
-      UPDATE memory_items
-      SET embedding_status = 'failed', updated_at = ?
-      WHERE id = ? AND project_id = ?
-    `).run(nowIso(), memoryId, projectId);
-    this.recordEvent(projectId, null, "MEMORY_EMBEDDING_FAILED", { memoryId, error });
-  }
-  listPendingMemoryForEmbedding(projectId, limit = 50) {
-    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
-    if (projectId) {
-      return this.db.prepare(`
-        SELECT *
-        FROM memory_items
-        WHERE project_id = ?
-          AND embedding_status IN ('pending', 'failed')
-        ORDER BY importance DESC, updated_at ASC
-        LIMIT ${safeLimit}
-      `).all(projectId);
-    }
-    return this.db.prepare(`
-      SELECT *
-      FROM memory_items
-      WHERE embedding_status IN ('pending', 'failed')
-      ORDER BY importance DESC, updated_at ASC
-      LIMIT ${safeLimit}
-    `).all();
-  }
-  queryMemoryByEmbedding(projectId, queryVector, limit = 8) {
-    const rows = this.db.prepare(`
-      SELECT memory_items.*, embeddings.vector_json, embeddings.model
-      FROM memory_items
-      JOIN embeddings ON embeddings.id = memory_items.embedding_id
-      WHERE memory_items.project_id = ?
-        AND memory_items.embedding_status = 'ready'
-      ORDER BY memory_items.updated_at DESC
-      LIMIT 200
-    `).all(projectId);
-    return rows.map((row) => {
-      const vector = readJson(row.vector_json, []);
-      return {
-        ...row,
-        metadata: readJson(row.metadata_json, {}),
-        score: cosineSimilarity(queryVector, vector) * 100 + Number(row.importance || 1)
-      };
-    }).sort((a, b) => Number(b.score) - Number(a.score) || String(b.updated_at).localeCompare(String(a.updated_at))).slice(0, limit);
-  }
-  recallMemory(projectId, query = "", limit = 8, options = {}) {
-    if (options.embedding?.length) {
-      const embedded = this.queryMemoryByEmbedding(projectId, options.embedding, limit);
-      if (embedded.length > 0) {
-        return embedded;
-      }
-    }
-    const tokens = query.toLowerCase().split(/[\s,，。！？!?.、:：；;]+/).filter((token) => token.length >= 2).slice(0, 8);
-    const rows = this.db.prepare(`
-      SELECT *
-      FROM memory_items
-      WHERE project_id = ?
-      ORDER BY importance DESC, updated_at DESC
-      LIMIT 80
-    `).all(projectId);
-    return rows.map((row) => {
-      const content = String(row.content || "").toLowerCase();
-      const kind = String(row.kind || "").toLowerCase();
-      const score = Number(row.importance || 1) * 10 + tokens.filter((token) => content.includes(token) || kind.includes(token)).length * 20;
-      return {
-        ...row,
-        metadata: readJson(row.metadata_json, {}),
-        score
-      };
-    }).sort((a, b) => Number(b.score) - Number(a.score) || String(b.updated_at).localeCompare(String(a.updated_at))).slice(0, limit);
-  }
-  upsertKnowledgeSource(input) {
-    const now = nowIso();
-    const version = input.version || "1";
-    const projectId = input.scope === "project" ? input.projectId ?? null : null;
-    const id = makeStableId("ks", `${input.scope}:${projectId || "global"}:${input.path}:${version}`);
-    const existing = this.db.prepare("SELECT content_hash FROM knowledge_sources WHERE id = ?").get(id);
-    const changed = Boolean(existing && existing.content_hash !== input.contentHash);
-    this.db.prepare(`
-      INSERT INTO knowledge_sources (
-        id, scope, project_id, source_type, path, title, content_hash, version,
-        status, metadata_json, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        scope = excluded.scope,
-        project_id = excluded.project_id,
-        source_type = excluded.source_type,
-        path = excluded.path,
-        title = excluded.title,
-        content_hash = excluded.content_hash,
-        version = excluded.version,
-        status = excluded.status,
-        metadata_json = excluded.metadata_json,
-        updated_at = excluded.updated_at
-    `).run(
-      id,
-      input.scope,
-      projectId,
-      input.sourceType,
-      input.path,
-      input.title,
-      input.contentHash,
-      version,
-      input.status ?? "ready",
-      jsonString(input.metadata ?? {}),
-      now,
-      now
-    );
-    if (changed) {
-      this.db.prepare(`
-        UPDATE knowledge_chunks
-        SET status = 'superseded', embedding_status = 'superseded', updated_at = ?
-        WHERE source_id = ?
-      `).run(now, id);
-    }
-    this.recordEvent(projectId, null, changed ? "KNOWLEDGE_SOURCE_UPDATED" : "KNOWLEDGE_SOURCE_UPSERTED", {
-      id,
-      scope: input.scope,
-      projectId,
-      sourceType: input.sourceType,
-      path: input.path,
-      changed
-    });
-    return { id, changed };
-  }
-  replaceKnowledgeChunks(sourceId, chunks) {
-    const now = nowIso();
-    this.db.prepare(`
-      UPDATE knowledge_chunks
-      SET status = 'superseded', embedding_status = CASE WHEN embedding_status = 'ready' THEN 'superseded' ELSE embedding_status END, updated_at = ?
-      WHERE source_id = ?
-    `).run(now, sourceId);
-    const source = this.db.prepare("SELECT project_id FROM knowledge_sources WHERE id = ?").get(sourceId);
-    const activeIds = [];
-    chunks.forEach((chunk, index) => {
-      const chunkId = chunk.id || makeStableId("kc", `${sourceId}:${index}`);
-      const projectId = chunk.scope === "project" ? chunk.projectId ?? null : null;
-      this.db.prepare(`
-        INSERT INTO knowledge_chunks (
-          id, source_id, scope, project_id, chunk_index, chunk_type, content,
-          content_hash, status, embedding_status, metadata_json, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(source_id, chunk_index) DO UPDATE SET
-          scope = excluded.scope,
-          project_id = excluded.project_id,
-          chunk_type = excluded.chunk_type,
-          content = excluded.content,
-          content_hash = excluded.content_hash,
-          status = excluded.status,
-          embedding_status = excluded.embedding_status,
-          metadata_json = excluded.metadata_json,
-          updated_at = excluded.updated_at
-      `).run(
-        chunkId,
-        sourceId,
-        chunk.scope,
-        projectId,
-        index,
-        chunk.chunkType,
-        chunk.content,
-        chunk.contentHash,
-        chunk.status ?? "ready",
-        chunk.embedding ? "ready" : "pending",
-        jsonString(chunk.metadata ?? {}),
-        now,
-        now
-      );
-      if (chunk.embedding) {
-        this.upsertKnowledgeEmbedding(chunkId, chunk.embedding.model, chunk.embedding.vector);
-      }
-      activeIds.push(chunkId);
-    });
-    this.recordEvent(typeof source?.project_id === "string" ? source.project_id : null, null, "KNOWLEDGE_CHUNKS_REPLACED", {
-      sourceId,
-      chunks: chunks.length
-    });
-    return activeIds;
-  }
-  upsertKnowledgeEmbedding(chunkId, model, vector) {
-    const now = nowIso();
-    const id = makeStableId("kemb", `${chunkId}:${model}`);
-    this.db.prepare(`
-      INSERT INTO knowledge_embeddings (
-        id, chunk_id, model, dimensions, vector_json, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(chunk_id, model) DO UPDATE SET
-        dimensions = excluded.dimensions,
-        vector_json = excluded.vector_json,
-        updated_at = excluded.updated_at
-    `).run(id, chunkId, model, vector.length, jsonString(vector), now, now);
-    this.db.prepare(`
-      UPDATE knowledge_chunks
-      SET embedding_status = 'ready', updated_at = ?
-      WHERE id = ?
-    `).run(now, chunkId);
-    return id;
-  }
-  markKnowledgeEmbeddingFailed(chunkId, error) {
-    this.db.prepare(`
-      UPDATE knowledge_chunks
-      SET embedding_status = 'failed', updated_at = ?
-      WHERE id = ?
-    `).run(nowIso(), chunkId);
-    const row = this.db.prepare("SELECT project_id, source_id FROM knowledge_chunks WHERE id = ?").get(chunkId);
-    this.recordEvent(typeof row?.project_id === "string" ? row.project_id : null, null, "KNOWLEDGE_EMBEDDING_FAILED", {
-      chunkId,
-      sourceId: typeof row?.source_id === "string" ? row.source_id : null,
-      error
-    });
-  }
-  listPendingKnowledgeChunks(options = {}) {
-    const safeLimit = Math.max(1, Math.min(1e3, Math.floor(options.limit ?? 100)));
-    const conditions = ["embedding_status IN ('pending', 'failed')", "status = 'ready'"];
-    const values = [];
-    if (options.scope) {
-      conditions.push("scope = ?");
-      values.push(options.scope);
-    }
-    if (typeof options.projectId === "string") {
-      conditions.push("project_id = ?");
-      values.push(options.projectId);
-    }
-    const rows = this.db.prepare(`
-      SELECT *
-      FROM knowledge_chunks
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY updated_at ASC
-      LIMIT ${safeLimit}
-    `).all(...values);
-    return rows.map((row) => ({
-      ...row,
-      metadata: readJson(row.metadata_json, {})
-    }));
-  }
-  queryKnowledgeByEmbedding(queryVector, options = {}) {
-    const rows = this.listKnowledgeCandidateRows(options, true);
-    return rows.map((row) => {
-      const vector = readJson(row.vector_json, []);
-      return this.mapKnowledgeRecallRow(row, cosineSimilarity(queryVector, vector) * 100);
-    }).sort((left, right) => Number(right.score) - Number(left.score) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, Math.max(1, Math.min(50, Math.floor(options.limit ?? 8))));
-  }
-  recallKnowledge(query = "", options = {}) {
-    const limit = Math.max(1, Math.min(50, Math.floor(options.limit ?? 8)));
-    if (options.embedding?.length) {
-      const embedded = this.queryKnowledgeByEmbedding(options.embedding, { ...options, limit });
-      if (embedded.length > 0) {
-        return embedded;
-      }
-    }
-    const tokens = query.toLowerCase().split(/[\s,，。！？!?.、:：；;]+/).filter((token) => token.length >= 2).slice(0, 12);
-    const rows = this.listKnowledgeCandidateRows(options, false);
-    return rows.map((row) => {
-      const content = String(row.content || "").toLowerCase();
-      const sourceType = String(row.source_type || "").toLowerCase();
-      const chunkType = String(row.chunk_type || "").toLowerCase();
-      const tokenHits = tokens.filter((token) => content.includes(token) || sourceType.includes(token) || chunkType.includes(token));
-      const score = tokenHits.length * 25 + (row.scope === "project" ? 8 : 4);
-      return this.mapKnowledgeRecallRow(row, score);
-    }).sort((left, right) => Number(right.score) - Number(left.score) || String(right.updated_at).localeCompare(String(left.updated_at))).slice(0, limit);
-  }
-  recordKnowledgeCitation(input) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO knowledge_citations (
-        id, project_id, run_id, message_id, query, filters_json,
-        results_json, used_chunk_ids_json, created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      makeId("kcite"),
-      input.projectId,
-      input.runId ?? null,
-      input.messageId ?? null,
-      input.query,
-      jsonString(input.filters ?? {}),
-      jsonString(input.results ?? []),
-      jsonString(input.usedChunkIds ?? []),
-      now
-    );
-    this.recordEvent(input.projectId, input.runId ?? null, "KNOWLEDGE_CITATION_RECORDED", {
-      messageId: input.messageId ?? null,
-      resultCount: Array.isArray(input.results) ? input.results.length : 0,
-      usedChunkIds: input.usedChunkIds ?? []
-    });
-  }
-  getKnowledgeSummary(projectId) {
-    const scalar = (sql, ...values) => Number(this.db.prepare(sql).get(...values)?.count || 0);
-    const latestEvaluationRow = this.db.prepare(`
-      SELECT *
-      FROM events
-      WHERE project_id = ? AND type = 'KNOWLEDGE_EVALUATION_COMPLETED'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(projectId);
-    const latestEvaluation = latestEvaluationRow ? {
-      ...compactDbRow(latestEvaluationRow),
-      payload: readJson(latestEvaluationRow.payload_json, {})
-    } : null;
-    return {
-      sources: this.db.prepare(`
-        SELECT *
-        FROM knowledge_sources
-        WHERE scope = 'global' OR project_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 24
-      `).all(projectId).map(compactDbRow),
-      chunks: this.db.prepare(`
-        SELECT knowledge_chunks.*, knowledge_sources.source_type, knowledge_sources.path AS source_path, knowledge_sources.title AS source_title
-        FROM knowledge_chunks
-        JOIN knowledge_sources ON knowledge_sources.id = knowledge_chunks.source_id
-        WHERE knowledge_chunks.status = 'ready'
-          AND (knowledge_chunks.scope = 'global' OR knowledge_chunks.project_id = ?)
-        ORDER BY knowledge_chunks.updated_at DESC
-        LIMIT 24
-      `).all(projectId).map(compactDbRow),
-      citations: this.db.prepare(`
-        SELECT *
-        FROM knowledge_citations
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        LIMIT 12
-      `).all(projectId).map(compactDbRow),
-      jobs: this.db.prepare(`
-        SELECT *
-        FROM jobs
-        WHERE project_id = ?
-          AND kind LIKE 'knowledge_%'
-          AND status IN ('idle', 'running', 'paused', 'failed', 'completed')
-        ORDER BY updated_at DESC
-        LIMIT 12
-      `).all(projectId).map(mapJobRow),
-      latestEvaluation,
-      summary: {
-        globalSources: scalar("SELECT COUNT(*) AS count FROM knowledge_sources WHERE scope = 'global' AND status = 'ready'"),
-        projectSources: scalar("SELECT COUNT(*) AS count FROM knowledge_sources WHERE scope = 'project' AND project_id = ? AND status = 'ready'", projectId),
-        readyChunks: scalar(`
-          SELECT COUNT(*) AS count
-          FROM knowledge_chunks
-          WHERE status = 'ready'
-            AND embedding_status = 'ready'
-            AND (scope = 'global' OR project_id = ?)
-        `, projectId),
-        pendingChunks: scalar(`
-          SELECT COUNT(*) AS count
-          FROM knowledge_chunks
-          WHERE status = 'ready'
-            AND embedding_status = 'pending'
-            AND (scope = 'global' OR project_id = ?)
-        `, projectId),
-        failedChunks: scalar(`
-          SELECT COUNT(*) AS count
-          FROM knowledge_chunks
-          WHERE status = 'ready'
-            AND embedding_status = 'failed'
-            AND (scope = 'global' OR project_id = ?)
-        `, projectId)
-      }
-    };
-  }
-  listKnowledgeCandidateRows(options = {}, requireEmbedding = false) {
-    const scopes = options.scopes?.length ? options.scopes : ["project", "global"];
-    const values = [];
-    const visibility = [];
-    if (scopes.includes("global")) {
-      visibility.push("(knowledge_chunks.scope = 'global' AND knowledge_chunks.project_id IS NULL)");
-    }
-    if (scopes.includes("project") && options.projectId) {
-      visibility.push("(knowledge_chunks.scope = 'project' AND knowledge_chunks.project_id = ?)");
-      values.push(options.projectId);
-    }
-    if (visibility.length === 0) {
-      return [];
-    }
-    const conditions = [
-      "knowledge_chunks.status = 'ready'",
-      `(${visibility.join(" OR ")})`
-    ];
-    if (requireEmbedding) {
-      conditions.push("knowledge_chunks.embedding_status = 'ready'");
-    }
-    if (options.sourceTypes?.length) {
-      conditions.push(`knowledge_sources.source_type IN (${options.sourceTypes.map(() => "?").join(", ")})`);
-      values.push(...options.sourceTypes);
-    }
-    if (options.chunkTypes?.length) {
-      conditions.push(`knowledge_chunks.chunk_type IN (${options.chunkTypes.map(() => "?").join(", ")})`);
-      values.push(...options.chunkTypes);
-    }
-    const safeLimit = Math.max(10, Math.min(1e3, Math.floor((options.limit ?? 8) * 80)));
-    return this.db.prepare(`
-      SELECT
-        knowledge_chunks.*,
-        knowledge_sources.source_type,
-        knowledge_sources.path AS source_path,
-        knowledge_sources.title AS source_title,
-        knowledge_sources.metadata_json AS source_metadata_json,
-        knowledge_embeddings.vector_json,
-        knowledge_embeddings.model
-      FROM knowledge_chunks
-      JOIN knowledge_sources ON knowledge_sources.id = knowledge_chunks.source_id
-      ${requireEmbedding ? "JOIN knowledge_embeddings ON knowledge_embeddings.chunk_id = knowledge_chunks.id" : "LEFT JOIN knowledge_embeddings ON knowledge_embeddings.chunk_id = knowledge_chunks.id"}
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY knowledge_chunks.updated_at DESC
-      LIMIT ${safeLimit}
-    `).all(...values);
-  }
-  mapKnowledgeRecallRow(row, score) {
-    return {
-      ...compactDbRow(row),
-      metadata: readJson(row.metadata_json, {}),
-      sourceMetadata: readJson(row.source_metadata_json, {}),
-      source: {
-        id: row.source_id,
-        sourceType: row.source_type,
-        path: row.source_path,
-        title: row.source_title
-      },
-      score
-    };
-  }
-  upsertGraph(projectId, nodes, edges) {
-    for (const node of nodes) {
-      this.db.prepare(`
-        INSERT INTO graph_nodes (id, project_id, type, label, metadata_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, id) DO UPDATE SET
-          type = excluded.type,
-          label = excluded.label,
-          metadata_json = excluded.metadata_json,
-          updated_at = excluded.updated_at
-      `).run(node.id, projectId, node.type, node.label, jsonString(node.properties ?? {}), node.updatedAt || nowIso());
-    }
-    for (const edge of edges) {
-      this.db.prepare(`
-        INSERT INTO graph_edges (id, project_id, type, from_node_id, to_node_id, metadata_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, id) DO UPDATE SET
-          type = excluded.type,
-          from_node_id = excluded.from_node_id,
-          to_node_id = excluded.to_node_id,
-          metadata_json = excluded.metadata_json,
-          updated_at = excluded.updated_at
-      `).run(edge.id, projectId, edge.type, edge.from, edge.to, jsonString(edge.properties ?? {}), edge.updatedAt || nowIso());
-    }
-    this.recordEvent(projectId, null, "GRAPH_SYNCED", {
-      nodes: nodes.length,
-      edges: edges.length
-    });
-  }
-  getGraph(projectId) {
-    return {
-      nodes: this.db.prepare(`
-        SELECT *
-        FROM graph_nodes
-        WHERE project_id = ?
-        ORDER BY updated_at DESC
-      `).all(projectId),
-      edges: this.db.prepare(`
-        SELECT *
-        FROM graph_edges
-        WHERE project_id = ?
-        ORDER BY updated_at DESC
-      `).all(projectId)
-    };
-  }
-  recordCheckpoint(input) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO checkpoints (id, project_id, run_id, label, path, drift_json, state_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      makeId("chk"),
-      input.projectId,
-      input.runId ?? null,
-      input.label,
-      input.path,
-      jsonString(input.drift ?? null),
-      jsonString(input.state ?? null),
-      now
-    );
-    this.recordArtifact({
-      projectId: input.projectId,
-      kind: "checkpoint",
-      path: input.path,
-      status: "completed",
-      metadata: { label: input.label, drift: input.drift ?? null }
-    });
-  }
-  recordEvent(projectId, runId, type, payload) {
-    this.db.prepare(`
-      INSERT INTO events (id, project_id, run_id, type, payload_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(makeId("evt"), projectId, runId, type, jsonString(payload), nowIso());
-  }
-  recordMessage(message, parts = []) {
-    const now = nowIso();
-    const updatedAt = message.updatedAt || now;
-    this.db.prepare(`
-      INSERT INTO messages (
-        id, project_id, conversation_id, run_id, turn_id, parent_message_id,
-        type, status, time, data_json, metadata_json, created_at, updated_at, completed_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        conversation_id = excluded.conversation_id,
-        run_id = excluded.run_id,
-        turn_id = excluded.turn_id,
-        parent_message_id = excluded.parent_message_id,
-        type = excluded.type,
-        status = excluded.status,
-        time = messages.time,
-        data_json = excluded.data_json,
-        metadata_json = excluded.metadata_json,
-        updated_at = excluded.updated_at,
-        completed_at = excluded.completed_at
-    `).run(
-      message.messageId,
-      message.projectId || "",
-      message.conversationId,
-      message.runId ?? null,
-      message.turnId ?? null,
-      message.parentMessageId ?? null,
-      message.type,
-      message.status,
-      message.time,
-      jsonString(message.data),
-      jsonString(message.metadata ?? {}),
-      message.createdAt || message.time,
-      updatedAt,
-      message.completedAt ?? null
-    );
-    if (parts.length > 0) {
-      this.db.prepare("DELETE FROM message_parts WHERE message_id = ?").run(message.messageId);
-      const insertPart = this.db.prepare(`
-        INSERT INTO message_parts (id, message_id, part_index, type, data_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-      parts.forEach((part, index) => {
-        insertPart.run(
-          part.id || `${message.messageId}:part:${index}`,
-          message.messageId,
-          Number.isFinite(part.index) ? part.index : index,
-          part.type,
-          jsonString(part.data),
-          part.createdAt || updatedAt
-        );
-      });
-    }
-    this.recordEvent(message.projectId || null, message.runId ?? null, "MESSAGE_RECORDED", {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      turnId: message.turnId ?? null,
-      type: message.type,
-      status: message.status
-    });
-  }
-  countMessages(projectId, options = {}) {
-    const row = options.conversationId ? this.db.prepare(`
-          SELECT count(*) AS count
-          FROM messages
-          WHERE project_id = ? AND conversation_id = ?
-        `).get(projectId, options.conversationId) : this.db.prepare(`
-          SELECT count(*) AS count
-          FROM messages
-          WHERE project_id = ?
-        `).get(projectId);
-    return Number(row?.count || 0);
-  }
-  listMessages(projectId, options = {}) {
-    const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? 80)));
-    const offset = Math.max(0, Math.floor(options.offset ?? 0));
-    const rows = options.conversationId ? this.db.prepare(`
-          SELECT *
-          FROM messages
-          WHERE project_id = ? AND conversation_id = ?
-          ORDER BY time DESC, created_at DESC
-          LIMIT ? OFFSET ?
-        `).all(projectId, options.conversationId, limit, offset) : this.db.prepare(`
-          SELECT *
-          FROM messages
-          WHERE project_id = ?
-          ORDER BY time DESC, created_at DESC
-          LIMIT ? OFFSET ?
-        `).all(projectId, limit, offset);
-    return rows.map((row) => ({
-      ...compactDbRow(row),
-      data: readJson(row.data_json, {}),
-      metadata: readJson(row.metadata_json, {}),
-      parts: this.db.prepare(`
-        SELECT *
-        FROM message_parts
-        WHERE message_id = ?
-        ORDER BY part_index ASC
-      `).all(String(row.id)).map((part) => ({
-        ...part,
-        data: readJson(part.data_json, {})
-      }))
-    }));
-  }
-  markStreamingMessagesFailed(projectId, options = {}) {
-    const now = nowIso();
-    const limit = Math.max(1, Math.min(50, Math.floor(options.limit ?? 8)));
-    const rows = options.conversationId ? this.db.prepare(`
-          SELECT id, data_json, metadata_json
-          FROM messages
-          WHERE project_id = ?
-            AND conversation_id = ?
-            AND status = 'streaming'
-          ORDER BY created_at DESC
-          LIMIT ?
-        `).all(projectId, options.conversationId, limit) : this.db.prepare(`
-          SELECT id, data_json, metadata_json
-          FROM messages
-          WHERE project_id = ?
-            AND status = 'streaming'
-          ORDER BY created_at DESC
-          LIMIT ?
-        `).all(projectId, limit);
-    let changed = 0;
-    for (const row of rows) {
-      const metadata = readJson(row.metadata_json, {});
-      if (typeof options.chapterNumber === "number" && Number(metadata.chapterNumber) !== options.chapterNumber) {
-        continue;
-      }
-      const data = readJson(row.data_json, {});
-      const statusText = "\u65E0\u4EBA\u503C\u5B88\u4EFB\u52A1\u88AB\u4E2D\u65AD\uFF0C\u7B49\u5F85\u6062\u590D\u540E\u91CD\u65B0\u6267\u884C\u3002";
-      const statusDetail = options.reason || "";
-      const nextData = {
-        ...data,
-        phase: "failed",
-        statusText,
-        statusDetail
-      };
-      const nextMetadata = {
-        ...metadata,
-        phase: "failed",
-        statusText,
-        statusDetail,
-        interruptedAt: now,
-        interruptedReason: statusDetail
-      };
-      this.db.prepare(`
-        UPDATE messages
-        SET status = 'failed',
-            data_json = ?,
-            metadata_json = ?,
-            updated_at = ?,
-            completed_at = ?
-        WHERE id = ?
-      `).run(
-        jsonString(nextData),
-        jsonString(nextMetadata),
-        now,
-        now,
-        String(row.id)
-      );
-      const parts = this.db.prepare(`
-        SELECT id, type, data_json, part_index
-        FROM message_parts
-        WHERE message_id = ?
-        ORDER BY part_index ASC
-      `).all(String(row.id));
-      for (const part of parts) {
-        const partType = String(part.type || "");
-        const partData = readJson(part.data_json, {});
-        if (partType === "json") {
-          this.db.prepare(`
-            UPDATE message_parts
-            SET data_json = ?
-            WHERE id = ?
-          `).run(jsonString({
-            ...partData,
-            status: "failed",
-            phase: "failed",
-            statusText,
-            statusDetail
-          }), String(part.id));
-        }
-        if (partType === "markdown") {
-          const text = typeof partData.text === "string" ? partData.text : "";
-          if (text) {
-            const patchedText = text.replace(/状态：请求已提交给 LLM，等待模型开始响应。/g, `\u72B6\u6001\uFF1A${statusText}`).replace(/状态：LLM 已开始响应，正在返回首段内容。/g, `\u72B6\u6001\uFF1A${statusText}`).replace(/状态：LLM 正在持续返回内容。/g, `\u72B6\u6001\uFF1A${statusText}`).replace(/如果模型或网络暂时没有首段返回，这条消息会保持动态等待状态。/g, statusDetail || "\u7CFB\u7EDF\u4F1A\u4ECE\u6570\u636E\u5E93\u4EFB\u52A1\u6062\u590D\u540E\u91CD\u65B0\u6267\u884C\u3002").replace(/返回内容会持续合并到这一条 agent 消息中。/g, statusDetail || "\u7CFB\u7EDF\u4F1A\u4ECE\u6570\u636E\u5E93\u4EFB\u52A1\u6062\u590D\u540E\u91CD\u65B0\u6267\u884C\u3002");
-            this.db.prepare(`
-            UPDATE message_parts
-            SET data_json = ?
-            WHERE id = ?
-          `).run(jsonString({
-              ...partData,
-              text: patchedText
-            }), String(part.id));
-          }
-        }
-      }
-      changed += 1;
-    }
-    if (changed > 0) {
-      this.recordEvent(projectId, null, "STREAMING_MESSAGES_MARKED_FAILED", {
-        conversationId: options.conversationId || null,
-        chapterNumber: options.chapterNumber ?? null,
-        count: changed,
-        reason: options.reason || ""
-      });
-    }
-    return changed;
-  }
-  createJob(input) {
-    const now = nowIso();
-    const id = makeId("job");
-    this.db.prepare(`
-      INSERT INTO jobs (id, project_id, run_id, kind, status, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.projectId, input.runId ?? null, input.kind, input.status, jsonString(input.payload ?? {}), now, now);
-    this.recordEvent(input.projectId, input.runId ?? null, "JOB_CREATED", { id, kind: input.kind, status: input.status });
-    return id;
-  }
-  updateJobPayload(jobId, payload) {
-    this.db.prepare(`
-      UPDATE jobs
-      SET payload_json = ?, updated_at = ?
-      WHERE id = ?
-    `).run(jsonString(payload ?? {}), nowIso(), jobId);
-    const row = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ?").get(jobId);
-    this.recordEvent(typeof row?.project_id === "string" ? row.project_id : null, typeof row?.run_id === "string" ? row.run_id : null, "JOB_PAYLOAD_UPDATED", {
-      id: jobId,
-      kind: typeof row?.kind === "string" ? row.kind : null,
-      payload: payload ?? {}
-    });
-  }
-  updateJob(jobId, status, patch = {}) {
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = ?, lease_owner = COALESCE(?, lease_owner), lease_expires_at = COALESCE(?, lease_expires_at), updated_at = ?
-      WHERE id = ?
-    `).run(status, patch.leaseOwner ?? null, patch.leaseExpiresAt ?? null, nowIso(), jobId);
-    const job = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ?").get(jobId);
-    this.recordEvent(typeof job?.project_id === "string" ? job.project_id : null, typeof job?.run_id === "string" ? job.run_id : null, "JOB_UPDATED", {
-      id: jobId,
-      kind: typeof job?.kind === "string" ? job.kind : null,
-      status,
-      leaseOwner: patch.leaseOwner ?? null,
-      leaseExpiresAt: patch.leaseExpiresAt ?? null
-    });
-  }
-  listRunnableJobs(kind, now = /* @__PURE__ */ new Date(), options = {}) {
-    const nowValue = now.toISOString();
-    const statuses = options.includeIdle ? "'idle', 'running', 'paused'" : "'running', 'paused'";
-    const rows = kind ? this.db.prepare(`
-          SELECT * FROM jobs
-          WHERE kind = ?
-            AND status IN (${statuses})
-            AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-          ORDER BY updated_at ASC
-        `).all(kind, nowValue) : this.db.prepare(`
-          SELECT * FROM jobs
-          WHERE status IN (${statuses})
-            AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-          ORDER BY updated_at ASC
-        `).all(nowValue);
-    return rows.map(mapJobRow);
-  }
-  claimJob(jobId, owner, leaseSeconds = 60, now = /* @__PURE__ */ new Date(), options = {}) {
-    const nowValue = now.toISOString();
-    const leaseExpiresAt = addSeconds(now, leaseSeconds).toISOString();
-    const statuses = options.includeIdle ? "'idle', 'running', 'paused'" : "'running', 'paused'";
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = 'running', lease_owner = ?, lease_expires_at = ?, updated_at = ?
-      WHERE id = ?
-        AND status IN (${statuses})
-        AND (lease_expires_at IS NULL OR lease_expires_at <= ? OR lease_owner = ?)
-    `).run(owner, leaseExpiresAt, nowValue, jobId, nowValue, owner);
-    const row = this.db.prepare("SELECT * FROM jobs WHERE id = ? AND lease_owner = ?").get(jobId, owner);
-    if (!row) {
-      return null;
-    }
-    this.recordEvent(String(row.project_id), typeof row.run_id === "string" ? row.run_id : null, "JOB_CLAIMED", {
-      id: jobId,
-      kind: row.kind,
-      owner,
-      leaseExpiresAt
-    });
-    return {
-      ...mapJobRow(row)
-    };
-  }
-  heartbeatJob(jobId, owner, leaseSeconds = 60, now = /* @__PURE__ */ new Date()) {
-    const leaseExpiresAt = addSeconds(now, leaseSeconds).toISOString();
-    this.db.prepare(`
-      UPDATE jobs
-      SET lease_expires_at = ?, updated_at = ?
-      WHERE id = ? AND lease_owner = ? AND status = 'running'
-    `).run(leaseExpiresAt, now.toISOString(), jobId, owner);
-    const row = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ? AND lease_owner = ?").get(jobId, owner);
-    if (!row) {
-      return null;
-    }
-    this.recordEvent(String(row.project_id), typeof row.run_id === "string" ? row.run_id : null, "JOB_HEARTBEAT", {
-      id: jobId,
-      kind: row.kind,
-      owner,
-      leaseExpiresAt
-    });
-    return leaseExpiresAt;
-  }
-  releaseJobLease(jobId, reason = "lease_released") {
-    this.db.prepare(`
-      UPDATE jobs
-      SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-      WHERE id = ? AND status IN ('running', 'paused')
-    `).run(nowIso(), jobId);
-    const row = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ?").get(jobId);
-    this.recordEvent(typeof row?.project_id === "string" ? row.project_id : null, typeof row?.run_id === "string" ? row.run_id : null, "JOB_LEASE_RELEASED", {
-      id: jobId,
-      kind: typeof row?.kind === "string" ? row.kind : null,
-      reason
-    });
-  }
-  completeJob(jobId, owner) {
-    this.finishJob(jobId, "completed", owner);
-  }
-  failJob(jobId, error, owner) {
-    this.finishJob(jobId, "failed", owner, { error });
-  }
-  pauseJob(jobId, owner) {
-    this.finishJob(jobId, "paused", owner);
-  }
-  resumeJob(jobId, payload) {
-    const updates = typeof payload === "undefined" ? "status = 'running', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?" : "status = 'running', payload_json = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?";
-    const values = typeof payload === "undefined" ? [nowIso(), jobId] : [jsonString(payload), nowIso(), jobId];
-    this.db.prepare(`
-      UPDATE jobs
-      SET ${updates}
-      WHERE id = ?
-    `).run(...values);
-    const row = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ?").get(jobId);
-    this.recordEvent(typeof row?.project_id === "string" ? row.project_id : null, typeof row?.run_id === "string" ? row.run_id : null, "JOB_RESUMED", {
-      id: jobId,
-      kind: typeof row?.kind === "string" ? row.kind : null
-    });
-  }
-  jobFailureLooksRecoverable(jobId) {
-    const row = this.db.prepare(`
-      SELECT payload_json
-      FROM events
-      WHERE type = 'JOB_UPDATED'
-        AND payload_json LIKE ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(`%"id":"${jobId}"%`);
-    const payload = readJson(row?.payload_json, null);
-    const error = typeof payload?.error === "string" ? payload.error : "";
-    return !/autopilot stopped by user|abort/i.test(error) && /network|fetch|failed|econn|enotfound|etimedout|socket|undici|timeout|timed\s*out|timed-out|429|rate limit|too many requests|quota|503|502|504|temporar|unavailable|overloaded|bad gateway|gateway timeout/i.test(error);
-  }
-  cancelJob(jobId, owner) {
-    this.finishJob(jobId, "cancelled", owner);
-  }
-  listProjectJobs(projectId, kind) {
-    const rows = kind ? this.db.prepare(`
-          SELECT * FROM jobs
-          WHERE project_id = ? AND kind = ?
-          ORDER BY updated_at DESC
-        `).all(projectId, kind) : this.db.prepare(`
-          SELECT * FROM jobs
-          WHERE project_id = ?
-          ORDER BY updated_at DESC
-        `).all(projectId);
-    return rows.map(mapJobRow);
-  }
-  cancelProjectJobs(projectId, kind) {
-    const jobs = this.listProjectJobs(projectId, kind).filter((job) => job.status === "running" || job.status === "paused").map((job) => String(job.id));
-    for (const jobId of jobs) {
-      this.cancelJob(jobId);
-    }
-    return jobs.length;
-  }
-  finishJob(jobId, status, owner, metadata = {}) {
-    const ownerClause = owner ? "AND (lease_owner = ? OR lease_owner IS NULL)" : "";
-    const values = owner ? [status, nowIso(), jobId, owner] : [status, nowIso(), jobId];
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-      WHERE id = ? ${ownerClause}
-    `).run(...values);
-    const row = this.db.prepare("SELECT project_id, run_id, kind FROM jobs WHERE id = ?").get(jobId);
-    this.recordEvent(typeof row?.project_id === "string" ? row.project_id : null, typeof row?.run_id === "string" ? row.run_id : null, "JOB_UPDATED", {
-      id: jobId,
-      kind: typeof row?.kind === "string" ? row.kind : null,
-      status,
-      ...metadata
-    });
-  }
-  getChapterFacts(projectId, now = /* @__PURE__ */ new Date()) {
-    const facts = /* @__PURE__ */ new Map();
-    const projectRow = this.db.prepare("SELECT chapter_word_target, project_root FROM projects WHERE id = ?").get(projectId);
-    const projectTargetWords = Number(projectRow?.chapter_word_target);
-    const targetWordsForQuality = Number.isFinite(projectTargetWords) ? projectTargetWords : void 0;
-    const projectRoot = typeof projectRow?.project_root === "string" ? projectRow.project_root : "";
-    const protagonistProfile = projectRoot ? readTextFileSync(import_node_path.default.join(projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md")) : "";
-    const ensureFact = (chapterNumber) => {
-      const existing = facts.get(chapterNumber);
-      if (existing) return existing;
-      const created = { chapterNumber, status: "pending" };
-      facts.set(chapterNumber, created);
-      return created;
-    };
-    const resetAtByChapter = /* @__PURE__ */ new Map();
-    const resetRows = this.db.prepare(`
-      SELECT payload_json, created_at
-      FROM events
-      WHERE project_id = ?
-        AND type = 'CHAPTER_QUEUE_RESET'
-      ORDER BY created_at ASC
-    `).all(projectId);
-    for (const row of resetRows) {
-      const payload = readJson(row.payload_json, {});
-      const createdAt = String(row.created_at || "");
-      const chapters = [
-        ...normalizeChapterNumberList(payload.resetChapters),
-        ...normalizeChapterNumberList(payload.chapters)
-      ];
-      for (const chapterNumber of new Set(chapters)) {
-        const previous = resetAtByChapter.get(chapterNumber);
-        if (!previous || timestampMs(createdAt) >= timestampMs(previous)) {
-          resetAtByChapter.set(chapterNumber, createdAt);
-        }
-      }
-    }
-    const isResetHistory = (chapterNumber, value) => {
-      const resetAt = resetAtByChapter.get(chapterNumber);
-      return Boolean(resetAt) && timestampMs(value) <= timestampMs(resetAt);
-    };
-    const artifactRows = this.db.prepare(`
-      SELECT path, metadata_json, updated_at, created_at
-      FROM artifacts
-      WHERE project_id = ?
-        AND (path LIKE '%.final.md' OR path LIKE '%-quality.md')
-      ORDER BY updated_at ASC
-    `).all(projectId);
-    for (const row of artifactRows) {
-      const chapterNumber = chapterNumberFromPath(row.path);
-      if (!chapterNumber) continue;
-      if (isResetHistory(chapterNumber, row.updated_at || row.created_at)) continue;
-      const fact = ensureFact(chapterNumber);
-      const pathValue = String(row.path || "");
-      const metadata = readJson(row.metadata_json, {});
-      const qualityGate = normalizeQualityGate(metadata.qualityGate, String(row.updated_at || row.created_at || ""));
-      if (pathValue.includes(".final.md")) {
-        fact.finalPath = pathValue;
-      }
-      if (pathValue.includes("-quality.md")) {
-        fact.reportPath = pathValue;
-      }
-      applyQualityGateFact(fact, qualityGate, targetWordsForQuality);
-    }
-    const progressRows = this.db.prepare(`
-      SELECT payload_json, created_at
-      FROM events
-      WHERE project_id = ?
-        AND type = 'WRITING_PROGRESS'
-      ORDER BY created_at ASC
-    `).all(projectId);
-    for (const row of progressRows) {
-      const payload = readJson(row.payload_json, {});
-      const chapterNumber = Number(payload.chapterNumber);
-      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
-      if (isResetHistory(chapterNumber, row.created_at)) continue;
-      const fact = ensureFact(chapterNumber);
-      fact.latestStep = typeof payload.step === "string" ? payload.step : fact.latestStep;
-      fact.latestEventStatus = typeof payload.status === "string" ? payload.status : fact.latestEventStatus;
-      fact.latestEventAt = String(row.created_at || "");
-      const qualityGate = normalizeQualityGate(payload.qualityGate, String(row.created_at || ""));
-      applyQualityGateFact(fact, qualityGate, targetWordsForQuality);
-    }
-    const pipelineRows = this.db.prepare(`
-      SELECT type, payload_json, created_at
-      FROM events
-      WHERE project_id = ?
-        AND type IN ('CHAPTER_PIPELINE_COMPLETED', 'CHAPTER_PIPELINE_BLOCKED')
-      ORDER BY created_at ASC
-    `).all(projectId);
-    for (const row of pipelineRows) {
-      const payload = readJson(row.payload_json, {});
-      const chapterNumber = Number(payload.chapterNumber);
-      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
-      if (isResetHistory(chapterNumber, row.created_at)) continue;
-      const fact = ensureFact(chapterNumber);
-      if (typeof payload.finalPath === "string") {
-        fact.finalPath = payload.finalPath;
-      }
-      if (typeof payload.reportPath === "string") {
-        fact.reportPath = payload.reportPath;
-      }
-      const qualityGate = normalizeQualityGate(payload.qualityGate, String(row.created_at || ""));
-      applyQualityGateFact(fact, qualityGate, targetWordsForQuality);
-    }
-    const taskRows = this.db.prepare(`
-      SELECT type, payload_json, created_at
-      FROM events
-      WHERE project_id = ?
-        AND type IN ('CHAPTER_PIPELINE_RECOVERY_QUEUED', 'CHAPTER_PIPELINE_AUTO_REWRITE_QUEUED', 'CHAPTER_TASK_STATUS_UPDATED')
-      ORDER BY created_at ASC
-    `).all(projectId);
-    for (const row of taskRows) {
-      const payload = readJson(row.payload_json, {});
-      const chapterNumber = Number(payload.chapterNumber);
-      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
-      if (isResetHistory(chapterNumber, row.created_at)) continue;
-      const fact = ensureFact(chapterNumber);
-      const createdAt = String(row.created_at || "");
-      if (row.type === "CHAPTER_PIPELINE_RECOVERY_QUEUED" || row.type === "CHAPTER_PIPELINE_AUTO_REWRITE_QUEUED") {
-        fact.recoveryQueuedAt = createdAt;
-        fact.latestTaskStatus = "pending";
-        fact.latestTaskStatusAt = createdAt;
-        continue;
-      }
-      const status = normalizeTaskStatus(payload.status);
-      if (status) {
-        fact.latestTaskStatus = status;
-        fact.latestTaskStatusAt = createdAt;
-      }
-    }
-    const reconciledRows = this.db.prepare(`
-      SELECT payload_json, created_at
-      FROM events
-      WHERE project_id = ?
-        AND type = 'CHAPTER_STATUS_RECONCILED'
-      ORDER BY created_at ASC
-    `).all(projectId);
-    for (const row of reconciledRows) {
-      const payload = readJson(row.payload_json, {});
-      const chapters = Array.isArray(payload.chapters) ? payload.chapters : [];
-      for (const ch of chapters) {
-        const chapterNumber = Number(ch.chapterNumber);
-        if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) continue;
-        if (isResetHistory(chapterNumber, row.created_at)) continue;
-        const fact = ensureFact(chapterNumber);
-        const status = normalizeTaskStatus(ch.to);
-        if (status) {
-          fact.latestTaskStatus = status;
-          fact.latestTaskStatusAt = String(row.created_at || "");
-        }
-      }
-    }
-    for (const [chapterNumber, resetAt] of resetAtByChapter) {
-      const fact = ensureFact(chapterNumber);
-      const existingTaskAt = timestampMs(fact.latestTaskStatusAt);
-      if (timestampMs(resetAt) >= existingTaskAt) {
-        fact.resetAt = resetAt;
-        fact.latestTaskStatus = "pending";
-        fact.latestTaskStatusAt = resetAt;
-        fact.updatedAt = resetAt;
-      }
-    }
-    let previousProtagonistName = inferLockedProtagonistName(protagonistProfile);
-    for (const fact of [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)) {
-      if (fact.finalPath) {
-        const absolutePath = import_node_path.default.isAbsolute(fact.finalPath) ? fact.finalPath : import_node_path.default.join(projectRoot, fact.finalPath);
-        let mtimeMs = 0;
-        try {
-          mtimeMs = import_node_fs.default.statSync(absolutePath).mtimeMs;
-        } catch {
-        }
-        const cacheKey = `${absolutePath}:${mtimeMs}:${previousProtagonistName || ""}:${protagonistProfile || ""}`;
-        const cached = chapterConsistencyCache.get(cacheKey);
-        if (cached && cached.mtimeMs === mtimeMs) {
-          fact.protagonistName = cached.protagonistName;
-          fact.consistency = cached.consistency;
-          if (cached.consistency.status === "eligible" && cached.protagonistName && !previousProtagonistName) {
-            previousProtagonistName = cached.protagonistName;
-          }
-          if (cached.consistency.status === "quarantined" && fact.contentQuality) {
-            fact.contentQuality = {
-              ...fact.contentQuality,
-              status: "quarantined",
-              reason: cached.consistency.reason
-            };
-          }
-        } else {
-          const finalText = readTextFileSync(absolutePath);
-          if (finalText) {
-            const consistency = evaluateChapterConsistency({
-              chapterNumber: fact.chapterNumber,
-              text: finalText,
-              previousProtagonistName,
-              protagonistProfile
-            });
-            fact.protagonistName = consistency.protagonistName;
-            fact.consistency = {
-              status: consistency.status,
-              reason: consistency.reason,
-              detectedNames: consistency.detectedNames
-            };
-            if (consistency.status === "eligible" && consistency.protagonistName && !previousProtagonistName) {
-              previousProtagonistName = consistency.protagonistName;
-            }
-            if (consistency.status === "quarantined" && fact.contentQuality) {
-              fact.contentQuality = {
-                ...fact.contentQuality,
-                status: "quarantined",
-                reason: consistency.reason
-              };
-            }
-            chapterConsistencyCache.set(cacheKey, {
-              mtimeMs,
-              protagonistName: fact.protagonistName,
-              consistency: fact.consistency
-            });
-          }
-        }
-      }
-      const latestTaskStatusAt = timestampMs(fact.latestTaskStatusAt);
-      const qualityGateUpdatedAt = timestampMs(fact.qualityGate?.updatedAt || fact.updatedAt);
-      const latestEventAt = timestampMs(fact.latestEventAt);
-      const taskInstructionIsNewer = latestTaskStatusAt > 0 && latestTaskStatusAt > qualityGateUpdatedAt;
-      const latestEventFailed = isWritingEventFailed({
-        status: fact.latestEventStatus || "",
-        step: fact.latestStep || ""
-      });
-      const failedEventIsNewer = latestEventFailed && latestEventAt > 0 && latestEventAt >= Math.max(latestTaskStatusAt, qualityGateUpdatedAt);
-      if (isWritingEventActive({
-        status: fact.latestEventStatus || "",
-        step: fact.latestStep || "",
-        createdAt: fact.latestEventAt || ""
-      }, now) && fact.qualityGate?.status !== "blocked") {
-        fact.status = "in_progress";
-      } else if (fact.qualityGate?.status === "passed" && fact.finalPath && fact.contentQuality?.status === "eligible") {
-        fact.status = "complete";
-      } else if (failedEventIsNewer || fact.qualityGate?.status === "blocked" && !taskInstructionIsNewer) {
-        fact.status = "blocked";
-      } else if (taskInstructionIsNewer && (fact.latestTaskStatus === "pending" || fact.latestTaskStatus === "in_progress" || fact.latestTaskStatus === "complete")) {
-        fact.status = fact.latestTaskStatus;
-      } else if (fact.qualityGate?.status === "passed" && fact.finalPath) {
-        fact.status = "pending";
-      } else if (fact.qualityGate?.status === "passed") {
-        fact.status = "pending";
-      } else if (fact.qualityGate?.status === "blocked") {
-        fact.status = "blocked";
-      } else if (fact.finalPath || fact.reportPath || fact.qualityGate) {
-        fact.status = "blocked";
-      } else {
-        fact.status = "pending";
-      }
-    }
-    return [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber);
-  }
-  getSnapshot(projectId) {
-    const project = this.getProject(projectId);
-    const projectRow = this.db.prepare("SELECT state_json, project_root FROM projects WHERE id = ?").get(projectId);
-    const chapterFacts = this.getChapterFacts(projectId);
-    const completedChapterFacts = chapterFacts.filter((fact) => fact.status === "complete");
-    const blockedChapterFacts = chapterFacts.filter((fact) => fact.status === "blocked");
-    const quarantinedFinalFacts = chapterFacts.filter((fact) => Boolean(fact.finalPath) && fact.contentQuality?.status === "quarantined");
-    const untrustedPassedGateFacts = quarantinedFinalFacts.filter((fact) => fact.qualityGate?.status === "passed");
-    const latestTrustedFinal = completedChapterFacts.slice().sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))[0];
-    const artifactCounts = this.db.prepare(`
-      SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN path LIKE '%.ai-novel/plans/chapter-blueprints/%' OR path LIKE '%plans/chapter-blueprints/%' THEN 1 ELSE 0 END) AS blueprints,
-        SUM(CASE WHEN path LIKE '%.final.md' THEN 1 ELSE 0 END) AS finalChapters,
-        SUM(CASE WHEN path LIKE '%-quality.md' THEN 1 ELSE 0 END) AS qualityReports,
-        SUM(CASE WHEN path LIKE '%-memory.md' THEN 1 ELSE 0 END) AS memoryUpdates
-      FROM artifacts
-      WHERE project_id = ?
-    `).get(projectId);
-    const latestFinal = this.db.prepare(`
-      SELECT path
-      FROM artifacts
-      WHERE project_id = ? AND path LIKE '%.final.md'
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `).get(projectId);
-    const pinnedArtifacts = this.db.prepare(`
-      SELECT * FROM artifacts
-      WHERE project_id = ?
-        AND (
-          path LIKE '%global-consensus.md'
-          OR path LIKE '%.ai-novel/consensus/%'
-          OR path LIKE '%/consensus/%'
-          OR path LIKE '%current-context.md'
-          OR path LIKE '%discussion-log.md'
-          OR path LIKE '%setting-freeze.md'
-          OR path LIKE '%master-outline.md'
-          OR path LIKE '%production-resources/%'
-          OR path LIKE '%.ai-novel/knowledge/%'
-          OR path LIKE '%/knowledge/%'
-        )
-      ORDER BY updated_at DESC
-      LIMIT 24
-    `).all(projectId);
-    const recentArtifacts = this.db.prepare(`
-      SELECT * FROM artifacts
-      WHERE project_id = ?
-      ORDER BY updated_at DESC
-      LIMIT 80
-    `).all(projectId);
-    const artifactsByPath = /* @__PURE__ */ new Map();
-    for (const row of [...pinnedArtifacts, ...recentArtifacts]) {
-      const key = String(row.path || row.id || "");
-      if (key && !artifactsByPath.has(key)) {
-        artifactsByPath.set(key, compactDbRow(row));
-      }
-    }
-    const stateObj = readJson(projectRow?.state_json, null);
-    const projectRoot = projectRow?.project_root || "";
-    if (projectRoot && stateObj) {
-      const stage = stateObj.runtime?.stage || "";
-      const tasks = stateObj.plan?.chapterTasks ? Array.isArray(stateObj.plan.chapterTasks) ? stateObj.plan.chapterTasks : [] : [];
-      const activeTask = tasks.find((t) => t.status === "in_progress" || t.status === "blocked");
-      const activeChapterNumber = activeTask ? Number(activeTask.chapterNumber) : null;
-      let latestDiscussionPath = "";
-      let latestDiscussionMtime = 0;
-      for (const [pathKey, row] of artifactsByPath.entries()) {
-        if (pathKey.includes("/consensus/discussion-") || pathKey.includes(".ai-novel/consensus/discussion-")) {
-          try {
-            const absPath = import_node_fs.default.existsSync(pathKey) ? pathKey : import_node_path.default.resolve(projectRoot, pathKey);
-            if (import_node_fs.default.existsSync(absPath)) {
-              const mtime = import_node_fs.default.statSync(absPath).mtimeMs;
-              if (mtime > latestDiscussionMtime) {
-                latestDiscussionMtime = mtime;
-                latestDiscussionPath = pathKey;
-              }
-            }
-          } catch {
-          }
-        }
-      }
-      for (const [pathKey, row] of artifactsByPath.entries()) {
-        const isOutline = stage === "master_planning" && pathKey.includes("master-outline");
-        let isBlueprint = false;
-        let isDraft = false;
-        if (activeChapterNumber) {
-          const paddedCh = String(activeChapterNumber).padStart(3, "0");
-          isBlueprint = stage === "chapter_task_generation" && pathKey.includes(`chapter-${paddedCh}`) && pathKey.includes("blueprint");
-          isDraft = (stage === "drafting" || stage === "reviewing") && pathKey.includes(`chapter-${paddedCh}`) && (pathKey.includes("draft") || pathKey.includes("final"));
-        }
-        const isLatestDiscussion = pathKey === latestDiscussionPath;
-        if (isOutline || isBlueprint || isDraft || isLatestDiscussion) {
-          try {
-            const absPath = import_node_fs.default.existsSync(pathKey) ? pathKey : import_node_path.default.resolve(projectRoot, pathKey);
-            if (import_node_fs.default.existsSync(absPath)) {
-              row.content = import_node_fs.default.readFileSync(absPath, "utf8");
-            }
-          } catch (e) {
-            console.error(`Failed to read artifact content for ${pathKey}:`, e);
-          }
-        }
-      }
-    }
-    const knowledge = this.getKnowledgeSummary(projectId);
-    const latestEventRows = this.db.prepare(`
-      SELECT * FROM events
-      WHERE project_id = ?
-      ORDER BY created_at DESC
-      LIMIT 80
-    `).all(projectId).map(compactDbRow);
-    const milestoneEventTypes = /* @__PURE__ */ new Set(["PROJECT_CREATED", "CONSENSUS_UPDATED", "CHAPTER_PIPELINE_COMPLETED"]);
-    const milestoneEventRows = this.db.prepare(`
-      SELECT * FROM events
-      WHERE project_id = ?
-        AND type IN ('PROJECT_CREATED', 'CONSENSUS_UPDATED', 'CHAPTER_PIPELINE_COMPLETED')
-      ORDER BY created_at DESC
-      LIMIT 24
-    `).all(projectId).map(compactDbRow);
-    const mergedLatestEvents = [
-      ...milestoneEventRows,
-      ...latestEventRows.filter((row) => !milestoneEventTypes.has(String(row.type || "")))
-    ].filter((row, index, rows) => rows.findIndex((candidate) => String(candidate.id || "") === String(row.id || "")) === index);
-    return {
-      project,
-      state: stateObj,
-      activeRuns: this.db.prepare(`
-        SELECT * FROM workflow_runs
-        WHERE project_id = ? AND status IN ('running', 'paused')
-        ORDER BY updated_at DESC
-      `).all(projectId),
-      latestRuns: this.db.prepare(`
-        SELECT * FROM workflow_runs
-        WHERE project_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 12
-      `).all(projectId),
-      latestEvents: mergedLatestEvents,
-      artifacts: [...artifactsByPath.values()],
-      artifactSummary: {
-        total: Number(artifactCounts?.total || 0),
-        blueprints: Number(artifactCounts?.blueprints || 0),
-        finalChapters: completedChapterFacts.length,
-        finalChapterFiles: Number(artifactCounts?.finalChapters || 0),
-        passedFinalChapters: completedChapterFacts.length,
-        blockedFinalChapters: blockedChapterFacts.length,
-        quarantinedFinalChapters: quarantinedFinalFacts.length,
-        untrustedPassedGates: untrustedPassedGateFacts.length,
-        qualityReports: Number(artifactCounts?.qualityReports || 0),
-        memoryUpdates: Number(artifactCounts?.memoryUpdates || 0),
-        latestFinalPath: latestTrustedFinal?.finalPath || (typeof latestFinal?.path === "string" ? latestFinal.path : "")
-      },
-      chapterFacts,
-      checkpoints: this.db.prepare(`
-        SELECT * FROM checkpoints
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        LIMIT 20
-      `).all(projectId),
-      graphNodes: this.db.prepare(`
-        SELECT *
-        FROM graph_nodes
-        WHERE project_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 120
-      `).all(projectId),
-      graphEdges: this.db.prepare(`
-        SELECT *
-        FROM graph_edges
-        WHERE project_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 160
-      `).all(projectId),
-      recentMemory: this.db.prepare(`
-        SELECT id, project_id, source, kind, substr(content, 1, 900) AS content, importance, embedding_status, metadata_json, created_at, updated_at, embedding_id
-        FROM memory_items
-        WHERE project_id = ?
-        ORDER BY importance DESC, updated_at DESC
-        LIMIT 24
-      `).all(projectId).map(compactDbRow),
-      recentMessages: this.listMessages(projectId, { limit: 80 }),
-      knowledge,
-      activeJobs: this.db.prepare(`
-        SELECT * FROM jobs
-        WHERE project_id = ? AND status IN ('running', 'paused')
-        ORDER BY updated_at DESC
-      `).all(projectId),
-      runnableJobs: this.db.prepare(`
-        SELECT * FROM jobs
-        WHERE project_id = ?
-          AND status IN ('running', 'paused')
-          AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-        ORDER BY updated_at ASC
-      `).all(projectId, nowIso())
-    };
-  }
-  getOperationalStatus(now = /* @__PURE__ */ new Date()) {
-    const nowValue = now.toISOString();
-    const scalar = (sql, ...values) => Number(this.db.prepare(sql).get(...values)?.count || 0);
-    const latestJobs = this.db.prepare(`
-      SELECT *
-      FROM jobs
-      ORDER BY updated_at DESC
-      LIMIT 20
-    `).all().map(mapJobRow);
-    return {
-      ok: true,
-      checkedAt: nowValue,
-      projects: {
-        total: scalar("SELECT COUNT(*) AS count FROM projects"),
-        running: scalar(`
-          SELECT COUNT(*) AS count
-          FROM projects
-          WHERE EXISTS (
-            SELECT 1
-            FROM workflow_runs
-            WHERE workflow_runs.project_id = projects.id
-              AND workflow_runs.status IN ('running', 'paused')
-          )
-          OR EXISTS (
-            SELECT 1
-            FROM jobs
-            WHERE jobs.project_id = projects.id
-              AND jobs.status IN ('running', 'paused')
-          )
-        `)
-      },
-      runs: {
-        active: scalar("SELECT COUNT(*) AS count FROM workflow_runs WHERE status IN ('running', 'paused')")
-      },
-      jobs: {
-        active: scalar("SELECT COUNT(*) AS count FROM jobs WHERE status IN ('running', 'paused')"),
-        runnable: scalar(`
-          SELECT COUNT(*) AS count
-          FROM jobs
-          WHERE status IN ('running', 'paused')
-            AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-        `, nowValue),
-        leased: scalar(`
-          SELECT COUNT(*) AS count
-          FROM jobs
-          WHERE status = 'running'
-            AND lease_owner IS NOT NULL
-            AND lease_expires_at > ?
-        `, nowValue),
-        latest: latestJobs
-      },
-      memory: {
-        pendingEmbeddings: scalar("SELECT COUNT(*) AS count FROM memory_items WHERE embedding_status = 'pending'"),
-        failedEmbeddings: scalar("SELECT COUNT(*) AS count FROM memory_items WHERE embedding_status = 'failed'")
-      },
-      knowledge: {
-        globalSources: scalar("SELECT COUNT(*) AS count FROM knowledge_sources WHERE scope = 'global' AND status = 'ready'"),
-        projectSources: scalar("SELECT COUNT(*) AS count FROM knowledge_sources WHERE scope = 'project' AND status = 'ready'"),
-        readyChunks: scalar("SELECT COUNT(*) AS count FROM knowledge_chunks WHERE status = 'ready' AND embedding_status = 'ready'"),
-        pendingEmbeddings: scalar("SELECT COUNT(*) AS count FROM knowledge_chunks WHERE status = 'ready' AND embedding_status = 'pending'"),
-        failedEmbeddings: scalar("SELECT COUNT(*) AS count FROM knowledge_chunks WHERE status = 'ready' AND embedding_status = 'failed'")
-      },
-      messages: {
-        total: scalar("SELECT COUNT(*) AS count FROM messages")
-      },
-      latestEvents: this.db.prepare(`
-        SELECT events.*
-        FROM events
-        LEFT JOIN projects ON projects.id = events.project_id
-        WHERE events.project_id IS NULL OR projects.id IS NOT NULL
-        ORDER BY events.created_at DESC
-        LIMIT 20
-      `).all()
-    };
-  }
-  listLlmConfigs() {
-    return this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
-      FROM llm_configs
-      ORDER BY created_at DESC
-    `).all();
-  }
-  addLlmConfig(config) {
-    const id = makeId("llm");
-    const now = nowIso();
-    const temp = config.temperature ?? 0.1;
-    const timeout = config.timeoutMs ?? 12e4;
-    const apiMode = normalizeLlmApiMode(config.apiMode);
-    const active = config.isActive ? 1 : 0;
-    if (active) {
-      this.db.prepare(`
-        UPDATE llm_configs SET is_active = 0
-      `).run();
-    }
-    this.db.prepare(`
-      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, active, now, now);
-    return id;
-  }
-  updateLlmConfig(id, config) {
-    const now = nowIso();
-    const temp = config.temperature ?? 0.1;
-    const timeout = config.timeoutMs ?? 12e4;
-    const apiMode = normalizeLlmApiMode(config.apiMode);
-    this.db.prepare(`
-      UPDATE llm_configs
-      SET name = ?, base_url = ?, api_key = ?, model_name = ?, api_mode = ?, temperature = ?, timeout_ms = ?, updated_at = ?
-      WHERE id = ?
-    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, now, id);
-  }
-  deleteLlmConfig(id) {
-    this.db.prepare(`
-      DELETE FROM llm_config_routes WHERE config_id = ?
-    `).run(id);
-    this.db.prepare(`
-      DELETE FROM llm_configs WHERE id = ?
-    `).run(id);
-  }
-  activateLlmConfig(id) {
-    this.db.prepare(`
-      UPDATE llm_configs SET is_active = 0
-    `).run();
-    this.db.prepare(`
-      UPDATE llm_configs SET is_active = 1 WHERE id = ?
-    `).run(id);
-    this.setLlmConfigRoute("text", id);
-  }
-  getActiveLlmConfig() {
-    const config = this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
-      FROM llm_configs
-      WHERE is_active = 1
-      LIMIT 1
-    `).get();
-    return config || null;
-  }
-  listLlmConfigRoutes() {
-    return this.db.prepare(`
-      SELECT routes.capability, routes.config_id, routes.created_at, routes.updated_at,
-             configs.name, configs.base_url, configs.model_name, configs.api_mode, configs.temperature, configs.timeout_ms
-      FROM llm_config_routes routes
-      LEFT JOIN llm_configs configs ON configs.id = routes.config_id
-      ORDER BY routes.capability ASC
-    `).all();
-  }
-  getLlmConfigForCapability(capability) {
-    const normalized = normalizeLlmCapability(capability);
-    const config = this.db.prepare(`
-      SELECT configs.id, configs.name, configs.base_url, configs.api_key, configs.model_name,
-             configs.api_mode, configs.temperature, configs.timeout_ms, configs.is_active, configs.created_at, configs.updated_at
-      FROM llm_config_routes routes
-      JOIN llm_configs configs ON configs.id = routes.config_id
-      WHERE routes.capability = ?
-      LIMIT 1
-    `).get(normalized);
-    return config || null;
-  }
-  setLlmConfigRoute(capability, configId) {
-    const normalized = normalizeLlmCapability(capability);
-    const exists = this.db.prepare(`
-      SELECT id FROM llm_configs WHERE id = ?
-    `).get(configId);
-    if (!exists) {
-      throw new Error("llm_config_not_found");
-    }
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO llm_config_routes (capability, config_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(capability) DO UPDATE SET
-        config_id = excluded.config_id,
-        updated_at = excluded.updated_at
-    `).run(normalized, configId, now, now);
-    if (normalized === "text") {
-      this.db.prepare(`
-        UPDATE llm_configs SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END
-      `).run(configId);
-    }
-  }
-  deleteLlmConfigRoute(capability) {
-    const normalized = normalizeLlmCapability(capability);
-    this.db.prepare(`
-      DELETE FROM llm_config_routes WHERE capability = ?
-    `).run(normalized);
-  }
-  getSystemSetting(key) {
-    const row = this.db.prepare(`
-      SELECT value FROM system_settings WHERE key = ?
-    `).get(key);
-    return row ? row.value : null;
-  }
-  setSystemSetting(key, value) {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO system_settings (key, value, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = excluded.updated_at
-    `).run(key, value, now, now);
-  }
-  listSystemSettings() {
-    return this.db.prepare(`
-      SELECT key, value FROM system_settings
-    `).all();
-  }
-};
-var activeDbInstance = null;
-var activeDbRootDir = null;
-var activeRefCount = 0;
-async function withFactoryDb(rootDir, callback) {
-  if (activeDbInstance && activeDbRootDir === rootDir) {
-    activeRefCount++;
-    try {
-      return await callback(activeDbInstance);
-    } finally {
-      activeRefCount--;
-      if (activeRefCount === 0) {
-        try {
-          activeDbInstance.close();
-        } catch (e) {
-        }
-        activeDbInstance = null;
-        activeDbRootDir = null;
-      }
-    }
-  }
-  const db = await FactoryDb.open(rootDir);
-  activeDbInstance = db;
-  activeDbRootDir = rootDir;
-  activeRefCount = 1;
-  try {
-    return await callback(db);
-  } finally {
-    activeRefCount--;
-    if (activeRefCount === 0) {
-      try {
-        db.close();
-      } catch (e) {
-      }
-      activeDbInstance = null;
-      activeDbRootDir = null;
-    }
-  }
-}
-
-// src/embedding.ts
-var LOCAL_EMBEDDING_DIMENSIONS = 64;
-function normalizeTokens(text) {
-  return text.toLowerCase().split(/[\s,，。！？!?.、:：；;'"“”‘’()\[\]{}<>《》]+/).map((token) => token.trim()).filter((token) => token.length > 0);
-}
-function hashToken(token) {
-  let hash = 2166136261;
-  for (let index = 0; index < token.length; index += 1) {
-    hash ^= token.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-function createLocalTextEmbedding(text, dimensions = LOCAL_EMBEDDING_DIMENSIONS) {
-  const vector = Array.from({ length: dimensions }, () => 0);
-  const tokens = normalizeTokens(text);
-  if (tokens.length === 0) {
-    return vector;
-  }
-  for (const token of tokens) {
-    const hash = hashToken(token);
-    const index = hash % dimensions;
-    const sign = hash & 1 ? 1 : -1;
-    vector[index] += sign;
-  }
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
-  return vector.map((value) => Number((value / magnitude).toFixed(6)));
-}
-
-// src/messages.ts
-var AGENT_TYPE_BY_LABEL = {
-  Showrunner: "showrunner",
-  "World Architect": "world_architect",
-  Author: "author",
-  Editor: "editor",
-  Reviewer: "reviewer",
-  "Prose Stylist": "prose_stylist"
-};
-var AGENT_LABEL_BY_TYPE = {
-  showrunner: "Showrunner",
-  world_architect: "World Architect",
-  author: "Author",
-  editor: "Editor",
-  reviewer: "Reviewer",
-  prose_stylist: "Prose Stylist",
-  director: "Director",
-  memory_keeper: "Memory Keeper",
-  tool_agent: "Tool Agent"
-};
-function nowIso2() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-function createMessageId(prefix = "msg") {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-function agentTypeFromLabel(label = "Author") {
-  return AGENT_TYPE_BY_LABEL[label] || label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom";
-}
-function agentLabelFromType(agentType = "custom") {
-  return AGENT_LABEL_BY_TYPE[agentType] || agentType.split("_").filter(Boolean).map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ") || "Agent";
-}
-function createBaseMessage(input) {
-  const time = input.time || input.createdAt || nowIso2();
-  const status = input.status || "completed";
-  return {
-    messageId: input.messageId || createMessageId(input.type),
-    conversationId: input.conversationId || input.runId || "default",
-    projectId: input.projectId,
-    runId: input.runId ?? null,
-    turnId: input.turnId ?? null,
-    parentMessageId: input.parentMessageId ?? null,
-    type: input.type,
-    status,
-    time,
-    createdAt: input.createdAt || time,
-    updatedAt: input.updatedAt || time,
-    completedAt: input.completedAt ?? (status === "completed" || status === "failed" || status === "cancelled" ? time : null),
-    data: input.data,
-    metadata: input.metadata || {}
-  };
-}
-function createAgentMessage(input) {
-  const agentType = input.agentType || agentTypeFromLabel(input.agentLabel || "Author");
-  return createBaseMessage({
-    ...input,
-    messageId: input.messageId || input.turnId || createMessageId("agent"),
-    type: "agent",
-    data: {
-      agentType,
-      agentLabel: input.agentLabel || agentLabelFromType(agentType),
-      content: input.content || "",
-      format: input.format || "markdown",
-      artifactPath: input.artifactPath || "",
-      phase: input.phase || "",
-      statusText: input.statusText || "",
-      statusDetail: input.statusDetail || ""
-    }
-  });
-}
-function createArtifactMessage(input) {
-  return createBaseMessage({
-    ...input,
-    type: "artifact",
-    data: {
-      artifactId: input.artifactId,
-      artifactPath: input.artifactPath,
-      label: input.label,
-      content: input.content || "",
-      format: input.format || "markdown"
-    }
-  });
-}
+import fs2 from "fs/promises";
+import path3 from "path";
 
 // src/llm-config.ts
-var import_node_fs2 = __toESM(require("fs"), 1);
-var import_node_path2 = __toESM(require("path"), 1);
+import fsSync from "fs";
+import path from "path";
 function readApiMode(value) {
   return value?.trim().toLowerCase() === "responses" ? "responses" : "chat";
 }
+function loadLlmConfigFromEnv(rootDir = process.cwd()) {
+  void rootDir;
+  return {
+    provider: {
+      baseUrl: "",
+      apiKeyEnv: "unset",
+      modelName: "",
+      apiMode: "chat",
+      timeoutMs: 12e4,
+      temperature: 0.1,
+      reactMaxSteps: 25
+    },
+    writing: {
+      chapterWordTarget: 2500,
+      chapterWordMinimum: 2500
+    }
+  };
+}
 var cachedActiveLlmConfig = null;
+function getCachedActiveLlmConfig() {
+  return cachedActiveLlmConfig;
+}
+function setCachedActiveLlmConfig(config) {
+  cachedActiveLlmConfig = config;
+}
+async function ensureEnvLlmConfigImported(rootDir = process.cwd()) {
+  void rootDir;
+}
 function isWorkspaceRoot(dir) {
   try {
-    const pkgPath = import_node_path2.default.join(dir, "package.json");
-    if (!import_node_fs2.default.existsSync(pkgPath)) {
+    const pkgPath = path.join(dir, "package.json");
+    if (!fsSync.existsSync(pkgPath)) {
       return false;
     }
-    const content = import_node_fs2.default.readFileSync(pkgPath, "utf8");
+    const content = fsSync.readFileSync(pkgPath, "utf8");
     const pkg = JSON.parse(content);
     return pkg.name === "ai-novel-factory-workspace";
   } catch {
@@ -3079,27 +72,30 @@ function isWorkspaceRoot(dir) {
   }
 }
 function resolveFactoryRootDir(dir = process.cwd()) {
-  let current = import_node_path2.default.resolve(dir);
+  let current = path.resolve(dir);
   while (true) {
     if (isWorkspaceRoot(current)) {
       return current;
     }
-    const parent = import_node_path2.default.dirname(current);
+    const parent = path.dirname(current);
     if (parent === current) {
       break;
     }
     current = parent;
   }
-  const fallback = import_node_path2.default.resolve(dir);
-  const projectsIndex = fallback.indexOf(`${import_node_path2.default.sep}.ai-novel-projects`);
+  const fallback = path.resolve(dir);
+  const projectsIndex = fallback.indexOf(`${path.sep}.ai-novel-projects`);
   if (projectsIndex !== -1) {
     return fallback.slice(0, projectsIndex);
   }
-  const novelIndex = fallback.indexOf(`${import_node_path2.default.sep}.ai-novel`);
+  const novelIndex = fallback.indexOf(`${path.sep}.ai-novel`);
   if (novelIndex !== -1) {
     return fallback.slice(0, novelIndex);
   }
   return fallback;
+}
+async function loadActiveLlmConfig(rootDir = process.cwd()) {
+  return loadLlmConfigForCapability(rootDir, "text");
 }
 function dbConfigToActiveConfig(activeDbConfig, capability, rootDir = process.cwd()) {
   return {
@@ -3146,6 +142,10 @@ async function loadLlmConfigForCapability(rootDir = process.cwd(), capability = 
 
 // src/abort.ts
 var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
+function isAutopilotStopError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /autopilot stopped by user/i.test(message);
+}
 function createAutopilotStopError() {
   return new Error(AUTOPILOT_STOP_MESSAGE);
 }
@@ -3640,310 +640,98 @@ ${options.message}
   }
   return content;
 }
-
-// src/knowledge.ts
-var import_node_crypto = __toESM(require("crypto"), 1);
-var import_promises2 = __toESM(require("fs/promises"), 1);
-var import_node_path3 = __toESM(require("path"), 1);
-var LOCAL_KNOWLEDGE_EMBEDDING_MODEL = "local-hash-v1";
-var DEFAULT_CHUNK_CHAR_LIMIT = 1400;
-var DEFAULT_GLOBAL_RESOURCE_LIMIT = process.env.AI_NOVEL_TEST_MODE === "1" ? 12 : 5e3;
-var DEFAULT_ARTIFACT_CHUNK_LIMIT = process.env.AI_NOVEL_TEST_MODE === "1" ? 40 : 500;
-function sha256(value) {
-  return import_node_crypto.default.createHash("sha256").update(value).digest("hex");
-}
-function normalizeRelativePath(value) {
-  return value.split(import_node_path3.default.sep).join("/");
-}
-function chapterNumberFromKnowledgePath(value) {
-  const match = String(value || "").match(/chapter-(\d+)/u);
-  return match ? Number(match[1]) : null;
-}
-function timestampMs2(value) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-function sourceTypeForPath(filePath) {
-  const normalized = normalizeRelativePath(filePath).toLowerCase();
-  if (normalized.includes("/vocabulary/") || normalized.includes("vocabulary")) return "vocabulary";
-  if (normalized.includes("/examples/")) return "example";
-  if (normalized.includes("/agents/")) return "agent_guide";
-  if (normalized.includes("/automation/")) return "quality_rule";
-  if (normalized.includes("/style/")) return "style_guide";
-  if (normalized.includes("/chapters/")) return "chapter";
-  if (normalized.includes("/plans/")) return "plan";
-  if (normalized.includes("/memory/")) return "memory";
-  if (normalized.includes("/consensus/")) return "consensus";
-  return "resource";
-}
-function chunkTypeForHeading(heading, sourceType) {
-  const text = heading.toLowerCase();
-  if (/成语|词汇|vocabulary|idiom/u.test(text) || sourceType === "vocabulary") return "vocabulary";
-  if (/示例|example|demo/u.test(text) || sourceType === "example") return "example";
-  if (/质量|检查|review|gate|consistency/u.test(text)) return "quality_rule";
-  if (/正文|final body|draft body|chapter/u.test(text)) return "chapter_text";
-  if (/记忆|memory|伏笔|foreshadow/u.test(text)) return "memory";
-  if (/风格|style|tone|rhythm|dialogue/u.test(text)) return "style_rule";
-  return sourceType;
-}
-function inferSceneTypes(text) {
-  const scenes = [];
-  const pairs = [
-    [/朝堂|宫廷|官场|政争|权力/u, "court_politics"],
-    [/战斗|军事|战争|军营|兵/u, "military"],
-    [/环境|山|雨|雪|风|夜|街|城/u, "environment"],
-    [/情感|心理|愤怒|恐惧|悲伤|欲望/u, "emotions"],
-    [/动作|奔|走|推|打|斩|握/u, "action"],
-    [/日常|饮食|市井|街坊|家宅/u, "daily_life"],
-    [/文化|典故|经史|佛|道|诗/u, "cultural"],
-    [/人物|性格|神态|外貌/u, "character_traits"]
-  ];
-  for (const [pattern, scene] of pairs) {
-    if (pattern.test(text)) scenes.push(scene);
-  }
-  return [...new Set(scenes)];
-}
-function splitLongText(text, maxChars = DEFAULT_CHUNK_CHAR_LIMIT) {
-  const paragraphs = text.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
-  const chunks = [];
-  let current = "";
-  for (const paragraph of paragraphs.length ? paragraphs : [text.trim()]) {
-    if (!current) {
-      current = paragraph;
-      continue;
-    }
-    if (current.length + paragraph.length + 2 <= maxChars) {
-      current = `${current}
-
-${paragraph}`;
-      continue;
-    }
-    chunks.push(current);
-    current = paragraph;
-  }
-  if (current) {
-    chunks.push(current);
-  }
-  return chunks.flatMap((chunk) => {
-    if (chunk.length <= maxChars * 1.4) return [chunk];
-    const pieces = [];
-    for (let index = 0; index < chunk.length; index += maxChars) {
-      pieces.push(chunk.slice(index, index + maxChars).trim());
-    }
-    return pieces.filter(Boolean);
-  });
-}
-function chunkMarkdown(content, sourceType, maxChars) {
-  const lines = content.split("\n");
-  const sections = [];
-  let current = { heading: "Document", body: [] };
-  for (const line of lines) {
-    if (/^#{1,4}\s+/.test(line) && current.body.some((entry) => entry.trim())) {
-      sections.push(current);
-      current = { heading: line.replace(/^#{1,4}\s+/, "").trim(), body: [line] };
-      continue;
-    }
-    if (/^#{1,4}\s+/.test(line)) {
-      current.heading = line.replace(/^#{1,4}\s+/, "").trim();
-    }
-    current.body.push(line);
-  }
-  if (current.body.some((entry) => entry.trim())) {
-    sections.push(current);
-  }
-  return sections.flatMap((section) => {
-    const sectionText = section.body.join("\n").trim();
-    return splitLongText(sectionText, maxChars).map((text, index) => ({
-      chunkType: chunkTypeForHeading(section.heading, sourceType),
-      content: text,
-      metadata: {
-        heading: section.heading,
-        part: index + 1,
-        sceneTypes: inferSceneTypes(`${section.heading}
-${text}`)
-      }
-    }));
-  });
-}
-function chunkVocabularyJson(content, maxEntries = DEFAULT_GLOBAL_RESOURCE_LIMIT) {
-  try {
-    const parsed = JSON.parse(content);
-    const categoryChunks = Object.entries(parsed.categories || {}).map(([key, value]) => ({
-      chunkType: "vocabulary_category",
-      content: `${value.title || key}
-\u5206\u7C7B\uFF1A${key}
-\u8BCD\u6761\u6570\u91CF\uFF1A${value.count ?? "unknown"}`,
-      metadata: {
-        category: key,
-        title: value.title || key,
-        count: value.count ?? null,
-        sceneTypes: [key]
-      }
-    }));
-    const wordChunks = Object.entries(parsed.word_index || {}).slice(0, maxEntries).map(([word, value]) => {
-      const categories = Array.isArray(value.categories) ? value.categories : [];
-      return {
-        chunkType: "vocabulary_entry",
-        content: `${word}
-\u91CA\u4E49\uFF1A${value.definition || ""}
-\u5206\u7C7B\uFF1A${categories.join(", ")}`,
-        metadata: {
-          word,
-          categories,
-          sceneTypes: categories
-        }
-      };
-    });
-    return [...categoryChunks, ...wordChunks];
-  } catch {
-    return splitLongText(content).map((chunk, index) => ({
-      chunkType: "json_resource",
-      content: chunk,
-      metadata: { part: index + 1 }
-    }));
-  }
-}
-function chunkKnowledgeContent(input) {
-  const normalizedPath = normalizeRelativePath(input.path || "");
-  const maxChars = input.chunkCharLimit || DEFAULT_CHUNK_CHAR_LIMIT;
-  const limit = Math.max(1, input.chunkLimit ?? DEFAULT_GLOBAL_RESOURCE_LIMIT);
-  const chunks = normalizedPath.endsWith(".json") ? chunkVocabularyJson(input.content, limit) : chunkMarkdown(input.content, input.sourceType, maxChars);
-  return chunks.filter((chunk) => chunk.content.trim().length > 0).slice(0, limit);
-}
-async function ingestKnowledgeSource(options) {
-  return withFactoryDb(options.rootDir, async (db) => {
-    const contentHash = sha256(options.content);
-    const source = db.upsertKnowledgeSource({
-      scope: options.scope,
-      projectId: options.projectId ?? null,
-      sourceType: options.sourceType,
-      path: options.path,
-      title: options.title || import_node_path3.default.basename(options.path),
-      contentHash,
-      version: options.version || "1",
-      status: "ready",
-      metadata: options.metadata ?? {}
-    });
-    const chunkDrafts = chunkKnowledgeContent({
-      content: options.content,
-      sourceType: options.sourceType,
-      path: options.path,
-      chunkLimit: options.chunkLimit,
-      chunkCharLimit: options.chunkCharLimit
-    });
-    const chunkIds = db.replaceKnowledgeChunks(source.id, chunkDrafts.map((chunk) => ({
-      sourceId: source.id,
-      scope: options.scope,
-      projectId: options.projectId ?? null,
-      chunkType: chunk.chunkType,
-      content: chunk.content,
-      contentHash: sha256(chunk.content),
-      status: "ready",
-      metadata: {
-        ...chunk.metadata,
-        sourcePath: options.path,
-        sourceType: options.sourceType
-      },
-      embedding: {
-        model: LOCAL_KNOWLEDGE_EMBEDDING_MODEL,
-        vector: createLocalTextEmbedding(chunk.content)
-      }
-    })));
+async function testProviderConnectivity(overrides = {}, rootDir = process.cwd()) {
+  const activeConfig = await loadActiveLlmConfig(rootDir);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const timeoutMs = activeConfig?.provider.timeoutMs || 12e4;
+  const baseUrl = overrides.baseUrl?.trim() || activeConfig?.provider.baseUrl || "";
+  const modelName = overrides.modelName?.trim() || activeConfig?.provider.modelName || "";
+  const apiMode = overrides.apiMode || activeConfig?.provider.apiMode || "chat";
+  const apiKey = overrides.apiKey?.trim() || activeConfig?._dbApiKey || "";
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return {
-      sourceId: source.id,
-      chunks: chunkIds.length,
-      changed: source.changed
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider connectivity check passed in test mode (${apiMode}).`
     };
-  });
-}
-async function ingestProjectArtifact(options) {
-  const absolutePath = import_node_path3.default.isAbsolute(options.artifactPath) ? options.artifactPath : import_node_path3.default.join(options.projectRoot, options.artifactPath);
-  const content = options.content ?? await import_promises2.default.readFile(absolutePath, "utf8");
-  return ingestKnowledgeSource({
-    rootDir: options.rootDir,
-    scope: "project",
-    projectId: options.projectId,
-    sourceType: sourceTypeForPath(options.artifactPath) || options.kind,
-    path: normalizeRelativePath(options.artifactPath),
-    title: import_node_path3.default.basename(options.artifactPath),
-    content,
-    metadata: {
-      kind: options.kind,
-      ...options.metadata || {}
-    },
-    chunkLimit: options.chunkLimit ?? DEFAULT_ARTIFACT_CHUNK_LIMIT
-  });
-}
-async function retrieveKnowledge(options) {
-  const results = await withFactoryDb(options.rootDir, async (db) => {
-    const rows = db.recallKnowledge(options.query, {
-      projectId: options.projectId ?? null,
-      scopes: options.scopes,
-      sourceTypes: options.sourceTypes,
-      chunkTypes: options.chunkTypes,
-      limit: options.limit ?? 8,
-      embedding: createLocalTextEmbedding(options.query)
-    });
-    const resetFacts = options.projectId ? db.getChapterFacts(options.projectId).filter((fact) => fact.resetAt).map((fact) => ({ chapterNumber: fact.chapterNumber, resetAt: fact.resetAt || "" })) : [];
-    const filteredRows = rows.filter((row) => {
-      const source = row.source || {};
-      const sourcePath = String(source.path || row.source_path || "");
-      const sourceType = String(source.sourceType || row.source_type || "");
-      const chapterNumber = chapterNumberFromKnowledgePath(sourcePath);
-      const resetFact = chapterNumber ? resetFacts.find((fact) => fact.chapterNumber === chapterNumber) : null;
-      if (!resetFact) {
-        return true;
-      }
-      if (!["chapter", "memory", "checkpoint"].includes(sourceType)) {
-        return true;
-      }
-      const rowUpdatedAt = String(row.updated_at || row.created_at || "");
-      return timestampMs2(rowUpdatedAt) > timestampMs2(resetFact.resetAt);
-    });
-    if (options.recordCitation && options.projectId) {
-      db.recordKnowledgeCitation({
-        projectId: options.projectId,
-        runId: options.runId ?? null,
-        messageId: options.messageId ?? null,
-        query: options.query,
-        filters: {
-          scopes: options.scopes,
-          sourceTypes: options.sourceTypes,
-          chunkTypes: options.chunkTypes,
-          limit: options.limit ?? 8
-        },
-        results: filteredRows.map((row) => ({
-          chunkId: row.id,
-          sourceId: row.source_id,
-          sourceType: row.source?.sourceType,
-          sourcePath: row.source?.path,
-          score: row.score
-        })),
-        usedChunkIds: filteredRows.map((row) => String(row.id))
-      });
-    }
-    return filteredRows;
-  });
-  return results;
-}
-function formatKnowledgeForPrompt(rows, limit = 8) {
-  if (!rows.length) {
-    return "No writing knowledge resources matched this turn.";
   }
-  return rows.slice(0, limit).map((row, index) => {
-    const source = row.source || {};
-    const pathValue = String(source.path || row.source_path || "");
-    const title = String(source.title || row.source_title || import_node_path3.default.basename(pathValue) || "knowledge");
-    return [
-      `${index + 1}. [${String(row.chunk_type || "chunk")}] ${title}`,
-      `Source: ${pathValue}`,
-      `Score: ${Number(row.score || 0).toFixed(2)}`,
-      String(row.content || "").slice(0, 520)
-    ].join("\n");
-  }).join("\n\n");
+  if (!baseUrl || !modelName || !apiKey) {
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: "Missing provider config. Configure a model in settings first."
+    };
+  }
+  try {
+    const response = await withTimeout(
+      timeoutMs,
+      (signal) => fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${apiKey}`
+        },
+        signal
+      })
+    );
+    if (!response.ok) {
+      try {
+        const content = await requestLlmTextCompletion({
+          baseUrl,
+          apiKey,
+          modelName,
+          apiMode,
+          timeoutMs,
+          maxTokens: 8,
+          messages: [{ role: "user", content: "ping" }]
+        });
+        if (content) {
+          return {
+            ok: true,
+            checkedAt,
+            baseUrl,
+            modelName,
+            apiMode,
+            message: `Provider reachable (verified via ${apiMode} generation fallback).`
+          };
+        }
+      } catch (chatErr) {
+      }
+      return {
+        ok: false,
+        checkedAt,
+        baseUrl,
+        modelName,
+        apiMode,
+        message: `Provider test failed with status ${response.status}.`
+      };
+    }
+    const payload = await response.json();
+    const modelCount = Array.isArray(payload.data) ? payload.data.length : 0;
+    return {
+      ok: true,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider reachable. ${modelCount} models listed.`
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      checkedAt,
+      baseUrl,
+      modelName,
+      apiMode,
+      message: `Provider test failed: ${message}`
+    };
+  }
 }
 
 // src/genre-presets.ts
@@ -4143,597 +931,6 @@ function findGenrePreset(searchText) {
     return GENRE_PRESETS.find((p) => p.genreName === "\u90FD\u5E02/\u73B0\u5B9E");
   }
   return void 0;
-}
-
-// src/aigc-detector.ts
-var import_node_fs3 = __toESM(require("fs"), 1);
-var import_node_path4 = __toESM(require("path"), 1);
-var DEFAULT_TIMEOUT_MS = 3e4;
-var DEFAULT_THRESHOLD = 0.8;
-var DEFAULT_SEGMENT_MAX_CHARS = 900;
-var DEFAULT_SEGMENT_MIN_CHARS = 180;
-var PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"];
-var MANAGED_PROJECTS_SEGMENT = `${import_node_path4.default.sep}.ai-novel-projects${import_node_path4.default.sep}`;
-function getAigcDetectorConfigFromEnv(env = process.env) {
-  return {
-    provider: readProvider(env.AIGC_DETECTOR_PROVIDER),
-    url: readOptionalString(env.AIGC_DETECTOR_URL),
-    token: readOptionalString(env.AIGC_DETECTOR_TOKEN),
-    timeoutMs: readPositiveInteger(env.AIGC_DETECTOR_TIMEOUT_MS),
-    threshold: readScore(env.AIGC_DETECTOR_THRESHOLD),
-    headers: readHeaders(env.AIGC_DETECTOR_HEADERS_JSON),
-    requestTextField: readOptionalString(env.AIGC_DETECTOR_REQUEST_TEXT_FIELD),
-    segment: {
-      maxChars: readPositiveInteger(env.AIGC_DETECTOR_SEGMENT_MAX_CHARS),
-      minChars: readPositiveInteger(env.AIGC_DETECTOR_SEGMENT_MIN_CHARS)
-    },
-    gradio: {
-      fnIndex: readInteger(env.AIGC_DETECTOR_GRADIO_FN_INDEX),
-      sessionHash: readOptionalString(env.AIGC_DETECTOR_GRADIO_SESSION_HASH),
-      joinUrl: readOptionalString(env.AIGC_DETECTOR_GRADIO_JOIN_URL),
-      dataUrl: readOptionalString(env.AIGC_DETECTOR_GRADIO_DATA_URL),
-      skipJoin: env.AIGC_DETECTOR_GRADIO_SKIP_JOIN === "1",
-      inputs: readJsonArray(env.AIGC_DETECTOR_GRADIO_INPUTS_JSON)
-    }
-  };
-}
-function getAigcDetectorConfig(rootDir) {
-  if (!rootDir) {
-    return getAigcDetectorConfigFromEnv();
-  }
-  try {
-    const projectEnv = readAigcProjectEnv(rootDir);
-    return getAigcDetectorConfigFromEnv({ ...projectEnv, ...process.env });
-  } catch {
-    return getAigcDetectorConfigFromEnv();
-  }
-}
-async function detectAigcText(input, config = getAigcDetectorConfigFromEnv()) {
-  const provider = config.provider ?? "disabled";
-  const text = typeof input === "string" ? input : input.text;
-  if (provider === "disabled") {
-    return unavailableResult(provider, "AIGC detector is disabled.", null);
-  }
-  if (!text.trim()) {
-    return unavailableResult(provider, "AIGC detector received empty text.", null);
-  }
-  if (!config.url?.trim()) {
-    return unavailableResult(provider, "AIGC detector URL is not configured.", null);
-  }
-  try {
-    if (provider === "generic-json") {
-      return await detectWithGenericJson(text, config);
-    }
-    if (provider === "gradio-queue") {
-      return await detectWithGradioQueue(text, config);
-    }
-    return unavailableResult(provider, `Unsupported AIGC detector provider: ${String(provider)}`, null);
-  } catch (error) {
-    if (config.throwOnError) {
-      throw error;
-    }
-    return unavailableResult(provider, error instanceof Error ? error.message : String(error), null);
-  }
-}
-async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()) {
-  const provider = config.provider ?? "disabled";
-  const threshold = config.threshold ?? DEFAULT_THRESHOLD;
-  const segments = Array.isArray(input) ? input : splitAigcTextIntoSegments(typeof input === "string" ? input : input.text, config.segment);
-  const results = [];
-  for (const segment of segments) {
-    const result = await detectAigcText(segment, config);
-    results.push({
-      ...result,
-      segment,
-      charCount: segment.text.length
-    });
-  }
-  const scoredResults = results.filter((result) => typeof result.score === "number");
-  const totalChars = scoredResults.reduce((sum, result) => sum + Math.max(1, result.charCount), 0);
-  const score = totalChars > 0 ? scoredResults.reduce((sum, result) => sum + Number(result.score) * Math.max(1, result.charCount), 0) / totalChars : null;
-  const highRiskSegments = results.filter((result) => result.status === "ai_likely" || typeof result.score === "number" && result.score >= threshold).sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
-  const failedResults = results.filter((result) => !result.ok);
-  return {
-    ok: results.some((result) => result.ok),
-    provider,
-    status: score === null ? "unavailable" : scoreToStatus(score, threshold),
-    score,
-    confidence: score === null ? null : Math.max(score, 1 - score),
-    threshold,
-    totalSegments: segments.length,
-    highRiskSegments,
-    segments: results,
-    reason: highRiskSegments.length > 0 ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.` : failedResults.length > 0 ? `AIGC detection failed: ${Array.from(new Set(failedResults.map((r) => r.reason))).join("; ")}` : "Segmented AIGC detection completed."
-  };
-}
-function splitAigcTextIntoSegments(text, options = {}) {
-  const maxChars = Math.max(120, options.maxChars ?? DEFAULT_SEGMENT_MAX_CHARS);
-  const minChars = Math.max(1, Math.min(options.minChars ?? DEFAULT_SEGMENT_MIN_CHARS, maxChars));
-  const paragraphs = collectParagraphs(text);
-  const pieces = paragraphs.flatMap((paragraph) => splitLongParagraph(paragraph, maxChars));
-  const segments = [];
-  let pending = null;
-  for (const piece of pieces) {
-    if (!pending) {
-      pending = { text: piece.text, startOffset: piece.startOffset, endOffset: piece.endOffset, metadata: piece.metadata };
-      continue;
-    }
-    const joinedLength = pending.text.length + 1 + piece.text.length;
-    if (pending.text.length < minChars || joinedLength <= maxChars) {
-      pending = {
-        ...pending,
-        text: `${pending.text}
-${piece.text}`,
-        endOffset: piece.endOffset
-      };
-      continue;
-    }
-    segments.push({ ...pending, index: segments.length, id: `segment-${segments.length + 1}` });
-    pending = { text: piece.text, startOffset: piece.startOffset, endOffset: piece.endOffset, metadata: piece.metadata };
-  }
-  if (pending) {
-    segments.push({ ...pending, index: segments.length, id: `segment-${segments.length + 1}` });
-  }
-  return segments;
-}
-function parseAigcDetectorSse(payload) {
-  const events = [];
-  let eventName;
-  const dataLines = [];
-  for (const rawLine of payload.replace(/\r\n/g, "\n").split("\n")) {
-    const line = rawLine.trimEnd();
-    if (!line) {
-      if (dataLines.length > 0 || eventName) {
-        events.push({ event: eventName, data: dataLines.join("\n") });
-      }
-      eventName = void 0;
-      dataLines.length = 0;
-      continue;
-    }
-    if (line.startsWith(":")) {
-      continue;
-    }
-    if (line.startsWith("event:")) {
-      eventName = line.slice("event:".length).trim();
-      continue;
-    }
-    if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trimStart());
-    }
-  }
-  if (dataLines.length > 0 || eventName) {
-    events.push({ event: eventName, data: dataLines.join("\n") });
-  }
-  return events;
-}
-async function detectWithGenericJson(text, config) {
-  const response = await requestWithTimeout(config.url ?? "", {
-    method: "POST",
-    headers: createHeaders(config, "application/json"),
-    body: JSON.stringify({ [config.requestTextField || "text"]: text })
-  }, config);
-  const raw = await readResponseBody(response);
-  if (!response.ok) {
-    return unavailableResult("generic-json", `Detector returned HTTP ${response.status}.`, raw);
-  }
-  return normalizeAigcDetectionResult(raw, "generic-json", config.threshold);
-}
-async function detectWithGradioQueue(text, config) {
-  const rootUrl = normalizeGradioRootUrl(config.url ?? "");
-  const sessionHash = config.gradio?.sessionHash || createSessionHash();
-  const joinUrl = config.gradio?.joinUrl || `${rootUrl}/gradio_api/queue/join${formatTokenQuery(config.token)}`;
-  const dataUrl = config.gradio?.dataUrl || `${rootUrl}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}${formatStudioTokenParam(config.token)}`;
-  if (!config.gradio?.skipJoin) {
-    const joinPayload = {
-      data: createGradioInputs(text, config.gradio?.inputs),
-      event_data: null,
-      fn_index: config.gradio?.fnIndex ?? 0,
-      session_hash: sessionHash
-    };
-    const joinResponse = await requestWithTimeout(joinUrl, {
-      method: "POST",
-      headers: createHeaders(config, "application/json"),
-      body: JSON.stringify(joinPayload)
-    }, config);
-    const joinRaw = await readResponseBody(joinResponse);
-    if (!joinResponse.ok) {
-      return unavailableResult("gradio-queue", `Gradio detector join returned HTTP ${joinResponse.status}.`, joinRaw);
-    }
-  }
-  const dataResponse = await requestWithTimeout(dataUrl, {
-    method: "GET",
-    headers: createHeaders(config, void 0, { accept: "text/event-stream" })
-  }, config);
-  const rawText = await dataResponse.text();
-  if (!dataResponse.ok) {
-    return unavailableResult("gradio-queue", `Gradio detector stream returned HTTP ${dataResponse.status}.`, rawText);
-  }
-  const raw = extractGradioQueueOutput(parseAigcDetectorSse(rawText));
-  return normalizeAigcDetectionResult(raw, "gradio-queue", config.threshold);
-}
-async function requestWithTimeout(url, init, config) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  try {
-    return await (config.fetchImpl ?? fetch)(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-async function readResponseBody(response) {
-  const body = await response.text();
-  if (!body.trim()) {
-    return null;
-  }
-  try {
-    return JSON.parse(body);
-  } catch {
-    return body;
-  }
-}
-function normalizeAigcDetectionResult(raw, provider, threshold = DEFAULT_THRESHOLD) {
-  const score = findScore(raw);
-  const label = findStringField(raw, ["label", "status", "result", "prediction", "class", "message"]) || inferLabel(raw);
-  const normalizedScore = normalizeScore(score);
-  const status = statusFromLabel(label) || (normalizedScore === null ? "uncertain" : scoreToStatus(normalizedScore, threshold));
-  const confidence = normalizeScore(findNumberField(raw, ["confidence", "probability", "prob"])) ?? (normalizedScore === null ? null : Math.max(normalizedScore, 1 - normalizedScore));
-  return {
-    ok: normalizedScore !== null || status !== "unavailable",
-    provider,
-    status,
-    score: normalizedScore,
-    label: label || status,
-    confidence,
-    raw,
-    reason: normalizedScore === null ? "Detector response did not include a normalized score; status was inferred from labels." : "Detector response normalized."
-  };
-}
-function unavailableResult(provider, reason, raw) {
-  return {
-    ok: false,
-    provider,
-    status: "unavailable",
-    score: null,
-    label: "unavailable",
-    confidence: null,
-    raw,
-    reason
-  };
-}
-function scoreToStatus(score, threshold) {
-  if (score >= threshold) {
-    return "ai_likely";
-  }
-  if (score <= 1 - threshold) {
-    return "human_likely";
-  }
-  return "uncertain";
-}
-function createHeaders(config, contentType, extra = {}) {
-  const headers = { ...config.headers, ...extra };
-  if (contentType) {
-    headers["content-type"] = contentType;
-  }
-  if (config.token && !headers.authorization) {
-    headers.authorization = `Bearer ${config.token}`;
-  }
-  return headers;
-}
-function collectParagraphs(text) {
-  const paragraphs = [];
-  const pattern = /\S[^\n]*(?:\n(?!\s*\n)\S[^\n]*)*/g;
-  for (const match of text.matchAll(pattern)) {
-    const value = match[0].trim();
-    if (!value) {
-      continue;
-    }
-    const leadingWhitespace = match[0].length - match[0].trimStart().length;
-    const startOffset = (match.index ?? 0) + leadingWhitespace;
-    paragraphs.push({
-      id: `paragraph-${paragraphs.length + 1}`,
-      index: paragraphs.length,
-      text: value,
-      startOffset,
-      endOffset: startOffset + value.length
-    });
-  }
-  return paragraphs;
-}
-function splitLongParagraph(segment, maxChars) {
-  if (segment.text.length <= maxChars) {
-    return [segment];
-  }
-  const fragments = segment.text.match(/[^。！？!?；;]+[。！？!?；;]?|.+/g) || [segment.text];
-  const pieces = [];
-  let pending = "";
-  let pendingStart = segment.startOffset;
-  let searchOffset = 0;
-  for (const fragment of fragments) {
-    const localIndex = segment.text.indexOf(fragment, searchOffset);
-    const fragmentStart = segment.startOffset + Math.max(0, localIndex);
-    searchOffset = Math.max(searchOffset, localIndex + fragment.length);
-    if (!pending) {
-      pending = fragment;
-      pendingStart = fragmentStart;
-      continue;
-    }
-    if (pending.length + fragment.length <= maxChars) {
-      pending += fragment;
-      continue;
-    }
-    pieces.push({
-      id: `segment-piece-${pieces.length + 1}`,
-      index: pieces.length,
-      text: pending.trim(),
-      startOffset: pendingStart,
-      endOffset: pendingStart + pending.trim().length
-    });
-    pending = fragment;
-    pendingStart = fragmentStart;
-  }
-  if (pending.trim()) {
-    pieces.push({
-      id: `segment-piece-${pieces.length + 1}`,
-      index: pieces.length,
-      text: pending.trim(),
-      startOffset: pendingStart,
-      endOffset: pendingStart + pending.trim().length
-    });
-  }
-  return pieces.flatMap((piece) => hardSplitSegment(piece, maxChars));
-}
-function hardSplitSegment(segment, maxChars) {
-  if (segment.text.length <= maxChars) {
-    return [segment];
-  }
-  const pieces = [];
-  for (let offset = 0; offset < segment.text.length; offset += maxChars) {
-    const text = segment.text.slice(offset, offset + maxChars);
-    pieces.push({
-      id: `segment-hard-${pieces.length + 1}`,
-      index: pieces.length,
-      text,
-      startOffset: segment.startOffset + offset,
-      endOffset: segment.startOffset + offset + text.length
-    });
-  }
-  return pieces;
-}
-function extractGradioQueueOutput(events) {
-  const parsedEvents = events.map((event) => parseJson(event.data) ?? event.data).filter((event) => event !== "");
-  const completed = [...parsedEvents].reverse().find(
-    (event) => isRecord(event) && (event.msg === "process_completed" || event.output || event.success === true)
-  );
-  if (isRecord(completed) && "output" in completed) {
-    const output = completed.output;
-    if (isRecord(output) && "data" in output) {
-      return output.data;
-    }
-    return output;
-  }
-  return completed ?? parsedEvents.at(-1) ?? null;
-}
-function createGradioInputs(text, inputs) {
-  if (!inputs || inputs.length === 0) {
-    return [text];
-  }
-  return inputs.map((input) => input === "$text" ? text : input);
-}
-function normalizeGradioRootUrl(url) {
-  const parsed = new URL(url);
-  const queueIndex = parsed.pathname.indexOf("/gradio_api/");
-  if (queueIndex >= 0) {
-    parsed.pathname = parsed.pathname.slice(0, queueIndex);
-    parsed.search = "";
-  }
-  return parsed.toString().replace(/\/$/, "");
-}
-function formatTokenQuery(token) {
-  return token ? `?studio_token=${encodeURIComponent(token)}` : "";
-}
-function formatStudioTokenParam(token) {
-  return `&studio_token=${encodeURIComponent(token || "")}`;
-}
-function createSessionHash() {
-  return Math.random().toString(36).slice(2, 14);
-}
-function findScore(raw) {
-  return findNumberField(raw, [
-    "score",
-    "aiProbability",
-    "aigcProbability",
-    "ai_probability",
-    "aigc_probability",
-    "aiProb",
-    "aigcProb",
-    "ai_score",
-    "aigc_score",
-    "fakeProbability"
-  ]) ?? parseScoreFromText(raw);
-}
-function findNumberField(raw, names) {
-  const queue = [raw];
-  const normalizedNames = new Set(names.map((name) => name.toLowerCase()));
-  while (queue.length > 0) {
-    const value = queue.shift();
-    if (Array.isArray(value)) {
-      queue.push(...value);
-      continue;
-    }
-    if (!isRecord(value)) {
-      continue;
-    }
-    for (const [key, child] of Object.entries(value)) {
-      if (normalizedNames.has(key.toLowerCase())) {
-        const number = typeof child === "number" ? child : typeof child === "string" ? Number(child) : NaN;
-        if (Number.isFinite(number)) {
-          return number;
-        }
-      }
-      if (isRecord(child) || Array.isArray(child)) {
-        queue.push(child);
-      }
-    }
-  }
-  return null;
-}
-function findStringField(raw, names) {
-  const queue = [raw];
-  const normalizedNames = new Set(names.map((name) => name.toLowerCase()));
-  while (queue.length > 0) {
-    const value = queue.shift();
-    if (Array.isArray(value)) {
-      queue.push(...value);
-      continue;
-    }
-    if (!isRecord(value)) {
-      continue;
-    }
-    for (const [key, child] of Object.entries(value)) {
-      if (normalizedNames.has(key.toLowerCase()) && (typeof child === "string" || typeof child === "number")) {
-        return String(child);
-      }
-      if (isRecord(child) || Array.isArray(child)) {
-        queue.push(child);
-      }
-    }
-  }
-  return "";
-}
-function inferLabel(raw) {
-  if (typeof raw === "string") {
-    return raw.slice(0, 120);
-  }
-  if (Array.isArray(raw)) {
-    const text = raw.find((item) => typeof item === "string");
-    return typeof text === "string" ? text.slice(0, 120) : "";
-  }
-  return "";
-}
-function statusFromLabel(label) {
-  const normalized = label.toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (/human|人工|人类|真人|非ai|非机器/.test(normalized)) {
-    return "human_likely";
-  }
-  if (/\bai\b|aigc|机器|模型|生成|疑似ai|ai生成/.test(normalized)) {
-    return "ai_likely";
-  }
-  if (/uncertain|unknown|不确定|无法判断/.test(normalized)) {
-    return "uncertain";
-  }
-  return null;
-}
-function parseScoreFromText(raw) {
-  const text = typeof raw === "string" ? raw : JSON.stringify(raw);
-  const percentMatch = text.match(/(?:AI|AIGC|机器|生成|疑似)[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)\s*%/i);
-  if (percentMatch) {
-    return Number(percentMatch[1]) / 100;
-  }
-  const decimalMatch = text.match(/(?:AI|AIGC|机器|生成|疑似)[^0-9]{0,12}(0?\.[0-9]+)/i);
-  return decimalMatch ? Number(decimalMatch[1]) : null;
-}
-function normalizeScore(score) {
-  if (score === null || !Number.isFinite(score)) {
-    return null;
-  }
-  if (score > 1 && score <= 100) {
-    return score / 100;
-  }
-  return Math.min(1, Math.max(0, score));
-}
-function readProvider(value) {
-  if (value === "generic-json" || value === "gradio-queue" || value === "disabled") {
-    return value;
-  }
-  return "disabled";
-}
-function readOptionalString(value) {
-  const trimmed = value?.trim();
-  return trimmed || void 0;
-}
-function readInteger(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : void 0;
-}
-function readPositiveInteger(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : void 0;
-}
-function readScore(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return void 0;
-  }
-  return normalizeScore(parsed) ?? void 0;
-}
-function readHeaders(value) {
-  const parsed = parseJson(value || "");
-  if (!isRecord(parsed)) {
-    return void 0;
-  }
-  return Object.fromEntries(
-    Object.entries(parsed).filter((entry) => typeof entry[1] === "string")
-  );
-}
-function readJsonArray(value) {
-  const parsed = parseJson(value || "");
-  return Array.isArray(parsed) ? parsed : void 0;
-}
-function parseJson(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null;
-}
-function readAigcProjectEnv(rootDir) {
-  const envPath = getAigcProjectEnvCandidatePaths(rootDir).find((candidate) => import_node_fs3.default.existsSync(candidate));
-  if (!envPath) {
-    return {};
-  }
-  const values = {};
-  for (const line of import_node_fs3.default.readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
-    values[key] = value;
-  }
-  return values;
-}
-function getAigcProjectEnvCandidatePaths(rootDir) {
-  const resolvedRootDir = import_node_path4.default.resolve(rootDir);
-  const candidates = [
-    import_node_path4.default.join(resolvedRootDir, ".env"),
-    import_node_path4.default.join(resolvedRootDir, ...PACKAGE_ENV_PARTS)
-  ];
-  const workspaceRoot = inferAigcWorkspaceRootFromManagedProject(resolvedRootDir);
-  if (workspaceRoot) {
-    candidates.push(
-      import_node_path4.default.join(workspaceRoot, ".env"),
-      import_node_path4.default.join(workspaceRoot, ...PACKAGE_ENV_PARTS)
-    );
-  }
-  return [...new Set(candidates.map((candidate) => import_node_path4.default.resolve(candidate)))];
-}
-function inferAigcWorkspaceRootFromManagedProject(rootDir) {
-  const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT);
-  if (index < 0) {
-    return null;
-  }
-  return rootDir.slice(0, index) || import_node_path4.default.parse(rootDir).root;
 }
 
 // src/production-contracts.ts
@@ -4982,10 +1179,369 @@ function evaluateStyleEvolutionGate(contract) {
   }
   return summarizeGate(issues);
 }
+function evaluateChapterBlueprintGate(blueprint) {
+  const issues = [];
+  if (!blueprint) {
+    return summarizeGate([
+      critical(
+        "chapter_blueprint_missing",
+        "\u7AE0\u8282\u6267\u884C\u5408\u540C\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u751F\u6210\u6B63\u6587\u3002",
+        "\u5148\u751F\u6210\u5305\u542B\u7AE0\u8282\u5B9A\u4F4D\u3001\u8282\u594F\u3001\u573A\u666F\u5361\u548C\u7981\u7528\u9879\u7684\u7AE0\u8282\u84DD\u56FE\u3002"
+      )
+    ]);
+  }
+  for (const [key, value] of [
+    ["title", blueprint.title],
+    ["chapterRole", blueprint.chapterRole],
+    ["chapterPurpose", blueprint.chapterPurpose],
+    ["suspenseLevel", blueprint.suspenseLevel],
+    ["foreshadowingOperation", blueprint.foreshadowingOperation],
+    ["emotionTarget", blueprint.emotionTarget],
+    ["endingHook", blueprint.endingHook],
+    ["nextChapterEntryState", blueprint.nextChapterEntryState]
+  ]) {
+    if (hasPlaceholder(value)) {
+      issues.push(critical(
+        `chapter_${key}_missing`,
+        `\u7AE0\u8282\u84DD\u56FE\u7F3A\u5C11\u53EF\u6267\u884C\u5B57\u6BB5\uFF1A${key}\u3002`,
+        "\u91CD\u65B0\u751F\u6210\u6216\u8865\u9F50\u7AE0\u8282\u6267\u884C\u5408\u540C\uFF0C\u4E0D\u80FD\u8BA9 pending/\u5F85\u5B9A \u5B57\u6BB5\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002"
+      ));
+    }
+  }
+  if (!["E", "F", "P", "C"].includes(blueprint.macroBeat)) {
+    issues.push(critical(
+      "chapter_macro_beat_invalid",
+      "\u7AE0\u8282 macroBeat \u5FC5\u987B\u662F E/F/P/C \u4E4B\u4E00\u3002",
+      "\u6309 1234 \u53D9\u4E8B\u5FAA\u73AF\u4E3A\u672C\u7AE0\u6307\u5B9A\u552F\u4E00\u8282\u62CD\uFF0C\u907F\u514D\u5355\u7AE0\u95ED\u73AF\u3002"
+    ));
+  }
+  if (!Number.isFinite(blueprint.targetWordCount) || blueprint.targetWordCount < 1e3) {
+    issues.push(critical(
+      "chapter_word_target_invalid",
+      "\u7AE0\u8282\u76EE\u6807\u5B57\u6570\u65E0\u6548\u3002",
+      "\u4E3A\u7AE0\u8282\u6267\u884C\u5408\u540C\u8BBE\u7F6E\u5408\u7406 targetWordCount\u3002"
+    ));
+  }
+  if (!Array.isArray(blueprint.mustAvoid) || blueprint.mustAvoid.length === 0) {
+    issues.push(critical(
+      "chapter_must_avoid_missing",
+      "\u7AE0\u8282\u6267\u884C\u5408\u540C\u7F3A\u5C11 mustAvoid \u7981\u7528\u9879\u3002",
+      "\u8865\u9F50\u672C\u7AE0\u7981\u6B62\u8D8A\u6743\u3001\u7981\u6B62\u63D0\u524D\u63ED\u793A\u3001\u7981\u6B62\u4EBA\u7269\u8DD1\u504F\u7B49\u9650\u5236\u3002"
+    ));
+  }
+  if (!Array.isArray(blueprint.allowedCharacters) || blueprint.allowedCharacters.length === 0) {
+    issues.push(critical(
+      "chapter_allowed_characters_missing",
+      "\u7AE0\u8282\u6267\u884C\u5408\u540C\u7F3A\u5C11\u5141\u8BB8\u767B\u573A\u4EBA\u7269\u3002",
+      "\u4ECE\u4EBA\u7269\u6863\u6848\u548C\u7AE0\u8282\u4EFB\u52A1\u4E2D\u786E\u5B9A\u672C\u7AE0\u5141\u8BB8\u767B\u573A\u7684\u4EBA\u7269\u6E05\u5355\u3002"
+    ));
+  }
+  if (!Array.isArray(blueprint.sceneCards) || blueprint.sceneCards.length === 0) {
+    issues.push(critical(
+      "chapter_scene_cards_missing",
+      "\u7AE0\u8282\u6267\u884C\u5408\u540C\u7F3A\u5C11 sceneCards\u3002",
+      "\u6309\u573A\u666F\u62C6\u5206\u76EE\u6807\u3001\u51B2\u7A81\u3001\u8F6C\u6298\u548C\u7ED3\u5C3E\u94A9\u5B50\uFF0C\u518D\u8FDB\u5165\u591A\u573A\u666F\u751F\u6210\u3002"
+    ));
+  } else {
+    for (const scene of blueprint.sceneCards) {
+      if (hasPlaceholder(scene.goal) || hasPlaceholder(scene.conflict) || hasPlaceholder(scene.turn) || hasPlaceholder(scene.endHook)) {
+        issues.push(critical(
+          `scene_card_${scene.index}_incomplete`,
+          `\u7B2C ${scene.index} \u4E2A\u573A\u666F\u5361\u4E0D\u5B8C\u6574\u3002`,
+          "\u8865\u9F50\u6BCF\u4E2A\u573A\u666F\u7684 goal\u3001conflict\u3001turn\u3001endHook\u3002"
+        ));
+      }
+    }
+  }
+  return summarizeGate(issues);
+}
+function evaluateChapterExecutionReadiness(input) {
+  const styleGate = evaluateStyleEvolutionGate(input.style);
+  const blueprintGate = evaluateChapterBlueprintGate(input.blueprint);
+  return summarizeGate([...styleGate.issues, ...blueprintGate.issues]);
+}
+function readinessItem(input) {
+  return {
+    key: input.key,
+    label: input.label,
+    status: input.gate.status,
+    detail: input.gate.status === "passed" ? input.passedDetail : input.gate.status === "warning" ? input.warningDetail || input.gate.issues[0]?.message || input.blockedDetail : input.gate.blockedReason || input.blockedDetail,
+    issueCodes: input.gate.issues.map((issue) => issue.code),
+    recoveryHint: input.gate.issues[0]?.recoveryHint || ""
+  };
+}
+function readinessGroup(input) {
+  const blocked = input.assets.filter((asset) => asset.status === "blocked").length;
+  const warningCount = input.assets.filter((asset) => asset.status === "warning").length;
+  const passed = input.assets.filter((asset) => asset.status === "passed").length;
+  return {
+    key: input.key,
+    label: input.label,
+    status: blocked > 0 ? "blocked" : warningCount > 0 ? "warning" : "passed",
+    summary: input.assets.length ? `${passed}/${input.assets.length} \u5DF2\u5C31\u7EEA${blocked ? `\uFF0C${blocked} \u9879\u7F3A\u5931` : warningCount ? `\uFF0C${warningCount} \u9879\u5F85\u8865\u5F3A` : ""}` : input.emptySummary,
+    assets: input.assets
+  };
+}
+function evaluateProductionReadiness(input) {
+  const totalChapters = Math.max(0, Number(input.totalChapters || 0));
+  const blueprintCount = Math.max(0, Number(input.blueprintCount || 0));
+  const planningArtifactCount = Math.max(0, Number(input.planningArtifactCount || 0));
+  const planningRequiredAssetCount = Math.max(0, Number(input.planningRequiredAssetCount || 0));
+  const planningRequiredAssets = Array.isArray(input.planningRequiredAssets) && input.planningRequiredAssets.length ? input.planningRequiredAssets : [
+    "world-matrix.md",
+    "plot-architecture.md",
+    "story-bible.md",
+    "volume-strategy.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "story-foundation-contract.json",
+    "world-matrix.json",
+    "plot-architecture.json",
+    "story-bible.json",
+    "volume-strategy.json",
+    "foreshadowing-ledger.json",
+    "character-dynamics.json",
+    "writing-plan.json"
+  ];
+  const planningMissingRequiredAssets = Array.isArray(input.planningMissingRequiredAssets) ? input.planningMissingRequiredAssets.filter(Boolean) : planningRequiredAssets.slice(planningRequiredAssetCount);
+  const planningAssetDetails = Array.isArray(input.planningAssetDetails) && input.planningAssetDetails.length ? input.planningAssetDetails : planningRequiredAssets.map((asset) => ({
+    key: asset.replace(/\.md$/u, "").replace(/[^a-z0-9]+/giu, "_"),
+    label: asset,
+    path: `.ai-novel/plans/${asset}`,
+    status: planningMissingRequiredAssets.includes(asset) ? "blocked" : "passed",
+    detail: planningMissingRequiredAssets.includes(asset) ? "\u7F3A\u5931" : "\u5DF2\u751F\u6210"
+  }));
+  const planningRequiredTotal = planningRequiredAssets.length;
+  const blockedPlanningAssetLabels = Array.from(/* @__PURE__ */ new Set([
+    ...planningMissingRequiredAssets,
+    ...planningAssetDetails.filter((asset) => asset.status === "blocked").map((asset) => asset.label || asset.key).filter(Boolean)
+  ]));
+  const readyPlanningAssetCount = planningAssetDetails.filter((asset) => asset.status === "passed").length;
+  const characterDossierCount = Math.max(0, Number(input.characterDossierCount || 0));
+  const characterDossierGaps = Array.isArray(input.characterDossierGaps) ? input.characterDossierGaps : [];
+  const memoryRecallRows = Math.max(0, Number(input.memoryRecallRows || 0));
+  const memoryLag = Math.max(0, Number(input.memoryLag || 0));
+  const contextBudgetPercent = Math.max(0, Number(input.contextBudgetPercent || 0));
+  const consensusGate = summarizeGate(String(input.consensusText || "").trim() ? [] : [critical(
+    "core_consensus_missing",
+    "\u7F3A\u5C11\u53EF\u8FFD\u8E2A\u7684\u6838\u5FC3\u521B\u4F5C\u5171\u8BC6\u3002",
+    "\u5148\u5B8C\u6210\u6838\u5FC3\u521B\u610F\u3001\u8BFB\u8005\u627F\u8BFA\u3001\u4E3B\u89D2\u538B\u529B\u548C\u4E16\u754C\u89C4\u5219\u7684\u7EDF\u4E00\u8BA8\u8BBA\uFF0C\u5E76\u5199\u5165 consensus\u3002"
+  )]);
+  const planningGate = summarizeGate(readyPlanningAssetCount >= planningRequiredTotal && blockedPlanningAssetLabels.length === 0 ? [] : planningRequiredAssetCount > 0 || planningArtifactCount > 0 ? [critical(
+    "story_planning_assets_incomplete",
+    `\u524D\u7F6E\u6545\u4E8B\u8D44\u4EA7\u5C1A\u672A\u5B8C\u6574\uFF0C\u7F3A\u5C11\u6216\u4E0D\u53EF\u6267\u884C\uFF1A${blockedPlanningAssetLabels.join("\u3001") || "\u6838\u5FC3\u6545\u4E8B\u8D44\u4EA7"}\u3002`,
+    "\u8865\u9F50 world-matrix\u3001plot-architecture\u3001story-bible\u3001volume-strategy\u3001foreshadowing-ledger\u3001character-dynamics\u3001\u5BF9\u5E94 JSON \u5951\u7EA6\u548C writing-plan \u540E\u518D\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002"
+  )] : [critical(
+    "story_planning_assets_sparse",
+    "\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u6545\u4E8B\u5723\u7ECF\u5C1A\u672A\u751F\u6210\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u5148\u751F\u6210\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u3001\u7ED3\u6784\u5316 JSON \u5951\u7EA6\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\uFF0C\u518D\u62C6\u7AE0\u8282\u5199\u6B63\u6587\u3002"
+  )]);
+  const storyFoundationApprovalGate = summarizeGate(
+    !input.storyFoundationApproved ? [critical(
+      "story_foundation_approval_missing",
+      "\u6545\u4E8B\u57FA\u5EFA\u5C1A\u672A\u7531\u7528\u6237\u786E\u8BA4\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+      "\u5148\u8865\u9F50\u5E76\u5BA1\u9605\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u5199\u4F5C\u8BA1\u5212\uFF0C\u786E\u8BA4\u53EF\u6267\u884C\u540E\u518D\u89E3\u9501\u6B63\u6587\u751F\u4EA7\u3002"
+    )] : input.storyFoundationApprovalFingerprint && input.storyFoundationAssetFingerprint && input.storyFoundationApprovalFingerprint !== input.storyFoundationAssetFingerprint ? [critical(
+      "story_foundation_approval_stale",
+      "\u6545\u4E8B\u57FA\u5EFA\u5DF2\u88AB\u4FEE\u6539\uFF0C\u65E7\u786E\u8BA4\u5DF2\u5931\u6548\u3002",
+      "\u91CD\u65B0\u5BA1\u9605\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u3001\u4EBA\u7269\u5173\u7CFB\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\uFF0C\u5E76\u518D\u6B21\u786E\u8BA4\u3002"
+    )] : []
+  );
+  const characterGate = summarizeGate(characterDossierCount <= 0 ? [critical(
+    "character_dossiers_missing",
+    "\u7F3A\u5C11\u53EF\u6267\u884C\u4EBA\u7269\u6863\u6848\u548C\u4EBA\u7269\u5173\u7CFB\u3002",
+    "\u4E3A\u4E3B\u89D2\u3001\u5BF9\u6297\u529B\u91CF\u548C\u5173\u952E\u5173\u7CFB\u4EBA\u7269\u8865\u9F50\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5173\u7CFB\u72B6\u6001\u548C\u53D8\u5316\u8F68\u8FF9\u3002"
+  )] : characterDossierGaps.length > 0 ? [warning(
+    "character_dossiers_incomplete",
+    "\u4EBA\u7269\u6863\u6848\u4ECD\u6709\u5173\u952E\u5B57\u6BB5\u7F3A\u53E3\u3002",
+    "\u8865\u9F50\u4EBA\u7269\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u548C\u5173\u7CFB\u53D8\u5316\uFF0C\u907F\u514D\u6B63\u6587\u4EBA\u7269\u6241\u5E73\u5316\u3002"
+  )] : []);
+  const blueprintGate = summarizeGate(totalChapters > 0 && blueprintCount >= totalChapters ? [] : blueprintCount > 0 ? [critical(
+    "chapter_blueprints_partial",
+    "\u7AE0\u8282\u84DD\u56FE\u5C1A\u672A\u8986\u76D6\u5168\u4E66\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u7EE7\u7EED\u751F\u6210\u5269\u4F59\u7AE0\u8282\u84DD\u56FE\uFF0C\u786E\u4FDD\u6BCF\u7AE0\u90FD\u6709\u56E0\u679C\u76EE\u6807\u3001\u573A\u666F\u5361\u3001\u4F0F\u7B14\u64CD\u4F5C\u548C\u4EA4\u68D2\u72B6\u6001\u3002"
+  )] : [critical(
+    "chapter_blueprints_missing",
+    "\u7F3A\u5C11\u7AE0\u8282\u84DD\u56FE\uFF0C\u4E0D\u80FD\u7A33\u5B9A\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002",
+    "\u5148\u6309\u6545\u4E8B\u5723\u7ECF\u62C6\u51FA\u7AE0\u8282\u6267\u884C\u5408\u540C\uFF0C\u800C\u4E0D\u662F\u76F4\u63A5\u8BA9\u6A21\u578B\u5199\u6B63\u6587\u3002"
+  )]);
+  const styleGate = input.styleGate || summarizeGate([critical(
+    "style_gate_missing",
+    "\u7F3A\u5C11 Style Contract Freeze Gate \u7ED3\u679C\u3002",
+    "\u5148\u8FD0\u884C Style Evolution Engine\uFF0C\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u540E\u518D\u8FDB\u5165\u6B63\u6587\u751F\u4EA7\u3002"
+  )]);
+  const memoryGate = summarizeGate(memoryRecallRows > 0 && memoryLag <= 1 ? [] : [warning(
+    "memory_recall_sparse",
+    "\u8BB0\u5FC6/RAG \u53EF\u53EC\u56DE\u5185\u5BB9\u4E0D\u8DB3\u3002",
+    "\u91CD\u65B0\u7D22\u5F15\u5171\u8BC6\u3001\u4EBA\u7269\u6863\u6848\u3001\u89C4\u5212\u548C\u5DF2\u5B8C\u6210\u7AE0\u8282\uFF0C\u786E\u4FDD\u540E\u7EED\u7AE0\u8282\u80FD\u627F\u63A5\u4E8B\u5B9E\u4E0E\u4F0F\u7B14\u3002"
+  )]);
+  const contextGate = summarizeGate(input.contextOverBudget || contextBudgetPercent >= 90 ? [warning(
+    "context_budget_pressure",
+    "\u4E0A\u4E0B\u6587\u9884\u7B97\u63A5\u8FD1\u6216\u8D85\u8FC7\u5B89\u5168\u8303\u56F4\u3002",
+    "\u538B\u7F29\u5171\u8BC6\u3001\u62C6\u5206\u7AE0\u8282\u573A\u666F\u8C03\u7528\uFF0C\u4FDD\u7559\u5F53\u524D\u573A\u666F\u5FC5\u9700\u4E8B\u5B9E\uFF0C\u907F\u514D\u4E00\u6B21\u8BF7\u6C42\u585E\u5165\u8FC7\u591A\u8D44\u6599\u3002"
+  )] : []);
+  const itemInputs = [
+    {
+      key: "core_consensus",
+      label: "\u6838\u5FC3\u5171\u8BC6",
+      gate: consensusGate,
+      passedDetail: "\u5DF2\u6709\u53EF\u8FFD\u8E2A\u5171\u8BC6",
+      blockedDetail: "\u7F3A\u5C11\u521B\u4F5C\u5171\u8BC6"
+    },
+    {
+      key: "story_planning",
+      label: "\u4E16\u754C/\u4E3B\u7EBF",
+      gate: planningGate,
+      passedDetail: `${readyPlanningAssetCount}/${planningRequiredTotal} \u4E2A\u6838\u5FC3\u8D44\u4EA7`,
+      blockedDetail: "\u7F3A\u5C11\u4E16\u754C\u89C2\u3001\u4E3B\u7EBF\u548C\u6545\u4E8B\u5723\u7ECF",
+      warningDetail: `${readyPlanningAssetCount}/${planningRequiredTotal} \u4E2A\u6838\u5FC3\u8D44\u4EA7\uFF0C${planningArtifactCount} \u4E2A\u89C4\u5212\u4EA7\u7269`
+    },
+    {
+      key: "character_dynamics",
+      label: "\u4EBA\u7269\u5173\u7CFB",
+      gate: characterGate,
+      passedDetail: `${characterDossierCount} \u4E2A\u6863\u6848`,
+      blockedDetail: "\u7F3A\u5C11\u4EBA\u7269\u6863\u6848",
+      warningDetail: `${characterDossierCount} \u4E2A\u6863\u6848\uFF0C${characterDossierGaps.length} \u4E2A\u7F3A\u53E3`
+    },
+    {
+      key: "story_foundation_approval",
+      label: "\u57FA\u5EFA\u786E\u8BA4",
+      gate: storyFoundationApprovalGate,
+      passedDetail: input.storyFoundationApprovedAt ? `\u5DF2\u786E\u8BA4 ${input.storyFoundationApprovedAt}` : "\u7528\u6237\u5DF2\u786E\u8BA4",
+      blockedDetail: "\u9700\u8981\u7528\u6237\u786E\u8BA4\u6545\u4E8B\u57FA\u5EFA"
+    },
+    {
+      key: "chapter_blueprints",
+      label: "\u7AE0\u8282\u84DD\u56FE",
+      gate: blueprintGate,
+      passedDetail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`,
+      blockedDetail: "\u7F3A\u5C11\u7AE0\u8282\u6267\u884C\u5408\u540C",
+      warningDetail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+    },
+    {
+      key: "style_approval",
+      label: "Style Freeze",
+      gate: styleGate,
+      passedDetail: "\u5DF2\u51BB\u7ED3\u5168\u4E66\u5199\u6CD5\u5408\u540C",
+      blockedDetail: "\u9700\u8981\u5B8C\u6210 Loop \u5E76\u51BB\u7ED3 style contract"
+    },
+    {
+      key: "memory_recall",
+      label: "\u8BB0\u5FC6/RAG",
+      gate: memoryGate,
+      passedDetail: `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE`,
+      blockedDetail: "\u7F3A\u5C11\u53EF\u53EC\u56DE\u8BB0\u5FC6",
+      warningDetail: `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE\uFF0C\u6EDE\u540E ${memoryLag}`
+    },
+    {
+      key: "context_budget",
+      label: "\u4E0A\u4E0B\u6587\u9884\u7B97",
+      gate: contextGate,
+      passedDetail: `${contextBudgetPercent}%`,
+      blockedDetail: "\u4E0A\u4E0B\u6587\u8FC7\u8F7D",
+      warningDetail: `${contextBudgetPercent}%`
+    }
+  ];
+  const items = itemInputs.map(readinessItem);
+  const characterAssetDetails = Array.isArray(input.characterAssetDetails) && input.characterAssetDetails.length ? input.characterAssetDetails : [
+    {
+      key: "character_dossiers",
+      label: "\u4EBA\u7269\u6863\u6848",
+      path: ".ai-novel/memory/characters/dossiers.json",
+      status: characterGate.status,
+      detail: characterGate.status === "passed" ? `${characterDossierCount} \u4E2A\u6863\u6848` : characterGate.blockedReason || "\u5F85\u8865\u9F50"
+    }
+  ];
+  const executionAssetDetails = Array.isArray(input.executionAssetDetails) && input.executionAssetDetails.length ? input.executionAssetDetails : [
+    {
+      key: "chapter_blueprints",
+      label: "\u7AE0\u8282\u84DD\u56FE",
+      path: ".ai-novel/chapter-blueprints/",
+      status: blueprintGate.status,
+      detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+    },
+    {
+      key: "style_contract",
+      label: "\u5199\u6CD5\u5408\u540C",
+      path: ".ai-novel/style/evolution/style-contract.json",
+      status: styleGate.status,
+      detail: styleGate.status === "passed" ? "\u5DF2\u51BB\u7ED3" : styleGate.blockedReason || "\u5F85\u786E\u8BA4"
+    }
+  ];
+  const groups = [
+    readinessGroup({
+      key: "story_foundation",
+      label: "\u6545\u4E8B\u57FA\u5EFA",
+      assets: [
+        {
+          key: "core_consensus",
+          label: "\u6838\u5FC3\u5171\u8BC6",
+          path: ".ai-novel/prompts/global-consensus.md",
+          status: consensusGate.status,
+          detail: consensusGate.status === "passed" ? "\u5DF2\u751F\u6210" : consensusGate.blockedReason || "\u7F3A\u5931"
+        },
+        ...planningAssetDetails,
+        {
+          key: "story_foundation_approval",
+          label: "\u7528\u6237\u786E\u8BA4",
+          path: input.storyFoundationApprovalPath || ".ai-novel/plans/story-foundation-approval.json",
+          status: storyFoundationApprovalGate.status,
+          detail: storyFoundationApprovalGate.status === "passed" ? input.storyFoundationApprovedAt ? `\u5DF2\u786E\u8BA4 ${input.storyFoundationApprovedAt}` : "\u5DF2\u786E\u8BA4" : storyFoundationApprovalGate.blockedReason || "\u5F85\u786E\u8BA4"
+        }
+      ],
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u6545\u4E8B\u57FA\u5EFA"
+    }),
+    readinessGroup({
+      key: "character_system",
+      label: "\u4EBA\u7269\u7CFB\u7EDF",
+      assets: characterAssetDetails,
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u4EBA\u7269\u7CFB\u7EDF"
+    }),
+    readinessGroup({
+      key: "chapter_execution",
+      label: "\u6B63\u6587\u6267\u884C",
+      assets: [
+        ...executionAssetDetails,
+        {
+          key: "memory_recall",
+          label: "\u8BB0\u5FC6/RAG",
+          path: ".ai-novel/memory/",
+          status: memoryGate.status,
+          detail: memoryGate.status === "passed" ? `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE` : `${memoryRecallRows} \u6761\u53EF\u53EC\u56DE\uFF0C\u6EDE\u540E ${memoryLag}`
+        },
+        {
+          key: "context_budget",
+          label: "\u4E0A\u4E0B\u6587\u9884\u7B97",
+          path: ".ai-novel/context/",
+          status: contextGate.status,
+          detail: `${contextBudgetPercent}%`
+        }
+      ],
+      emptySummary: "\u5C1A\u672A\u68C0\u67E5\u6B63\u6587\u6267\u884C\u6761\u4EF6"
+    })
+  ];
+  const issues = itemInputs.flatMap((item) => item.gate.issues);
+  const blocked = items.filter((item) => item.status === "blocked").length;
+  const warningCount = items.filter((item) => item.status === "warning").length;
+  const passed = items.filter((item) => item.status === "passed").length;
+  const score = Math.round((passed + warningCount * 0.5) / Math.max(1, items.length) * 100);
+  const gate = summarizeGate(issues);
+  return {
+    status: gate.status,
+    canProceed: gate.canProceed,
+    score,
+    summary: blocked > 0 ? `${blocked} \u9879\u963B\u585E\u6B63\u6587\u751F\u4EA7` : warningCount > 0 ? `${warningCount} \u9879\u5EFA\u8BAE\u8865\u5F3A` : "\u6B63\u6587\u751F\u4EA7\u51C6\u5907\u5B8C\u6210",
+    blockedReason: gate.blockedReason,
+    items,
+    groups,
+    issues
+  };
+}
 
 // src/production-style-evolution.ts
-var import_promises3 = __toESM(require("fs/promises"), 1);
-var import_node_path5 = __toESM(require("path"), 1);
+import fs from "fs/promises";
+import path2 from "path";
 var STYLE_EVOLUTION_DIR = ".ai-novel/style/evolution";
 var STYLE_SAMPLES_DIR = ".ai-novel/style/evolution/samples";
 var STYLE_SEED_PATH = ".ai-novel/style/evolution/style-seed.md";
@@ -5010,8 +1566,210 @@ function styleGenerationVerificationFromEntry(entry) {
     checkedAt: entry.createdAt
   });
 }
+function hasStructuredStyleEvaluation(entry) {
+  return Boolean(entry?.evaluation || entry?.verification);
+}
+function isVerifiedStyleCandidate(entry) {
+  if (!entry) return false;
+  if (!hasStructuredStyleEvaluation(entry)) return false;
+  return styleGenerationVerificationFromEntry(entry).status === "passed";
+}
+function normalizeStyleFreezerVerdict(value) {
+  if (value === "ready" || value === "approve" || value === "freeze") return "ready";
+  if (value === "block" || value === "blocked" || value === "reject") return "block";
+  return "continue";
+}
 function styleEntryFreezerGate(entry) {
   return entry?.freezer || null;
+}
+function isStyleCandidateLoopReady(entry, contract) {
+  if (!entry) return false;
+  const version = Number(entry.version || 0);
+  const loop = contract.loop || {};
+  const readyVersion = Number(loop.readyVersion || 0);
+  const stableVersion = Number(loop.stableVersion || 0);
+  const freezerVerdict = styleEntryFreezerGate(entry)?.verdict;
+  return Boolean(
+    entry.readyForApproval || readyVersion && readyVersion === version || stableVersion && stableVersion === version || freezerVerdict === "ready"
+  );
+}
+function buildReadyReasons(evaluation, retryPolicy, totalRounds, freezer) {
+  const reasons = [];
+  const overall = Number(evaluation?.scores?.overall || 0);
+  if (overall >= Number(retryPolicy.approvalScoreThreshold || 8.6)) {
+    reasons.push(`\u7EFC\u5408\u8BC4\u5206\u8FBE\u5230 ${overall.toFixed(1)}\u3002`);
+  }
+  if ((evaluation?.forbiddenHits?.length || 0) <= Math.max(0, Number(retryPolicy.maxForbiddenHitCount || 1))) {
+    reasons.push("\u7981\u5FCC\u547D\u4E2D\u5904\u4E8E\u53EF\u51BB\u7ED3\u8303\u56F4\u3002");
+  }
+  if (totalRounds >= Math.max(1, Number(retryPolicy.approvalMinRounds || 2))) {
+    reasons.push(`\u5DF2\u5B8C\u6210\u81F3\u5C11 ${totalRounds} \u8F6E\u6709\u6548\u8FED\u4EE3\u3002`);
+  }
+  if (evaluation?.verdict === "approve") {
+    reasons.push("\u8BC4\u4F30\u5668\u5DF2\u5224\u5B9A\u5F53\u524D\u6837\u6BB5\u53EF\u8FDB\u5165\u7528\u6237\u786E\u8BA4\u3002");
+  }
+  const verification = buildStyleGenerationVerification({ evaluation });
+  if (verification.status === "passed") {
+    reasons.push("Generation Verification Gate \u5DF2\u901A\u8FC7\u3002");
+  }
+  if (freezer?.verdict === "ready") {
+    reasons.push("Style Contract Freezer \u5DF2\u5224\u5B9A\u53EF\u4EE5\u8FDB\u5165\u6574\u4E66\u5199\u6CD5\u786E\u8BA4\u3002");
+  }
+  return reasons;
+}
+var EXPLANATION_PATTERNS = [
+  { pattern: /解释创作意图|创作意图|本章将|这一章/gu, label: "\u89E3\u91CA\u521B\u4F5C\u610F\u56FE" },
+  { pattern: /总结式|总而言之|归根结底|说到底|最终他明白/gu, label: "\u603B\u7ED3\u5F0F\u5347\u534E" },
+  { pattern: /未来会|事情很严重|命运齿轮|危险才刚开始/gu, label: "\u6A21\u677F\u5316\u60AC\u5FF5" },
+  { pattern: /他知道|她知道|他明白|她明白|意味着/gu, label: "\u89E3\u91CA\u6027\u5224\u65AD\u8FC7\u591A" }
+];
+function clampScore(value) {
+  return Math.max(0, Math.min(10, Math.round(value * 10) / 10));
+}
+function averageSentenceLength(sample) {
+  const segments = sample.split(/[。！？!?]/u).map((part) => part.trim()).filter(Boolean);
+  if (!segments.length) return 0;
+  return segments.reduce((sum, segment) => sum + segment.length, 0) / segments.length;
+}
+function extractStyleDirectionTokens(text) {
+  const tokens = /* @__PURE__ */ new Set();
+  for (const token of ["\u514B\u5236", "\u51B7\u611F", "\u767D\u63CF", "\u70ED\u8840", "\u60AC\u7591", "\u538B\u8FEB", "\u52A8\u4F5C", "\u5BF9\u767D", "\u7559\u767D", "\u53E4\u98CE", "\u8F7B\u677E", "\u5E7D\u9ED8"]) {
+    if (text.includes(token)) tokens.add(token);
+  }
+  return [...tokens];
+}
+function summarizeStrengths(sample, dialogueCount, sensoryCount) {
+  const strengths = [];
+  if (dialogueCount > 0) strengths.push("\u6837\u6BB5\u91CC\u6709\u660E\u786E\u5BF9\u767D\u538B\u529B\uFF0C\u4E0D\u662F\u7EAF\u8BF4\u660E\u6BB5\u3002");
+  if (sensoryCount >= 2) strengths.push("\u611F\u5B98\u548C\u7269\u4EF6\u7EC6\u8282\u8DB3\u591F\uFF0C\u753B\u9762\u843D\u70B9\u6BD4\u8F83\u5177\u4F53\u3002");
+  if (averageSentenceLength(sample) <= 24) strengths.push("\u53E5\u5F0F\u504F\u77ED\uFF0C\u8282\u594F\u63A5\u8FD1\u7F51\u6587\u6B63\u6587\u53EF\u8BFB\u533A\u95F4\u3002");
+  if (!strengths.length) strengths.push("\u6837\u6BB5\u81F3\u5C11\u4FDD\u6301\u4E86\u6B63\u6587\u8F93\u51FA\u5F62\u6001\uFF0C\u6CA1\u6709\u9000\u56DE\u89E3\u91CA\u6216\u5927\u7EB2\u53E3\u543B\u3002");
+  return strengths;
+}
+function summarizeDeviations(sample, userStylePrompt, forbiddenHits, dialogueCount, avgSentenceLength) {
+  const deviations = [];
+  const requestedTokens = extractStyleDirectionTokens(userStylePrompt);
+  if (requestedTokens.includes("\u5BF9\u767D") && dialogueCount === 0) {
+    deviations.push("\u7528\u6237\u8981\u6C42\u5173\u6CE8\u5BF9\u767D\u8D28\u611F\uFF0C\u4F46\u5F53\u524D\u6837\u6BB5\u51E0\u4E4E\u6CA1\u6709\u5BF9\u767D\u3002");
+  }
+  if (requestedTokens.includes("\u52A8\u4F5C") && !/[抬推按握退停看折掀靠走站拢合抽]/u.test(sample)) {
+    deviations.push("\u7528\u6237\u5F3A\u8C03\u52A8\u4F5C\u63A8\u8FDB\uFF0C\u4F46\u5F53\u524D\u52A8\u4F5C\u5BC6\u5EA6\u8FD8\u4E0D\u591F\u3002");
+  }
+  if (avgSentenceLength > 28) {
+    deviations.push("\u53E5\u5B50\u504F\u957F\uFF0C\u89E3\u91CA\u6BB5\u98CE\u9669\u504F\u9AD8\uFF0C\u8282\u594F\u8FD8\u4E0D\u591F\u5229\u843D\u3002");
+  }
+  if (forbiddenHits.length > 0) {
+    deviations.push(`\u547D\u4E2D\u7981\u7528\u98CE\u9669\uFF1A${forbiddenHits.join("\u3001")}\u3002`);
+  }
+  if (!deviations.length && requestedTokens.length === 0) {
+    deviations.push("\u7528\u6237\u98CE\u683C\u65B9\u5411\u4ECD\u7136\u6BD4\u8F83\u62BD\u8C61\uFF0C\u540E\u7EED\u53EF\u4EE5\u7EE7\u7EED\u6536\u7D27\u8981\u6C42\u3002");
+  }
+  return deviations;
+}
+function summarizeNextFocus(deviations, forbiddenHits, iterationFeedback, aigc) {
+  const nextFocus = [];
+  if (forbiddenHits.length > 0) {
+    nextFocus.push("\u5148\u6E05\u6389\u89E3\u91CA\u8154\u3001\u603B\u7ED3\u8154\u548C\u6A21\u677F\u5316\u60AC\u5FF5\u3002");
+  }
+  if (aigc?.status === "blocked") {
+    nextFocus.push("\u538B\u4F4E AI \u8154\u548C\u6A21\u677F\u8154\uFF0C\u6539\u7528\u66F4\u5177\u4F53\u7684\u52A8\u4F5C\u3001\u7269\u4EF6\u3001\u505C\u987F\u4E0E\u5173\u7CFB\u538B\u529B\u627F\u8F7D\u4FE1\u606F\u3002");
+  }
+  if (deviations.some((item) => item.includes("\u5BF9\u767D"))) {
+    nextFocus.push("\u7F29\u77ED\u5BF9\u767D\uFF0C\u8BA9\u5173\u7CFB\u8BD5\u63A2\u843D\u5728\u4E00\u53E5\u8BDD\u548C\u505C\u987F\u91CC\u3002");
+  }
+  if (deviations.some((item) => item.includes("\u52A8\u4F5C\u5BC6\u5EA6"))) {
+    nextFocus.push("\u589E\u52A0\u52A8\u4F5C\u548C\u7269\u4EF6\u63A8\u52A8\uFF0C\u800C\u4E0D\u662F\u62BD\u8C61\u5FC3\u7406\u8BF4\u660E\u3002");
+  }
+  if (deviations.some((item) => item.includes("\u53E5\u5B50\u504F\u957F"))) {
+    nextFocus.push("\u538B\u77ED\u53E5\u5B50\uFF0C\u51CF\u5C11\u89E3\u91CA\u6027\u4E2D\u957F\u53E5\u3002");
+  }
+  if (iterationFeedback.trim()) {
+    nextFocus.push(`\u4F18\u5148\u5438\u6536\u7528\u6237\u53CD\u9988\uFF1A${iterationFeedback.trim()}`);
+  }
+  if (!nextFocus.length) {
+    nextFocus.push("\u7EE7\u7EED\u5FAE\u8C03\u58F0\u97F3\u7A33\u5B9A\u5EA6\uFF0C\u51C6\u5907\u8FDB\u5165\u53EF\u786E\u8BA4\u7248\u672C\u3002");
+  }
+  return nextFocus;
+}
+function evaluateStyleEvolutionCandidate(input) {
+  const sample = normalizeText(input.sample);
+  const prompt = normalizeText(input.prompt);
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  const avgLength = averageSentenceLength(sample);
+  const dialogueCount = (sample.match(/[“"'「『]/gu) || []).length + (sample.match(/：/gu) || []).length;
+  const sensoryCount = (sample.match(/[雨灯门声风血冷热湿痛光影]/gu) || []).length;
+  const forbiddenHits = EXPLANATION_PATTERNS.filter((item) => item.pattern.test(sample)).map((item) => item.label);
+  const requirementTokens = extractStyleDirectionTokens(`${prompt}
+${userStylePrompt}
+${iterationFeedback}`);
+  const requirementMatches = requirementTokens.filter((token) => sample.includes(token)).length;
+  const narrativeVoice = clampScore(6.6 + Math.min(1.8, requirementMatches * 0.4) - forbiddenHits.length * 0.5);
+  const sentenceRhythm = clampScore(avgLength > 28 ? 5.9 : avgLength > 22 ? 7.3 : 8.4);
+  const dialogueTexture = clampScore(dialogueCount > 0 ? 7.8 : 5.6);
+  const informationDensity = clampScore(sensoryCount >= 4 ? 8.1 : sensoryCount >= 2 ? 7.2 : 5.8);
+  const emotionalTension = clampScore(/[停退缩压盯扣攥问没有没有接]/u.test(sample) ? 8.1 : 6.2);
+  const readability = clampScore(sample.length >= 120 && sample.length <= 950 ? 8.2 : 6.4);
+  const requirementAlignment = clampScore(6.2 + Math.min(2.4, requirementMatches * 0.6) - (iterationFeedback && !sample.includes(iterationFeedback.slice(0, 2)) ? 0.4 : 0));
+  const forbiddenPatternRisk = clampScore(forbiddenHits.length === 0 ? 1.5 : Math.min(9.5, forbiddenHits.length * 2.2 + 2));
+  const aigcPenalty = input.aigc?.status === "blocked" ? Math.min(1.6, 0.5 + input.aigc.highRiskCount * 0.25 + (typeof input.aigc.score === "number" ? Math.max(0, input.aigc.score - 0.78) : 0)) : 0;
+  const overall = clampScore(
+    (narrativeVoice + sentenceRhythm + dialogueTexture + informationDensity + emotionalTension + readability + requirementAlignment + (10 - forbiddenPatternRisk)) / 8 - aigcPenalty
+  );
+  const strengths = summarizeStrengths(sample, dialogueCount, sensoryCount);
+  const deviations = summarizeDeviations(sample, userStylePrompt, forbiddenHits, dialogueCount, avgLength);
+  if (input.aigc?.status === "blocked") {
+    deviations.push(`AIGC \u68C0\u6D4B\u63D0\u793A\u5F53\u524D\u6837\u6BB5\u4ECD\u6709 ${input.aigc.highRiskCount} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF0CAI \u8154/\u6A21\u677F\u8154\u98CE\u9669\u504F\u9AD8\u3002`);
+  }
+  const nextFocus = summarizeNextFocus(deviations, forbiddenHits, iterationFeedback, input.aigc);
+  const verdict = forbiddenHits.length > 0 || input.aigc?.status === "blocked" || overall < 7.2 ? "retry" : overall >= 8.6 && deviations.length <= 1 ? "approve" : "candidate";
+  return {
+    source: "heuristic",
+    verdict,
+    summary: verdict === "approve" ? "\u6837\u6BB5\u5DF2\u63A5\u8FD1\u53EF\u51BB\u7ED3\u7684\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\uFF0C\u53EF\u4EE5\u8FDB\u5165\u7528\u6237\u786E\u8BA4\u3002" : verdict === "candidate" ? "\u6837\u6BB5\u5DF2\u7ECF\u6709\u53EF\u7528\u57FA\u5E95\uFF0C\u4F46\u8FD8\u9700\u8981\u4E00\u8F6E\u5B9A\u5411\u6536\u7D27\u3002" : "\u6837\u6BB5\u4ECD\u9700\u7EE7\u7EED\u8FED\u4EE3\uFF0C\u6682\u4E0D\u9002\u5408\u4F5C\u4E3A\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\u3002",
+    scores: {
+      narrativeVoice,
+      sentenceRhythm,
+      dialogueTexture,
+      informationDensity,
+      emotionalTension,
+      readability,
+      requirementAlignment,
+      forbiddenPatternRisk,
+      overall
+    },
+    aigc: input.aigc,
+    strengths,
+    deviations,
+    forbiddenHits,
+    nextFocus
+  };
+}
+function normalizeStyleAigcSignal(result, diagnostics = {}) {
+  const threshold = typeof result.threshold === "number" ? result.threshold : null;
+  const highRiskPreviews = Array.isArray(result.highRiskSegments) ? result.highRiskSegments.slice(0, 3).map((segment) => segment.segment.text.replace(/\s+/gu, " ").slice(0, 80)).filter(Boolean) : [];
+  const diagnosticLines = [
+    `provider=${result.provider || "unknown"}`,
+    typeof diagnostics.urlConfigured === "boolean" ? `urlConfigured=${diagnostics.urlConfigured ? "yes" : "no"}` : "",
+    diagnostics.context ? `context=${diagnostics.context}` : "",
+    diagnostics.error ? `error=${diagnostics.error instanceof Error ? diagnostics.error.message : String(diagnostics.error)}` : ""
+  ].filter(Boolean);
+  const reason = [
+    String(result.reason || "").trim() || "AIGC detection completed.",
+    diagnosticLines.length ? `Detector diagnostics: ${diagnosticLines.join(", ")}.` : ""
+  ].filter(Boolean).join(" ");
+  return {
+    enabled: true,
+    status: !result.ok ? "unavailable" : result.highRiskSegments.length > 0 || typeof result.score === "number" && typeof threshold === "number" && result.score >= threshold ? "blocked" : "passed",
+    provider: result.provider,
+    urlConfigured: diagnostics.urlConfigured,
+    diagnostics: diagnosticLines,
+    score: typeof result.score === "number" ? result.score : null,
+    threshold,
+    highRiskCount: Array.isArray(result.highRiskSegments) ? result.highRiskSegments.length : 0,
+    reason,
+    highRiskPreviews
+  };
 }
 function buildStyleGenerationVerification(input) {
   const evaluation = input.evaluation;
@@ -5058,6 +1816,26 @@ function buildStyleGenerationVerification(input) {
     highRiskPreviews: Array.isArray(aigc?.highRiskPreviews) ? aigc.highRiskPreviews.filter(Boolean) : [],
     version: input.version,
     checkedAt: input.checkedAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function buildStyleEvolutionRefinement(input) {
+  const prompt = normalizeText(input.prompt);
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  const adjustments = input.evaluation.nextFocus.map((item) => item.replace(/。$/u, ""));
+  const contractAdjustments = input.evaluation.deviations.filter(Boolean).slice(0, 3).map((item) => item.replace(/。$/u, ""));
+  const nextPrompt = [
+    prompt,
+    userStylePrompt ? `\u7EE7\u7EED\u8D34\u5408\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A${userStylePrompt}` : "",
+    iterationFeedback ? `\u5FC5\u987B\u5438\u6536\u7528\u6237\u53CD\u9988\uFF1A${iterationFeedback}` : "",
+    ...adjustments.map((item) => `- ${item}`)
+  ].filter(Boolean).join("\n");
+  return {
+    source: "heuristic",
+    summary: input.evaluation.verdict === "approve" ? "\u4FDD\u7559\u5F53\u524D\u58F0\u97F3\uFF0C\u53EA\u505A\u8F7B\u5FAE\u6536\u675F\uFF0C\u51C6\u5907\u7ED9\u7528\u6237\u786E\u8BA4\u3002" : "\u4E0B\u4E00\u8F6E prompt \u5E94\u91CD\u70B9\u4FEE\u590D\u504F\u5DEE\u9879\uFF0C\u800C\u4E0D\u662F\u6574\u4F53\u63A8\u7FFB\u91CD\u6765\u3002",
+    promptAdjustments: adjustments.length ? adjustments : ["\u4FDD\u6301\u5DF2\u6709\u58F0\u97F3\uFF0C\u7EE7\u7EED\u6536\u7D27\u7A33\u5B9A\u5EA6\u3002"],
+    contractAdjustments: contractAdjustments.length ? contractAdjustments : ["\u5199\u6CD5\u5408\u540C\u53EF\u4EE5\u5F00\u59CB\u56FA\u5316 voice\u3001\u8282\u594F\u548C\u7981\u7528\u6A21\u5F0F\u3002"],
+    nextPrompt
   };
 }
 function defaultRetryPolicy() {
@@ -5144,6 +1922,18 @@ function buildStableReasons(input) {
     reasons.push(`\u7A33\u5B9A\u7A97\u53E3\u5185\u7D2F\u8BA1\u65B0\u589E ${tighteningTotal} \u6761\u5408\u540C\u6536\u7D27\u5EFA\u8BAE\u3002`);
   }
   return reasons;
+}
+function computeReadyForApproval(input) {
+  const overall = Number(input.evaluation?.scores?.overall || 0);
+  const forbiddenHits = input.evaluation?.forbiddenHits?.length || 0;
+  const thresholdReached = overall >= Number(input.retryPolicy.approvalScoreThreshold || 8.6);
+  const roundsReached = input.totalRounds >= Math.max(1, Number(input.retryPolicy.approvalMinRounds || 2));
+  const forbiddenOk = forbiddenHits <= Math.max(0, Number(input.retryPolicy.maxForbiddenHitCount || 1));
+  const verification = buildStyleGenerationVerification({ evaluation: input.evaluation });
+  const verificationOk = verification.status === "passed";
+  const freezerReady = input.freezer?.verdict ? input.freezer.verdict === "ready" : true;
+  const stableReady = input.stable && thresholdReached && roundsReached && forbiddenOk;
+  return verificationOk && freezerReady && (input.evaluation?.verdict === "approve" || stableReady);
 }
 function isOpenStyleEvolutionEntry(entry, rejectedVersion) {
   if (entry.userDecision === "accepted") return false;
@@ -5458,11 +2248,161 @@ function deriveStyleLoopProtocol(contract) {
 }
 async function persistStyleFreezeLedger(projectRoot, contract) {
   const paths = absolutePaths(projectRoot);
-  await import_promises3.default.mkdir(import_node_path5.default.dirname(paths.freezeLedger), { recursive: true });
+  await fs.mkdir(path2.dirname(paths.freezeLedger), { recursive: true });
   const ledger = buildStyleFreezeLedger(contract);
-  await import_promises3.default.writeFile(paths.freezeLedger, `${JSON.stringify(ledger, null, 2)}
+  await fs.writeFile(paths.freezeLedger, `${JSON.stringify(ledger, null, 2)}
 `);
   return ledger;
+}
+function formatApprovedStyleRulebook(contract) {
+  const style = contract.styleContract;
+  if (!contract.approvedAt || !style) {
+    return "";
+  }
+  const dialogueRules = style.dialogueRules || [];
+  const descriptionRules = style.descriptionRules || [];
+  const emotionRules = style.emotionRules || [];
+  const pacingRules = style.pacingRules || [];
+  const povRules = style.povRules || [];
+  const openingRules = style.openingRules || [];
+  const endingHookRules = style.endingHookRules || [];
+  return [
+    "# Style Rulebook",
+    "",
+    "This asset is frozen from the approved Style Evolution contract and must be inherited by every chapter draft, review, and polish pass.",
+    "",
+    `Approved at: ${contract.approvedAt}`,
+    contract.approval?.approvedVersion ? `Approved version: v${contract.approval.approvedVersion}` : "",
+    contract.approval?.freezeSummary ? `Freeze summary: ${contract.approval.freezeSummary}` : "",
+    contract.verification?.summary ? `Verification summary: ${contract.verification.summary}` : "",
+    contract.verification?.status ? `Verification status: ${contract.verification.status}` : "",
+    typeof contract.verification?.score === "number" ? `AIGC verification score: ${contract.verification.score.toFixed(3)}` : "",
+    typeof contract.verification?.threshold === "number" ? `AIGC verification threshold: ${contract.verification.threshold.toFixed(3)}` : "",
+    contract.verification?.highRiskCount ? `High risk segments before freeze: ${contract.verification.highRiskCount}` : "",
+    "",
+    "## Voice",
+    style.voice || "- pending",
+    "",
+    "## Sentence Rhythm",
+    style.sentenceRhythm || "- pending",
+    "",
+    "## Dialogue Rules",
+    ...dialogueRules.length ? dialogueRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Description Rules",
+    ...descriptionRules.length ? descriptionRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Emotion Rules",
+    ...emotionRules.length ? emotionRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Pacing Rules",
+    ...pacingRules.length ? pacingRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## POV Rules",
+    ...povRules.length ? povRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Opening Rules",
+    ...openingRules.length ? openingRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Ending Hook Rules",
+    ...endingHookRules.length ? endingHookRules.map((rule) => `- ${rule}`) : ["- pending"],
+    "",
+    "## Retry Policy",
+    `- Approval threshold: ${Number(contract.retryPolicy?.approvalScoreThreshold || 8.6).toFixed(1)}`,
+    `- Approval min rounds: ${Math.max(1, Number(contract.retryPolicy?.approvalMinRounds || 2))}`,
+    `- Stability min rounds: ${Math.max(1, Number(contract.retryPolicy?.stabilityMinRounds || 2))}`,
+    `- Max forbidden hits: ${Math.max(0, Number(contract.retryPolicy?.maxForbiddenHitCount || 1))}`
+  ].filter(Boolean).join("\n");
+}
+function formatApprovedStyleReferences(contract) {
+  const style = contract.styleContract;
+  if (!contract.approvedAt || !style) {
+    return "";
+  }
+  const positiveExamples = style.positiveExamples || [];
+  const allowedDevices = style.allowedDevices || [];
+  return [
+    "# Style References",
+    "",
+    "These are the positive references frozen from the approved style loop. They are not to be copied mechanically, but they define the acceptable writing band for the whole book.",
+    "",
+    "## Positive Examples",
+    ...positiveExamples.length ? positiveExamples.map((example) => `- ${example}`) : ["- pending"],
+    "",
+    "## Allowed Devices",
+    ...allowedDevices.length ? allowedDevices.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Approved Sample Excerpt",
+    contract.approvedSample?.trim() || "- pending"
+  ].join("\n");
+}
+function formatApprovedStyleAntiPatterns(contract) {
+  const style = contract.styleContract;
+  if (!contract.approvedAt || !style) {
+    return "";
+  }
+  const forbiddenPatterns = [.../* @__PURE__ */ new Set([...style.forbiddenPatterns || [], ...contract.antiPatterns || []])];
+  const negativeExamples = style.negativeExamples || [];
+  const inheritedRules = contract.inheritance?.inheritedRules || [];
+  return [
+    "# Style Anti-Patterns",
+    "",
+    "These patterns are frozen as disallowed or high-risk writing moves for subsequent chapter production.",
+    "",
+    "## Forbidden Patterns",
+    ...forbiddenPatterns.length ? forbiddenPatterns.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Negative Examples",
+    ...negativeExamples.length ? negativeExamples.map((item) => `- ${item}`) : ["- pending"],
+    "",
+    "## Inheritance Rules",
+    ...inheritedRules.length ? inheritedRules.map((rule) => `- ${rule}`) : ["- pending"]
+  ].join("\n");
+}
+async function materializeApprovedStyleAssets(projectRoot, contract) {
+  if (!contract?.approvedAt || !contract.styleContract) {
+    return;
+  }
+  const styleDir = path2.join(projectRoot, ".ai-novel", "style");
+  await fs.mkdir(styleDir, { recursive: true });
+  const writes = [
+    [path2.join(styleDir, "rulebook.md"), formatApprovedStyleRulebook(contract)],
+    [path2.join(styleDir, "references.md"), formatApprovedStyleReferences(contract)],
+    [path2.join(styleDir, "anti-patterns.md"), formatApprovedStyleAntiPatterns(contract)]
+  ];
+  for (const [filePath, content] of writes) {
+    if (!content.trim()) continue;
+    await fs.writeFile(filePath, `${content.trimEnd()}
+`);
+  }
+}
+async function persistStyleEvolutionContractState(projectRoot, partial) {
+  const paths = absolutePaths(projectRoot);
+  const current = await readOptionalJson(paths.styleContract, {});
+  const next = {
+    ...current,
+    ...partial
+  };
+  next.retryPolicy = next.retryPolicy || current.retryPolicy || defaultRetryPolicy();
+  next.loop = deriveLoopState(next);
+  next.loopProtocol = deriveStyleLoopProtocol(next);
+  await fs.writeFile(paths.styleContract, `${JSON.stringify(next, null, 2)}
+`);
+  await persistStyleFreezeLedger(projectRoot, next);
+  return next;
+}
+async function persistStyleEvolutionRuntimeState(projectRoot, runtime) {
+  const current = await readOptionalJson(absolutePaths(projectRoot).styleContract, {});
+  return persistStyleEvolutionContractState(projectRoot, {
+    runtime: {
+      ...current.runtime,
+      ...runtime,
+      engine: "Style Evolution Engine",
+      runtime: "Prompt Loop Runtime",
+      gate: "Style Contract Freeze Gate",
+      verificationGate: "Generation Verification Gate"
+    }
+  });
 }
 function relativePaths() {
   return {
@@ -5482,18 +2422,106 @@ function relativePaths() {
 function absolutePaths(projectRoot) {
   const paths = relativePaths();
   return {
-    dir: import_node_path5.default.join(projectRoot, paths.dir),
-    samplesDir: import_node_path5.default.join(projectRoot, paths.samplesDir),
-    seedPrompt: import_node_path5.default.join(projectRoot, paths.seedPrompt),
-    userStylePrompt: import_node_path5.default.join(projectRoot, paths.userStylePrompt),
-    referenceText: import_node_path5.default.join(projectRoot, paths.referenceText),
-    history: import_node_path5.default.join(projectRoot, paths.history),
-    styleContract: import_node_path5.default.join(projectRoot, paths.styleContract),
-    approvedSample: import_node_path5.default.join(projectRoot, paths.approvedSample),
-    freezeLedger: import_node_path5.default.join(projectRoot, paths.freezeLedger),
-    loopRuntime: import_node_path5.default.join(projectRoot, paths.loopRuntime),
-    loopRuns: import_node_path5.default.join(projectRoot, paths.loopRuns)
+    dir: path2.join(projectRoot, paths.dir),
+    samplesDir: path2.join(projectRoot, paths.samplesDir),
+    seedPrompt: path2.join(projectRoot, paths.seedPrompt),
+    userStylePrompt: path2.join(projectRoot, paths.userStylePrompt),
+    referenceText: path2.join(projectRoot, paths.referenceText),
+    history: path2.join(projectRoot, paths.history),
+    styleContract: path2.join(projectRoot, paths.styleContract),
+    approvedSample: path2.join(projectRoot, paths.approvedSample),
+    freezeLedger: path2.join(projectRoot, paths.freezeLedger),
+    loopRuntime: path2.join(projectRoot, paths.loopRuntime),
+    loopRuns: path2.join(projectRoot, paths.loopRuns)
   };
+}
+function createLoopRunId() {
+  return `style_loop_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function createStyleLoopRuntimeRecord(input) {
+  const referenceWorks = normalizeStringArray(input.referenceWorks);
+  const desiredVibes = normalizeStringArray(input.desiredVibes);
+  const seedForbiddenPatterns = normalizeStringArray(input.seedForbiddenPatterns);
+  return {
+    version: 1,
+    runId: createLoopRunId(),
+    engine: "Style Evolution Engine",
+    runtime: "Prompt Loop Runtime",
+    gate: "Style Contract Freeze Gate",
+    verificationGate: "Generation Verification Gate",
+    status: "running",
+    startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    requestedIterations: Math.max(1, input.requestedIterations),
+    completedIterations: 0,
+    projectTitle: normalizeText(input.projectTitle) || void 0,
+    idea: normalizeText(input.idea) || void 0,
+    userStylePrompt: normalizeText(input.userStylePrompt) || void 0,
+    referenceText: normalizeText(input.referenceText) || void 0,
+    referenceWorks: referenceWorks.length ? referenceWorks : void 0,
+    desiredVibes: desiredVibes.length ? desiredVibes : void 0,
+    seedForbiddenPatterns: seedForbiddenPatterns.length ? seedForbiddenPatterns : void 0,
+    iterationFeedback: normalizeText(input.iterationFeedback) || void 0,
+    iterations: []
+  };
+}
+async function persistStyleLoopRuntime(projectRoot, runtime) {
+  const paths = absolutePaths(projectRoot);
+  await fs.mkdir(path2.dirname(paths.loopRuntime), { recursive: true });
+  await fs.writeFile(paths.loopRuntime, `${JSON.stringify(runtime, null, 2)}
+`);
+  return runtime;
+}
+async function appendStyleLoopRunLedger(projectRoot, runtime) {
+  const paths = absolutePaths(projectRoot);
+  await fs.mkdir(path2.dirname(paths.loopRuns), { recursive: true });
+  const record = {
+    recordedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    runId: runtime.runId,
+    status: runtime.status,
+    stopReason: runtime.stopReason,
+    startedAt: runtime.startedAt,
+    completedAt: runtime.completedAt,
+    requestedIterations: runtime.requestedIterations,
+    completedIterations: runtime.completedIterations,
+    finalVersion: runtime.finalVersion,
+    finalLoopStatus: runtime.finalLoopStatus,
+    finalConvergence: runtime.finalConvergence,
+    verificationGate: runtime.verificationGate,
+    iterations: runtime.iterations.map((entry) => ({
+      iteration: entry.iteration,
+      version: entry.version,
+      completedAt: entry.completedAt,
+      stage: entry.stage,
+      candidateCount: entry.candidateCount,
+      candidateIndex: entry.candidateIndex,
+      candidateScores: entry.candidateScores,
+      winningReason: entry.winningReason,
+      verificationStatus: entry.verificationStatus,
+      verificationSummary: entry.verificationSummary,
+      verificationReasons: entry.verificationReasons,
+      freezerVerdict: entry.freezerVerdict,
+      freezerSummary: entry.freezerSummary,
+      freezerBlockingReasons: entry.freezerBlockingReasons,
+      aigcRiskScore: entry.aigcRiskScore,
+      aigcThreshold: entry.aigcThreshold,
+      aigcHighRiskCount: entry.aigcHighRiskCount,
+      forbiddenHitCount: entry.forbiddenHitCount,
+      candidates: (entry.candidates || []).map((candidate) => ({
+        candidateIndex: candidate.candidateIndex,
+        persistedVersion: candidate.persistedVersion,
+        sampleExcerpt: candidate.sample.replace(/\s+/gu, " ").slice(0, 240),
+        verdict: candidate.evaluation?.verdict,
+        overallScore: candidate.evaluation?.scores?.overall,
+        evaluationSummary: candidate.evaluation?.summary,
+        verification: candidate.verification,
+        freezer: candidate.freezer,
+        refinementSummary: candidate.refinement?.summary
+      }))
+    }))
+  };
+  await fs.appendFile(paths.loopRuns, `${JSON.stringify(record)}
+`);
+  return record;
 }
 async function readStyleLoopRuntime(projectRoot) {
   const paths = absolutePaths(projectRoot);
@@ -5501,7 +2529,7 @@ async function readStyleLoopRuntime(projectRoot) {
 }
 async function readOptionalText(filePath) {
   try {
-    return await import_promises3.default.readFile(filePath, "utf8");
+    return await fs.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return "";
     throw error;
@@ -5516,11 +2544,989 @@ async function readOptionalJson(filePath, fallback) {
     return fallback;
   }
 }
+async function writeTextIfNeeded(filePath, content, overwrite) {
+  if (!overwrite) {
+    const existing = await readOptionalText(filePath);
+    if (existing.trim()) return;
+  }
+  await fs.writeFile(filePath, content.endsWith("\n") ? content : `${content}
+`);
+}
 function normalizeText(value) {
   return value?.trim() || "";
 }
 function normalizeStringArray(value) {
   return Array.isArray(value) ? [...new Set(value.map((item) => normalizeText(item)).filter(Boolean))] : [];
+}
+function buildSeedPromptProtocol(input) {
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const referenceText = normalizeText(input.referenceText);
+  const referenceWorks = normalizeStringArray(input.referenceWorks);
+  const desiredVibes = normalizeStringArray(input.desiredVibes);
+  const seedForbiddenPatterns = normalizeStringArray(input.seedForbiddenPatterns);
+  const rows = [
+    userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A${userStylePrompt}` : "",
+    desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A${desiredVibes.join("\uFF1B")}` : "",
+    referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A${referenceWorks.join("\uFF1B")}` : "",
+    seedForbiddenPatterns.length ? `\u5199\u6CD5\u7981\u5FCC\uFF1A${seedForbiddenPatterns.join("\uFF1B")}` : "",
+    referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A${referenceText.slice(0, 240)}` : ""
+  ].filter(Boolean);
+  return {
+    rows,
+    referenceWorks,
+    desiredVibes,
+    seedForbiddenPatterns
+  };
+}
+function defaultSeedPrompt(options) {
+  const title = normalizeText(options.projectTitle) || "Untitled Novel";
+  const idea = normalizeText(options.idea) || "\u672A\u586B\u5199\u6838\u5FC3\u521B\u610F";
+  const userStyle = normalizeText(options.userStylePrompt) || "\u7528\u6237\u5C1A\u672A\u8865\u5145\u98CE\u683C\u8981\u6C42\u3002";
+  const seedProtocol = buildSeedPromptProtocol(options);
+  return [
+    "# Style Evolution Seed",
+    "",
+    `Novel: ${title}`,
+    `Core idea: ${idea}`,
+    "",
+    "## Engine",
+    "- Engine: Style Evolution Engine",
+    "- Runtime: Prompt Loop Runtime",
+    "- Gate: Style Contract Freeze Gate",
+    "",
+    "## Goal",
+    "\u53CD\u590D\u751F\u6210\u77ED\u7BC7\u5C0F\u8BF4\u6837\u6BB5\uFF0C\u76F4\u5230\u7528\u6237\u786E\u8BA4\u5176\u53EF\u4EE5\u4F5C\u4E3A\u672C\u4E66\u6B63\u6587\u7684\u57FA\u7840\u5199\u6CD5\uFF0C\u800C\u4E0D\u662F\u53EA\u9002\u7528\u4E8E\u5355\u4E2A\u7247\u6BB5\u3002",
+    "",
+    "## User Style Direction",
+    userStyle,
+    ...seedProtocol.rows.length ? [
+      "",
+      "## Seed Prompt Builder Inputs",
+      ...seedProtocol.rows.map((item) => `- ${item}`)
+    ] : [],
+    "",
+    "## Loop Tasks",
+    "- \u5148\u6839\u636E\u7528\u6237\u98CE\u683C\u65B9\u5411\u3001\u521B\u610F\u548C\u7981\u5FCC\uFF0C\u751F\u6210\u4E00\u7248\u53EF\u8BC4\u4F30\u7684\u6B63\u6587\u6837\u6BB5\u3002",
+    "- \u6BCF\u8F6E\u90FD\u5FC5\u987B\u53EF\u88AB\u8BC4\u4F30\u3001\u53EF\u88AB\u91CD\u5199\u3001\u53EF\u88AB\u63D0\u70BC\u4E3A style contract\u3002",
+    "- \u6BCF\u8F6E\u90FD\u8981\u8FFD\u6C42\u66F4\u7A33\u5B9A\u7684\u53D9\u8FF0\u58F0\u97F3\u3001\u53E5\u5F0F\u8282\u594F\u3001\u5BF9\u767D\u538B\u529B\u3001\u63CF\u5199\u5BC6\u5EA6\u548C\u7AE0\u672B\u94A9\u5B50\u3002",
+    "- \u5F53\u6837\u6BB5\u5177\u5907\u6574\u672C\u4E66\u7EE7\u627F\u4EF7\u503C\u65F6\uFF0C\u8FDB\u5165\u51BB\u7ED3\u5019\u9009\uFF0C\u800C\u4E0D\u662F\u63D0\u524D\u5F00\u59CB\u6B63\u6587\u3002",
+    "",
+    "## Freeze Target",
+    "- base writing prompt",
+    "- style contract",
+    "- forbidden patterns",
+    "- positive examples",
+    "- retry policy",
+    "",
+    "## Hard Requirements",
+    "- \u53EA\u751F\u6210\u5C0F\u8BF4\u6B63\u6587\u6837\u6BB5\uFF0C\u4E0D\u8F93\u51FA\u89E3\u91CA\u3001\u8BA1\u5212\u6216\u5217\u8868\u3002",
+    "- \u6837\u6BB5\u5FC5\u987B\u4F53\u73B0\u53D9\u8FF0\u58F0\u97F3\u3001\u53E5\u5F0F\u8282\u594F\u3001\u5BF9\u767D\u89C4\u5219\u3001\u63CF\u5199\u5BC6\u5EA6\u548C\u7AE0\u672B\u94A9\u5B50\u503E\u5411\u3002",
+    "- \u751F\u6210\u540E\u5FC5\u987B\u80FD\u88AB\u63D0\u70BC\u6210\u53EF\u6267\u884C\u7684 style-contract\u3002",
+    "- \u7528\u6237\u786E\u8BA4\u524D\uFF0C\u4E0D\u80FD\u8FDB\u5165\u6B63\u5F0F\u7AE0\u8282\u6B63\u6587\u521B\u4F5C\u3002",
+    "- \u5FC5\u987B\u628A\u6574\u672C\u4E66\u53EF\u7EE7\u627F\u6027\u89C6\u4E3A\u76EE\u6807\uFF0C\u800C\u4E0D\u662F\u53EA\u5199\u51FA\u4E00\u6BB5\u597D\u770B\u7684\u793A\u4F8B\u3002",
+    "- \u53C2\u8003\u4F5C\u54C1\u53EA\u80FD\u501F\u9274\u58F0\u97F3\u3001\u7ED3\u6784\u5F20\u529B\u548C\u8282\u594F\u4E60\u60EF\uFF0C\u4E0D\u80FD\u7167\u6284\u60C5\u8282\u3001\u8BBE\u5B9A\u6216\u53E5\u5B50\u3002",
+    "- \u5FC5\u987B\u4E3B\u52A8\u89C4\u907F\u7528\u6237\u660E\u786E\u5217\u51FA\u7684\u5199\u6CD5\u7981\u5FCC\u4E0E\u4E0D\u60F3\u8981\u7684\u6C14\u8D28\u3002",
+    "",
+    "## Anti-Goals",
+    "- \u4E0D\u8981\u5199\u6210\u8BBE\u5B9A\u8BF4\u660E\u3001\u4E16\u754C\u89C2\u4ECB\u7ECD\u3001\u89D2\u8272\u5C0F\u4F20\u6216\u5267\u60C5\u5927\u7EB2\u3002",
+    "- \u4E0D\u8981\u7528\u89E3\u91CA\u6027\u5224\u65AD\u4EE3\u66FF\u52A8\u4F5C\u3001\u7269\u4EF6\u3001\u58F0\u97F3\u548C\u5173\u7CFB\u538B\u529B\u3002",
+    "- \u4E0D\u8981\u4E3A\u4E86\u8FFD\u6C42\u534E\u4E3D\u800C\u727A\u7272\u53EF\u6301\u7EED\u7684\u7AE0\u8282\u5199\u4F5C\u7A33\u5B9A\u6027\u3002"
+  ].join("\n");
+}
+function buildFallbackStyleContract(sample, prompt = "") {
+  const shortSample = sample.replace(/\s+/g, " ").trim().slice(0, 120);
+  const voice = prompt.match(/克制|冷感|轻松|幽默|热血|悬疑|古风|白描/u)?.[0];
+  return {
+    voice: voice ? `${voice}\uFF0C\u4EE5\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u4E3A\u6700\u9AD8\u5199\u6CD5\u53C2\u7167\u3002` : "\u4EE5\u7528\u6237\u786E\u8BA4\u6837\u6BB5\u4E3A\u6700\u9AD8\u5199\u6CD5\u53C2\u7167\u3002",
+    sentenceRhythm: "\u4FDD\u6301\u6837\u6BB5\u4E2D\u7684\u53E5\u957F\u3001\u505C\u987F\u3001\u52A8\u4F5C\u5BC6\u5EA6\u548C\u60C5\u7EEA\u7559\u767D\u3002",
+    dialogueRules: ["\u5BF9\u767D\u5FC5\u987B\u670D\u52A1\u5173\u7CFB\u538B\u529B\u548C\u5F53\u524D\u5229\u76CA\uFF0C\u4E0D\u5199\u540C\u8D28\u5316\u89E3\u91CA\u8154\u3002"],
+    descriptionRules: ["\u63CF\u5199\u5148\u7ED9\u7269\u4EF6\u3001\u52A8\u4F5C\u3001\u58F0\u97F3\u3001\u6C14\u5473\u548C\u8EAB\u4F53\u53CD\u5E94\uFF0C\u518D\u7ED9\u5224\u65AD\u3002"],
+    emotionRules: ["\u60C5\u7EEA\u901A\u8FC7\u9009\u62E9\u3001\u505C\u987F\u3001\u52A8\u4F5C\u548C\u7EC6\u8282\u5916\u5316\uFF0C\u51CF\u5C11\u76F4\u63A5\u8BF4\u660E\u3002"],
+    pacingRules: ["\u6BCF\u4E2A\u6837\u6BB5\u90FD\u8981\u6709\u538B\u529B\u8FDB\u5165\u3001\u9009\u62E9\u63A8\u8FDB\u548C\u4F59\u6CE2\u94A9\u5B50\u3002"],
+    povRules: ["\u4FDD\u6301\u7A33\u5B9A\u89C6\u89D2\uFF0C\u4E0D\u8D8A\u6743\u6CC4\u9732\u672A\u5230\u573A\u89D2\u8272\u6216\u672A\u6765\u4FE1\u606F\u3002"],
+    openingRules: ["\u5F00\u573A\u4F18\u5148\u843D\u5728\u5177\u4F53\u573A\u666F\u538B\u529B\u4E0A\u3002"],
+    endingHookRules: ["\u7ED3\u5C3E\u7559\u4E0B\u53EF\u8FFD\u8E2A\u7684\u95EE\u9898\u3001\u5173\u7CFB\u88C2\u7F1D\u6216\u7EBF\u7D22\u3002"],
+    allowedDevices: ["\u52A8\u4F5C\u63A8\u8FDB", "\u7269\u4EF6\u538B\u8FEB", "\u77ED\u5BF9\u767D", "\u611F\u5B98\u7EC6\u8282"],
+    forbiddenPatterns: ["\u4E0D\u8981\u603B\u7ED3\u5F0F\u5347\u534E", "\u4E0D\u8981\u6A21\u677F\u5316\u8F6C\u6298\u8BCD", "\u4E0D\u8981\u89E3\u91CA\u521B\u4F5C\u610F\u56FE"],
+    positiveExamples: shortSample ? [shortSample] : [],
+    negativeExamples: []
+  };
+}
+function normalizeStyleContractForFreeze(value, sample, prompt = "") {
+  const fallback = buildFallbackStyleContract(sample, prompt);
+  return {
+    voice: normalizeText(value.voice) || fallback.voice,
+    sentenceRhythm: normalizeText(value.sentenceRhythm) || fallback.sentenceRhythm,
+    dialogueRules: coerceStringArray(value.dialogueRules).length ? coerceStringArray(value.dialogueRules) : fallback.dialogueRules,
+    descriptionRules: coerceStringArray(value.descriptionRules).length ? coerceStringArray(value.descriptionRules) : fallback.descriptionRules,
+    emotionRules: coerceStringArray(value.emotionRules).length ? coerceStringArray(value.emotionRules) : fallback.emotionRules,
+    pacingRules: coerceStringArray(value.pacingRules).length ? coerceStringArray(value.pacingRules) : fallback.pacingRules,
+    povRules: coerceStringArray(value.povRules).length ? coerceStringArray(value.povRules) : fallback.povRules,
+    openingRules: coerceStringArray(value.openingRules).length ? coerceStringArray(value.openingRules) : fallback.openingRules,
+    endingHookRules: coerceStringArray(value.endingHookRules).length ? coerceStringArray(value.endingHookRules) : fallback.endingHookRules,
+    allowedDevices: coerceStringArray(value.allowedDevices).length ? coerceStringArray(value.allowedDevices) : fallback.allowedDevices,
+    forbiddenPatterns: coerceStringArray(value.forbiddenPatterns).length ? coerceStringArray(value.forbiddenPatterns) : fallback.forbiddenPatterns,
+    positiveExamples: coerceStringArray(value.positiveExamples).length ? coerceStringArray(value.positiveExamples) : fallback.positiveExamples,
+    negativeExamples: coerceStringArray(value.negativeExamples)
+  };
+}
+function validateStyleContractForFreeze(contract) {
+  const gate = evaluateStyleEvolutionGate(contract);
+  if (gate.status !== "blocked") {
+    return gate;
+  }
+  const criticalIssue = gate.issues.find((issue) => issue.severity === "critical");
+  throw new Error(criticalIssue?.code || "style_contract_freeze_blocked");
+}
+function coerceStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+}
+function extractJsonObject(value) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]?.trim()) return fenced[1].trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end > start) return trimmed.slice(start, end + 1);
+  return "";
+}
+function parseNumericScore(value, fallback = 0) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return clampScore(value);
+}
+function parseStyleEvolutionCritiqueFromText(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  const evaluationPayload = payload.evaluation;
+  const refinementPayload = payload.refinement;
+  if (!evaluationPayload || typeof evaluationPayload !== "object" || !refinementPayload || typeof refinementPayload !== "object") {
+    return null;
+  }
+  const evaluationRecord = evaluationPayload;
+  const refinementRecord = refinementPayload;
+  const verdict = evaluationRecord.verdict;
+  if (verdict !== "retry" && verdict !== "candidate" && verdict !== "approve") {
+    return null;
+  }
+  const evaluation = {
+    source: "llm_critic",
+    verdict,
+    summary: typeof evaluationRecord.summary === "string" ? evaluationRecord.summary.trim() : "",
+    scores: {
+      narrativeVoice: parseNumericScore(evaluationRecord.scores?.narrativeVoice, 0),
+      sentenceRhythm: parseNumericScore(evaluationRecord.scores?.sentenceRhythm, 0),
+      dialogueTexture: parseNumericScore(evaluationRecord.scores?.dialogueTexture, 0),
+      informationDensity: parseNumericScore(evaluationRecord.scores?.informationDensity, 0),
+      emotionalTension: parseNumericScore(evaluationRecord.scores?.emotionalTension, 0),
+      readability: parseNumericScore(evaluationRecord.scores?.readability, 0),
+      requirementAlignment: parseNumericScore(evaluationRecord.scores?.requirementAlignment, 0),
+      forbiddenPatternRisk: parseNumericScore(evaluationRecord.scores?.forbiddenPatternRisk, 0),
+      overall: parseNumericScore(evaluationRecord.scores?.overall, 0)
+    },
+    strengths: coerceStringArray(evaluationRecord.strengths),
+    deviations: coerceStringArray(evaluationRecord.deviations),
+    forbiddenHits: coerceStringArray(evaluationRecord.forbiddenHits),
+    nextFocus: coerceStringArray(evaluationRecord.nextFocus)
+  };
+  const refinement = {
+    source: "llm_critic",
+    summary: typeof refinementRecord.summary === "string" ? refinementRecord.summary.trim() : "",
+    promptAdjustments: coerceStringArray(refinementRecord.promptAdjustments),
+    contractAdjustments: coerceStringArray(refinementRecord.contractAdjustments),
+    nextPrompt: typeof refinementRecord.nextPrompt === "string" ? refinementRecord.nextPrompt.trim() : ""
+  };
+  if (!evaluation.summary || !refinement.summary || !refinement.nextPrompt) {
+    return null;
+  }
+  return { evaluation, refinement };
+}
+function parseStyleEvolutionEvaluationFromText(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  const evaluationPayload = payload.evaluation && typeof payload.evaluation === "object" ? payload.evaluation : payload;
+  const verdict = evaluationPayload.verdict;
+  if (verdict !== "retry" && verdict !== "candidate" && verdict !== "approve") {
+    return null;
+  }
+  const evaluation = {
+    source: "llm_critic",
+    verdict,
+    summary: typeof evaluationPayload.summary === "string" ? evaluationPayload.summary.trim() : "",
+    scores: {
+      narrativeVoice: parseNumericScore(evaluationPayload.scores?.narrativeVoice, 0),
+      sentenceRhythm: parseNumericScore(evaluationPayload.scores?.sentenceRhythm, 0),
+      dialogueTexture: parseNumericScore(evaluationPayload.scores?.dialogueTexture, 0),
+      informationDensity: parseNumericScore(evaluationPayload.scores?.informationDensity, 0),
+      emotionalTension: parseNumericScore(evaluationPayload.scores?.emotionalTension, 0),
+      readability: parseNumericScore(evaluationPayload.scores?.readability, 0),
+      requirementAlignment: parseNumericScore(evaluationPayload.scores?.requirementAlignment, 0),
+      forbiddenPatternRisk: parseNumericScore(evaluationPayload.scores?.forbiddenPatternRisk, 0),
+      overall: parseNumericScore(evaluationPayload.scores?.overall, 0)
+    },
+    strengths: coerceStringArray(evaluationPayload.strengths),
+    deviations: coerceStringArray(evaluationPayload.deviations),
+    forbiddenHits: coerceStringArray(evaluationPayload.forbiddenHits),
+    nextFocus: coerceStringArray(evaluationPayload.nextFocus)
+  };
+  if (!evaluation.summary) {
+    return null;
+  }
+  return { evaluation };
+}
+function parseStyleEvolutionRefinementFromText(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  const refinementPayload = payload.refinement && typeof payload.refinement === "object" ? payload.refinement : payload;
+  const refinement = {
+    source: "llm_critic",
+    summary: typeof refinementPayload.summary === "string" ? refinementPayload.summary.trim() : "",
+    promptAdjustments: coerceStringArray(refinementPayload.promptAdjustments),
+    contractAdjustments: coerceStringArray(refinementPayload.contractAdjustments),
+    nextPrompt: typeof refinementPayload.nextPrompt === "string" ? refinementPayload.nextPrompt.trim() : ""
+  };
+  if (!refinement.summary || !refinement.nextPrompt) {
+    return null;
+  }
+  return { refinement };
+}
+function parseStyleFreezeAdviceFromText(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  const freezeSummary = typeof payload.freezeSummary === "string" ? payload.freezeSummary.trim() : "";
+  const freezeVerdict = normalizeStyleFreezerVerdict(
+    payload.freezeVerdict || payload.verdict || (/还需|继续|暂不|不能|尚未|没有冻结价值|需要重写/u.test(freezeSummary) ? "continue" : /已形成|可以冻结|可冻结|可持续|ready/u.test(freezeSummary) ? "ready" : "continue")
+  );
+  const blockingReasons = coerceStringArray(payload.blockingReasons);
+  const contractAdjustments = coerceStringArray(payload.contractAdjustments);
+  const forbiddenPatterns = coerceStringArray(payload.forbiddenPatterns);
+  const positiveExamples = coerceStringArray(payload.positiveExamples);
+  const inheritedRules = coerceStringArray(payload.inheritedRules);
+  if (!freezeSummary) {
+    return null;
+  }
+  return {
+    freezeVerdict,
+    freezeSummary,
+    blockingReasons,
+    contractAdjustments,
+    forbiddenPatterns,
+    positiveExamples,
+    inheritedRules
+  };
+}
+function parseStyleContractFromText(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  const contract = {
+    voice: typeof payload.voice === "string" ? payload.voice.trim() : "",
+    sentenceRhythm: typeof payload.sentenceRhythm === "string" ? payload.sentenceRhythm.trim() : "",
+    dialogueRules: coerceStringArray(payload.dialogueRules),
+    descriptionRules: coerceStringArray(payload.descriptionRules),
+    emotionRules: coerceStringArray(payload.emotionRules),
+    pacingRules: coerceStringArray(payload.pacingRules),
+    povRules: coerceStringArray(payload.povRules),
+    openingRules: coerceStringArray(payload.openingRules),
+    endingHookRules: coerceStringArray(payload.endingHookRules),
+    allowedDevices: coerceStringArray(payload.allowedDevices),
+    forbiddenPatterns: coerceStringArray(payload.forbiddenPatterns),
+    positiveExamples: coerceStringArray(payload.positiveExamples),
+    negativeExamples: coerceStringArray(payload.negativeExamples)
+  };
+  if (!contract.voice || !contract.sentenceRhythm || contract.forbiddenPatterns.length === 0) {
+    return null;
+  }
+  return contract;
+}
+function buildStyleContractExtractionPrompt(input) {
+  const sample = normalizeText(input.sample);
+  const prompt = normalizeText(input.prompt);
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const referenceText = normalizeText(input.referenceText);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  return {
+    system: [
+      "\u4F60\u662F\u5C0F\u8BF4\u5199\u6CD5\u5408\u540C\u63D0\u70BC\u5668\u3002",
+      "\u8BF7\u4ECE\u7528\u6237\u786E\u8BA4\u7684\u5C0F\u8BF4\u6837\u6BB5\u4E2D\u63D0\u70BC\u53EF\u6267\u884C\u7684\u5199\u4F5C\u98CE\u683C\u5408\u540C\u3002",
+      "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
+      "JSON \u5B57\u6BB5\u5FC5\u987B\u5305\u542B\uFF1Avoice, sentenceRhythm, dialogueRules, descriptionRules, emotionRules, pacingRules, povRules, openingRules, endingHookRules, allowedDevices, forbiddenPatterns, positiveExamples, negativeExamples\u3002",
+      "\u9664 voice \u4E0E sentenceRhythm \u4E3A\u5B57\u7B26\u4E32\u5916\uFF0C\u5176\u4F59\u5B57\u6BB5\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4\u3002",
+      "\u89C4\u5219\u5FC5\u987B\u53EF\u64CD\u4F5C\uFF0C\u9762\u5411\u540E\u7EED\u7AE0\u8282\u6B63\u6587\u751F\u6210\u548C\u8D28\u68C0\u3002"
+    ].join("\n"),
+    user: [
+      userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
+${userStylePrompt.slice(0, 1200)}` : "",
+      seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+      seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+      seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+      prompt ? `\u5019\u9009\u751F\u6210 prompt\uFF1A
+${prompt.slice(0, 1200)}` : "",
+      referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A
+${referenceText.slice(0, 1200)}` : "",
+      `\u7528\u6237\u786E\u8BA4\u6837\u6BB5\uFF1A
+${sample.slice(0, 2400)}`,
+      "\u8BF7\u63D0\u70BC\u4E3A\u4E25\u683C JSON\u3002"
+    ].filter(Boolean).join("\n\n")
+  };
+}
+function buildStyleFreezeAdvicePrompt(input) {
+  const sample = normalizeText(input.sample);
+  const prompt = normalizeText(input.prompt);
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const referenceText = normalizeText(input.referenceText);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  return {
+    system: [
+      "\u4F60\u662F Style Contract Freeze Gate \u7684 Freezer\u3002",
+      "\u8BF7\u57FA\u4E8E\u5F53\u524D\u5019\u9009\u6837\u6BB5\u3001\u8BC4\u4F30\u7ED3\u679C\u548C\u4FEE\u8BA2\u5EFA\u8BAE\uFF0C\u8F93\u51FA\u672C\u8F6E\u662F\u5426\u5DF2\u5177\u5907\u51BB\u7ED3\u6F5C\u529B\u7684\u51BB\u7ED3\u5EFA\u8BAE\u3002",
+      "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
+      "JSON \u5B57\u6BB5\u5FC5\u987B\u5305\u542B\uFF1AfreezeVerdict, freezeSummary, blockingReasons, contractAdjustments, forbiddenPatterns, positiveExamples, inheritedRules\u3002",
+      "freezeVerdict \u53EA\u80FD\u662F block / continue / ready\uFF1B\u53EA\u6709\u5F53\u524D\u6837\u6BB5\u5DF2\u7ECF\u9002\u5408\u4F5C\u4E3A\u6574\u672C\u4E66\u540E\u7EED\u7AE0\u8282\u5199\u6CD5\u5E95\u76D8\u65F6\u624D\u5141\u8BB8 ready\u3002",
+      "freezeSummary \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\uFF0CblockingReasons \u548C\u5176\u4F59\u5B57\u6BB5\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4\u3002",
+      "blockingReasons \u8981\u8BF4\u660E\u4E3A\u4EC0\u4E48\u6682\u65F6\u4E0D\u80FD\u51BB\u7ED3\uFF1Bready \u65F6\u53EF\u4EE5\u4E3A\u7A7A\u6570\u7EC4\u3002",
+      "contractAdjustments \u8981\u8BF4\u660E style contract \u8FD8\u5E94\u5982\u4F55\u6536\u7D27\u3002",
+      "forbiddenPatterns \u8981\u8865\u5145\u672C\u8F6E\u6700\u8BE5\u7EE7\u7EED\u538B\u5236\u7684\u5199\u6CD5\u7981\u5FCC\u3002",
+      "positiveExamples \u8981\u62BD\u53D6\u672C\u8F6E\u53EF\u590D\u7528\u7684\u6B63\u5411\u5199\u6CD5\u7247\u6BB5\u3002",
+      "inheritedRules \u8981\u8BF4\u660E\u82E5\u672A\u6765\u51BB\u7ED3\uFF0C\u6B63\u6587\u5E94\u5982\u4F55\u5F3A\u5236\u7EE7\u627F\u3002"
+    ].join("\n"),
+    user: [
+      userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
+${userStylePrompt.slice(0, 1200)}` : "",
+      seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+      seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+      seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+      prompt ? `\u672C\u8F6E prompt\uFF1A
+${prompt.slice(0, 1200)}` : "",
+      referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A
+${referenceText.slice(0, 1200)}` : "",
+      input.evaluation ? `\u672C\u8F6E\u8BC4\u4F30\uFF1A
+${JSON.stringify(input.evaluation, null, 2)}` : "",
+      input.refinement ? `\u672C\u8F6E\u4FEE\u8BA2\u5EFA\u8BAE\uFF1A
+${JSON.stringify(input.refinement, null, 2)}` : "",
+      `\u672C\u8F6E\u6837\u6BB5\uFF1A
+${sample.slice(0, 2400)}`,
+      "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
+    ].filter(Boolean).join("\n\n")
+  };
+}
+function buildStyleEvolutionCritiquePrompt(input) {
+  const projectTitle = normalizeText(input.projectTitle) || "Untitled Novel";
+  const idea = normalizeText(input.idea) || "\u672A\u586B\u5199\u6838\u5FC3\u521B\u610F";
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const referenceText = normalizeText(input.referenceText);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  const prompt = normalizeText(input.prompt);
+  const sample = normalizeText(input.sample);
+  const priorSample = normalizeText(input.priorSample);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  return {
+    system: [
+      "\u4F60\u662F Style Evolution Engine \u7684 Critic + Prompt Refiner\u3002",
+      "\u8BF7\u5BF9\u5F53\u524D\u5C0F\u8BF4\u6837\u6BB5\u8FDB\u884C\u591A\u7EF4\u8BC4\u4F30\uFF0C\u5E76\u7ED9\u51FA\u4E0B\u4E00\u8F6E prompt \u548C style contract \u6536\u7D27\u5EFA\u8BAE\u3002",
+      "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
+      "JSON \u7ED3\u6784\u5FC5\u987B\u4E3A { evaluation: {...}, refinement: {...} }\u3002",
+      "evaluation \u5FC5\u987B\u5305\u542B\uFF1Averdict, summary, scores, strengths, deviations, forbiddenHits, nextFocus\u3002",
+      "scores \u5FC5\u987B\u5305\u542B\uFF1AnarrativeVoice, sentenceRhythm, dialogueTexture, informationDensity, emotionalTension, readability, requirementAlignment, forbiddenPatternRisk, overall\u3002",
+      "refinement \u5FC5\u987B\u5305\u542B\uFF1Asummary, promptAdjustments, contractAdjustments, nextPrompt\u3002",
+      "verdict \u53EA\u80FD\u662F retry / candidate / approve\u3002",
+      "\u8BC4\u5206\u533A\u95F4\u7EDF\u4E00\u4E3A 0-10\uFF0C\u53EF\u4EE5\u4FDD\u7559\u4E00\u4F4D\u5C0F\u6570\u3002",
+      "\u8981\u76F4\u9762\u504F\u5DEE\uFF0C\u4E0D\u8981\u5BA2\u5957\uFF0C\u4E0D\u8981\u6CDB\u6CDB\u800C\u8C08\u3002"
+    ].join("\n"),
+    user: [
+      `\u9879\u76EE\uFF1A${projectTitle}`,
+      `\u6838\u5FC3\u521B\u610F\uFF1A${idea}`,
+      userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
+${userStylePrompt}` : "",
+      seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+      seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+      seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+      referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A
+${referenceText.slice(0, 1600)}` : "",
+      priorSample ? `\u4E0A\u4E00\u7248\u6837\u6BB5\uFF1A
+${priorSample.slice(0, 1200)}` : "",
+      iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
+${iterationFeedback}` : "",
+      `\u672C\u8F6E prompt\uFF1A
+${prompt}`,
+      `\u672C\u8F6E\u6837\u6BB5\uFF1A
+${sample.slice(0, 2400)}`,
+      "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
+    ].filter(Boolean).join("\n\n")
+  };
+}
+function buildStyleEvolutionEvaluationPrompt(input) {
+  const projectTitle = normalizeText(input.projectTitle) || "Untitled Novel";
+  const idea = normalizeText(input.idea) || "\u672A\u586B\u5199\u6838\u5FC3\u521B\u610F";
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const referenceText = normalizeText(input.referenceText);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  const prompt = normalizeText(input.prompt);
+  const sample = normalizeText(input.sample);
+  const priorSample = normalizeText(input.priorSample);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  return {
+    system: [
+      "\u4F60\u662F Style Evolution Engine \u7684 Evaluator / Critic\u3002",
+      "\u8BF7\u53EA\u8D1F\u8D23\u8BC4\u4F30\u5F53\u524D\u5C0F\u8BF4\u6837\u6BB5\uFF0C\u4E0D\u8981\u505A prompt \u6539\u5199\u3002",
+      "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
+      "JSON \u7ED3\u6784\u5FC5\u987B\u4E3A { evaluation: {...} }\uFF0C\u4E5F\u5141\u8BB8\u76F4\u63A5\u8F93\u51FA evaluation \u5BF9\u8C61\u3002",
+      "evaluation \u5FC5\u987B\u5305\u542B\uFF1Averdict, summary, scores, strengths, deviations, forbiddenHits, nextFocus\u3002",
+      "scores \u5FC5\u987B\u5305\u542B\uFF1AnarrativeVoice, sentenceRhythm, dialogueTexture, informationDensity, emotionalTension, readability, requirementAlignment, forbiddenPatternRisk, overall\u3002",
+      "verdict \u53EA\u80FD\u662F retry / candidate / approve\u3002",
+      "\u8BC4\u5206\u533A\u95F4\u7EDF\u4E00\u4E3A 0-10\uFF0C\u53EF\u4EE5\u4FDD\u7559\u4E00\u4F4D\u5C0F\u6570\u3002"
+    ].join("\n"),
+    user: [
+      `\u9879\u76EE\uFF1A${projectTitle}`,
+      `\u6838\u5FC3\u521B\u610F\uFF1A${idea}`,
+      userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
+${userStylePrompt}` : "",
+      seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+      seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+      seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+      referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A
+${referenceText.slice(0, 1600)}` : "",
+      priorSample ? `\u4E0A\u4E00\u7248\u6837\u6BB5\uFF1A
+${priorSample.slice(0, 1200)}` : "",
+      iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
+${iterationFeedback}` : "",
+      `\u672C\u8F6E prompt\uFF1A
+${prompt}`,
+      `\u672C\u8F6E\u6837\u6BB5\uFF1A
+${sample.slice(0, 2400)}`,
+      "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
+    ].filter(Boolean).join("\n\n")
+  };
+}
+function buildStyleEvolutionRefinementOnlyPrompt(input) {
+  const projectTitle = normalizeText(input.projectTitle) || "Untitled Novel";
+  const idea = normalizeText(input.idea) || "\u672A\u586B\u5199\u6838\u5FC3\u521B\u610F";
+  const userStylePrompt = normalizeText(input.userStylePrompt);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  const prompt = normalizeText(input.prompt);
+  const sample = normalizeText(input.sample);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  return {
+    system: [
+      "\u4F60\u662F Style Evolution Engine \u7684 Prompt Refiner\u3002",
+      "\u8BF7\u53EA\u8D1F\u8D23\u6839\u636E\u8BC4\u4F30\u7ED3\u679C\u6539\u5199\u4E0B\u4E00\u8F6E prompt\uFF0C\u5E76\u63D0\u51FA style contract \u6536\u7D27\u5EFA\u8BAE\u3002",
+      "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
+      "JSON \u7ED3\u6784\u5FC5\u987B\u4E3A { refinement: {...} }\uFF0C\u4E5F\u5141\u8BB8\u76F4\u63A5\u8F93\u51FA refinement \u5BF9\u8C61\u3002",
+      "refinement \u5FC5\u987B\u5305\u542B\uFF1Asummary, promptAdjustments, contractAdjustments, nextPrompt\u3002"
+    ].join("\n"),
+    user: [
+      `\u9879\u76EE\uFF1A${projectTitle}`,
+      `\u6838\u5FC3\u521B\u610F\uFF1A${idea}`,
+      userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
+${userStylePrompt}` : "",
+      seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+      seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+      seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+      iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
+${iterationFeedback}` : "",
+      `\u672C\u8F6E prompt\uFF1A
+${prompt}`,
+      `\u672C\u8F6E\u6837\u6BB5\uFF1A
+${sample.slice(0, 1800)}`,
+      `\u672C\u8F6E\u8BC4\u4F30\uFF1A
+${JSON.stringify(input.evaluation, null, 2)}`,
+      "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
+    ].filter(Boolean).join("\n\n")
+  };
+}
+function buildStyleEvolutionCandidatePrompt(input) {
+  const projectTitle = normalizeText(input.projectTitle) || "Untitled Novel";
+  const idea = normalizeText(input.idea) || "\u672A\u586B\u5199\u6838\u5FC3\u521B\u610F";
+  const userStylePrompt = normalizeText(input.userStylePrompt) || "\u7528\u6237\u5C1A\u672A\u8865\u5145\u98CE\u683C\u8981\u6C42\u3002";
+  const referenceText = normalizeText(input.referenceText);
+  const seedProtocol = buildSeedPromptProtocol(input);
+  const seedPrompt = normalizeText(input.seedPrompt);
+  const priorSample = normalizeText(input.priorSample);
+  const iterationFeedback = normalizeText(input.iterationFeedback);
+  const prompt = [
+    `\u4E3A\u300A${projectTitle}\u300B\u751F\u6210\u4E00\u7248\u53EF\u4F9B\u7528\u6237\u786E\u8BA4\u7684\u5C0F\u8BF4\u5199\u6CD5\u6837\u6BB5\u3002`,
+    `\u6838\u5FC3\u521B\u610F\uFF1A${idea}`,
+    `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A${userStylePrompt}`,
+    seedProtocol.desiredVibes.length ? `\u76EE\u6807\u6C14\u8D28\uFF1A${seedProtocol.desiredVibes.join("\u3001")}` : "",
+    seedProtocol.referenceWorks.length ? `\u53C2\u8003\u4F5C\u54C1\uFF1A${seedProtocol.referenceWorks.join("\u3001")}` : "",
+    seedProtocol.seedForbiddenPatterns.length ? `\u5FC5\u987B\u56DE\u907F\uFF1A${seedProtocol.seedForbiddenPatterns.join("\u3001")}` : "",
+    iterationFeedback ? `\u672C\u8F6E\u7528\u6237\u53CD\u9988\uFF1A${iterationFeedback}` : ""
+  ].join("\n");
+  const system = [
+    "\u4F60\u662F Style Evolution Engine \u7684 Candidate Generator\uFF0C\u53EA\u8D1F\u8D23\u751F\u6210\u4E00\u6BB5\u53EF\u8BC4\u4F30\u7684\u6B63\u6587\u6837\u6BB5\u3002",
+    "\u76EE\u6807\u662F\u5E2E\u52A9\u7528\u6237\u786E\u8BA4\u6574\u672C\u4E66\u7684\u57FA\u7840\u53D9\u8FF0\u58F0\u97F3\u3001\u53E5\u5F0F\u8282\u594F\u3001\u5BF9\u767D\u89C4\u5219\u3001\u63CF\u5199\u5BC6\u5EA6\u548C\u60C5\u7EEA\u7559\u767D\u3002",
+    "\u5FC5\u987B\u53EA\u8F93\u51FA\u5C0F\u8BF4\u6B63\u6587\u6837\u6BB5\uFF0C\u4E0D\u8981\u8F93\u51FA\u6807\u9898\u3001\u89E3\u91CA\u3001\u5217\u8868\u3001\u8BA1\u5212\u3001Markdown \u6216\u81EA\u6211\u8BC4\u4EF7\u3002",
+    "\u6837\u6BB5\u957F\u5EA6\u63A7\u5236\u5728 500-900 \u4E2A\u4E2D\u6587\u5B57\u7B26\u3002",
+    "\u5FC5\u987B\u6709\u5177\u4F53\u573A\u666F\u3001\u4EBA\u7269\u52A8\u4F5C\u3001\u611F\u5B98\u7EC6\u8282\u3001\u5173\u7CFB\u538B\u529B\u548C\u4E00\u4E2A\u53EF\u8FFD\u8E2A\u94A9\u5B50\u3002",
+    "\u4E0D\u8981\u5199\u7CFB\u7EDF\u63D0\u793A\u3001\u4E0D\u8981\u63D0\u5230 prompt\u3001\u4E0D\u8981\u603B\u7ED3\u521B\u4F5C\u610F\u56FE\u3002"
+  ].join("\n");
+  const userBlocks = [
+    prompt,
+    "\n\u672C\u8F6E\u76EE\u6807\u4E0D\u662F\u5199\u4E00\u6BB5\u5B64\u7ACB\u597D\u770B\u7684\u793A\u4F8B\uFF0C\u800C\u662F\u903C\u8FD1\u4E00\u4EFD\u53EF\u51BB\u7ED3\u3001\u53EF\u7EE7\u627F\u5230\u6574\u672C\u4E66\u7684\u57FA\u7840\u5199\u6CD5\u3002",
+    seedProtocol.referenceWorks.length ? `
+\u53C2\u8003\u4F5C\u54C1\uFF08\u501F\u9274\u58F0\u97F3\u3001\u8282\u594F\u548C\u5F20\u529B\uFF0C\u4E0D\u7167\u6284\u60C5\u8282\u4E0E\u53E5\u5B50\uFF09\uFF1A
+${seedProtocol.referenceWorks.join("\n")}` : "",
+    seedProtocol.desiredVibes.length ? `
+\u76EE\u6807\u6C14\u8D28\uFF1A
+${seedProtocol.desiredVibes.join("\n")}` : "",
+    seedProtocol.seedForbiddenPatterns.length ? `
+\u5FC5\u987B\u4E3B\u52A8\u89C4\u907F\u7684\u5199\u6CD5\u7981\u5FCC\uFF1A
+${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
+    seedPrompt ? `
+\u521D\u59CB\u5199\u6CD5 prompt\uFF1A
+${seedPrompt.slice(0, 1800)}` : "",
+    referenceText ? `
+\u7528\u6237\u53C2\u8003\u6587\u672C\uFF1A
+${referenceText.slice(0, 1800)}` : "",
+    priorSample ? `
+\u4E0A\u4E00\u7248\u5019\u9009\u6837\u6BB5\uFF1A
+${priorSample.slice(0, 1200)}
+
+\u8BF7\u5728\u4FDD\u7559\u4F18\u70B9\u7684\u57FA\u7840\u4E0A\u66F4\u63A5\u8FD1\u7528\u6237\u8981\u6C42\u3002` : "",
+    iterationFeedback ? `
+\u672C\u8F6E\u5FC5\u987B\u54CD\u5E94\u7684\u7528\u6237\u53CD\u9988\uFF1A
+${iterationFeedback.slice(0, 1200)}` : "",
+    "\n\u8BF7\u7279\u522B\u6CE8\u610F\uFF1A\u5F53\u524D\u6837\u6BB5\u672A\u6765\u9700\u8981\u88AB\u63D0\u70BC\u4E3A base writing prompt\u3001style contract\u3001forbidden patterns\u3001positive examples \u548C retry policy \u7684\u6765\u6E90\u3002",
+    "\n\u73B0\u5728\u8F93\u51FA\u4E00\u6BB5\u65B0\u7684\u5C0F\u8BF4\u6B63\u6587\u6837\u6BB5\u3002"
+  ];
+  return {
+    system,
+    user: userBlocks.filter(Boolean).join("\n"),
+    prompt
+  };
+}
+function getStyleEvolutionAssetPaths(projectRoot) {
+  return absolutePaths(projectRoot);
+}
+async function initializeStyleEvolution(projectRoot, options = {}) {
+  const paths = absolutePaths(projectRoot);
+  const overwrite = options.overwrite === true;
+  await fs.mkdir(paths.dir, { recursive: true });
+  await fs.mkdir(paths.samplesDir, { recursive: true });
+  await writeTextIfNeeded(paths.seedPrompt, normalizeText(options.seedPrompt) || defaultSeedPrompt(options), overwrite);
+  if (normalizeText(options.userStylePrompt) || overwrite) {
+    await writeTextIfNeeded(paths.userStylePrompt, normalizeText(options.userStylePrompt), overwrite);
+  }
+  if (normalizeText(options.referenceText) || overwrite) {
+    await writeTextIfNeeded(paths.referenceText, normalizeText(options.referenceText), overwrite);
+  }
+  const existingHistory = await readOptionalText(paths.history);
+  if (!existingHistory.trim() || overwrite) {
+    await fs.writeFile(paths.history, "[]\n");
+  }
+  const existingLedger = await readOptionalText(paths.freezeLedger);
+  if (!existingLedger.trim() || overwrite) {
+    await fs.writeFile(paths.freezeLedger, `${JSON.stringify({
+      version: 1,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      latestVersion: 0,
+      convergence: "unknown",
+      convergenceEvidence: [],
+      entries: []
+    }, null, 2)}
+`);
+  }
+  const existingRuntime = await readOptionalText(paths.loopRuntime);
+  if (!existingRuntime.trim() || overwrite) {
+    await fs.writeFile(paths.loopRuntime, "null\n");
+  }
+  await persistStyleEvolutionContractState(projectRoot, {
+    runtime: {
+      engine: "Style Evolution Engine",
+      runtime: "Prompt Loop Runtime",
+      gate: "Style Contract Freeze Gate",
+      lastRunStatus: "idle"
+    },
+    seedPrompt: normalizeText(options.seedPrompt) || (await readOptionalText(paths.seedPrompt)).trim(),
+    userStylePrompt: normalizeText(options.userStylePrompt) || (await readOptionalText(paths.userStylePrompt)).trim(),
+    referenceText: normalizeText(options.referenceText) || (await readOptionalText(paths.referenceText)).trim(),
+    referenceWorks: normalizeStringArray(options.referenceWorks),
+    desiredVibes: normalizeStringArray(options.desiredVibes),
+    seedForbiddenPatterns: normalizeStringArray(options.seedForbiddenPatterns),
+    retryPolicy: defaultRetryPolicy()
+  });
+  return loadStyleEvolution(projectRoot);
+}
+async function appendStyleEvolutionCandidate(projectRoot, input) {
+  const paths = absolutePaths(projectRoot);
+  await fs.mkdir(paths.samplesDir, { recursive: true });
+  const history = await readOptionalJson(paths.history, []);
+  const version = Math.max(0, ...history.map((entry) => entry.version || 0)) + 1;
+  const samplePath = path2.join(paths.samplesDir, `v${String(version).padStart(3, "0")}.md`);
+  const prompt = normalizeText(input.prompt);
+  const sample = normalizeText(input.sample);
+  const review = normalizeText(input.review);
+  const createdAt = input.createdAt || (/* @__PURE__ */ new Date()).toISOString();
+  const currentContract = await readOptionalJson(paths.styleContract, {});
+  const retryPolicy = currentContract.retryPolicy || defaultRetryPolicy();
+  const freezer = input.freezer ? {
+    verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
+    summary: normalizeText(input.freezer.summary),
+    blockingReasons: normalizeStringArray(input.freezer.blockingReasons),
+    checkedAt: input.freezer.checkedAt || createdAt
+  } : void 0;
+  const totalRounds = history.length + 1;
+  const projectedHistory = history.concat([{
+    version,
+    prompt,
+    sample,
+    review,
+    createdAt,
+    samplePath: path2.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
+    iterationFeedback: normalizeText(input.iterationFeedback),
+    source: input.source || "manual",
+    userDecision: "pending",
+    contractTightening: input.refinement?.contractAdjustments || [],
+    convergenceNote: input.evaluation?.summary,
+    freezer,
+    verification: buildStyleGenerationVerification({
+      evaluation: input.evaluation,
+      version,
+      checkedAt: createdAt
+    }),
+    evaluation: input.evaluation,
+    refinement: input.refinement
+  }]);
+  const projectedStableState = computeStableWindowState({ history: projectedHistory, retryPolicy });
+  const readyReasons = buildReadyReasons(input.evaluation, retryPolicy, totalRounds);
+  const readyForApproval = computeReadyForApproval({
+    evaluation: input.evaluation,
+    retryPolicy,
+    totalRounds,
+    stable: projectedStableState.stable,
+    freezer
+  });
+  await fs.writeFile(samplePath, `${sample}
+`);
+  history.push({
+    version,
+    prompt,
+    sample,
+    review,
+    createdAt,
+    samplePath: path2.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
+    iterationFeedback: normalizeText(input.iterationFeedback),
+    source: input.source || "manual",
+    readyForApproval,
+    readyReasons,
+    userDecision: "pending",
+    contractTightening: input.refinement?.contractAdjustments || [],
+    convergenceNote: input.evaluation?.summary,
+    freezer,
+    verification: buildStyleGenerationVerification({
+      evaluation: input.evaluation,
+      version,
+      checkedAt: createdAt
+    }),
+    evaluation: input.evaluation,
+    refinement: input.refinement
+  });
+  await fs.writeFile(paths.history, `${JSON.stringify(history, null, 2)}
+`);
+  await persistStyleEvolutionContractState(projectRoot, {
+    evolutionHistory: history,
+    freezer: freezer ? {
+      ...freezer,
+      version
+    } : currentContract.freezer,
+    verification: buildStyleGenerationVerification({
+      evaluation: input.evaluation,
+      version,
+      checkedAt: createdAt
+    })
+  });
+  return loadStyleEvolution(projectRoot);
+}
+async function approveStyleEvolutionSample(projectRoot, input) {
+  const paths = absolutePaths(projectRoot);
+  await fs.mkdir(paths.dir, { recursive: true });
+  const history = await readOptionalJson(paths.history, []);
+  const currentContract = await readOptionalJson(paths.styleContract, {});
+  const selected = input.version ? history.find((entry) => entry.version === input.version) : null;
+  if (!input.version) {
+    throw new Error("style_candidate_version_required");
+  }
+  if (!selected) {
+    throw new Error("style_candidate_not_found");
+  }
+  if (selected && !isOpenStyleEvolutionEntry(
+    selected,
+    currentContract.approval?.status === "rejected" ? currentContract.approval.rejectedVersion : void 0
+  )) {
+    throw new Error("style_candidate_rejected");
+  }
+  const sample = normalizeText(input.sample) || selected?.sample?.trim() || "";
+  if (!sample) {
+    throw new Error("approveStyleEvolutionSample requires a sample or an existing history version");
+  }
+  const selectedVerification = styleGenerationVerificationFromEntry(selected);
+  if (selectedVerification.status === "blocked") {
+    throw new Error(
+      "style_generation_verification_blocked"
+    );
+  }
+  if (!isVerifiedStyleCandidate(selected)) {
+    throw new Error("style_candidate_not_verified");
+  }
+  const approvalFreezer = input.freezer ? {
+    verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
+    summary: normalizeText(input.freezer.summary),
+    blockingReasons: normalizeStringArray(input.freezer.blockingReasons),
+    checkedAt: input.freezer.checkedAt || input.approvedAt || (/* @__PURE__ */ new Date()).toISOString()
+  } : selected.freezer;
+  const selectedForGate = approvalFreezer ? { ...selected, freezer: approvalFreezer } : selected;
+  if (!isStyleCandidateLoopReady(selectedForGate, currentContract)) {
+    throw new Error("style_candidate_not_ready_for_freeze");
+  }
+  if (selected.userDecision !== "accepted_for_freeze") {
+    throw new Error("style_candidate_not_user_accepted");
+  }
+  const seedPrompt = await readOptionalText(paths.seedPrompt);
+  const userStylePrompt = await readOptionalText(paths.userStylePrompt);
+  const prompt = selected?.prompt || userStylePrompt || seedPrompt;
+  const styleContract = normalizeStyleContractForFreeze(
+    input.styleContract || buildFallbackStyleContract(sample, prompt),
+    sample,
+    prompt
+  );
+  const mergedPositiveExamples = [...new Set([
+    ...Array.isArray(styleContract.positiveExamples) ? styleContract.positiveExamples : [],
+    ...Array.isArray(input.positiveExamples) ? input.positiveExamples : []
+  ].map((item) => normalizeText(item)).filter(Boolean))];
+  if (mergedPositiveExamples.length) {
+    styleContract.positiveExamples = mergedPositiveExamples;
+  }
+  const frozenBasePrompt = normalizeText(input.frozenBasePrompt) || normalizeText(selected?.refinement?.nextPrompt) || prompt;
+  const approvedAt = input.approvedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const approvedVersion = selected?.version;
+  const nextHistory = history.map((entry) => {
+    if (approvedVersion && entry.version === approvedVersion) {
+      return {
+        ...entry,
+        readyForApproval: true,
+        readyReasons: entry.readyReasons?.length ? entry.readyReasons : buildReadyReasons(entry.evaluation, defaultRetryPolicy(), history.length, approvalFreezer || entry.freezer),
+        freezer: approvalFreezer || entry.freezer,
+        userDecision: "accepted",
+        userDecisionAt: approvedAt
+      };
+    }
+    return {
+      ...entry,
+      userDecision: entry.userDecision === "accepted" ? "accepted" : "superseded",
+      userDecisionAt: entry.userDecisionAt
+    };
+  });
+  const freezeSummary = normalizeText(input.freezeSummary) || (selected?.readyReasons?.length ? `\u7528\u6237\u786E\u8BA4 v${selected.version} \u4E3A\u5168\u4E66\u57FA\u7840\u5199\u6CD5\uFF1A${selected.readyReasons.join(" ")}` : approvedVersion ? `\u7528\u6237\u786E\u8BA4 v${approvedVersion} \u4E3A\u5168\u4E66\u57FA\u7840\u5199\u6CD5\u3002` : "\u7528\u6237\u786E\u8BA4\u5F53\u524D\u6837\u6BB5\u4E3A\u5168\u4E66\u57FA\u7840\u5199\u6CD5\u3002");
+  const inheritedRules = [...new Set([
+    ...Array.isArray(input.inheritedRules) ? input.inheritedRules : [],
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F\u7528\u6237\u51BB\u7ED3\u540E\u7684 base writing prompt\u3002",
+    "\u540E\u7EED\u6BCF\u7AE0\u5FC5\u987B\u7EE7\u627F style contract \u4E2D\u7684 voice\u3001\u8282\u594F\u3001\u5BF9\u767D\u4E0E\u7981\u5FCC\u7EA6\u675F\u3002",
+    "\u6B63\u6587\u751F\u4EA7\u4E0D\u5F97\u7ED5\u8FC7\u5DF2\u51BB\u7ED3\u6837\u6BB5\u91CD\u65B0\u81EA\u7531\u53D1\u6325\u3002",
+    "\u5982\u679C\u6B63\u6587\u8D28\u91CF\u8FD4\u5DE5\uFF0C\u8FD4\u5DE5\u4ECD\u5FC5\u987B\u5728\u51BB\u7ED3\u5199\u6CD5\u5408\u540C\u5185\u90E8\u6536\u7D27\uFF0C\u4E0D\u5F97\u64C5\u81EA\u66F4\u6362\u5199\u4F5C\u5E95\u76D8\u3002"
+  ].map((item) => normalizeText(item)).filter(Boolean))];
+  const retryPolicy = {
+    ...defaultRetryPolicy(),
+    ...currentContract.retryPolicy || {}
+  };
+  const contract = {
+    seedPrompt: seedPrompt.trim(),
+    userStylePrompt: userStylePrompt.trim(),
+    referenceText: (await readOptionalText(paths.referenceText)).trim(),
+    referenceWorks: currentContract.referenceWorks || [],
+    desiredVibes: currentContract.desiredVibes || [],
+    seedForbiddenPatterns: currentContract.seedForbiddenPatterns || [],
+    retryPolicy,
+    freezer: approvalFreezer ? {
+      ...approvalFreezer,
+      version: approvedVersion
+    } : currentContract.freezer,
+    frozenBasePrompt,
+    approval: {
+      status: "approved",
+      approvedVersion,
+      approvedAt,
+      approvedBy: input.approvedBy || "user",
+      freezeSummary,
+      acceptedAsBookStyle: true
+    },
+    inheritance: {
+      status: "enforced",
+      inheritedArtifacts: ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"],
+      inheritedRules,
+      promptSummary: frozenBasePrompt.replace(/\s+/gu, " ").slice(0, 240)
+    },
+    approvedSample: sample,
+    approvedSamplePath: APPROVED_SAMPLE_PATH,
+    approvedAt,
+    verification: selected?.version ? selectedVerification : buildStyleGenerationVerification({
+      evaluation: selected?.evaluation,
+      version: approvedVersion,
+      checkedAt: approvedAt
+    }),
+    styleContract,
+    antiPatterns: input.antiPatterns || styleContract.forbiddenPatterns || [],
+    evolutionHistory: nextHistory
+  };
+  contract.loop = deriveLoopState({
+    ...contract,
+    loop: {
+      ...contract.loop,
+      approvalVersion: approvedVersion,
+      readyVersion: approvedVersion
+    }
+  });
+  contract.loopProtocol = deriveStyleLoopProtocol(contract);
+  validateStyleContractForFreeze(contract);
+  await fs.writeFile(paths.approvedSample, `${sample}
+`);
+  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+`);
+  await fs.writeFile(paths.styleContract, `${JSON.stringify(contract, null, 2)}
+`);
+  await persistStyleFreezeLedger(projectRoot, contract);
+  await materializeApprovedStyleAssets(projectRoot, contract);
+  return loadStyleEvolution(projectRoot);
+}
+async function acceptStyleEvolutionCandidate(projectRoot, input) {
+  const paths = absolutePaths(projectRoot);
+  const history = await readOptionalJson(paths.history, []);
+  const currentContract = await readOptionalJson(paths.styleContract, {});
+  const selected = input.version ? history.find((entry) => entry.version === input.version) : history.at(-1);
+  if (!input.version) {
+    throw new Error("style_candidate_version_required");
+  }
+  if (!selected) {
+    throw new Error("style_candidate_not_found");
+  }
+  if (!isOpenStyleEvolutionEntry(
+    selected,
+    currentContract.approval?.status === "rejected" ? currentContract.approval.rejectedVersion : void 0
+  )) {
+    throw new Error("style_candidate_rejected");
+  }
+  const selectedVerification = styleGenerationVerificationFromEntry(selected);
+  if (selectedVerification.status === "blocked") {
+    throw new Error("style_generation_verification_blocked");
+  }
+  if (!isVerifiedStyleCandidate(selected)) {
+    throw new Error("style_candidate_not_verified");
+  }
+  if (!isStyleCandidateLoopReady(selected, currentContract)) {
+    throw new Error("style_candidate_not_ready_for_freeze");
+  }
+  const acceptedAt = input.acceptedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const nextHistory = history.map((entry) => {
+    if (entry.version === selected.version) {
+      return {
+        ...entry,
+        readyForApproval: true,
+        userDecision: "accepted_for_freeze",
+        userDecisionAt: acceptedAt
+      };
+    }
+    return entry;
+  });
+  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+`);
+  await persistStyleEvolutionContractState(projectRoot, {
+    approval: {
+      status: "pending",
+      approvedBy: input.acceptedBy || "user",
+      freezeSummary: `\u7528\u6237\u5DF2\u63A5\u53D7 v${selected.version} \u4F5C\u4E3A\u6574\u4E66\u5199\u6CD5\u5019\u9009\uFF0C\u7B49\u5F85\u51BB\u7ED3\u5408\u540C\u9884\u89C8\u4E0E\u6700\u7EC8\u786E\u8BA4\u3002`,
+      acceptedAsBookStyle: false
+    },
+    evolutionHistory: nextHistory
+  });
+  return loadStyleEvolution(projectRoot);
+}
+async function rejectStyleEvolutionSample(projectRoot, input) {
+  const paths = absolutePaths(projectRoot);
+  const history = await readOptionalJson(paths.history, []);
+  const rejectedAt = input.rejectedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const rejectionReason = normalizeText(input.rejectionReason);
+  if (!rejectionReason) {
+    throw new Error("rejectStyleEvolutionSample requires a rejectionReason");
+  }
+  const selected = input.version ? history.find((entry) => entry.version === input.version) : history.at(-1);
+  if (!selected?.version) {
+    throw new Error("rejectStyleEvolutionSample requires an existing history version");
+  }
+  const currentContract = await readOptionalJson(paths.styleContract, {});
+  if (!isOpenStyleEvolutionEntry(
+    selected,
+    currentContract.approval?.status === "rejected" ? currentContract.approval.rejectedVersion : void 0
+  )) {
+    throw new Error("style_candidate_rejected");
+  }
+  const nextHistory = history.map((entry) => {
+    if (entry.version === selected.version) {
+      return {
+        ...entry,
+        userDecision: "superseded",
+        userDecisionAt: rejectedAt,
+        rejectionReason
+      };
+    }
+    return entry;
+  });
+  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+`);
+  await persistStyleEvolutionContractState(projectRoot, {
+    approval: {
+      status: "rejected",
+      rejectedVersion: selected.version,
+      rejectedAt,
+      rejectionReason,
+      acceptedAsBookStyle: false
+    },
+    evolutionHistory: nextHistory
+  });
+  return loadStyleEvolution(projectRoot);
 }
 async function loadStyleEvolution(projectRoot) {
   const paths = absolutePaths(projectRoot);
@@ -5610,17 +3616,17 @@ function currentBundleDir() {
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path6.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return path3.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path6.default.dirname(fileMatch[1]);
+      return path3.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
+  const marker = `${path3.sep}.ai-novel-projects${path3.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
@@ -5629,7 +3635,7 @@ function workspaceRootForProject(projectRoot) {
 }
 async function readOptionalText2(filePath) {
   try {
-    return (await import_promises4.default.readFile(filePath, "utf8")).trim();
+    return (await fs2.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
@@ -5637,18 +3643,18 @@ async function readOptionalText2(filePath) {
 async function readCharacterDossiers(filePath) {
   if (!filePath) return [];
   try {
-    const parsed = JSON.parse(await import_promises4.default.readFile(filePath, "utf8"));
+    const parsed = JSON.parse(await fs2.readFile(filePath, "utf8"));
     return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string") : [];
   } catch {
     return [];
   }
 }
 async function writeJsonFileAtomic(filePath, value) {
-  await import_promises4.default.mkdir(import_node_path6.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path6.default.join(import_node_path6.default.dirname(filePath), `.${import_node_path6.default.basename(filePath)}.${Date.now()}.tmp`);
-  await import_promises4.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await fs2.mkdir(path3.dirname(filePath), { recursive: true });
+  const tempPath = path3.join(path3.dirname(filePath), `.${path3.basename(filePath)}.${Date.now()}.tmp`);
+  await fs2.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await import_promises4.default.rename(tempPath, filePath);
+  await fs2.rename(tempPath, filePath);
 }
 async function writeChapterVersionManifest(input) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -5710,7 +3716,7 @@ async function writeChapterVersionManifest(input) {
     },
     versions
   };
-  const manifestPath = import_node_path6.default.join(import_node_path6.default.dirname(input.finalPath), `${input.chapterId}.versions.json`);
+  const manifestPath = path3.join(path3.dirname(input.finalPath), `${input.chapterId}.versions.json`);
   await writeJsonFileAtomic(manifestPath, manifest);
   await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
     chapterNumber: input.task.chapterNumber,
@@ -5728,7 +3734,7 @@ async function writeChapterVersionManifest(input) {
 }
 async function fileHasContent(filePath) {
   try {
-    const stat = await import_promises4.default.stat(filePath);
+    const stat = await fs2.stat(filePath);
     return stat.isFile() && stat.size > 0;
   } catch {
     return false;
@@ -6343,7 +4349,7 @@ ${input.memoryUpdate}`,
   return nextDossiers;
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return import_node_path6.default.relative(projectRoot, absolutePath).replaceAll(import_node_path6.default.sep, "/");
+  return path3.relative(projectRoot, absolutePath).replaceAll(path3.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -6886,7 +4892,7 @@ async function updateStyleFingerprintFromFirstChapter(input) {
     "Production selection contract:",
     `- style fingerprint: ${extracted}`
   ].join("\n");
-  await import_promises4.default.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
+  await fs2.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
 `);
   return extracted;
 }
@@ -7198,7 +5204,7 @@ async function persistApprovedWritingStyleAssets(projectRoot, paths, approvedSty
   if (approvedStyleContext.status !== "ready") {
     return;
   }
-  await import_promises4.default.mkdir(paths.styleDir, { recursive: true });
+  await fs2.mkdir(paths.styleDir, { recursive: true });
   const writes = [
     [paths.styleRulebookPath, approvedStyleContext.rulebook || "", "style_rulebook"],
     [paths.styleReferencesPath, approvedStyleContext.references || "", "style_references"],
@@ -7206,7 +5212,7 @@ async function persistApprovedWritingStyleAssets(projectRoot, paths, approvedSty
   ];
   for (const [filePath, content, kind] of writes) {
     if (!content.trim()) continue;
-    await import_promises4.default.writeFile(filePath, `${content.trimEnd()}
+    await fs2.writeFile(filePath, `${content.trimEnd()}
 `);
     await recordPipelineArtifact(projectRoot, filePath, "style", options, {
       kind,
@@ -8202,7 +6208,7 @@ async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
   const sections = [];
   const files = [];
   for (const filename of PRODUCTION_STORY_ASSET_FILES) {
-    const content = await readOptionalText2(import_node_path6.default.join(paths.plansDir, filename));
+    const content = await readOptionalText2(path3.join(paths.plansDir, filename));
     if (!content) continue;
     const relevant = extractStoryAssetRelevantLines(content, task);
     if (!relevant.length) continue;
@@ -8665,7 +6671,7 @@ function createProductionWritingPlanContract(state) {
 }
 async function writeProductionWritingPlan(projectRoot, paths, state, options = {}) {
   const writingPlan = createProductionWritingPlanContract(state);
-  const writingPlanPath = import_node_path6.default.join(paths.plansDir, "writing-plan.json");
+  const writingPlanPath = path3.join(paths.plansDir, "writing-plan.json");
   await writeJsonFileAtomic(writingPlanPath, writingPlan);
   await recordPipelineArtifact(projectRoot, writingPlanPath, "plan", options, {
     stage: "writing_plan",
@@ -9222,9 +7228,9 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir();
   const candidates = [
-    import_node_path6.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path6.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path6.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    path3.resolve(bundleDir, "..", "resources", "writing"),
+    path3.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    path3.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
@@ -9236,7 +7242,7 @@ async function loadProductionWritingResources(rootDir) {
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText2(import_node_path6.default.join(candidate, relativePath));
+        const text = await readOptionalText2(path3.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -9275,9 +7281,9 @@ async function loadProductionWritingResources(rootDir) {
 async function writeProductionWritingResourceArtifacts(projectRoot, paths, state, options = {}) {
   invalidateWritingResourcesCache();
   const resources = await loadProductionWritingResources(projectRoot);
-  const resourceDir = import_node_path6.default.join(paths.styleDir, "production-resources");
-  await import_promises4.default.mkdir(resourceDir, { recursive: true });
-  const guidePath = import_node_path6.default.join(resourceDir, "production-writing-assets.md");
+  const resourceDir = path3.join(paths.styleDir, "production-resources");
+  await fs2.mkdir(resourceDir, { recursive: true });
+  const guidePath = path3.join(resourceDir, "production-writing-assets.md");
   const genre = inferGenreProfile(state);
   const content = [
     "# Production Writing Resources",
@@ -9303,7 +7309,7 @@ async function writeProductionWritingResourceArtifacts(projectRoot, paths, state
     ensureMarkdownSection("Style Controller Guide", resources.styleControllerGuide || "Production style controller guide not found."),
     ensureMarkdownSection("Consistency Guide", resources.consistencyGuide || "Production consistency guide not found.")
   ].join("\n");
-  await import_promises4.default.writeFile(guidePath, content);
+  await fs2.writeFile(guidePath, content);
   if (options.factoryRootDir && options.projectId) {
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordArtifact({
@@ -10336,7 +8342,7 @@ async function loadAndPruneGlobalContext(params) {
   let previousDraftFragment = "";
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
   if (paths && previousChapterId) {
-    const previousFinalDraft = await readOptionalText2(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`));
+    const previousFinalDraft = await readOptionalText2(path3.join(paths.chaptersDir, `${previousChapterId}.final.md`));
     if (previousFinalDraft) {
       previousDraftFragment = previousFinalDraft.slice(-1200);
     }
@@ -10364,7 +8370,7 @@ async function loadAndPruneGlobalContext(params) {
   });
   let rawMemory = "";
   if (paths && previousChapterId) {
-    rawMemory = await readOptionalText2(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`));
+    rawMemory = await readOptionalText2(path3.join(paths.memoryDir, `${previousChapterId}-memory.md`));
   }
   const recalledMemory = await retrieveFactoryMemoryContext({
     state,
@@ -10873,17 +8879,17 @@ function formatChapterContextPackage(input) {
 }
 async function writeChapterContextPackage(input) {
   const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
-  const checkpointsRoot = import_node_path6.default.join(input.paths.workspaceDir, "checkpoints");
-  const contextDir = import_node_path6.default.join(checkpointsRoot, "chapter-contexts");
-  const contextPath = import_node_path6.default.join(contextDir, `${chapterId}-context.md`);
-  const activeWorldSliceDir = import_node_path6.default.join(checkpointsRoot, "active-world-slices");
-  const activeWorldSlicePath = import_node_path6.default.join(activeWorldSliceDir, `${chapterId}-world-slice.md`);
-  await import_promises4.default.mkdir(contextDir, { recursive: true });
-  await import_promises4.default.mkdir(activeWorldSliceDir, { recursive: true });
+  const checkpointsRoot = path3.join(input.paths.workspaceDir, "checkpoints");
+  const contextDir = path3.join(checkpointsRoot, "chapter-contexts");
+  const contextPath = path3.join(contextDir, `${chapterId}-context.md`);
+  const activeWorldSliceDir = path3.join(checkpointsRoot, "active-world-slices");
+  const activeWorldSlicePath = path3.join(activeWorldSliceDir, `${chapterId}-world-slice.md`);
+  await fs2.mkdir(contextDir, { recursive: true });
+  await fs2.mkdir(activeWorldSliceDir, { recursive: true });
   const content = formatChapterContextPackage(input);
-  await import_promises4.default.writeFile(contextPath, `${content.trimEnd()}
+  await fs2.writeFile(contextPath, `${content.trimEnd()}
 `);
-  await import_promises4.default.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}
+  await fs2.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}
 `);
   const relativePath = relativeArtifactPath(input.projectRoot, contextPath);
   const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card") ? "scene_card" : "timeline";
@@ -11072,7 +9078,7 @@ async function writeDraftSegmentSubArtifacts(input) {
   ];
   const written = [];
   for (const brief of briefs) {
-    const briefPath = import_node_path6.default.join(input.segmentDir, brief.filename);
+    const briefPath = path3.join(input.segmentDir, brief.filename);
     const content = formatSegmentBriefArtifact({
       title: brief.title,
       kind: brief.kind,
@@ -11083,7 +9089,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       executionPrompt: brief.executionPrompt,
       generatedBody: brief.body
     });
-    await import_promises4.default.writeFile(briefPath, `${content.trimEnd()}
+    await fs2.writeFile(briefPath, `${content.trimEnd()}
 `);
     const relativePath = relativeArtifactPath(input.projectRoot, briefPath);
     await recordPipelineArtifact(input.projectRoot, briefPath, "checkpoint", input.options, {
@@ -11101,7 +9107,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       relativePath,
       chars: content.length
     });
-    const materialPath = import_node_path6.default.join(input.segmentDir, brief.materialFilename);
+    const materialPath = path3.join(input.segmentDir, brief.materialFilename);
     const override = input.materialOverrides?.[brief.kind]?.trim();
     const materialContent = override ? [
       `# ${brief.title.replace("Brief", "Material")}`,
@@ -11124,7 +9130,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       task: input.task,
       generatedBody: input.generatedBody
     });
-    await import_promises4.default.writeFile(materialPath, `${materialContent.trimEnd()}
+    await fs2.writeFile(materialPath, `${materialContent.trimEnd()}
 `);
     const materialRelativePath = relativeArtifactPath(input.projectRoot, materialPath);
     await recordPipelineArtifact(input.projectRoot, materialPath, "checkpoint", input.options, {
@@ -11449,7 +9455,7 @@ function isUsableDraftAssemblyBody(text = "", fallbackBody = "") {
   return true;
 }
 async function writeDraftSegmentManifest(input) {
-  const manifestPath = import_node_path6.default.join(input.segmentDir, "segment-manifest.json");
+  const manifestPath = path3.join(input.segmentDir, "segment-manifest.json");
   const byKind = input.subArtifacts.reduce((acc, artifact) => {
     const current = acc[artifact.kind] || {};
     current[artifact.role] = artifact.relativePath;
@@ -11498,7 +9504,7 @@ async function writeDraftSegmentManifest(input) {
       }
     }
   };
-  await import_promises4.default.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
+  await fs2.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
 `);
   const relativePath = relativeArtifactPath(input.projectRoot, manifestPath);
   await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
@@ -11515,10 +9521,10 @@ async function writeDraftSegmentManifest(input) {
 async function writeDraftSegmentArtifact(input) {
   const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
   const segmentId = `segment-${String(input.segment.index).padStart(2, "0")}`;
-  const segmentsRoot = import_node_path6.default.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId);
-  const segmentDir = import_node_path6.default.join(segmentsRoot, segmentId);
-  const segmentPath = import_node_path6.default.join(segmentDir, `${segmentId}.md`);
-  await import_promises4.default.mkdir(segmentDir, { recursive: true });
+  const segmentsRoot = path3.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId);
+  const segmentDir = path3.join(segmentsRoot, segmentId);
+  const segmentPath = path3.join(segmentDir, `${segmentId}.md`);
+  await fs2.mkdir(segmentDir, { recursive: true });
   const sceneCardLines = input.segment.sceneCard ? [
     "## Scene Card",
     `- Index: ${input.segment.sceneCard.index}`,
@@ -11568,7 +9574,7 @@ ${input.previousSegmentTail}
     "## Generated Body",
     input.content.trim()
   ].filter((line) => line !== void 0).join("\n");
-  await import_promises4.default.writeFile(segmentPath, `${content.trimEnd()}
+  await fs2.writeFile(segmentPath, `${content.trimEnd()}
 `);
   const subArtifacts = await writeDraftSegmentSubArtifacts({
     projectRoot: input.projectRoot,
@@ -12163,7 +10169,7 @@ ${originalText}`
       cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim();
       cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim();
       cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim();
-      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5: 
+      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5:
 - \u539F\u6587: \u300C${originalText.slice(0, 40)}...\u300D
 - \u4FEE\u590D: \u300C${cleanText.slice(0, 40)}...\u300D`);
       replacements.push({
@@ -12963,8 +10969,8 @@ async function recordPipelineArtifact(projectRoot, absolutePath, kind, options, 
 async function writeProductionMasterOutline(projectRoot, paths, state, context, options = {}) {
   const { resources } = await writeProductionWritingResourceArtifacts(projectRoot, paths, state, options);
   const content = await createMasterOutlineContent(state, context, resources, options);
-  await import_promises4.default.mkdir(paths.plansDir, { recursive: true });
-  await import_promises4.default.writeFile(paths.masterOutlinePath, `${content}
+  await fs2.mkdir(paths.plansDir, { recursive: true });
+  await fs2.writeFile(paths.masterOutlinePath, `${content}
 `);
   await recordPipelineArtifact(projectRoot, paths.masterOutlinePath, "plan", options, {
     stage: "master_planning",
@@ -12984,11 +10990,11 @@ async function writeProductionMasterOutline(projectRoot, paths, state, context, 
 async function writeProductionStoryBibleAssets(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
   const assets = createProductionStoryBibleAssets(state, context, resources);
-  await import_promises4.default.mkdir(paths.plansDir, { recursive: true });
+  await fs2.mkdir(paths.plansDir, { recursive: true });
   const written = [];
   for (const asset of assets) {
-    const assetPath = import_node_path6.default.join(paths.plansDir, asset.filename);
-    await import_promises4.default.writeFile(assetPath, `${asset.content}
+    const assetPath = path3.join(paths.plansDir, asset.filename);
+    await fs2.writeFile(assetPath, `${asset.content}
 `);
     await recordPipelineArtifact(projectRoot, assetPath, "plan", options, {
       stage: asset.stage,
@@ -13004,7 +11010,7 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
     role: "Showrunner",
     status: "completed",
     message: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\u5DF2\u4FDD\u5B58\u3002",
-    artifactPath: relativeArtifactPath(projectRoot, import_node_path6.default.join(paths.plansDir, "story-bible.md")),
+    artifactPath: relativeArtifactPath(projectRoot, path3.join(paths.plansDir, "story-bible.md")),
     preview: [...assets.map((asset) => `- ${asset.filename}`), "- writing-plan.json"].join("\n"),
     wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n"))
   });
@@ -13014,7 +11020,7 @@ async function ensureProductionStoryBibleAssets(projectRoot, paths, state, conte
   const required = [...PRODUCTION_STORY_ASSET_FILES, "writing-plan.json"];
   const missing = [];
   for (const filename of required) {
-    const content = await readOptionalText2(import_node_path6.default.join(paths.plansDir, filename));
+    const content = await readOptionalText2(path3.join(paths.plansDir, filename));
     if (!content.trim()) missing.push(filename);
   }
   if (missing.length === 0) return [];
@@ -13030,7 +11036,7 @@ async function ensureProductionStoryBibleAssets(projectRoot, paths, state, conte
 }
 async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  await import_promises4.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+  await fs2.mkdir(paths.chapterBlueprintsDir, { recursive: true });
   const written = [];
   for (const task of state.plan.chapterTasks) {
     const storyAssetContext = await loadProductionStoryAssetContext(paths, task);
@@ -13068,8 +11074,8 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
-    await import_promises4.default.writeFile(blueprintPath, `${content}
+    const blueprintPath = path3.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    await fs2.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -13107,9 +11113,9 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText2(import_node_path6.default.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText2(import_node_path6.default.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = import_node_path6.default.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText2(path3.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText2(path3.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = path3.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
     consensus: await readOptionalText2(paths.consensusPath),
     protagonist: protagonistProfile,
@@ -13139,8 +11145,8 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       previousFinalDraft
     });
     blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext);
-    await import_promises4.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
-    await import_promises4.default.writeFile(blueprintPath, `${blueprint}
+    await fs2.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+    await fs2.writeFile(blueprintPath, `${blueprint}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -13348,43 +11354,43 @@ ${formatAigcWritingDetectionReport(aigcDetection)}
 
 ${formatStyleConformanceDriftReport(styleConformanceDrift)}`;
   throwIfPipelineAborted(options);
-  const draftPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = import_node_path6.default.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = import_node_path6.default.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = import_node_path6.default.join(paths.memoryDir, `${chapterId}-memory.md`);
-  const characterRelationshipsPath = paths.characterDossiersPath ? import_node_path6.default.join(import_node_path6.default.dirname(paths.characterDossiersPath), "relationships.json") : "";
-  const characterRelationsMarkdownPath = paths.characterDossiersPath ? import_node_path6.default.join(import_node_path6.default.dirname(paths.characterDossiersPath), "relations.md") : "";
+  const draftPath = path3.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = path3.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = path3.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = path3.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = path3.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const characterRelationshipsPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relationships.json") : "";
+  const characterRelationsMarkdownPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relations.md") : "";
   const characterRelationshipGraph = updatedCharacterDossiers.length ? createCharacterRelationshipGraph(updatedCharacterDossiers) : null;
-  await import_promises4.default.mkdir(paths.chaptersDir, { recursive: true });
-  await import_promises4.default.mkdir(paths.reportsDir, { recursive: true });
-  await import_promises4.default.mkdir(paths.memoryDir, { recursive: true });
-  await import_promises4.default.writeFile(draftPath, `${draft}
+  await fs2.mkdir(paths.chaptersDir, { recursive: true });
+  await fs2.mkdir(paths.reportsDir, { recursive: true });
+  await fs2.mkdir(paths.memoryDir, { recursive: true });
+  await fs2.writeFile(draftPath, `${draft}
 `);
-  await import_promises4.default.writeFile(reportPath, `${reportWithAigcDetection}
+  await fs2.writeFile(reportPath, `${reportWithAigcDetection}
 `);
-  await import_promises4.default.writeFile(reviewedPath, `${draft}
+  await fs2.writeFile(reviewedPath, `${draft}
 
 ---
 
 ${reportWithAigcDetection}
 `);
-  await import_promises4.default.writeFile(finalPath, `${finalDraft}
+  await fs2.writeFile(finalPath, `${finalDraft}
 `);
-  await import_promises4.default.writeFile(memoryPath, `${memoryUpdate}
+  await fs2.writeFile(memoryPath, `${memoryUpdate}
 `);
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
   }
   if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
-    await import_promises4.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+    await fs2.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
 `);
   }
   if (characterRelationshipsPath && characterRelationshipGraph) {
     await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph);
   }
   if (characterRelationsMarkdownPath && characterRelationshipGraph) {
-    await import_promises4.default.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
+    await fs2.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
 `);
   }
   const versionManifestPath = await writeChapterVersionManifest({
@@ -13541,48 +11547,93 @@ ${reportWithAigcDetection}
 function hasApprovedStyleSummaryPrompt(approvedStyleContext) {
   return approvedStyleContext.status === "ready" && Boolean(approvedStyleContext.prompt.trim());
 }
-// Annotate the CommonJS export names for ESM import in node:
-0 && (module.exports = {
+
+export {
+  loadLlmConfigFromEnv,
+  getCachedActiveLlmConfig,
+  setCachedActiveLlmConfig,
+  ensureEnvLlmConfigImported,
+  resolveFactoryRootDir,
+  loadActiveLlmConfig,
+  loadLlmConfigForCapability,
+  isAutopilotStopError,
+  createAutopilotStopError,
+  throwIfStopped,
+  requestLlmTextCompletion,
+  generateAgentReply,
+  testProviderConnectivity,
+  evaluateStyleEvolutionGate,
+  evaluateChapterBlueprintGate,
+  evaluateChapterExecutionReadiness,
+  evaluateProductionReadiness,
+  evaluateStyleEvolutionCandidate,
+  normalizeStyleAigcSignal,
+  buildStyleGenerationVerification,
+  buildStyleEvolutionRefinement,
+  materializeApprovedStyleAssets,
+  persistStyleEvolutionRuntimeState,
+  createStyleLoopRuntimeRecord,
+  persistStyleLoopRuntime,
+  appendStyleLoopRunLedger,
+  validateStyleContractForFreeze,
+  parseStyleEvolutionCritiqueFromText,
+  parseStyleEvolutionEvaluationFromText,
+  parseStyleEvolutionRefinementFromText,
+  parseStyleFreezeAdviceFromText,
+  parseStyleContractFromText,
+  buildStyleContractExtractionPrompt,
+  buildStyleFreezeAdvicePrompt,
+  buildStyleEvolutionCritiquePrompt,
+  buildStyleEvolutionEvaluationPrompt,
+  buildStyleEvolutionRefinementOnlyPrompt,
+  buildStyleEvolutionCandidatePrompt,
+  getStyleEvolutionAssetPaths,
+  initializeStyleEvolution,
+  appendStyleEvolutionCandidate,
+  approveStyleEvolutionSample,
+  acceptStyleEvolutionCandidate,
+  rejectStyleEvolutionSample,
+  loadStyleEvolution,
   ProductionReadinessBlockedError,
-  buildChapterInheritanceAdapterPayload,
-  compactPreviousSegmentTail,
-  createContinuityContract,
-  createDetailedChapterBlueprint,
-  createDraftBodyFromBlueprint,
-  createDraftSegmentCompositionPlan,
-  createDraftSegmentPlan,
-  createNaturalnessReport,
-  createProductionMasterOutline,
-  createProductionStoryBibleAssets,
-  createProductionWritingPlanContract,
-  createQualityReport,
   evaluateChapterStyleConformanceDrift,
-  evaluateCharacterProfilePresence,
-  evaluateNarrativeStyleQuality,
-  evaluatePlotContinuityBridge,
-  evaluateSemanticPreservation,
-  evaluateWritingResourceUsage,
-  formatApprovedWritingStylePrompt,
+  parseQualityGate,
   inferGenreProfile,
+  buildChapterInheritanceAdapterPayload,
+  formatApprovedWritingStylePrompt,
+  loadApprovedWritingStyleContext,
+  compactPreviousSegmentTail,
+  evaluateNarrativeStyleQuality,
+  evaluateWritingResourceUsage,
+  evaluateSemanticPreservation,
+  createNaturalnessReport,
+  evaluatePlotContinuityBridge,
+  memoryCacheTracker,
+  resourcesCacheTracker,
   invalidateAllCaches,
   invalidateProjectCache,
   invalidateWritingResourcesCache,
-  loadAndPruneGlobalContext,
-  loadApprovedWritingStyleContext,
-  loadProductionStoryAssetContext,
-  loadProductionWritingResources,
-  memoryCacheTracker,
-  normalizeAigcWritingDetectionReport,
-  parseQualityGate,
-  repairAigcHighRiskDraft,
-  resourcesCacheTracker,
   retrieveFactoryMemoryContext,
-  runAigcWritingDetection,
-  runChapterProductionPipeline,
+  loadProductionStoryAssetContext,
+  createProductionStoryBibleAssets,
+  createProductionWritingPlanContract,
+  writeProductionWritingPlan,
+  evaluateCharacterProfilePresence,
+  createContinuityContract,
+  loadProductionWritingResources,
+  writeProductionWritingResourceArtifacts,
+  createProductionMasterOutline,
+  createDetailedChapterBlueprint,
+  createDraftBodyFromBlueprint,
+  loadAndPruneGlobalContext,
+  createDraftSegmentPlan,
+  createDraftSegmentCompositionPlan,
+  repairAigcHighRiskDraft,
+  createQualityReport,
+  normalizeAigcWritingDetectionReport,
   skippedAigcWritingDetectionReport,
-  writeAllDetailedChapterBlueprints,
+  runAigcWritingDetection,
   writeProductionMasterOutline,
   writeProductionStoryBibleAssets,
-  writeProductionWritingPlan,
-  writeProductionWritingResourceArtifacts
-});
+  writeAllDetailedChapterBlueprints,
+  runChapterProductionPipeline
+};

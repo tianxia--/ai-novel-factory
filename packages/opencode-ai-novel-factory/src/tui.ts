@@ -2,7 +2,7 @@ import readline from "node:readline"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { getProjectEnvStatus, loadAutonomousState } from "ai-novel-core"
+import { loadAutonomousState } from "ai-novel-core"
 import type { AutonomousNovelState } from "ai-novel-core"
 import { executeComposerAction, parseComposerInput } from "./tui-controller"
 
@@ -83,8 +83,6 @@ function renderTuiScreenWithDiscussion(state: AutonomousNovelState, options: Ren
   const liveDiscussion = options.liveDiscussion ?? []
   const draftInput = options.draftInput ?? ""
   const chatMetadata = getRoutedChatMetadata(state)
-  const envStatus = getProjectEnvStatus()
-  const providerBadge = envStatus.configured ? "[configured]" : "[missing]"
   const providerCheck = state.runtime.lastProviderCheck
     ? state.runtime.lastProviderCheck.ok
       ? `ok @ ${state.runtime.lastProviderCheck.checkedAt.slice(11, 19)}`
@@ -103,10 +101,7 @@ function renderTuiScreenWithDiscussion(state: AutonomousNovelState, options: Ren
     `Status: ${state.runtime.statusMessage}`,
     `Cover prep: ${state.assets.cover.status}`,
     `Comic prep: ${state.assets.comic.status}`,
-    `Provider env: ${providerBadge}`,
-    envStatus.configured
-      ? `Provider model: ${envStatus.resolved.modelName || "unset"}`
-      : `Missing env: ${envStatus.missing.join(", ")}`,
+    "Provider config: settings/database",
     `Provider test: ${providerCheck}`,
     `Last route: ${chatMetadata.lastRoute}`,
     `Last action: ${chatMetadata.lastAction}`,
@@ -115,7 +110,7 @@ function renderTuiScreenWithDiscussion(state: AutonomousNovelState, options: Ren
   const composerLines = [
     "Type in the live prompt below the dashboard. Enter sends one line.",
     "Commands: /advance /cover /provider-test /interrupt ...",
-    "          /env base_url=... model=... api_key=...",
+    "Model providers are managed in settings.",
     draftInput ? `Last input: ${draftInput}` : "Last input: none yet",
   ]
 

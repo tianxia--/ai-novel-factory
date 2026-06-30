@@ -1,7 +1,7 @@
-import { P as ProviderTestResult, A as AutonomousNovelState, f as InitProjectOptions, N as NovelProjectRecord, g as InterruptOptions, I as InterruptionReview } from './cli-types-sWRA2Cw2.js';
-import { ProductionPipelineOptions } from './writing-pipeline.js';
-import './factory-db-am8z7hMk.js';
-import './env-manager-BY-bHMi5.js';
+import { P as ProviderTestResult, A as AutonomousNovelState, g as InitProjectOptions, N as NovelProjectRecord, h as InterruptOptions, I as InterruptionReview } from './cli-types-dnbh9JaE.cjs';
+import { ProductionPipelineOptions } from './writing-pipeline.cjs';
+import './factory-db-DdCUw3Hq.cjs';
+import { L as LlmApiMode } from './llm-config-Rvjshu2J.cjs';
 
 interface AgentReplyOptions {
     roleName: string;
@@ -29,7 +29,26 @@ interface ProviderOverrideOptions {
     baseUrl?: string;
     apiKey?: string;
     modelName?: string;
+    apiMode?: LlmApiMode;
 }
+interface LlmTextMessage {
+    role: "system" | "user" | "assistant";
+    content: string;
+}
+interface LlmTextCompletionOptions {
+    baseUrl: string;
+    apiKey: string;
+    modelName: string;
+    apiMode: LlmApiMode;
+    timeoutMs: number;
+    temperature?: number;
+    messages: LlmTextMessage[];
+    stream?: boolean;
+    maxTokens?: number;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void | Promise<void>;
+}
+declare function requestLlmTextCompletion(options: LlmTextCompletionOptions): Promise<string>;
 declare function generateAgentReply(options: AgentReplyOptions): Promise<string>;
 declare function testProviderConnectivity(overrides?: ProviderOverrideOptions, rootDir?: string): Promise<ProviderTestResult>;
 
@@ -75,7 +94,11 @@ declare function retryChapterProduction(rootDir: string, chapterNumber: number, 
     runNow?: boolean;
     maxRecoveryAttempts?: number;
 }): Promise<AutonomousNovelState>;
-declare function prepareCoverGeneration(rootDir: string): Promise<AutonomousNovelState>;
+declare function prepareCoverGeneration(rootDir: string, options?: {
+    factoryRootDir?: string;
+    projectId?: string | null;
+    reason?: string;
+}): Promise<AutonomousNovelState>;
 declare function reviewInterruption(options: InterruptOptions): Promise<InterruptionReview>;
 declare function formatStatus(state: AutonomousNovelState): string;
 declare function getWorkspaceSummary(rootDir: string): {
@@ -84,4 +107,4 @@ declare function getWorkspaceSummary(rootDir: string): {
     slug: string;
 };
 
-export { advanceAutonomousProject as a, getWorkspaceSummary as b, createManagedAutonomousProject as c, deleteManagedAutonomousProject as d, loadAutonomousState as e, formatStatus as f, generateAgentReply as g, retryChapterProduction as h, initAutonomousProject as i, reviewInterruption as j, syncManagedProjectState as k, listAutonomousProjects as l, prepareCoverGeneration as p, resolveManagedProjectRoot as r, saveAutonomousState as s, testProviderConnectivity as t };
+export { advanceAutonomousProject as a, getWorkspaceSummary as b, createManagedAutonomousProject as c, deleteManagedAutonomousProject as d, loadAutonomousState as e, formatStatus as f, generateAgentReply as g, resolveManagedProjectRoot as h, initAutonomousProject as i, retryChapterProduction as j, reviewInterruption as k, listAutonomousProjects as l, syncManagedProjectState as m, prepareCoverGeneration as p, requestLlmTextCompletion as r, saveAutonomousState as s, testProviderConnectivity as t };

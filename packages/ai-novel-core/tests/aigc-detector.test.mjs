@@ -4,9 +4,10 @@ import fs from "node:fs/promises"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
-const packageRoot = path.resolve(process.cwd())
+const testFilePath = fileURLToPath(import.meta.url)
+const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const coreEntry = path.join(packageRoot, "dist", "index.js")
 
 async function loadCore() {

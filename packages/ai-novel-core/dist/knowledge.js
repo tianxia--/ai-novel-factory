@@ -8,8 +8,8 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-M45WOEFA.js";
-import "./chunk-4PMKQQNV.js";
+} from "./chunk-Q7A3BTJU.js";
+import "./chunk-XEYMG4OS.js";
 export {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,

@@ -296,7 +296,11 @@ function derivePrimaryAction(
   if (productionStatus === "complete") return "none"
   if (productionStatus === "blocked" || executionStatus === "blocked") return "retry_blocked"
   if (productionStatus === "reviewing") return "review"
-  if (PRODUCTION_STAGES.has(stage) || progress.completedChapters > 0 || progress.pendingChapters > 0 || progress.inProgressChapters > 0) {
+  const hasChapterWork = progress.completedChapters > 0
+    || progress.passedChapters > 0
+    || progress.inProgressChapters > 0
+    || progress.blockedChapters > 0
+  if (PRODUCTION_STAGES.has(stage) || hasChapterWork) {
     return "continue"
   }
   return "start"
@@ -308,7 +312,11 @@ function deriveNextTarget(
   progress: ProjectChapterProgress,
 ): ProjectNextTarget {
   if (productionStatus === "complete") return null
-  if (progress.nextChapterNumber && (PRODUCTION_STAGES.has(stage) || progress.completedChapters > 0 || progress.pendingChapters > 0)) {
+  const hasChapterWork = progress.completedChapters > 0
+    || progress.passedChapters > 0
+    || progress.inProgressChapters > 0
+    || progress.blockedChapters > 0
+  if (progress.nextChapterNumber && (PRODUCTION_STAGES.has(stage) || hasChapterWork)) {
     return { type: "chapter", chapterNumber: progress.nextChapterNumber }
   }
   if (stage !== "empty" && stage !== "unknown") return { type: "stage", stage }

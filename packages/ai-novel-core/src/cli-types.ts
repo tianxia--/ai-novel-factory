@@ -4,11 +4,13 @@ export type NovelStage =
   | "master_planning"
   | "chapter_task_generation"
   | "drafting"
+  | "aigc_refinement"
   | "reviewing"
   | "replanning"
   | "complete"
 
 export type TaskStatus = "pending" | "in_progress" | "complete" | "blocked"
+export type AssetStatus = TaskStatus | "failed"
 
 export type InterruptionScope = "local" | "chapter_arc" | "global"
 
@@ -49,6 +51,7 @@ export interface ChapterTask {
     targetWords?: number
     updatedAt: string
   }
+  aigcStatus?: "pending" | "passed" | "blocked" | "skipped"
 }
 
 export interface InterruptionReview {
@@ -65,6 +68,7 @@ export interface ProviderTestResult {
   checkedAt: string
   baseUrl: string
   modelName: string
+  apiMode?: string
   message: string
 }
 
@@ -156,8 +160,13 @@ export interface AutonomousNovelState {
   }
   assets: {
     cover: {
-      status: TaskStatus
+      status: AssetStatus
       briefPath: string
+      promptPath?: string
+      imagePath?: string
+      metadataPath?: string
+      generatedAt?: string
+      error?: string
     }
     comic: {
       status: TaskStatus

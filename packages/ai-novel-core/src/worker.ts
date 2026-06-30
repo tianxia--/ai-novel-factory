@@ -1,7 +1,8 @@
 import path from "node:path"
 
 import type { AutonomousNovelState } from "./cli-types"
-import { getProjectEnvStatus, getPublicProjectEnvStatus } from "./env-manager"
+import { getPublicProjectEnvStatus } from "./env-manager"
+import { loadLlmConfigForCapability } from "./llm-config"
 import { restoreAutopilotJobs, startAutopilotWorkerRuntime } from "./autopilot-worker"
 import { withFactoryDb } from "./factory-db"
 
@@ -73,12 +74,30 @@ export async function startNovelAutopilotWorker(options: { rootDir: string; poll
 
 export async function getNovelAutopilotWorkerStatus(rootDir: string) {
   const factory = await withFactoryDb(rootDir, async (db) => db.getOperationalStatus())
+  const textLlmConfig = await loadLlmConfigForCapability(rootDir, "text").catch(() => null)
   return {
     ok: true,
     service: "ai-novel-worker",
     rootDir,
     factory,
     envStatus: getPublicProjectEnvStatus(rootDir),
+    llm: textLlmConfig
+      ? {
+          capability: textLlmConfig._capability || "text",
+          configId: textLlmConfig._configId || null,
+          baseUrl: textLlmConfig.provider.baseUrl,
+          modelName: textLlmConfig.provider.modelName,
+          apiMode: textLlmConfig.provider.apiMode,
+          source: "database",
+        }
+      : {
+          capability: "text",
+          configId: null,
+          baseUrl: "",
+          modelName: "",
+          apiMode: "chat",
+          source: "unconfigured",
+        },
   }
 }
 
@@ -105,5 +124,6 @@ export async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   })
 
   console.log(`AI Novel Autopilot worker running for workspace: ${flags.rootDir}`)
-  console.log(`Provider: ${getProjectEnvStatus(flags.rootDir).resolved.modelName || "not configured"}`)
+  const status = await getNovelAutopilotWorkerStatus(flags.rootDir)
+  console.log(`Provider: ${status.llm.modelName || "not configured"} (${status.llm.apiMode}, ${status.llm.source})`)
 }

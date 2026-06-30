@@ -1,14 +1,16 @@
 import {
   restoreAutopilotJobs,
   startAutopilotWorkerRuntime
-} from "./chunk-HYZ2LJNY.js";
+} from "./chunk-7EVIEO4M.js";
 import {
-  getProjectEnvStatus,
   getPublicProjectEnvStatus
-} from "./chunk-TI62PTKZ.js";
+} from "./chunk-KXL2FONS.js";
+import {
+  loadLlmConfigForCapability
+} from "./chunk-SK3T47GJ.js";
 import {
   withFactoryDb
-} from "./chunk-4PMKQQNV.js";
+} from "./chunk-XEYMG4OS.js";
 
 // src/worker.ts
 import path from "path";
@@ -66,12 +68,28 @@ async function startNovelAutopilotWorker(options) {
 }
 async function getNovelAutopilotWorkerStatus(rootDir) {
   const factory = await withFactoryDb(rootDir, async (db) => db.getOperationalStatus());
+  const textLlmConfig = await loadLlmConfigForCapability(rootDir, "text").catch(() => null);
   return {
     ok: true,
     service: "ai-novel-worker",
     rootDir,
     factory,
-    envStatus: getPublicProjectEnvStatus(rootDir)
+    envStatus: getPublicProjectEnvStatus(rootDir),
+    llm: textLlmConfig ? {
+      capability: textLlmConfig._capability || "text",
+      configId: textLlmConfig._configId || null,
+      baseUrl: textLlmConfig.provider.baseUrl,
+      modelName: textLlmConfig.provider.modelName,
+      apiMode: textLlmConfig.provider.apiMode,
+      source: "database"
+    } : {
+      capability: "text",
+      configId: null,
+      baseUrl: "",
+      modelName: "",
+      apiMode: "chat",
+      source: "unconfigured"
+    }
   };
 }
 async function runNovelAutopilotWorkerOnce(rootDir) {
@@ -93,7 +111,8 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
     pollMs: flags.pollMs
   });
   console.log(`AI Novel Autopilot worker running for workspace: ${flags.rootDir}`);
-  console.log(`Provider: ${getProjectEnvStatus(flags.rootDir).resolved.modelName || "not configured"}`);
+  const status = await getNovelAutopilotWorkerStatus(flags.rootDir);
+  console.log(`Provider: ${status.llm.modelName || "not configured"} (${status.llm.apiMode}, ${status.llm.source})`);
 }
 
 export {

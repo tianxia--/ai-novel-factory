@@ -3,9 +3,10 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
 import nodePath from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
-const packageRoot = nodePath.resolve(process.cwd())
+const testFilePath = fileURLToPath(import.meta.url)
+const packageRoot = nodePath.resolve(nodePath.dirname(testFilePath), "..")
 const coreEntry = nodePath.join(packageRoot, "dist", "index.js")
 const studioServerEntry = nodePath.join(packageRoot, "dist", "studio-server.js")
 const autopilotWorkerSource = nodePath.join(packageRoot, "src", "autopilot-worker.ts")

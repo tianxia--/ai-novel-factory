@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
+import { createHash } from "node:crypto"
 
 import type {
   AutonomousNovelState,
@@ -13,19 +14,32 @@ import type {
   InterruptionScope,
   NovelProjectRecord,
 } from "./cli-types"
-import { loadLlmConfigFromEnv } from "./llm-config"
+import { loadLlmConfigForCapability, type LlmProviderConfig } from "./llm-config"
+import { requestLlmTextCompletion } from "./runtime-llm"
+import { getProjectEnvStatus } from "./env-manager"
 import { initializeSuperGraph } from "./super-graph"
 import { withFactoryDb } from "./factory-db"
 import {
   runChapterProductionPipeline,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
+  writeProductionStoryBibleAssets,
   writeProductionWritingResourceArtifacts,
+  loadProductionWritingResources,
+  repairAigcHighRiskDraft,
+  normalizeAigcWritingDetectionReport,
   type ProductionPipelineOptions,
 } from "./writing-pipeline"
 import type { ChapterProductionFact } from "./factory-db"
 import { throwIfStopped } from "./abort"
 import { syncCurrentContextPacketFile } from "./context-packet"
+import { detectAigcSegments, getAigcDetectorConfig } from "./aigc-detector"
+import {
+  evaluateProductionReadiness,
+  evaluateStyleEvolutionGate,
+  type ProductionReadinessAsset,
+} from "./production-contracts"
+import { loadStyleEvolution } from "./production-style-evolution"
 
 const WORKSPACE_DIR = ".ai-novel"
 const PROJECTS_DIR = ".ai-novel-projects"
@@ -53,6 +67,23 @@ const AGENT_ROLES = [
   "reviewer",
   "prose-stylist",
 ] as const
+
+const COVER_IMAGE_PATH = ".ai-novel/assets/cover/cover.png"
+const COVER_METADATA_PATH = ".ai-novel/assets/cover/cover-metadata.json"
+const COVER_PROMPT_PATH = ".ai-novel/assets/cover/cover-prompt.md"
+const DRAFT_SUBCALL_ROLE_VALUES = ["plot", "narration", "dialogue", "character_action", "continuity", "assembly"] as const
+const STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json"
+
+function parseDraftSubcallRolesSetting(value: string | null | undefined): ProductionPipelineOptions["draftSubcallRoles"] {
+  if (!value) return undefined
+  const roles = value
+    .split(",")
+    .map((role) => role.trim())
+    .filter((role): role is NonNullable<ProductionPipelineOptions["draftSubcallRoles"]>[number] =>
+      DRAFT_SUBCALL_ROLE_VALUES.includes(role as NonNullable<ProductionPipelineOptions["draftSubcallRoles"]>[number])
+    )
+  return roles.length ? [...new Set(roles)] : undefined
+}
 
 function slugifyTitle(title: string) {
   const cleaned = title
@@ -396,6 +427,7 @@ function buildInitialState(options: InitProjectOptions): AutonomousNovelState {
       cover: {
         status: "pending",
         briefPath: ".ai-novel/assets/cover/cover-brief.md",
+        promptPath: COVER_PROMPT_PATH,
       },
       comic: {
         status: "pending",
@@ -438,6 +470,8 @@ function getWorkspacePaths(rootDir: string) {
     masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
     chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
     coverPromptPath: path.join(workspaceDir, "assets", "cover", "cover-prompt.md"),
+    coverImagePath: path.join(workspaceDir, "assets", "cover", "cover.png"),
+    coverMetadataPath: path.join(workspaceDir, "assets", "cover", "cover-metadata.json"),
   }
 }
 
@@ -487,7 +521,22 @@ function formatCharacterDossierSummary(dossiers: CharacterDossier[]) {
 
 async function writeWorkspaceArtifacts(rootDir: string, state: AutonomousNovelState) {
   const paths = getWorkspacePaths(rootDir)
-  const llmConfig = loadLlmConfigFromEnv(rootDir)
+  const textLlmConfig = await loadLlmConfigForCapability(rootDir, "text").catch(() => null)
+  const llmConfig: LlmProviderConfig = {
+    provider: {
+      baseUrl: textLlmConfig?.provider.baseUrl || "",
+      apiKeyEnv: textLlmConfig ? "DB_ACTIVE_CONFIG" : "unset",
+      modelName: textLlmConfig?.provider.modelName || "",
+      apiMode: textLlmConfig?.provider.apiMode || "chat",
+      timeoutMs: textLlmConfig?.provider.timeoutMs || 120000,
+      temperature: textLlmConfig?.provider.temperature || 0.1,
+      reactMaxSteps: 25,
+    },
+    writing: {
+      chapterWordTarget: state.plan.chapterWordTarget,
+      chapterWordMinimum: MIN_CHAPTER_WORD_TARGET,
+    },
+  }
   const creativeProfile = state.project.creativeProfile || buildCreativeProfile({
     rootDir,
     idea: state.project.idea,
@@ -519,8 +568,6 @@ async function writeWorkspaceArtifacts(rootDir: string, state: AutonomousNovelSt
   await fs.mkdir(paths.characterCoreDir, { recursive: true })
 
   await writeJsonFileAtomic(paths.statePath, state)
-  llmConfig.writing.chapterWordTarget = state.plan.chapterWordTarget
-  llmConfig.writing.chapterWordMinimum = MIN_CHAPTER_WORD_TARGET
   await writeJsonFileAtomic(paths.configPath, llmConfig)
   await writeJsonFileAtomic(paths.characterDossiersPath, characterDossiers)
 
@@ -807,6 +854,271 @@ async function readOptionalText(filePath: string) {
   }
 }
 
+async function readOptionalJson(filePath: string) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8")
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+async function fileHasContent(filePath: string) {
+  return Boolean((await readOptionalText(filePath)).trim())
+}
+
+function nonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function hasItems(value: unknown) {
+  return Array.isArray(value) && value.length > 0
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+function createStoryFoundationFingerprint(payload: unknown) {
+  return createHash("sha256").update(stableJson(payload)).digest("hex").slice(0, 24)
+}
+
+function buildStoryFoundationFingerprintInput({
+  planningAssetDetails,
+  storyFoundationContract,
+  worldMatrix,
+  plotArchitecture,
+  storyBible,
+  volumeStrategy,
+  foreshadowingLedger,
+  characterDynamics,
+  writingPlan,
+}: {
+  planningAssetDetails: ProductionReadinessAsset[]
+  storyFoundationContract: Record<string, unknown> | null
+  worldMatrix: Record<string, unknown> | null
+  plotArchitecture: Record<string, unknown> | null
+  storyBible: Record<string, unknown> | null
+  volumeStrategy: Record<string, unknown> | null
+  foreshadowingLedger: Record<string, unknown> | null
+  characterDynamics: Record<string, unknown> | null
+  writingPlan: Record<string, unknown> | null
+}) {
+  return {
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan,
+  }
+}
+
+function planningAssetStructuralIssue(asset: string, value: Record<string, unknown> | null, totalChapters: number) {
+  if (!value) return "JSON 无法解析"
+  switch (asset) {
+    case "story-foundation-contract.json": {
+      const plot = value.plot && typeof value.plot === "object" ? value.plot as Record<string, unknown> : {}
+      const characters = value.characters && typeof value.characters === "object" ? value.characters as Record<string, unknown> : {}
+      if (!nonEmptyString((value.project as Record<string, unknown> | undefined)?.title)
+        && !nonEmptyString((value.project as Record<string, unknown> | undefined)?.idea)) return "缺少项目核心信息"
+      if (!hasItems(plot.chapters) && !hasItems((plot.causalModel as Record<string, unknown> | undefined)?.chapters)) return "缺少主线章节因果"
+      if (!hasItems(characters.requiredDossierFields)) return "缺少人物档案要求"
+      return ""
+    }
+    case "world-matrix.json":
+      return hasItems(value.rules) ? "" : "缺少世界规则"
+    case "plot-architecture.json":
+      return hasItems(value.chapters) ? "" : "缺少章节因果架构"
+    case "story-bible.json":
+      return nonEmptyString(value.readerPromise) && hasItems(value.nonNegotiableContracts) ? "" : "缺少读者承诺或故事合同"
+    case "volume-strategy.json":
+      return hasItems(value.volumes) ? "" : "缺少分卷策略"
+    case "foreshadowing-ledger.json":
+      return hasItems(value.entries) ? "" : "缺少伏笔条目"
+    case "character-dynamics.json":
+      return hasItems(value.relationshipEntries) || hasItems(value.dossiers) || hasItems(value.relationships) ? "" : "缺少人物关系动态"
+    case "writing-plan.json": {
+      const chapters = Array.isArray(value.chapters) ? value.chapters : []
+      if (!Number.isFinite(Number(value.totalChapters)) || Number(value.totalChapters) <= 0) return "缺少总章节数"
+      if (chapters.length < Math.max(1, totalChapters)) return "写作计划未覆盖全书章节"
+      return ""
+    }
+    default:
+      return ""
+  }
+}
+
+async function countMarkdownFiles(dirPath: string) {
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true })
+    return entries.filter((entry) => entry.isFile() && /\.md$/iu.test(entry.name)).length
+  } catch {
+    return 0
+  }
+}
+
+async function evaluateDraftingStartReadiness(
+  rootDir: string,
+  paths: ReturnType<typeof getWorkspacePaths>,
+  state: AutonomousNovelState,
+) {
+  const requiredPlanningAssets = [
+    "world-matrix.md",
+    "plot-architecture.md",
+    "story-bible.md",
+    "volume-strategy.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "story-foundation-contract.json",
+    "world-matrix.json",
+    "plot-architecture.json",
+    "story-bible.json",
+    "volume-strategy.json",
+    "foreshadowing-ledger.json",
+    "character-dynamics.json",
+    "writing-plan.json",
+  ]
+  const totalChapters = Math.max(0, Number(state.plan.totalChapters || state.plan.chapterTasks.length || 0))
+  const planningAssetDetails: ProductionReadinessAsset[] = await Promise.all(requiredPlanningAssets.map(async (asset) => {
+    const assetPath = path.join(paths.plansDir, asset)
+    const present = await fileHasContent(assetPath)
+    const issue = present && asset.endsWith(".json")
+      ? planningAssetStructuralIssue(asset, await readOptionalJson(assetPath), totalChapters)
+      : ""
+    return {
+      key: asset.replace(/\.md$/u, "").replace(/[^a-z0-9]+/giu, "_"),
+      label: asset,
+      path: `.ai-novel/plans/${asset}`,
+      status: present && !issue ? "passed" as const : "blocked" as const,
+      detail: present ? issue || "已生成" : "缺失",
+    }
+  }))
+  const presentPlanningAssets = planningAssetDetails.filter((asset) => asset.status === "passed").map((asset) => asset.label)
+  const storyFoundationApproval = await readOptionalJson(path.join(paths.plansDir, STORY_FOUNDATION_APPROVAL_FILE))
+  const storyFoundationApproved = Boolean(storyFoundationApproval?.approved === true && String(storyFoundationApproval.approvedAt || "").trim())
+  const storyFoundationApprovalFingerprint = typeof storyFoundationApproval?.assetFingerprint === "string"
+    ? String(storyFoundationApproval.assetFingerprint)
+    : ""
+  const styleEvolution = await loadStyleEvolution(rootDir).catch(() => null)
+  const hasCharacterDynamicsAsset = await fileHasContent(path.join(paths.plansDir, "character-dynamics.json"))
+  const hasDossiers = await fileHasContent(paths.characterDossiersPath) || hasCharacterDynamicsAsset
+  const hasRelationships = await fileHasContent(path.join(paths.charactersDir, "relationships.json")) || hasCharacterDynamicsAsset
+  const blueprintCount = await countMarkdownFiles(paths.chapterBlueprintsDir)
+  const consensus = await readOptionalText(paths.consensusPath)
+  const storyFoundationContract = await readOptionalJson(path.join(paths.plansDir, "story-foundation-contract.json"))
+  const worldMatrix = await readOptionalJson(path.join(paths.plansDir, "world-matrix.json"))
+  const plotArchitecture = await readOptionalJson(path.join(paths.plansDir, "plot-architecture.json"))
+  const storyBible = await readOptionalJson(path.join(paths.plansDir, "story-bible.json"))
+  const volumeStrategy = await readOptionalJson(path.join(paths.plansDir, "volume-strategy.json"))
+  const foreshadowingLedger = await readOptionalJson(path.join(paths.plansDir, "foreshadowing-ledger.json"))
+  const characterDynamics = await readOptionalJson(path.join(paths.plansDir, "character-dynamics.json"))
+  const writingPlan = await readOptionalJson(path.join(paths.plansDir, "writing-plan.json"))
+  const storyFoundationFingerprintInput = buildStoryFoundationFingerprintInput({
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan,
+  })
+  const storyFoundationAssetFingerprint = createStoryFoundationFingerprint(storyFoundationFingerprintInput)
+  return evaluateProductionReadiness({
+    consensusText: consensus,
+    planningArtifactCount: presentPlanningAssets.length,
+    planningRequiredAssetCount: presentPlanningAssets.length,
+    planningRequiredAssets: requiredPlanningAssets,
+    planningMissingRequiredAssets: requiredPlanningAssets.filter((asset) => !presentPlanningAssets.includes(asset)),
+    planningAssetDetails,
+    storyFoundationApproved,
+    storyFoundationApprovalPath: `.ai-novel/plans/${STORY_FOUNDATION_APPROVAL_FILE}`,
+    storyFoundationApprovedAt: typeof storyFoundationApproval?.approvedAt === "string" ? storyFoundationApproval.approvedAt : undefined,
+    storyFoundationApprovalFingerprint,
+    storyFoundationAssetFingerprint,
+    characterAssetDetails: [
+      {
+        key: "character_dossiers",
+        label: "人物档案",
+        path: ".ai-novel/memory/characters/dossiers.json",
+        status: hasDossiers ? "passed" : "blocked",
+        detail: hasDossiers ? "已生成" : "缺失",
+      },
+      {
+        key: "relationship_graph",
+        label: "人物关系图",
+        path: ".ai-novel/memory/characters/relationships.json",
+        status: hasRelationships ? "passed" : "blocked",
+        detail: hasRelationships ? "已生成" : "缺失",
+      },
+    ],
+    executionAssetDetails: [
+      {
+        key: "chapter_blueprints",
+        label: "章节蓝图",
+        path: ".ai-novel/plans/chapter-blueprints/",
+        status: totalChapters > 0 && blueprintCount >= totalChapters ? "passed" : "blocked",
+        detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} 个蓝图`,
+      },
+      {
+        key: "style_contract",
+        label: "写法合同",
+        path: ".ai-novel/style/evolution/style-contract.json",
+        status: styleEvolution?.gate?.status || "blocked",
+        detail: styleEvolution?.gate?.status === "passed" ? "已冻结" : styleEvolution?.gate?.blockedReason || "待确认",
+      },
+    ],
+    blueprintCount,
+    totalChapters,
+    characterDossierCount: hasDossiers ? Math.max(1, state.memory?.characterDossiers?.length || 0) : 0,
+    styleGate: styleEvolution?.gate || evaluateStyleEvolutionGate(null),
+    memoryRecallRows: Math.max(0, Number(state.memory?.characterDossiers?.length || 0)),
+    memoryLag: 0,
+    contextBudgetPercent: 0,
+  })
+}
+
+async function blockDraftingUntilReady(
+  rootDir: string,
+  paths: ReturnType<typeof getWorkspacePaths>,
+  state: AutonomousNovelState,
+  pipelineOptions: ProductionPipelineOptions,
+) {
+  const readiness = await evaluateDraftingStartReadiness(rootDir, paths, state)
+  if (readiness.canProceed) {
+    return false
+  }
+  state.runtime.stage = "chapter_task_generation"
+  state.runtime.statusMessage = `Drafting is blocked by production readiness: ${readiness.blockedReason || readiness.summary}`
+  stampRuntimeProgress(state, "drafting_blocked_by_production_readiness")
+  await saveAutonomousState(rootDir, state)
+  await recordWorkflowEvent(pipelineOptions, "DRAFTING_START_BLOCKED_BY_READINESS", {
+    status: readiness.status,
+    score: readiness.score,
+    blockedReason: readiness.blockedReason,
+    issueCodes: readiness.issues.map((issue) => issue.code),
+  })
+  if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+    await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+  }
+  return true
+}
+
 async function writeJsonFileAtomic(filePath: string, value: unknown) {
   const data = `${JSON.stringify(value, null, 2)}\n`
   await fs.mkdir(path.dirname(filePath), { recursive: true })
@@ -879,6 +1191,259 @@ function extractMeaningfulLines(source: string, limit = 4) {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"))
     .slice(0, limit)
+}
+
+function trimForPrompt(source: string, maxChars: number) {
+  const normalized = source.trim().replace(/\n{3,}/g, "\n\n")
+  if (normalized.length <= maxChars) {
+    return normalized
+  }
+  return `${normalized.slice(0, maxChars).trim()}\n[truncated]`
+}
+
+function getEnvValue(rootDir: string, name: string) {
+  return process.env[name] || (getProjectEnvStatus(rootDir).values as Record<string, string | undefined>)[name] || ""
+}
+
+type CoverContext = { consensus: string; protagonist: string; style: string }
+type CoverVisualBrief = { brief: string; source: "llm" | "fallback"; error?: string }
+
+function buildFallbackCoverVisualBrief(state: AutonomousNovelState, context: CoverContext) {
+  const consensusLines = extractMeaningfulLines(context.consensus, 5)
+  const protagonistLines = extractMeaningfulLines(context.protagonist, 4)
+  const styleLines = extractMeaningfulLines(context.style, 3)
+  const genre = state.project.creativeProfile?.genre || "genre-forward commercial fiction"
+
+  return [
+    "# Cover Visual Brief",
+    "",
+    `Title: ${state.project.title}`,
+    `Core concept: ${state.project.idea}`,
+    `Genre signal: ${genre}`,
+    "",
+    "Primary cover concept:",
+    "- A single iconic protagonist silhouette or symbolic emblem dominates the cover.",
+    "- The image should feel like a premium illustrated novel cover, not a generic stock poster.",
+    "- The central visual metaphor must communicate the protagonist's pressure, ambition, and story promise at a glance.",
+    "",
+    "Story signals to visualize:",
+    ...(consensusLines.length ? consensusLines.map((line) => `- ${line}`) : ["- Use the frozen world assumptions and central conflict."]),
+    "",
+    "Character or emblem focus:",
+    ...(protagonistLines.length ? protagonistLines.map((line) => `- ${line}`) : ["- Foreground one memorable protagonist silhouette or emblem."]),
+    "",
+    "Style direction:",
+    ...(styleLines.length ? styleLines.map((line) => `- ${line}`) : ["- Signal the genre promise immediately."]),
+    "",
+    "Composition:",
+    "- Vertical 2:3 book-cover layout with a clear foreground, midground, and background.",
+    "- One strong focal shape, dramatic lighting, readable silhouette, and title-safe negative space near the upper third.",
+    "- Avoid busy collage layouts, plastic fantasy armor, random flames, over-rendered faces, and cheap mobile-game poster aesthetics.",
+    "",
+    "Color and finish:",
+    "- Use a disciplined color script with one dominant mood color and one accent color.",
+    "- High-end editorial illustration, cinematic but painterly, crisp edges on the focal subject, atmospheric depth in the background.",
+  ].join("\n")
+}
+
+function buildCoverBriefRequest(state: AutonomousNovelState, context: CoverContext) {
+  return [
+    `Novel title: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Genre: ${state.project.creativeProfile?.genre || "unknown"}`,
+    `Reader promise: ${state.project.creativeProfile?.readerPromise || "unknown"}`,
+    "",
+    "Global consensus:",
+    trimForPrompt(context.consensus || "(not finalized)", 3500),
+    "",
+    "Protagonist dossier:",
+    trimForPrompt(context.protagonist || "(not finalized)", 1800),
+    "",
+    "Style profile:",
+    trimForPrompt(context.style || "(not finalized)", 1500),
+  ].join("\n")
+}
+
+async function generateCoverVisualBrief(rootDir: string, state: AutonomousNovelState, context: CoverContext): Promise<CoverVisualBrief> {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return { brief: buildFallbackCoverVisualBrief(state, context), source: "fallback", error: "test_mode" }
+  }
+
+  try {
+    const config = await loadLlmConfigForCapability(rootDir, "text")
+    const apiKey = config?._dbApiKey || ""
+
+    if (!config || !apiKey) {
+      throw new Error("text_llm_config_missing")
+    }
+
+    const brief = await requestLlmTextCompletion({
+      baseUrl: config.provider.baseUrl,
+      apiKey,
+      modelName: config.provider.modelName,
+      apiMode: config.provider.apiMode,
+      timeoutMs: config.provider.timeoutMs,
+      temperature: 0.35,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a senior commercial book-cover art director.",
+            "Create an English visual brief for a text-to-image model.",
+            "Do not write prose fiction. Do not ask questions. Do not include typography copy.",
+            "Prioritize specific visual anchors, composition, mood, palette, lighting, and negative constraints.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            buildCoverBriefRequest(state, context),
+            "",
+            "Return markdown with exactly these sections:",
+            "1. Core Visual Metaphor",
+            "2. Main Subject",
+            "3. Setting And Background",
+            "4. Composition",
+            "5. Palette And Lighting",
+            "6. Texture And Rendering Style",
+            "7. Must Avoid",
+            "",
+            "Make the brief concrete enough that the generated image will not look like a generic webnovel poster.",
+          ].join("\n"),
+        },
+      ],
+    })
+    if (!brief) {
+      throw new Error("text_llm_returned_empty_cover_brief")
+    }
+    return { brief, source: "llm" }
+  } catch (error) {
+    return {
+      brief: buildFallbackCoverVisualBrief(state, context),
+      source: "fallback",
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+function buildFinalCoverImagePrompt(state: AutonomousNovelState, visualBrief: string) {
+  return [
+    `Create a premium illustrated vertical novel cover for "${state.project.title}".`,
+    `Core story concept: ${state.project.idea}.`,
+    "",
+    "Use this art-direction brief as binding visual guidance:",
+    trimForPrompt(visualBrief, 5000),
+    "",
+    "Image requirements:",
+    "- Vertical 2:3 book-cover composition, commercial publishing quality, polished editorial illustration.",
+    "- One dominant focal subject or emblem, strong silhouette, cinematic depth, clear foreground/midground/background separation.",
+    "- Leave clean negative space for title and author typography; do not render any letters, pseudo-text, subtitles, logos, or watermarks.",
+    "- Avoid generic stock-poster composition, cheap mobile-game aesthetics, cluttered collage layouts, malformed anatomy, extra limbs, distorted faces, celebrity likeness, and blurry low-detail output.",
+  ].join("\n")
+}
+
+function buildCoverPrompt(state: AutonomousNovelState, visualBrief: CoverVisualBrief) {
+  const imagePrompt = buildFinalCoverImagePrompt(state, visualBrief.brief)
+  return {
+    markdown: [
+      "# Cover Image Prompt",
+      "",
+      `Project: ${state.project.title}`,
+      `Core idea: ${state.project.idea}`,
+      `Visual brief source: ${visualBrief.source}`,
+      visualBrief.error ? `Visual brief fallback reason: ${visualBrief.error}` : "",
+      "",
+      "## Visual Brief",
+      "",
+      visualBrief.brief,
+      "",
+      "## Final Image Prompt",
+      "",
+      imagePrompt,
+    ].filter(Boolean).join("\n"),
+    imagePrompt,
+  }
+}
+
+async function getImageGenerationConfig(rootDir: string) {
+  const imageConfig = await loadLlmConfigForCapability(rootDir, "image").catch(() => null)
+  const baseUrl = imageConfig?.provider.baseUrl || ""
+  const apiKey = imageConfig?._dbApiKey || ""
+  const model = imageConfig?.provider.modelName || ""
+  const size = getEnvValue(rootDir, "IMAGE_SIZE") || "1024x1536"
+  return { baseUrl, apiKey, model, size }
+}
+
+async function requestCoverImage(rootDir: string, prompt: string) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    throw new Error("image_generation_skipped_in_test_mode")
+  }
+
+  const config = await getImageGenerationConfig(rootDir)
+  if (!config.apiKey) {
+    throw new Error("image_generation_api_key_missing")
+  }
+
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/images/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.model,
+      prompt,
+      size: config.size,
+      n: 1,
+    }),
+  })
+
+  const text = await response.text()
+  let payload: any = null
+  try {
+    payload = text ? JSON.parse(text) : null
+  } catch {
+    payload = null
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || text || response.statusText
+    throw new Error(`image_generation_failed:${response.status}:${message}`)
+  }
+
+  const first = Array.isArray(payload?.data) ? payload.data[0] : null
+  const base64 = first?.b64_json || first?.base64 || first?.image
+  if (typeof base64 === "string" && base64.trim()) {
+    return {
+      bytes: Buffer.from(base64.replace(/^data:image\/\w+;base64,/, ""), "base64"),
+      mimeType: "image/png",
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size,
+      },
+    }
+  }
+
+  const url = first?.url
+  if (typeof url === "string" && url.trim()) {
+    const imageResponse = await fetch(url)
+    if (!imageResponse.ok) {
+      throw new Error(`image_download_failed:${imageResponse.status}:${imageResponse.statusText}`)
+    }
+    return {
+      bytes: Buffer.from(await imageResponse.arrayBuffer()),
+      mimeType: imageResponse.headers.get("content-type") || "image/png",
+      sourceUrl: url,
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size,
+      },
+    }
+  }
+
+  throw new Error("image_generation_returned_no_image")
 }
 
 export async function initAutonomousProject(options: InitProjectOptions) {
@@ -1218,6 +1783,7 @@ async function produceChapterTask(
     ...produced.qualityGate,
     updatedAt: new Date().toISOString(),
   }
+  task.aigcStatus = pipelineOptions.bypassAigcGate ? "pending" : (produced.qualityGate.status === "blocked" ? "blocked" : "passed")
   if (task.status === "complete") {
     task.recoveryBlocked = false
   }
@@ -1647,7 +2213,20 @@ function createChapterDraft(
 }
 
 export async function advanceAutonomousProject(rootDir: string, options: ProductionPipelineOptions = {}) {
-  const pipelineOptions = { envRootDir: rootDir, ...options }
+  const dbSettings = await withFactoryDb(options.factoryRootDir || rootDir, async (db) => {
+    return {
+      bypassAigcGate: db.getSystemSetting("bypassAigcGate"),
+      draftSubcallRoles: db.getSystemSetting("draftSubcallRoles"),
+    }
+  }).catch(() => null)
+  const bypassAigcGateDb = dbSettings?.bypassAigcGate === "1"
+  const draftSubcallRolesDb = parseDraftSubcallRolesSetting(dbSettings?.draftSubcallRoles)
+  const pipelineOptions = {
+    envRootDir: rootDir,
+    bypassAigcGate: bypassAigcGateDb,
+    ...(draftSubcallRolesDb ? { draftSubcallRoles: draftSubcallRolesDb } : {}),
+    ...options,
+  }
   throwIfStopped(pipelineOptions.signal)
   const state = await loadAutonomousState(rootDir)
   const paths = getWorkspacePaths(rootDir)
@@ -1682,6 +2261,104 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
     style: await readOptionalText(paths.styleProfilePath),
   }
 
+  if (state.runtime.stage === "aigc_refinement") {
+    throwIfStopped(pipelineOptions.signal)
+    const autoRefineVal = await withFactoryDb(pipelineOptions.factoryRootDir || rootDir, async (db) => {
+      return db.getSystemSetting("autoAigcRefinement")
+    }).catch(() => null)
+    const isAutoRefineEnabled = autoRefineVal === "1"
+
+    if (!isAutoRefineEnabled) {
+      state.runtime.statusMessage = "All chapter drafts generated. Waiting for manual AIGC batch scanning and refinement."
+      await saveAutonomousState(rootDir, state)
+      return state
+    }
+
+    const refineTask = state.plan.chapterTasks.find(
+      (t) => t.aigcStatus === "pending" || t.aigcStatus === "blocked" || !t.aigcStatus
+    )
+
+    if (!refineTask) {
+      state.runtime.stage = "complete"
+      state.runtime.statusMessage = "All chapter drafts generated and AIGC batch refinement finalized successfully."
+      state.runtime.lastRoute = "workflow"
+      state.runtime.lastAction = "workflow_complete"
+      await saveAutonomousState(rootDir, state)
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+      }
+      return state
+    }
+
+    const chapterId = `chapter-${String(refineTask.chapterNumber).padStart(3, "0")}`
+    const finalPath = path.join(paths.chaptersDir, `${chapterId}.final.md`)
+    let finalDraft = ""
+    try {
+      finalDraft = await fs.readFile(finalPath, "utf8")
+    } catch {
+      refineTask.aigcStatus = "skipped"
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} final draft not found, skipping.`
+      await saveAutonomousState(rootDir, state)
+      return state
+    }
+
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} scanning AIGC risk...`
+    await saveAutonomousState(rootDir, state)
+
+    try {
+      const detectorConfig = getAigcDetectorConfig(rootDir)
+      const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+      const detectResult = await detectAigcSegments(bodyOnly || finalDraft, detectorConfig)
+      const aigcReport = normalizeAigcWritingDetectionReport(detectResult)
+
+      if (aigcReport.status === "blocked" && aigcReport.highRiskSegments.length > 0) {
+        state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} has ${aigcReport.highRiskSegments.length} high risk segments, fixing...`
+        await saveAutonomousState(rootDir, state)
+
+        const resources = await loadProductionWritingResources(rootDir)
+        const refinedDraft = await repairAigcHighRiskDraft(
+          state,
+          refineTask,
+          finalDraft,
+          aigcReport,
+          resources,
+          pipelineOptions,
+          {} as any,
+          state.memory?.characterDossiers || []
+        )
+
+        await fs.writeFile(finalPath, `${refinedDraft}\n`, "utf8")
+
+        const finalBodyOnly = refinedDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+        const finalDetectResult = await detectAigcSegments(finalBodyOnly || refinedDraft, detectorConfig)
+        const finalAigcReport = normalizeAigcWritingDetectionReport(finalDetectResult)
+
+        refineTask.aigcStatus = finalAigcReport.status === "blocked" ? "blocked" : "passed"
+
+        if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+          await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
+            db.recordEvent(pipelineOptions.projectId as string, `auto_refine_ch_${refineTask.chapterNumber}`, "AIGC_DETECTION_COMPLETED", {
+              chapterNumber: refineTask.chapterNumber,
+              aigcReport: finalAigcReport,
+            })
+          }).catch(() => undefined)
+        }
+      } else {
+        refineTask.aigcStatus = "passed"
+      }
+    } catch (e) {
+      refineTask.aigcStatus = "skipped"
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} failed with error: ${String(e)}, skipping.`
+    }
+
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} processed with status ${refineTask.aigcStatus}.`
+    await saveAutonomousState(rootDir, state)
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+    }
+    return state
+  }
+
   if (state.runtime.stage === "worldbuilding_dialogue") {
     throwIfStopped(pipelineOptions.signal)
     await writeProductionWritingResourceArtifacts(rootDir, paths, state, pipelineOptions)
@@ -1697,6 +2374,14 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
         })
       }).catch(() => undefined)
     }
+    const coverState = await prepareCoverGeneration(rootDir, {
+      factoryRootDir: pipelineOptions.factoryRootDir,
+      projectId: pipelineOptions.projectId,
+      reason: "worldbuilding_completed",
+    }).catch(() => undefined)
+    if (coverState?.assets?.cover) {
+      state.assets.cover = coverState.assets.cover
+    }
     state.runtime.stage = "setting_review"
     state.runtime.statusMessage = "Setting freeze drafted. Review the frozen world assumptions before outlining."
     stampRuntimeProgress(state, "setting_freeze_generated")
@@ -1711,7 +2396,7 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
     throwIfStopped(pipelineOptions.signal)
     await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions)
     state.runtime.stage = "master_planning"
-    state.runtime.statusMessage = "Production master outline generated. Next step is to expand detailed chapter blueprints."
+    state.runtime.statusMessage = "Production master outline generated. Next step is to write story bible assets before chapter blueprints."
     stampRuntimeProgress(state, "master_outline_generated")
     await saveAutonomousState(rootDir, state)
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
@@ -1721,10 +2406,11 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
   }
 
   if (state.runtime.stage === "master_planning") {
+    await writeProductionStoryBibleAssets(rootDir, paths, state, context, pipelineOptions)
     await writeAllDetailedChapterBlueprints(rootDir, paths, state, context, pipelineOptions)
-    state.runtime.stage = "drafting"
-    state.runtime.statusMessage = "Detailed chapter blueprints generated for the full book. Drafting has started from the queued chapter tasks."
-    stampRuntimeProgress(state, "chapter_blueprints_generated")
+    state.runtime.stage = "chapter_task_generation"
+    state.runtime.statusMessage = "Story bible assets and detailed chapter blueprints generated. Review and confirm story foundation and writing style before drafting starts."
+    stampRuntimeProgress(state, "story_bible_and_chapter_blueprints_generated")
     await saveAutonomousState(rootDir, state)
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
@@ -1756,7 +2442,21 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
     return state
   }
 
-  if (state.runtime.stage === "chapter_task_generation" || state.runtime.stage === "drafting") {
+  if (state.runtime.stage === "chapter_task_generation") {
+    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions)
+    if (blocked) {
+      return state
+    }
+    state.runtime.stage = "drafting"
+    state.runtime.statusMessage = "Production readiness passed. Drafting has started from the queued chapter tasks."
+    stampRuntimeProgress(state, "drafting_started_after_readiness")
+    await saveAutonomousState(rootDir, state)
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+    }
+  }
+
+  if (state.runtime.stage === "drafting") {
     const inProgressTask = state.plan.chapterTasks.find((task) => task.status === "in_progress")
     if (inProgressTask) {
       state.runtime.stage = "drafting"
@@ -1778,19 +2478,34 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
         return recovered
       }
     }
-    const nextTask = state.plan.chapterTasks.find((task) => task.status === "pending")
+	    const nextTask = state.plan.chapterTasks.find((task) => task.status === "pending")
 
-    if (!nextTask) {
-      state.runtime.stage = "complete"
-      state.runtime.statusMessage = "All chapter drafts have been generated."
-      state.plan.pendingChapters = 0
-      stampRuntimeProgress(state, "workflow_complete")
+	    if (!nextTask) {
+      const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || pipelineOptions.bypassAigcGate === true
+      if (isAigcGateBypassed) {
+        state.runtime.stage = "aigc_refinement"
+        state.runtime.statusMessage = "All chapter drafts have been generated. Waiting for batch AIGC scanning and refinement."
+        state.plan.pendingChapters = 0
+        stampRuntimeProgress(state, "aigc_refinement_entered")
+      } else {
+        state.runtime.stage = "complete"
+        state.runtime.statusMessage = "All chapter drafts have been generated."
+        state.plan.pendingChapters = 0
+        stampRuntimeProgress(state, "workflow_complete")
+      }
       await saveAutonomousState(rootDir, state)
-      return state
-    }
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+      }
+	      return state
+	    }
 
-    return (await produceChapterTask(rootDir, paths, state, nextTask, pipelineOptions)).state
-  }
+	    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions)
+	    if (blocked) {
+	      return state
+	    }
+	    return (await produceChapterTask(rootDir, paths, state, nextTask, pipelineOptions)).state
+	  }
 
   state.runtime.statusMessage = `No advance action is defined for stage ${state.runtime.stage}.`
   stampRuntimeProgress(state, `noop:${state.runtime.stage}`)
@@ -1858,31 +2573,117 @@ export async function retryChapterProduction(
   return state
 }
 
-export async function prepareCoverGeneration(rootDir: string) {
+export async function prepareCoverGeneration(
+  rootDir: string,
+  options: { factoryRootDir?: string; projectId?: string | null; reason?: string } = {},
+) {
   const state = await loadAutonomousState(rootDir)
   const paths = getWorkspacePaths(rootDir)
+  const context = {
+    consensus: await readOptionalText(paths.consensusPath),
+    protagonist: await readOptionalText(paths.protagonistPath),
+    style: await readOptionalText(paths.styleProfilePath),
+  }
 
-  const prompt = [
-    "# Cover Image Prompt",
-    "",
-    `Project: ${state.project.title}`,
-    `Core idea: ${state.project.idea}`,
-    "",
-    "Art direction:",
-    "- foreground one memorable protagonist silhouette or emblem",
-    "- signal genre promise immediately",
-    "- leave clean title space",
-    "- avoid generic stock-poster composition",
-    "",
-    "Image prompt seed:",
-    `"Create a novel cover for '${state.project.title}' inspired by: ${state.project.idea}"`,
-  ].join("\n")
+  const visualBrief = await generateCoverVisualBrief(rootDir, state, context)
+  const prompt = buildCoverPrompt(state, visualBrief)
+  const requestedAt = new Date().toISOString()
 
-  await fs.writeFile(paths.coverPromptPath, `${prompt}\n`)
+  await fs.writeFile(path.join(paths.coverDir, "cover-brief.md"), `${visualBrief.brief}\n`)
+  await fs.writeFile(paths.coverPromptPath, `${prompt.markdown}\n`)
   state.assets.cover.status = "in_progress"
-  state.runtime.statusMessage = "Cover prompt prepared. Ready for an image-generation step."
+  state.assets.cover.briefPath = ".ai-novel/assets/cover/cover-brief.md"
+  state.assets.cover.promptPath = COVER_PROMPT_PATH
+  state.assets.cover.imagePath = state.assets.cover.imagePath || COVER_IMAGE_PATH
+  state.assets.cover.metadataPath = COVER_METADATA_PATH
+  delete state.assets.cover.error
+  state.runtime.statusMessage = "Cover prompt prepared. Generating cover image..."
   stampRuntimeProgress(state, "cover_prompt_prepared", "cover")
   await saveAutonomousState(rootDir, state)
+
+  try {
+    const generated = await requestCoverImage(rootDir, prompt.imagePrompt)
+    await fs.writeFile(paths.coverImagePath, generated.bytes)
+    const metadata = {
+      status: "complete",
+      requestedAt,
+      generatedAt: new Date().toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      mimeType: generated.mimeType,
+      sourceUrl: "sourceUrl" in generated ? generated.sourceUrl : undefined,
+      provider: generated.provider,
+      reason: options.reason || "manual",
+    }
+    await writeJsonFileAtomic(paths.coverMetadataPath, metadata)
+    state.assets.cover.status = "complete"
+    state.assets.cover.imagePath = COVER_IMAGE_PATH
+    state.assets.cover.metadataPath = COVER_METADATA_PATH
+    state.assets.cover.generatedAt = metadata.generatedAt
+    delete state.assets.cover.error
+    state.runtime.statusMessage = "Cover image generated and saved."
+    stampRuntimeProgress(state, "cover_image_generated", "cover")
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId as string,
+          kind: "plan",
+          path: COVER_IMAGE_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover" },
+        })
+        db.recordArtifact({
+          projectId: options.projectId as string,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" },
+        })
+        db.recordEvent(options.projectId as string, null, "COVER_IMAGE_GENERATED", metadata)
+      }).catch(() => undefined)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const metadata = {
+      status: "failed",
+      requestedAt,
+      failedAt: new Date().toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      reason: options.reason || "manual",
+      error: message,
+    }
+    await writeJsonFileAtomic(paths.coverMetadataPath, metadata)
+    state.assets.cover.status = "failed"
+    state.assets.cover.imagePath = COVER_IMAGE_PATH
+    state.assets.cover.metadataPath = COVER_METADATA_PATH
+    state.assets.cover.error = message
+    state.runtime.statusMessage = `Cover generation failed but workflow can continue: ${message}`
+    stampRuntimeProgress(state, "cover_image_failed", "cover")
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId as string,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" },
+        })
+        db.recordEvent(options.projectId as string, null, "COVER_IMAGE_FAILED", metadata)
+      }).catch(() => undefined)
+    }
+  }
+
+  await saveAutonomousState(rootDir, state)
+  if (options.factoryRootDir && options.projectId) {
+    await syncManagedProjectState(options.factoryRootDir, options.projectId, state).catch(() => undefined)
+  }
   return state
 }
 

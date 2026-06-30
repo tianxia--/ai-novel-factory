@@ -264,11 +264,18 @@ function evaluateChapterConsistency(input) {
 
 // src/factory-db.ts
 var chapterConsistencyCache = /* @__PURE__ */ new Map();
+function normalizeLlmApiMode(value) {
+  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
+}
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";
 var MIN_CHAPTER_PASS_RATIO = 0.8;
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeLlmCapability(capability) {
+  const normalized = capability.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+  return normalized || "text";
 }
 function jsonString(value) {
   return JSON.stringify(value ?? null);
@@ -536,6 +543,13 @@ var FactoryDb = class _FactoryDb {
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
 
+      CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         slug TEXT NOT NULL,
@@ -796,11 +810,20 @@ var FactoryDb = class _FactoryDb {
         base_url TEXT NOT NULL,
         api_key TEXT NOT NULL,
         model_name TEXT NOT NULL,
+        api_mode TEXT NOT NULL DEFAULT 'chat',
         temperature REAL NOT NULL DEFAULT 0.1,
         timeout_ms INTEGER NOT NULL DEFAULT 120000,
         is_active INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS llm_config_routes (
+        capability TEXT PRIMARY KEY,
+        config_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(config_id) REFERENCES llm_configs(id) ON DELETE CASCADE
       );
 
 
@@ -820,6 +843,7 @@ var FactoryDb = class _FactoryDb {
       CREATE INDEX IF NOT EXISTS idx_message_parts_message_index ON message_parts(message_id, part_index);
     `);
     this.migrateColumn("memory_items", "embedding_id", "TEXT");
+    this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'");
     this.migrateGraphTablePrimaryKey("graph_nodes", `
       CREATE TABLE graph_nodes (
         id TEXT NOT NULL,
@@ -2402,7 +2426,7 @@ var FactoryDb = class _FactoryDb {
   }
   getSnapshot(projectId) {
     const project = this.getProject(projectId);
-    const projectRow = this.db.prepare("SELECT state_json FROM projects WHERE id = ?").get(projectId);
+    const projectRow = this.db.prepare("SELECT state_json, project_root FROM projects WHERE id = ?").get(projectId);
     const chapterFacts = this.getChapterFacts(projectId);
     const completedChapterFacts = chapterFacts.filter((fact) => fact.status === "complete");
     const blockedChapterFacts = chapterFacts.filter((fact) => fact.status === "blocked");
@@ -2457,10 +2481,74 @@ var FactoryDb = class _FactoryDb {
         artifactsByPath.set(key, compactDbRow(row));
       }
     }
+    const stateObj = readJson(projectRow?.state_json, null);
+    const projectRoot = projectRow?.project_root || "";
+    if (projectRoot && stateObj) {
+      const stage = stateObj.runtime?.stage || "";
+      const tasks = stateObj.plan?.chapterTasks ? Array.isArray(stateObj.plan.chapterTasks) ? stateObj.plan.chapterTasks : [] : [];
+      const activeTask = tasks.find((t) => t.status === "in_progress" || t.status === "blocked");
+      const activeChapterNumber = activeTask ? Number(activeTask.chapterNumber) : null;
+      let latestDiscussionPath = "";
+      let latestDiscussionMtime = 0;
+      for (const [pathKey, row] of artifactsByPath.entries()) {
+        if (pathKey.includes("/consensus/discussion-") || pathKey.includes(".ai-novel/consensus/discussion-")) {
+          try {
+            const absPath = fsSync.existsSync(pathKey) ? pathKey : path.resolve(projectRoot, pathKey);
+            if (fsSync.existsSync(absPath)) {
+              const mtime = fsSync.statSync(absPath).mtimeMs;
+              if (mtime > latestDiscussionMtime) {
+                latestDiscussionMtime = mtime;
+                latestDiscussionPath = pathKey;
+              }
+            }
+          } catch {
+          }
+        }
+      }
+      for (const [pathKey, row] of artifactsByPath.entries()) {
+        const isOutline = stage === "master_planning" && pathKey.includes("master-outline");
+        let isBlueprint = false;
+        let isDraft = false;
+        if (activeChapterNumber) {
+          const paddedCh = String(activeChapterNumber).padStart(3, "0");
+          isBlueprint = stage === "chapter_task_generation" && pathKey.includes(`chapter-${paddedCh}`) && pathKey.includes("blueprint");
+          isDraft = (stage === "drafting" || stage === "reviewing") && pathKey.includes(`chapter-${paddedCh}`) && (pathKey.includes("draft") || pathKey.includes("final"));
+        }
+        const isLatestDiscussion = pathKey === latestDiscussionPath;
+        if (isOutline || isBlueprint || isDraft || isLatestDiscussion) {
+          try {
+            const absPath = fsSync.existsSync(pathKey) ? pathKey : path.resolve(projectRoot, pathKey);
+            if (fsSync.existsSync(absPath)) {
+              row.content = fsSync.readFileSync(absPath, "utf8");
+            }
+          } catch (e) {
+            console.error(`Failed to read artifact content for ${pathKey}:`, e);
+          }
+        }
+      }
+    }
     const knowledge = this.getKnowledgeSummary(projectId);
+    const latestEventRows = this.db.prepare(`
+      SELECT * FROM events
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+      LIMIT 80
+    `).all(projectId).map(compactDbRow);
+    const milestoneEventTypes = /* @__PURE__ */ new Set(["PROJECT_CREATED", "CONSENSUS_UPDATED", "CHAPTER_PIPELINE_COMPLETED"]);
+    const milestoneEventRows = this.db.prepare(`
+      SELECT * FROM events
+      WHERE project_id = ?
+        AND type IN ('PROJECT_CREATED', 'CONSENSUS_UPDATED', 'CHAPTER_PIPELINE_COMPLETED')
+      ORDER BY created_at DESC
+      LIMIT 24
+    `).all(projectId).map(compactDbRow);
+    const mergedLatestEvents = [
+      ...milestoneEventRows,
+      ...latestEventRows.filter((row) => !milestoneEventTypes.has(String(row.type || "")))
+    ].filter((row, index, rows) => rows.findIndex((candidate) => String(candidate.id || "") === String(row.id || "")) === index);
     return {
       project,
-      state: readJson(projectRow?.state_json, null),
+      state: stateObj,
       activeRuns: this.db.prepare(`
         SELECT * FROM workflow_runs
         WHERE project_id = ? AND status IN ('running', 'paused')
@@ -2472,12 +2560,7 @@ var FactoryDb = class _FactoryDb {
         ORDER BY updated_at DESC
         LIMIT 12
       `).all(projectId),
-      latestEvents: this.db.prepare(`
-        SELECT * FROM events
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        LIMIT 80
-      `).all(projectId).map(compactDbRow),
+      latestEvents: mergedLatestEvents,
       artifacts: [...artifactsByPath.values()],
       artifactSummary: {
         total: Number(artifactCounts?.total || 0),
@@ -2613,7 +2696,7 @@ var FactoryDb = class _FactoryDb {
   }
   listLlmConfigs() {
     return this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
       FROM llm_configs
       ORDER BY created_at DESC
     `).all();
@@ -2623,6 +2706,7 @@ var FactoryDb = class _FactoryDb {
     const now = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const apiMode = normalizeLlmApiMode(config.apiMode);
     const active = config.isActive ? 1 : 0;
     if (active) {
       this.db.prepare(`
@@ -2630,22 +2714,26 @@ var FactoryDb = class _FactoryDb {
       `).run();
     }
     this.db.prepare(`
-      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, active, now, now);
+      INSERT INTO llm_configs (id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, active, now, now);
     return id;
   }
   updateLlmConfig(id, config) {
     const now = nowIso();
     const temp = config.temperature ?? 0.1;
     const timeout = config.timeoutMs ?? 12e4;
+    const apiMode = normalizeLlmApiMode(config.apiMode);
     this.db.prepare(`
       UPDATE llm_configs
-      SET name = ?, base_url = ?, api_key = ?, model_name = ?, temperature = ?, timeout_ms = ?, updated_at = ?
+      SET name = ?, base_url = ?, api_key = ?, model_name = ?, api_mode = ?, temperature = ?, timeout_ms = ?, updated_at = ?
       WHERE id = ?
-    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, temp, timeout, now, id);
+    `).run(config.name, config.baseUrl, config.apiKey, config.modelName, apiMode, temp, timeout, now, id);
   }
   deleteLlmConfig(id) {
+    this.db.prepare(`
+      DELETE FROM llm_config_routes WHERE config_id = ?
+    `).run(id);
     this.db.prepare(`
       DELETE FROM llm_configs WHERE id = ?
     `).run(id);
@@ -2657,15 +2745,86 @@ var FactoryDb = class _FactoryDb {
     this.db.prepare(`
       UPDATE llm_configs SET is_active = 1 WHERE id = ?
     `).run(id);
+    this.setLlmConfigRoute("text", id);
   }
   getActiveLlmConfig() {
     const config = this.db.prepare(`
-      SELECT id, name, base_url, api_key, model_name, temperature, timeout_ms, is_active, created_at, updated_at
+      SELECT id, name, base_url, api_key, model_name, api_mode, temperature, timeout_ms, is_active, created_at, updated_at
       FROM llm_configs
       WHERE is_active = 1
       LIMIT 1
     `).get();
     return config || null;
+  }
+  listLlmConfigRoutes() {
+    return this.db.prepare(`
+      SELECT routes.capability, routes.config_id, routes.created_at, routes.updated_at,
+             configs.name, configs.base_url, configs.model_name, configs.api_mode, configs.temperature, configs.timeout_ms
+      FROM llm_config_routes routes
+      LEFT JOIN llm_configs configs ON configs.id = routes.config_id
+      ORDER BY routes.capability ASC
+    `).all();
+  }
+  getLlmConfigForCapability(capability) {
+    const normalized = normalizeLlmCapability(capability);
+    const config = this.db.prepare(`
+      SELECT configs.id, configs.name, configs.base_url, configs.api_key, configs.model_name,
+             configs.api_mode, configs.temperature, configs.timeout_ms, configs.is_active, configs.created_at, configs.updated_at
+      FROM llm_config_routes routes
+      JOIN llm_configs configs ON configs.id = routes.config_id
+      WHERE routes.capability = ?
+      LIMIT 1
+    `).get(normalized);
+    return config || null;
+  }
+  setLlmConfigRoute(capability, configId) {
+    const normalized = normalizeLlmCapability(capability);
+    const exists = this.db.prepare(`
+      SELECT id FROM llm_configs WHERE id = ?
+    `).get(configId);
+    if (!exists) {
+      throw new Error("llm_config_not_found");
+    }
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO llm_config_routes (capability, config_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(capability) DO UPDATE SET
+        config_id = excluded.config_id,
+        updated_at = excluded.updated_at
+    `).run(normalized, configId, now, now);
+    if (normalized === "text") {
+      this.db.prepare(`
+        UPDATE llm_configs SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END
+      `).run(configId);
+    }
+  }
+  deleteLlmConfigRoute(capability) {
+    const normalized = normalizeLlmCapability(capability);
+    this.db.prepare(`
+      DELETE FROM llm_config_routes WHERE capability = ?
+    `).run(normalized);
+  }
+  getSystemSetting(key) {
+    const row = this.db.prepare(`
+      SELECT value FROM system_settings WHERE key = ?
+    `).get(key);
+    return row ? row.value : null;
+  }
+  setSystemSetting(key, value) {
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO system_settings (key, value, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `).run(key, value, now, now);
+  }
+  listSystemSettings() {
+    return this.db.prepare(`
+      SELECT key, value FROM system_settings
+    `).all();
   }
 };
 var activeDbInstance = null;

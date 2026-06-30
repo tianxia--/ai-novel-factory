@@ -59,6 +59,109 @@ async function loadCoreModule() {
   return import(`${pathToFileURL(coreEntry).href}?ts=${Date.now()}`)
 }
 
+async function seedActiveTextLlmConfig(rootDir, overrides = {}) {
+  const { withFactoryDb } = await loadCoreModule()
+  return withFactoryDb(rootDir, async (db) => {
+    const id = db.addLlmConfig({
+      name: overrides.name || "Test text provider",
+      baseUrl: overrides.baseUrl || "https://example.test/v1",
+      apiKey: overrides.apiKey || "test-secret",
+      modelName: overrides.modelName || "test-model",
+      apiMode: overrides.apiMode || "chat",
+      temperature: overrides.temperature ?? 0.1,
+      timeoutMs: overrides.timeoutMs ?? 120000,
+      isActive: true,
+    })
+    db.setLlmConfigRoute("text", id)
+    return id
+  })
+}
+
+async function approveTestWritingStyle(projectRoot) {
+  const { appendStyleEvolutionCandidate, approveStyleEvolutionSample, initializeStyleEvolution } = await loadCoreModule()
+  await initializeStyleEvolution(projectRoot, {
+    projectTitle: "插件测试小说",
+    idea: "一名审雨官发现降雨记录被篡改",
+    userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+  })
+  await appendStyleEvolutionCandidate(projectRoot, {
+    prompt: "插件测试冻结样段",
+    sample: [
+      "夜色落在城墙上，像一层没有温度的灰。",
+      "他把账册合上，指节在封皮边缘停了一息，才说：明日不必再等我。",
+      "屋外有人咳了一声，灯火随之低下去，仿佛整座城都听见了这句轻得过分的话。",
+    ].join("\n"),
+    review: "插件测试夹具：已通过写法验证。",
+    evaluation: {
+      source: "llm_critic",
+      verdict: "approve",
+      summary: "插件测试夹具：当前样段可以作为全书基础写法。",
+      scores: {
+        narrativeVoice: 9,
+        sentenceRhythm: 8.8,
+        dialogueTexture: 8.7,
+        informationDensity: 8.8,
+        emotionalTension: 8.8,
+        readability: 8.9,
+        requirementAlignment: 9,
+        forbiddenPatternRisk: 0.4,
+        overall: 9,
+      },
+      strengths: ["克制冷感，动作和物件推进清楚。"],
+      deviations: [],
+      forbiddenHits: [],
+      nextFocus: ["保持短对白与动作压迫。"],
+      aigc: {
+        enabled: true,
+        status: "passed",
+        score: 0.12,
+        threshold: 0.8,
+        highRiskCount: 0,
+        reason: "fixture passed",
+        highRiskPreviews: [],
+      },
+    },
+  })
+  const result = await approveStyleEvolutionSample(projectRoot, {
+    version: 1,
+    approvedAt: "2026-06-25T00:00:00.000Z",
+    styleContract: {
+      voice: "冷静克制，以动作、物件和停顿推进情绪。",
+      sentenceRhythm: "中短句为主，少解释，多留白。",
+      dialogueRules: ["对白短促，必须带有关系压力。"],
+      descriptionRules: ["先写可感知细节，再写判断。"],
+      emotionRules: ["情绪通过动作和选择外化。"],
+      pacingRules: ["每场必须有压力进入、选择推进和余波。"],
+      povRules: ["保持稳定有限视角。"],
+      openingRules: ["开场落在具体场景压力上。"],
+      endingHookRules: ["结尾留下关系裂缝或线索。"],
+      allowedDevices: ["白描", "物件回声"],
+      forbiddenPatterns: ["不要总结式升华", "不要解释创作意图"],
+      positiveExamples: ["他把账册合上，指节在封皮边缘停了一息。"],
+      negativeExamples: [],
+    },
+  })
+  await fs.mkdir(path.join(projectRoot, ".ai-novel", "plans"), { recursive: true })
+  await fs.writeFile(path.join(projectRoot, ".ai-novel", "plans", "story-foundation-approval.json"), `${JSON.stringify({
+    version: 1,
+    approved: true,
+    approvedAt: "2026-06-25T00:00:00.000Z",
+    approvedBy: "test",
+    note: "插件测试确认故事基建可进入正文生产。",
+    assetPaths: [
+      ".ai-novel/plans/world-matrix.md",
+      ".ai-novel/plans/plot-architecture.md",
+      ".ai-novel/plans/story-bible.md",
+      ".ai-novel/plans/volume-strategy.md",
+      ".ai-novel/plans/foreshadowing-ledger.md",
+      ".ai-novel/plans/character-dynamics.md",
+      ".ai-novel/plans/story-foundation-contract.json",
+      ".ai-novel/plans/writing-plan.json",
+    ],
+  }, null, 2)}\n`)
+  return result
+}
+
 async function loadViewModelModule() {
   return import(`${pathToFileURL(viewModelEntry).href}?ts=${Date.now()}`)
 }
@@ -145,7 +248,7 @@ test("ai-novel init creates autonomous workspace and queued chapter tasks", asyn
 
   const configPath = path.join(tempDir, ".ai-novel", "config.json")
   const config = JSON.parse(await fs.readFile(configPath, "utf8"))
-  assert.equal(config.provider.modelName, "gpt-4o")
+  assert.equal(config.provider.modelName, "")
   assert.equal(config.writing.chapterWordTarget, 2500)
 
   const coverBriefPath = path.join(tempDir, ".ai-novel", "assets", "cover", "cover-brief.md")
@@ -387,7 +490,7 @@ test("ai-novel status reports current stage and pending chapter count", async ()
   assert.match(result.stdout, /chapter word target: 2500/i)
 })
 
-test("ai-novel init loads provider settings from a local .env file", async () => {
+test("ai-novel init ignores provider settings from a local .env file", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-cli-dotenv-"))
   await fs.writeFile(
     path.join(tempDir, ".env"),
@@ -422,10 +525,10 @@ test("ai-novel init loads provider settings from a local .env file", async () =>
     await fs.readFile(path.join(tempDir, ".ai-novel", "config.json"), "utf8"),
   )
 
-  assert.equal(config.provider.baseUrl, "https://example.test/v1")
-  assert.equal(config.provider.apiKeyEnv, "LLM_API_KEY")
-  assert.equal(config.provider.modelName, "test-model")
-  assert.equal(config.provider.temperature, 0.25)
+  assert.equal(config.provider.baseUrl, "")
+  assert.equal(config.provider.apiKeyEnv, "unset")
+  assert.equal(config.provider.modelName, "")
+  assert.equal(config.provider.temperature, 0.1)
   assert.equal(config.writing.chapterWordTarget, 2500)
 })
 
@@ -537,7 +640,7 @@ test("env manager upserts into the existing discovered .env file", async () => {
   assert.equal(status.resolved.modelName, "package-model-updated")
 })
 
-test("studio llm config list imports configured project env provider", async () => {
+test("studio llm config list uses explicit database providers instead of project env", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-llm-env-import-"))
   const packageEnvDir = path.join(tempDir, "packages", "opencode-ai-novel-factory")
   const { handleNovelStudioApi } = await loadServerModule()
@@ -566,19 +669,31 @@ test("studio llm config list imports configured project env provider", async () 
   const result = await handleNovelStudioApi(tempDir, "GET", "/api/llm-configs")
 
   assert.equal(result.status, 200)
-  assert.equal(result.payload.configs.length, 1)
-  assert.match(result.payload.configs[0].name, /Project \.env/)
-  assert.equal(result.payload.configs[0].base_url, "https://package-env.example/v1")
-  assert.equal(result.payload.configs[0].model_name, "package-model")
-  assert.equal(result.payload.configs[0].api_key, "[configured]")
-  assert.equal(result.payload.configs[0].api_key_configured, true)
-  assert.equal(result.payload.configs[0].temperature, 0.25)
-  assert.equal(result.payload.configs[0].timeout_ms, 90000)
-  assert.equal(result.payload.configs[0].is_active, 1)
+  assert.equal(result.payload.configs.length, 0)
+
+  const createResult = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+    name: "Manual test config",
+    baseUrl: "https://package-env.example/v1",
+    apiKey: "package-secret",
+    modelName: "package-model",
+    timeoutMs: 90000,
+    temperature: 0.25,
+  })
+
+  assert.equal(createResult.status, 200)
+  assert.equal(createResult.payload.configs.length, 1)
+  assert.match(createResult.payload.configs[0].name, /Manual test config/)
+  assert.equal(createResult.payload.configs[0].base_url, "https://package-env.example/v1")
+  assert.equal(createResult.payload.configs[0].model_name, "package-model")
+  assert.equal(createResult.payload.configs[0].api_key, "[configured]")
+  assert.equal(createResult.payload.configs[0].api_key_configured, true)
+  assert.equal(createResult.payload.configs[0].temperature, 0.25)
+  assert.equal(createResult.payload.configs[0].timeout_ms, 90000)
+  assert.equal(createResult.payload.configs[0].is_active, 1)
 
   const updateResult = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
-    id: result.payload.configs[0].id,
-    name: "Renamed env config",
+    id: createResult.payload.configs[0].id,
+    name: "Renamed manual config",
     baseUrl: "https://package-env.example/v2",
     apiKey: "[configured]",
     modelName: "package-model-v2",
@@ -619,12 +734,8 @@ test("tui controller parses composer input into explicit actions", async () => {
   assert.deepEqual(
     parseComposerInput("/env base_url=https://example.test/v1 model=test-model api_key=secret"),
     {
-      type: "env-update",
-      updates: {
-        LLM_BASE_URL: "https://example.test/v1",
-        LLM_MODEL_ID: "test-model",
-        LLM_API_KEY: "secret",
-      },
+      type: "chat",
+      message: "Model configuration must be managed in settings. The /env command has been removed.",
     },
   )
 })
@@ -633,17 +744,8 @@ test("tui controller executes composer actions against the autonomous workspace"
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-tui-controller-"))
   const { executeComposerAction } = await loadTuiController()
 
-  await fs.writeFile(
-    path.join(tempDir, ".env"),
-    [
-      "LLM_BASE_URL=https://example.test/v1",
-      "LLM_API_KEY=test-secret",
-      "LLM_MODEL_ID=test-model",
-      "",
-    ].join("\n"),
-  )
-
   await runCli(["init", "--idea", "A frost saint bargains with a dead sea"], tempDir)
+  await seedActiveTextLlmConfig(tempDir)
 
   const advanceResult = await executeComposerAction(tempDir, { type: "advance" })
   assert.equal(advanceResult.state.runtime.stage, "setting_review")
@@ -796,15 +898,11 @@ test("multi-agent discussion blocks pre-drafting chapter draft claims from produ
 
   try {
     process.env.AI_NOVEL_TEST_MODE = "0"
-    await fs.writeFile(
-      path.join(tempDir, ".env"),
-      [
-        `LLM_BASE_URL=http://127.0.0.1:${address.port}/v1`,
-        "LLM_API_KEY=test-secret",
-        "LLM_MODEL_ID=test-model",
-        "",
-      ].join("\n"),
-    )
+    await seedActiveTextLlmConfig(tempDir, {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      apiKey: "test-secret",
+      modelName: "test-model",
+    })
 
     const result = await runMultiAgentDiscussion(tempDir, "设定这里继续收敛，不要正式写正文。", {
       envRootDir: tempDir,
@@ -1241,6 +1339,7 @@ test("novel studio API can explicitly retry a blocked chapter", async () => {
     totalChapters: 4,
     chapterWordTarget: 2500,
   })
+  await approveTestWritingStyle(created.project.projectRoot)
   const state = created.state
   state.runtime.stage = "reviewing"
   state.plan.chapterTasks[0].status = "blocked"
@@ -1265,13 +1364,19 @@ test("novel studio API can explicitly retry a blocked chapter", async () => {
   assert.equal(result.status, 200)
   assert.equal(result.payload.state.plan.chapterTasks[0].status, "complete")
   assert.equal(result.payload.state.plan.chapterTasks[0].recoveryAttempts, 1)
-  assert.ok(result.payload.factorySnapshot.latestEvents.some((event) => event.type === "CHAPTER_PIPELINE_RECOVERY_QUEUED"))
+  const projectEvents = await withFactoryDb(tempDir, async (db) => db.db.prepare(`
+    SELECT type, payload_json
+    FROM events
+    WHERE project_id = ?
+    ORDER BY created_at DESC
+  `).all(created.project.id))
+  assert.ok(projectEvents.some((event) => event.type === "CHAPTER_PIPELINE_RECOVERY_QUEUED"))
   assert.ok(result.payload.factorySnapshot.latestEvents.some((event) => event.type === "CHAPTER_PIPELINE_COMPLETED"))
   const retryDirectorEvent = result.payload.factorySnapshot.latestEvents.find((event) => event.type === "DIRECTOR_COMMAND_COMPLETED")
   assert.match(retryDirectorEvent?.payload_json || "", /"command":"retry_chapter"/)
   assert.match(retryDirectorEvent?.payload_json || "", /"chapterNumber":1/)
   assert.match(retryDirectorEvent?.payload_json || "", /"requestedBy":"api:\/api\/chapters\/retry"/)
-  const retryQueuedEvent = result.payload.factorySnapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_RECOVERY_QUEUED")
+  const retryQueuedEvent = projectEvents.find((event) => event.type === "CHAPTER_PIPELINE_RECOVERY_QUEUED")
   assert.match(retryQueuedEvent?.payload_json || "", /"directorCommandId":"cmd_/)
   assert.ok(result.payload.factorySnapshot.recentMessages.some((message) =>
     message.type === "status"
@@ -1833,25 +1938,17 @@ test("provider-test accepts unsaved provider overrides for modal connectivity ch
   assert.ok(providerToolMessage.parts.some((part) => part.type === "tool_result" && part.data.status === "completed"))
 })
 
-test("studio api redacts provider secrets from public env status", async () => {
+test("studio api redacts provider secrets from public config payloads", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-env-redaction-"))
   const { handleNovelStudioApi } = await loadServerModule()
 
-  await fs.writeFile(
-    path.join(tempDir, ".env"),
-    [
-      "LLM_BASE_URL=https://example.test/v1",
-      "LLM_API_KEY=super-secret",
-      "LLM_MODEL_ID=test-model",
-      "",
-    ].join("\n"),
-  )
+  await seedActiveTextLlmConfig(tempDir, { apiKey: "super-secret" })
 
-  const result = await handleNovelStudioApi(tempDir, "GET", "/api/projects")
+  const result = await handleNovelStudioApi(tempDir, "GET", "/api/llm-configs")
 
   assert.equal(result.status, 200)
-  assert.equal(result.payload.envStatus.configured, true)
-  assert.equal(result.payload.envStatus.values.LLM_API_KEY, "[configured]")
+  assert.equal(result.payload.configs[0].api_key, "[configured]")
+  assert.equal(result.payload.configs[0].api_key_configured, true)
   assert.equal(JSON.stringify(result.payload).includes("super-secret"), false)
 })
 
@@ -1886,17 +1983,8 @@ test("desktop view model derives project, workflow, provider, and task data from
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-view-model-"))
   const { deriveStudioViewModel } = await loadViewModelModule()
 
-  await fs.writeFile(
-    path.join(tempDir, ".env"),
-    [
-      "LLM_BASE_URL=https://example.test/v1",
-      "LLM_API_KEY=test-secret",
-      "LLM_MODEL_ID=test-model",
-      "",
-    ].join("\n"),
-  )
-
   await runCli(["init", "--idea", "A frost saint bargains with a dead sea"], tempDir)
+  await seedActiveTextLlmConfig(tempDir)
   await runCli(["provider-test"], tempDir)
   await runCli(["chat", "--message", "主角要更冷静克制，但绝不麻木"], tempDir)
 
@@ -3384,16 +3472,12 @@ test("generateAgentReply aborts stalled provider requests using LLM_TIMEOUT_MS",
 
   try {
     process.env.AI_NOVEL_TEST_MODE = "0"
-    await fs.writeFile(
-      path.join(tempDir, ".env"),
-      [
-        `LLM_BASE_URL=http://127.0.0.1:${address.port}/v1`,
-        "LLM_API_KEY=test-secret",
-        "LLM_MODEL_ID=test-model",
-        "LLM_TIMEOUT_MS=50",
-        "",
-      ].join("\n"),
-    )
+    await seedActiveTextLlmConfig(tempDir, {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      apiKey: "test-secret",
+      modelName: "test-model",
+      timeoutMs: 50,
+    })
 
     await assert.rejects(
       runtimeModule.generateAgentReply({
@@ -3879,7 +3963,7 @@ test("desktop studio exposes network recovery status and retry hooks", async () 
   assert.match(js, /job\?\.status === "paused" \|\| !job\?\.lease_owner/)
   assert.match(js, /job\?\.status === "running"\s*&& job\?\.lease_owner/)
   assert.match(js, /function hasRunningAutopilotJob\(\)/)
-  assert.match(js, /const running = Boolean\(runtimeAutopilot\.running \|\| hasRunningAutopilotJob\(\) \|\| \(dashboardState\.autopilotActive && dashboardState\.autopilotStreamConnected\)\)/)
+  assert.match(js, /const running = Boolean\(\s*projectRuntime\?\.executionStatus === "running"\s*\|\| runtimeAutopilot\.running\s*\|\| hasRunningAutopilotJob\(\)\s*\|\| \(dashboardState\.autopilotActive && dashboardState\.autopilotStreamConnected\),\s*\)/)
   assert.match(js, /function syncComposerStatusFromAutopilotControl\(\)/)
   assert.match(js, /AUTOPILOT_RESUME_HINT/)
   assert.match(js, /后台 worker 正在运行；如果模型超时，会自动重试并保留进度。/)
@@ -3901,8 +3985,8 @@ test("desktop composer shows submitted, processing, and failure feedback", async
   assert.match(html, /data-composer-action="advance"/)
   assert.match(html, /data-composer-action="cover"/)
   assert.match(html, /data-composer-action="interrupt"/)
-  assert.match(html, /data-composer-action="provider-test"/)
   assert.match(html, /data-composer-action="stop"/)
+  assert.match(js, /if \(action === "provider-test"\) return runProviderTest\(\)/)
   assert.match(js, /setComposerStatus/)
   assert.match(js, /renderComposerStatus/)
   assert.match(js, /function runComposerAction/)
@@ -3931,7 +4015,7 @@ test("desktop project creation disables duplicate submits while request is in fl
   assert.match(js, /showManagerView\(\)/)
   assert.doesNotMatch(js, /创建并启动/)
   assert.doesNotMatch(js, /创建后会直接进入该项目/)
-  assert.match(html, /建立独立工作区；进入创作台后可手动开始自动创作/)
+  assert.match(html, /项目创建后将生成完整的设定与大纲，你需要手动点击“开始创作”。/)
   assert.match(html, /创建项目/)
   assert.doesNotMatch(html, /创建并启动/)
   assert.doesNotMatch(html, /创建后会直接进入该项目/)
@@ -4077,6 +4161,7 @@ test("ai-novel advance executes real workflow steps and writes planning artifact
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-cli-advance-"))
   await runCli(["init", "--idea", "A blind astronomer hears the future in starlight"], tempDir)
   await runCli(["chat", "--message", "主角要更克制，结局要有悲壮但明亮的回响"], tempDir)
+  await approveTestWritingStyle(tempDir)
 
   const first = await runCli(["advance"], tempDir)
   assert.equal(first.code, 0, first.stderr)
@@ -4102,7 +4187,7 @@ test("ai-novel advance executes real workflow steps and writes planning artifact
 
   const third = await runCli(["advance"], tempDir)
   assert.equal(third.code, 0, third.stderr)
-  assert.match(third.stdout, /drafting/i)
+  assert.match(third.stdout, /chapter_task_generation|ready_to_draft/i)
 
   const blueprint = await fs.readFile(
     path.join(tempDir, ".ai-novel", "plans", "chapter-blueprints", "chapter-001.md"),
@@ -4164,10 +4249,10 @@ test("ai-novel cover prepares a concrete cover prompt artifact", async () => {
 
   const result = await runCli(["cover"], tempDir)
   assert.equal(result.code, 0, result.stderr)
-  assert.match(result.stdout, /in_progress/i)
+  assert.match(result.stdout, /in_progress|image_generation_skipped_in_test_mode/i)
 
   const state = JSON.parse(await fs.readFile(path.join(tempDir, ".ai-novel", "state.json"), "utf8"))
-  assert.equal(state.assets.cover.status, "in_progress")
+  assert.match(state.assets.cover.status, /in_progress|failed/)
 
   const coverPrompt = await fs.readFile(
     path.join(tempDir, ".ai-novel", "assets", "cover", "cover-prompt.md"),
@@ -4178,17 +4263,9 @@ test("ai-novel cover prepares a concrete cover prompt artifact", async () => {
 
 test("ai-novel provider-test records a successful provider connectivity check in test mode", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-cli-provider-"))
-  await fs.writeFile(
-    path.join(tempDir, ".env"),
-    [
-      "LLM_BASE_URL=https://example.test/v1",
-      "LLM_API_KEY=test-secret",
-      "LLM_MODEL_ID=test-model",
-      "",
-    ].join("\n"),
-  )
 
   await runCli(["init", "--idea", "A storm oracle rewrites dynasties"], tempDir)
+  await seedActiveTextLlmConfig(tempDir)
   const result = await runCli(["provider-test"], tempDir)
 
   assert.equal(result.code, 0, result.stderr)
@@ -4276,16 +4353,8 @@ test("ai-novel chat routes status, workflow, and interruption style messages", a
 
 test("ai-novel tui --once renders a dashboard snapshot", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-cli-tui-"))
-  await fs.writeFile(
-    path.join(tempDir, ".env"),
-    [
-      "LLM_BASE_URL=https://example.test/v1",
-      "LLM_API_KEY=test-secret",
-      "LLM_MODEL_ID=test-model",
-      "",
-    ].join("\n"),
-  )
   await runCli(["init", "--idea", "A cursed archivist deciphers forbidden stars"], tempDir)
+  await seedActiveTextLlmConfig(tempDir)
   await runCli(["chat", "--message", "文风要更冷，更克制，更少解释"], tempDir)
   await runCli(["provider-test"], tempDir)
 
@@ -4302,8 +4371,7 @@ test("ai-novel tui --once renders a dashboard snapshot", async () => {
   assert.match(result.stdout, /Story Memory/)
   assert.match(result.stdout, /Workflow Control/)
   assert.match(result.stdout, /Pending chapter tasks/)
-  assert.match(result.stdout, /Provider env: \[configured\]/i)
-  assert.match(result.stdout, /Provider model: test-model/i)
+  assert.match(result.stdout, /Provider config: settings\/database/i)
   assert.match(result.stdout, /Provider test: ok/i)
   assert.match(result.stdout, /Provider note: Provider connectivity check passed in test mode/i)
   assert.match(result.stdout, /Last route: discussion_chat/i)

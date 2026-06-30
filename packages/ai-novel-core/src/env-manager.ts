@@ -20,9 +20,11 @@ export interface ProjectEnvValues {
   LLM_BASE_URL?: string
   LLM_API_KEY?: string
   LLM_MODEL_ID?: string
+  LLM_API_MODE?: string
   OPENAI_BASE_URL?: string
   OPENAI_API_KEY?: string
   OPENAI_MODEL_NAME?: string
+  OPENAI_API_MODE?: string
   LLM_TIMEOUT_MS?: string
   LLM_TEMPERATURE?: string
   MAX_STEPS?: string

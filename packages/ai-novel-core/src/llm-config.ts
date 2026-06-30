@@ -1,6 +1,5 @@
 import fsSync from "node:fs"
 import path from "node:path"
-import { getProjectEnvStatus } from "./env-manager"
 import { withFactoryDb } from "./factory-db"
 
 
@@ -10,6 +9,7 @@ export interface LlmProviderConfig {
     baseUrl: string
     apiKeyEnv: string
     modelName: string
+    apiMode: LlmApiMode
     timeoutMs: number
     temperature: number
     reactMaxSteps: number
@@ -20,6 +20,8 @@ export interface LlmProviderConfig {
   }
 }
 
+export type LlmApiMode = "chat" | "responses"
+
 function readNumber(value: string | undefined, fallback: number) {
   if (!value) {
     return fallback
@@ -29,40 +31,24 @@ function readNumber(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function readApiMode(value: string | undefined): LlmApiMode {
+  return value?.trim().toLowerCase() === "responses" ? "responses" : "chat"
+}
+
 export function loadLlmConfigFromEnv(rootDir = process.cwd()): LlmProviderConfig {
-  const envStatus = getProjectEnvStatus(rootDir)
-  const dotEnv = envStatus.values
-  const baseUrl =
-    process.env.LLM_BASE_URL ||
-    dotEnv.LLM_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    dotEnv.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1"
-
-  const apiKeyEnv = process.env.LLM_API_KEY || dotEnv.LLM_API_KEY
-    ? "LLM_API_KEY"
-    : process.env.OPENAI_API_KEY || dotEnv.OPENAI_API_KEY
-      ? "OPENAI_API_KEY"
-      : "unset"
-
-  const modelName =
-    process.env.LLM_MODEL_ID ||
-    dotEnv.LLM_MODEL_ID ||
-    process.env.OPENAI_MODEL_NAME ||
-    dotEnv.OPENAI_MODEL_NAME ||
-    "gpt-4o"
-
+  void rootDir
   return {
     provider: {
-      baseUrl,
-      apiKeyEnv,
-      modelName,
-      timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || dotEnv.LLM_TIMEOUT_MS, 120000),
-      temperature: readNumber(process.env.LLM_TEMPERATURE || dotEnv.LLM_TEMPERATURE, 0.1),
-      reactMaxSteps: readNumber(process.env.MAX_STEPS || dotEnv.MAX_STEPS, 25),
+      baseUrl: "",
+      apiKeyEnv: "unset",
+      modelName: "",
+      apiMode: "chat",
+      timeoutMs: 120000,
+      temperature: 0.1,
+      reactMaxSteps: 25,
     },
     writing: {
-      chapterWordTarget: readNumber(process.env.NOVEL_CHAPTER_WORD_TARGET || dotEnv.NOVEL_CHAPTER_WORD_TARGET, 2500),
+      chapterWordTarget: 2500,
       chapterWordMinimum: 2500,
     },
   }
@@ -70,6 +56,8 @@ export function loadLlmConfigFromEnv(rootDir = process.cwd()): LlmProviderConfig
 
 export interface ActiveLlmConfig extends LlmProviderConfig {
   _dbApiKey?: string
+  _configId?: string
+  _capability?: string
 }
 
 let cachedActiveLlmConfig: ActiveLlmConfig | null = null
@@ -82,60 +70,10 @@ export function setCachedActiveLlmConfig(config: ActiveLlmConfig | null): void {
   cachedActiveLlmConfig = config
 }
 
-function getEnvApiKey(values: ReturnType<typeof getProjectEnvStatus>["values"]) {
-  return (
-    process.env.LLM_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    values.LLM_API_KEY ||
-    values.OPENAI_API_KEY ||
-    ""
-  )
-}
-
-function buildEnvBackedLlmConfig(rootDir = process.cwd()) {
-  const envStatus = getProjectEnvStatus(rootDir)
-  const apiKey = getEnvApiKey(envStatus.values)
-
-  if (!envStatus.resolved.baseUrl || !envStatus.resolved.modelName || !apiKey) {
-    return null
-  }
-
-  return {
-    name: `Project .env (${envStatus.resolved.modelName})`,
-    baseUrl: envStatus.resolved.baseUrl,
-    apiKey,
-    modelName: envStatus.resolved.modelName,
-    temperature: readNumber(process.env.LLM_TEMPERATURE || envStatus.values.LLM_TEMPERATURE, 0.1),
-    timeoutMs: readNumber(process.env.LLM_TIMEOUT_MS || envStatus.values.LLM_TIMEOUT_MS, 120000),
-  }
-}
+export type LlmCapability = "text" | "image" | "video" | "audio" | "embedding" | string
 
 export async function ensureEnvLlmConfigImported(rootDir = process.cwd()): Promise<void> {
-  const envConfig = buildEnvBackedLlmConfig(rootDir)
-  if (!envConfig) {
-    return
-  }
-
-  const dbRootDir = resolveFactoryRootDir(rootDir)
-  await withFactoryDb(dbRootDir, async (db) => {
-    const configs = db.listLlmConfigs()
-    const hasActiveConfig = configs.some((config) => Number(config.is_active) === 1)
-
-    if (configs.length === 0) {
-      db.addLlmConfig({
-        ...envConfig,
-        isActive: true,
-      })
-      return
-    }
-
-    if (!hasActiveConfig) {
-      const firstConfig = configs[0]
-      if (typeof firstConfig?.id === "string") {
-        db.activateLlmConfig(firstConfig.id)
-      }
-    }
-  })
+  void rootDir
 }
 
 function isWorkspaceRoot(dir: string): boolean {
@@ -178,35 +116,49 @@ export function resolveFactoryRootDir(dir = process.cwd()): string {
 }
 
 export async function loadActiveLlmConfig(rootDir = process.cwd()): Promise<ActiveLlmConfig | null> {
+  return loadLlmConfigForCapability(rootDir, "text")
+}
+
+function dbConfigToActiveConfig(activeDbConfig: Record<string, unknown>, capability: string, rootDir = process.cwd()): ActiveLlmConfig {
+  return {
+    provider: {
+      baseUrl: activeDbConfig.base_url as string,
+      apiKeyEnv: "DB_ACTIVE_CONFIG",
+      modelName: activeDbConfig.model_name as string,
+      apiMode: readApiMode(activeDbConfig.api_mode as string | undefined),
+      timeoutMs: Number(activeDbConfig.timeout_ms) || 120000,
+      temperature: Number(activeDbConfig.temperature) || 0.1,
+      reactMaxSteps: 25,
+    },
+    writing: {
+      chapterWordTarget: 2500,
+      chapterWordMinimum: 2500,
+    },
+    _dbApiKey: activeDbConfig.api_key as string,
+    _configId: activeDbConfig.id as string,
+    _capability: capability,
+  }
+}
+
+export async function loadLlmConfigForCapability(rootDir = process.cwd(), capability: LlmCapability = "text"): Promise<ActiveLlmConfig | null> {
   const dbRootDir = resolveFactoryRootDir(rootDir)
   try {
-    await ensureEnvLlmConfigImported(rootDir)
     const activeDbConfig = await withFactoryDb(dbRootDir, async (db) => {
-      return db.getActiveLlmConfig()
+      return db.getLlmConfigForCapability(String(capability)) || (String(capability) === "text" ? db.getActiveLlmConfig() : null)
     })
     if (!activeDbConfig) {
-      cachedActiveLlmConfig = null
+      if (String(capability) === "text") {
+        cachedActiveLlmConfig = null
+      }
       return null
     }
-    const config: ActiveLlmConfig = {
-      provider: {
-        baseUrl: activeDbConfig.base_url as string,
-        apiKeyEnv: "DB_ACTIVE_CONFIG",
-        modelName: activeDbConfig.model_name as string,
-        timeoutMs: Number(activeDbConfig.timeout_ms) || 120000,
-        temperature: Number(activeDbConfig.temperature) || 0.1,
-        reactMaxSteps: 25,
-      },
-      writing: {
-        chapterWordTarget: 2500,
-        chapterWordMinimum: 2500,
-      },
-      _dbApiKey: activeDbConfig.api_key as string,
+    const config = dbConfigToActiveConfig(activeDbConfig, String(capability), rootDir)
+    if (String(capability) === "text") {
+      cachedActiveLlmConfig = config
     }
-    cachedActiveLlmConfig = config
     return config
   } catch (error) {
-    console.error("Failed to load active LLM config from DB:", error)
+    console.error(`Failed to load ${String(capability)} LLM config from DB:`, error)
     return null
   }
 }

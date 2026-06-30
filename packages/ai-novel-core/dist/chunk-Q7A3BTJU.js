@@ -1,7 +1,7 @@
 import {
   createLocalTextEmbedding,
   withFactoryDb
-} from "./chunk-4PMKQQNV.js";
+} from "./chunk-XEYMG4OS.js";
 
 // src/knowledge.ts
 import crypto from "crypto";

@@ -1,4 +1,6 @@
-import { d as CharacterDossier, A as AutonomousNovelState } from './cli-types-sWRA2Cw2.cjs';
+import { d as CharacterDossier, A as AutonomousNovelState } from './cli-types-dnbh9JaE.cjs';
+import { AigcBatchDetectionResult } from './aigc-detector.cjs';
+import { S as StyleEvolutionContract, W as WritingPlanContract } from './production-contracts-nNcsaxwV.cjs';
 
 interface NovelWorkspacePaths {
     workspaceDir: string;
@@ -32,6 +34,8 @@ interface ProductionPipelineOptions {
     forceQualityScoreForTest?: number;
     preferDeterministicPlanning?: boolean;
     writingMode?: ProductionWritingMode;
+    bypassAigcGate?: boolean;
+    draftSubcallRoles?: Array<"plot" | "narration" | "dialogue" | "character_action" | "continuity" | "assembly">;
 }
 type ProductionWritingMode = "fast" | "quality";
 interface WritingProgressEvent {
@@ -95,6 +99,54 @@ interface ProductionWritingResources {
     antiHallucinationGuide?: string;
     evidenceConflictStrategy?: string;
 }
+interface ProductionStoryBibleAsset {
+    filename: string;
+    title: string;
+    content: string;
+    stage: string;
+    format?: "markdown" | "json";
+}
+interface ProductionStoryAssetContext {
+    prompt: string;
+    files: string[];
+}
+interface ApprovedWritingStyleContext {
+    status: "ready" | "missing";
+    prompt: string;
+    contract?: StyleEvolutionContract;
+    rulebook?: string;
+    references?: string;
+    antiPatterns?: string;
+    chapterInheritanceAdapter?: ChapterInheritanceAdapterPayload;
+}
+interface ChapterInheritanceAdapterPayload {
+    name: "Chapter Inheritance Adapter";
+    status: "ready" | "blocked";
+    contractVersion: number;
+    approvedAt: string;
+    freezerVerdict: "block" | "continue" | "ready" | "missing";
+    freezerSummary: string;
+    verificationStatus: string;
+    verificationSummary: string;
+    inheritedArtifacts: string[];
+    inheritedRules: string[];
+    styleContractFields: string[];
+    loopProtocolStatus?: string;
+    loopProtocolStages?: {
+        required: string[];
+        completed: string[];
+        blocked: string[];
+    };
+    loopProtocolEvidence?: string[];
+    promptSections: string[];
+    requiredChapterEvidence: string[];
+    approvedSampleExcerpt: string;
+}
+declare class ProductionReadinessBlockedError extends Error {
+    code: string;
+    gate: string;
+    constructor(message: string);
+}
 interface VocabularyEntry {
     word: string;
     definition: string;
@@ -136,6 +188,79 @@ interface CharacterProfileContract {
     prompt: string;
     characterDossiers?: CharacterDossier[];
 }
+interface DraftSceneCard {
+    index: number;
+    goal: string;
+    conflict: string;
+    turn: string;
+    endHook: string;
+    requiredCharacters: string[];
+    requiredFacts: string[];
+    forbiddenFacts: string[];
+}
+interface DraftSegmentPlan {
+    index: number;
+    total: number;
+    label: string;
+    timelinePosition: string;
+    narrativeFocus: string;
+    requiredBeats: string[];
+    continuityFocus: string[];
+    targetWords: number;
+    source?: "scene_card" | "timeline";
+    sceneCard?: DraftSceneCard;
+}
+interface DraftSegmentCompositionPlan {
+    plot: string[];
+    narration: string[];
+    dialogue: string[];
+    characterAction: string[];
+    continuity: string[];
+    assemblyRules: string[];
+}
+interface DraftSegmentSubArtifactInfo {
+    kind: "plot" | "narration" | "dialogue" | "character_action" | "continuity" | "assembly";
+    role: "brief" | "material";
+    path: string;
+    relativePath: string;
+    chars: number;
+}
+interface DraftSegmentAssemblyUsage {
+    requested: boolean;
+    decision: "not_requested" | "used" | "fallback_author";
+    reason: string;
+    materialChars: number;
+    finalChars: number;
+    fallbackChars: number;
+}
+interface ChapterContextPackageInfo {
+    path: string;
+    relativePath: string;
+    promptBudget: {
+        basePromptChars: number;
+        fixedDynamicPromptChars: number;
+        guardrailsChars: number;
+        activeWorldSliceChars: number;
+        storyAssetsChars: number;
+        consensusChars: number;
+        memoryChars: number;
+        ledgerChars: number;
+        ragChars: number;
+    };
+    segmentCount: number;
+    segmentationSource: "scene_card" | "timeline";
+}
+interface DraftSegmentArtifactInfo {
+    path: string;
+    relativePath: string;
+    segmentIndex: number;
+    segmentTotal: number;
+    source: "scene_card" | "timeline";
+    chars: number;
+    manifestPath: string;
+    manifestRelativePath: string;
+    subArtifacts: DraftSegmentSubArtifactInfo[];
+}
 interface NaturalnessReport {
     status: "passed" | "needs_revision" | "blocked";
     score: number;
@@ -153,6 +278,40 @@ interface SemanticPreservationReport {
     preservedFacts: string[];
     reason: string;
 }
+interface StyleConformanceDriftReport {
+    status: "conformant" | "warning" | "drifted" | "pending";
+    conformanceScore: number;
+    driftScore: number;
+    score: number;
+    reason: string;
+    evidence: string[];
+    risks: string[];
+    metrics: {
+        bodyChars: number;
+        contractRuleCount: number;
+        matchedRuleCount: number;
+        approvedSampleOverlap: number;
+        positiveExampleHitCount: number;
+        allowedDeviceHitCount: number;
+        forbiddenHitCount: number;
+        narrativeStyleStatus: ReturnType<typeof evaluateNarrativeStyleQuality>["status"];
+        averageSentenceLength: number;
+        dialogueRatio: number;
+    };
+    forbiddenHits: Array<{
+        pattern: string;
+        count: number;
+        evidence: string[];
+    }>;
+    matchedContractRules: string[];
+    missingContractRules: string[];
+    checkedAt: string;
+}
+declare function evaluateChapterStyleConformanceDrift(input: {
+    approvedStyleContext: ApprovedWritingStyleContext;
+    chapterText: string;
+    extractedStyleFingerprint?: string;
+}): StyleConformanceDriftReport;
 declare function parseQualityGate(report: string, attempts?: number, maxAttempts?: number): QualityGateResult;
 declare function inferGenreProfile(state: AutonomousNovelState): {
     narration: string;
@@ -169,6 +328,10 @@ declare function inferGenreProfile(state: AutonomousNovelState): {
     genre: string;
     vocabularyScenes: string[];
 };
+declare function buildChapterInheritanceAdapterPayload(contract: StyleEvolutionContract | null | undefined): ChapterInheritanceAdapterPayload | null;
+declare function formatApprovedWritingStylePrompt(contract: StyleEvolutionContract | null | undefined): string;
+declare function loadApprovedWritingStyleContext(projectRoot: string): Promise<ApprovedWritingStyleContext>;
+declare function compactPreviousSegmentTail(text: string, maxChars?: number): string;
 declare function evaluateNarrativeStyleQuality(text?: string): {
     status: "eligible" | "quarantined";
     reason: string;
@@ -228,6 +391,14 @@ declare function retrieveFactoryMemoryContext(input: {
     continuityContract: ContinuityContract;
     limit?: number;
 }): Promise<string>;
+declare function loadProductionStoryAssetContext(paths: NovelWorkspacePaths, task: AutonomousNovelState["plan"]["chapterTasks"][number], maxChars?: number): Promise<ProductionStoryAssetContext>;
+declare function createProductionStoryBibleAssets(state: AutonomousNovelState, context: {
+    consensus: string;
+    protagonist: string;
+    style: string;
+}, resources: ProductionWritingResources): ProductionStoryBibleAsset[];
+declare function createProductionWritingPlanContract(state: AutonomousNovelState): WritingPlanContract;
+declare function writeProductionWritingPlan(projectRoot: string, paths: NovelWorkspacePaths, state: AutonomousNovelState, options?: ProductionPipelineOptions): Promise<string>;
 declare function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract): {
     status: "quarantined";
     reason: string;
@@ -266,11 +437,13 @@ declare function createDetailedChapterBlueprint(state: AutonomousNovelState, tas
     consensus: string;
     protagonist: string;
     style: string;
-}, resources: ProductionWritingResources, continuityContract?: ContinuityContract): string;
+}, resources: ProductionWritingResources, continuityContract?: ContinuityContract, storyAssetContext?: ProductionStoryAssetContext): string;
 declare function createDraftBodyFromBlueprint(state: AutonomousNovelState, task: AutonomousNovelState["plan"]["chapterTasks"][number], blueprint: string, resources: ProductionWritingResources, continuityContract?: ContinuityContract): string;
 interface GlobalContextResult {
     prunedConsensus: string;
     prunedOutline: string;
+    prunedStoryAssets: string;
+    activeWorldSlice: string;
     prunedRag: string;
     prunedMemory: string;
     prunedLedger: string;
@@ -291,11 +464,23 @@ declare function loadAndPruneGlobalContext(params: {
     };
     additionalFixedLength?: number;
 }): Promise<GlobalContextResult>;
+declare function createDraftSegmentPlan(state: AutonomousNovelState, task: AutonomousNovelState["plan"]["chapterTasks"][number], continuityContract?: ContinuityContract, blueprint?: string): DraftSegmentPlan[];
+declare function createDraftSegmentCompositionPlan(segment: DraftSegmentPlan, continuityContract: ContinuityContract): DraftSegmentCompositionPlan;
+declare function repairAigcHighRiskDraft(state: AutonomousNovelState, task: AutonomousNovelState["plan"]["chapterTasks"][number], finalDraft: string, aigcReport: AigcWritingDetectionReport, resources: ProductionWritingResources, options: ProductionPipelineOptions, continuityContract: ContinuityContract, characterDossiers?: CharacterDossier[]): Promise<string>;
+declare function createQualityReport(state: AutonomousNovelState, task: AutonomousNovelState["plan"]["chapterTasks"][number], draft: string, blueprint: string, continuityContract?: ContinuityContract, characterDossiers?: CharacterDossier[]): string;
+declare function normalizeAigcWritingDetectionReport(result: AigcBatchDetectionResult): AigcWritingDetectionReport;
+declare function skippedAigcWritingDetectionReport(reason: string): AigcWritingDetectionReport;
+declare function runAigcWritingDetection(finalDraft: string, options: ProductionPipelineOptions): Promise<AigcWritingDetectionReport>;
 declare function writeProductionMasterOutline(projectRoot: string, paths: NovelWorkspacePaths, state: AutonomousNovelState, context: {
     consensus: string;
     protagonist: string;
     style: string;
 }, options?: ProductionPipelineOptions): Promise<string>;
+declare function writeProductionStoryBibleAssets(projectRoot: string, paths: NovelWorkspacePaths, state: AutonomousNovelState, context: {
+    consensus: string;
+    protagonist: string;
+    style: string;
+}, options?: ProductionPipelineOptions): Promise<string[]>;
 declare function writeAllDetailedChapterBlueprints(projectRoot: string, paths: NovelWorkspacePaths, state: AutonomousNovelState, context: {
     consensus: string;
     protagonist: string;
@@ -305,6 +490,7 @@ declare function runChapterProductionPipeline(projectRoot: string, paths: NovelW
     draftPath: string;
     reviewedPath: string;
     finalPath: string;
+    versionManifestPath: string;
     reportPath: string;
     memoryPath: string;
     wordCount: number;
@@ -320,4 +506,4 @@ declare function runChapterProductionPipeline(projectRoot: string, paths: NovelW
     writingMode: ProductionWritingMode;
 }>;
 
-export { type AigcWritingDetectionReport, type CharacterProfileContract, type ContinuityContract, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type SemanticPreservationReport, type WritingKnowledgeReference, type WritingProgressEvent, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createNaturalnessReport, createProductionMasterOutline, evaluateCharacterProfilePresence, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateSemanticPreservation, evaluateWritingResourceUsage, inferGenreProfile, invalidateAllCaches, invalidateProjectCache, invalidateWritingResourcesCache, loadAndPruneGlobalContext, loadProductionWritingResources, memoryCacheTracker, parseQualityGate, resourcesCacheTracker, retrieveFactoryMemoryContext, runChapterProductionPipeline, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionWritingResourceArtifacts };
+export { type AigcWritingDetectionReport, type ApprovedWritingStyleContext, type ChapterContextPackageInfo, type ChapterInheritanceAdapterPayload, type CharacterProfileContract, type ContinuityContract, type DraftSceneCard, type DraftSegmentArtifactInfo, type DraftSegmentAssemblyUsage, type DraftSegmentCompositionPlan, type DraftSegmentPlan, type DraftSegmentSubArtifactInfo, type NaturalnessReport, type NovelWorkspacePaths, type ProductionPipelineOptions, ProductionReadinessBlockedError, type ProductionStoryAssetContext, type ProductionStoryBibleAsset, type ProductionWritingMode, type ProductionWritingResources, type QualityGateResult, type SemanticPreservationReport, type StyleConformanceDriftReport, type WritingKnowledgeReference, type WritingProgressEvent, buildChapterInheritanceAdapterPayload, compactPreviousSegmentTail, createContinuityContract, createDetailedChapterBlueprint, createDraftBodyFromBlueprint, createDraftSegmentCompositionPlan, createDraftSegmentPlan, createNaturalnessReport, createProductionMasterOutline, createProductionStoryBibleAssets, createProductionWritingPlanContract, createQualityReport, evaluateChapterStyleConformanceDrift, evaluateCharacterProfilePresence, evaluateNarrativeStyleQuality, evaluatePlotContinuityBridge, evaluateSemanticPreservation, evaluateWritingResourceUsage, formatApprovedWritingStylePrompt, inferGenreProfile, invalidateAllCaches, invalidateProjectCache, invalidateWritingResourcesCache, loadAndPruneGlobalContext, loadApprovedWritingStyleContext, loadProductionStoryAssetContext, loadProductionWritingResources, memoryCacheTracker, normalizeAigcWritingDetectionReport, parseQualityGate, repairAigcHighRiskDraft, resourcesCacheTracker, retrieveFactoryMemoryContext, runAigcWritingDetection, runChapterProductionPipeline, skippedAigcWritingDetectionReport, writeAllDetailedChapterBlueprints, writeProductionMasterOutline, writeProductionStoryBibleAssets, writeProductionWritingPlan, writeProductionWritingResourceArtifacts };

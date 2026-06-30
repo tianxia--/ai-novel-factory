@@ -1,5 +1,4 @@
-import { getProjectEnvStatus } from "./env-manager"
-import { loadLlmConfigFromEnv, loadActiveLlmConfig } from "./llm-config"
+import { loadLlmConfigForCapability, loadActiveLlmConfig, type LlmApiMode } from "./llm-config"
 import { createAutopilotStopError } from "./abort"
 import type { ProviderTestResult } from "./cli-types"
 
@@ -30,6 +29,26 @@ interface ProviderOverrideOptions {
   baseUrl?: string
   apiKey?: string
   modelName?: string
+  apiMode?: LlmApiMode
+}
+
+interface LlmTextMessage {
+  role: "system" | "user" | "assistant"
+  content: string
+}
+
+interface LlmTextCompletionOptions {
+  baseUrl: string
+  apiKey: string
+  modelName: string
+  apiMode: LlmApiMode
+  timeoutMs: number
+  temperature?: number
+  messages: LlmTextMessage[]
+  stream?: boolean
+  maxTokens?: number
+  signal?: AbortSignal
+  onDelta?: (delta: string) => void | Promise<void>
 }
 
 const AUTONOMOUS_DISCUSSION_PROTOCOL = [
@@ -55,15 +74,26 @@ const STAGE_DRIFT_PATTERNS = [
   /第\s*\d+\s*章/u,
 ]
 
-function hasExplicitProviderEnvOverride() {
-  return Boolean(
-    process.env.LLM_BASE_URL?.trim()
-    || process.env.OPENAI_BASE_URL?.trim()
-    || process.env.LLM_API_KEY?.trim()
-    || process.env.OPENAI_API_KEY?.trim()
-    || process.env.LLM_MODEL_ID?.trim()
-    || process.env.OPENAI_MODEL_NAME?.trim(),
-  )
+function extractTextContent(value: unknown): string {
+  if (typeof value === "string") {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => extractTextContent(item)).join("")
+  }
+  if (!value || typeof value !== "object") {
+    return ""
+  }
+  const record = value as Record<string, unknown>
+  const direct = [record.text, record.output_text, record.reasoning_content, record.content]
+    .map((item) => extractTextContent(item))
+    .join("")
+  if (direct) {
+    return direct
+  }
+  return [record.message, record.delta]
+    .map((item) => extractTextContent(item))
+    .join("")
 }
 
 function buildFakeReply(options: AgentReplyOptions) {
@@ -257,10 +287,8 @@ async function streamOpenAiCompatibleResponse(
             continue
           }
 
-          const payload = JSON.parse(payloadText) as {
-            choices?: Array<{ delta?: { content?: string } }>
-          }
-          const delta = payload.choices?.[0]?.delta?.content
+          const payload = JSON.parse(payloadText)
+          const delta = extractStreamingDelta(payload)
           if (!delta) {
             continue
           }
@@ -327,6 +355,165 @@ async function withTimeout<T>(
   }
 }
 
+function getMessageContent(messages: LlmTextMessage[], role: LlmTextMessage["role"]) {
+  return messages
+    .filter((message) => message.role === role && message.content.trim())
+    .map((message) => message.content.trim())
+    .join("\n\n")
+}
+
+function buildResponsesInput(messages: LlmTextMessage[]) {
+  const userMessages = messages.filter((message) => message.role !== "system" && message.content.trim())
+  if (userMessages.length === 1 && userMessages[0].role === "user") {
+    return userMessages[0].content
+  }
+  return userMessages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  }))
+}
+
+function extractResponsesOutput(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return ""
+  }
+  const record = payload as Record<string, unknown>
+  const direct = extractTextContent(record.output_text)
+  if (direct) {
+    return direct.trim()
+  }
+
+  const output = Array.isArray(record.output) ? record.output : []
+  return output.map((item) => extractTextContent(item)).join("").trim()
+}
+
+function extractStreamingDelta(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return ""
+  }
+
+  const record = payload as Record<string, unknown>
+  const choicePayload = payload as {
+    choices?: Array<{ delta?: unknown; message?: unknown; text?: unknown }>
+  }
+  const choice = choicePayload.choices?.[0]
+  const chatDelta = extractTextContent(choice?.delta) || extractTextContent(choice?.message) || extractTextContent(choice?.text)
+  if (chatDelta) {
+    return chatDelta
+  }
+
+  const eventType = typeof record.type === "string" ? record.type : ""
+  if (eventType.endsWith(".delta")) {
+    return extractTextContent(record.delta)
+  }
+
+  return ""
+}
+
+async function parseProviderError(response: Response) {
+  const raw = await response.text().catch(() => "")
+  if (!raw) {
+    return response.statusText
+  }
+  try {
+    const payload = JSON.parse(raw) as { error?: { message?: string } | string }
+    if (typeof payload.error === "string") {
+      return payload.error
+    }
+    return payload.error?.message || raw.slice(0, 500)
+  } catch {
+    return raw.slice(0, 500)
+  }
+}
+
+export async function requestLlmTextCompletion(options: LlmTextCompletionOptions) {
+  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions"
+  const requestStartTime = Date.now()
+  const baseUrl = options.baseUrl.replace(/\/$/, "")
+  const selectedTemperature = options.temperature ?? 0.1
+  const messages = options.messages.filter((message) => message.content.trim())
+  const system = getMessageContent(messages, "system")
+  const user = getMessageContent(messages, "user")
+  const effectiveStream = Boolean(options.stream)
+
+  console.log(`[LLM REQUEST SEND] 准备向 API 发送 ${endpoint} 请求...`)
+  console.log(`- BaseUrl: ${options.baseUrl}`)
+  console.log(`- Model: ${options.modelName}`)
+  console.log(`- API Mode: ${options.apiMode}`)
+  console.log(`- Temperature: ${selectedTemperature}`)
+  console.log(`- Messages Count: ${messages.length}`)
+  console.log(`- System Prompt Length: ${system.length} chars`)
+  console.log(`- User Message Length: ${user.length} chars`)
+
+  const body = options.apiMode === "responses"
+    ? {
+        model: options.modelName,
+        instructions: system || undefined,
+        input: buildResponsesInput(messages),
+        temperature: selectedTemperature,
+        max_output_tokens: options.maxTokens,
+        stream: effectiveStream,
+      }
+    : {
+        model: options.modelName,
+        temperature: selectedTemperature,
+        stream: effectiveStream,
+        max_tokens: options.maxTokens,
+        messages,
+      }
+
+  return withTimeout(options.timeoutMs, async (signal, markActivity) => {
+    const response = await fetch(`${baseUrl}/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${options.apiKey}`,
+      },
+      signal,
+      body: JSON.stringify(body),
+    })
+
+    const fetchTime = Date.now() - requestStartTime
+    console.log(`[LLM REQUEST HEAD] 收到 API Response 头部，状态码: ${response.status}，HTTP建立连接与首包头耗时: ${fetchTime}ms`)
+
+    if (!response.ok) {
+      const providerMessage = await parseProviderError(response)
+      console.error(`[LLM REQUEST ERROR] 请求失败，状态码: ${response.status}，错误: ${providerMessage}`)
+      throw new Error(`LLM request failed with status ${response.status}: ${providerMessage}`)
+    }
+    markActivity()
+
+    if (effectiveStream && options.onDelta) {
+      return streamOpenAiCompatibleResponse(response, async (delta) => {
+        markActivity()
+        await options.onDelta?.(delta)
+      }, {
+        signal,
+        markActivity,
+        requestStartTime,
+      })
+    }
+
+    const payload = await response.json() as {
+      choices?: Array<{ message?: unknown; text?: unknown }>
+    }
+    const choice = payload.choices?.[0]
+    const content = options.apiMode === "responses"
+      ? extractResponsesOutput(payload)
+      : (extractTextContent(choice?.message) || extractTextContent(choice?.text)).trim()
+
+    const totalTime = Date.now() - requestStartTime
+    console.log(`[LLM REQUEST END] 非流式请求完成。总耗时: ${totalTime}ms，返回内容长度: ${content.length}`)
+    console.log(`\n========== [LLM RESPONSE START] ==========\n${content.trim()}\n========== [LLM RESPONSE END] ==========\n`)
+
+    if (options.stream && options.onDelta && content) {
+      await options.onDelta(content)
+    }
+
+    return content.trim()
+  }, options.signal)
+}
+
 export async function generateAgentReply(options: AgentReplyOptions) {
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     const reply = buildFakeReply(options)
@@ -336,24 +523,11 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     return reply
   }
 
-  const envStatus = getProjectEnvStatus(options.envRootDir)
-  const explicitEnvOverride = hasExplicitProviderEnvOverride()
-  let config = explicitEnvOverride ? null : await loadActiveLlmConfig(options.envRootDir)
-  let apiKey = ""
-  if (config) {
-    apiKey = config._dbApiKey || ""
-  } else {
-    config = loadLlmConfigFromEnv(options.envRootDir)
-    apiKey =
-      process.env.LLM_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      envStatus.values.LLM_API_KEY ||
-      envStatus.values.OPENAI_API_KEY ||
-      ""
-  }
+  let config = await loadLlmConfigForCapability(options.envRootDir, "text")
+  const apiKey = config?._dbApiKey || ""
 
-  if (!apiKey) {
-    throw new Error("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY, or configure an active LLM in settings.")
+  if (!config || !apiKey) {
+    throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.")
   }
 
 
@@ -362,97 +536,66 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     ? "正文创作协议：你负责执行小说章节的初稿创作、质量返工或自然度润色，必须输出具体的文学正文，且严禁输出讨论过程或无关废话。"
     : AUTONOMOUS_DISCUSSION_PROTOCOL
 
-  const system = [
-    protocol,
-    "",
+  const systemBlocks: string[] = []
+  if (isDrafting) {
+    // 写作模式下：最庞大且最固定的是写作规范 (basePrompt)，而 dynamicPrompt 是本章细节（频繁变动，必须置后）
+    if (options.basePrompt.trim()) systemBlocks.push(options.basePrompt.trim())
+    if (protocol) systemBlocks.push(protocol)
+    if (options.consensus.trim()) systemBlocks.push(options.consensus.trim())
+    if (options.dynamicPrompt.trim()) systemBlocks.push(options.dynamicPrompt.trim())
+  } else {
+    // 讨论模式下：最庞大且对所有 Agent 共享（基本不随专家角色而变）的是小说核心设定/世界观 (consensus)
+    // 随后是通用的全局讨论协议
+    // 而 basePrompt/dynamicPrompt 是各个 Agent 专属的角色设定与职责（每次调用均不同，必须置后）
+    if (options.consensus.trim()) systemBlocks.push(options.consensus.trim())
+    if (protocol) systemBlocks.push(protocol)
+    if (options.basePrompt.trim()) systemBlocks.push(options.basePrompt.trim())
+    if (options.dynamicPrompt.trim()) systemBlocks.push(options.dynamicPrompt.trim())
+  }
+
+  systemBlocks.push(
     `输出语言：${options.preferredLanguage === "en-US" ? "English" : "简体中文"}`,
     `当前工作流阶段：${options.currentStage ?? "worldbuilding_dialogue"}`,
     options.stageInstruction ? `阶段约束：${options.stageInstruction}` : "",
-    "",
-    options.basePrompt.trim(),
-    "",
-    options.dynamicPrompt.trim(),
-    "",
-    options.consensus.trim(),
-    "",
     `Discussion stage: ${options.discussionStage ?? "specialist_turn"}`,
     options.discussionTarget
       ? `Discussion target: ${options.discussionTarget.label}\nTarget kind: ${options.discussionTarget.kind}\nTarget asset: ${options.discussionTarget.assetPath}\nTarget instruction: ${options.discussionTarget.instruction}`
       : "",
-    "Response contract:",
-    "- 必须使用简体中文输出。",
-    isDrafting ? "- 必须按照章节格式要求输出章节正文内容。" : "- 给出实质性讨论内容，不能只说一句拒绝。",
-    isDrafting ? "- 必须遵循小说人物档案，保证人名与情节的连续性。" : "- 可以使用简短 markdown 小节与列表。",
-    "- 必须停留在当前 target 内。",
-    isDrafting ? "" : "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
-    isDrafting ? "" : "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
-    isDrafting ? "" : "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
+    "Response contract:\n" + [
+      "- 必须使用简体中文输出。",
+      isDrafting ? "- 必须按照章节格式要求输出章节正文内容。" : "- 给出实质性讨论内容，不能只说一句拒绝。",
+      isDrafting ? "- 必须遵循小说人物档案，保证人名与情节的连续性。" : "- 可以使用简短 markdown 小节与列表。",
+      "- 必须停留在当前 target 内。",
+      isDrafting ? "" : "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
+      isDrafting ? "" : "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
+      isDrafting ? "" : "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
+    ].filter(Boolean).join("\n"),
     (!isDrafting && options.priorTranscript?.trim()) ? `Prior roundtable transcript:\n${options.priorTranscript.trim()}` : "",
-  ].filter(Boolean).join("\n")
+  )
 
-  const startTime = Date.now()
+  const system = systemBlocks.filter(Boolean).join("\n\n")
+
   const selectedTemperature = options.temperature !== undefined ? options.temperature : config.provider.temperature
-  console.log(`[LLM REQUEST SEND] 准备向 API 发送 chat/completions 请求...`)
-  console.log(`- BaseUrl: ${config.provider.baseUrl}`)
-  console.log(`- Model: ${config.provider.modelName}`)
-  console.log(`- Temperature: ${selectedTemperature}`)
-  console.log(`- Messages Count: ${options.message ? 2 : 1}`)
-  console.log(`- System Prompt Length: ${system.length} chars`)
-  console.log(`- User Message Length: ${(options.message || "").length} chars`)
   console.log(`\n========== [LLM SYSTEM PROMPT START] ==========\n${system}\n========== [LLM SYSTEM PROMPT END] ==========\n`)
   if (options.message) {
     console.log(`\n========== [LLM USER MESSAGE START] ==========\n${options.message}\n========== [LLM USER MESSAGE END] ==========\n`)
   }
 
-  const content = await withTimeout(config.provider.timeoutMs, async (signal, markActivity) => {
-    const response = await fetch(`${config.provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
-      signal,
-      body: JSON.stringify({
-        model: config.provider.modelName,
-        temperature: selectedTemperature,
-        stream: Boolean(options.onDelta),
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: options.message },
-        ],
-      }),
-    })
-
-    const fetchTime = Date.now() - startTime
-    console.log(`[LLM REQUEST HEAD] 收到 API Response 头部，状态码: ${response.status}，HTTP建立连接与首包头耗时: ${fetchTime}ms`)
-
-    if (!response.ok) {
-      console.error(`[LLM REQUEST ERROR] 请求失败，状态码: ${response.status}`)
-      throw new Error(`LLM request failed with status ${response.status}.`)
-    }
-    markActivity()
-
-    if (options.onDelta) {
-      return streamOpenAiCompatibleResponse(response, async (delta) => {
-        markActivity()
-        await options.onDelta?.(delta)
-      }, {
-        signal,
-        markActivity,
-      })
-    }
-
-    const payload = await response.json() as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-
-    const totalTime = Date.now() - startTime
-    const resContent = payload.choices?.[0]?.message?.content?.trim() || ""
-    console.log(`[LLM REQUEST END] 非流式请求完成。总耗时: ${totalTime}ms，返回内容长度: ${resContent.length}`)
-    console.log(`\n========== [LLM RESPONSE START] ==========\n${resContent}\n========== [LLM RESPONSE END] ==========\n`)
-
-    return resContent
-  }, options.signal)
+  const content = await requestLlmTextCompletion({
+    baseUrl: config.provider.baseUrl,
+    apiKey,
+    modelName: config.provider.modelName,
+    apiMode: config.provider.apiMode,
+    timeoutMs: config.provider.timeoutMs,
+    temperature: selectedTemperature,
+    stream: Boolean(options.onDelta),
+    signal: options.signal,
+    onDelta: options.onDelta,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: options.message },
+    ],
+  })
   if (!content) {
     throw new Error("LLM response did not include message content.")
   }
@@ -481,18 +624,15 @@ export async function testProviderConnectivity(
   rootDir = process.cwd(),
 ): Promise<ProviderTestResult> {
   const activeConfig = await loadActiveLlmConfig(rootDir)
-  const config = activeConfig || loadLlmConfigFromEnv(rootDir)
-  const envStatus = getProjectEnvStatus(rootDir)
   const checkedAt = new Date().toISOString()
-  const baseUrl = overrides.baseUrl?.trim() || config.provider.baseUrl
-  const modelName = overrides.modelName?.trim() || config.provider.modelName
+  const timeoutMs = activeConfig?.provider.timeoutMs || 120000
+  const baseUrl = overrides.baseUrl?.trim() || activeConfig?.provider.baseUrl || ""
+  const modelName = overrides.modelName?.trim() || activeConfig?.provider.modelName || ""
+  const apiMode = overrides.apiMode || activeConfig?.provider.apiMode || "chat"
   const apiKey =
     overrides.apiKey?.trim() ||
-    (activeConfig ? activeConfig._dbApiKey : null) ||
-    process.env.LLM_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    envStatus.values.LLM_API_KEY ||
-    envStatus.values.OPENAI_API_KEY
+    activeConfig?._dbApiKey ||
+    ""
 
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return {
@@ -500,7 +640,8 @@ export async function testProviderConnectivity(
       checkedAt,
       baseUrl,
       modelName,
-      message: "Provider connectivity check passed in test mode.",
+      apiMode,
+      message: `Provider connectivity check passed in test mode (${apiMode}).`,
     }
   }
 
@@ -510,12 +651,13 @@ export async function testProviderConnectivity(
       checkedAt,
       baseUrl,
       modelName,
-      message: "Missing provider config: LLM_BASE_URL, LLM_API_KEY, or LLM_MODEL_ID.",
+      apiMode,
+      message: "Missing provider config. Configure a model in settings first.",
     }
   }
 
   try {
-    const response = await withTimeout(config.provider.timeoutMs, (signal) =>
+    const response = await withTimeout(timeoutMs, (signal) =>
       fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
         method: "GET",
         headers: {
@@ -526,11 +668,37 @@ export async function testProviderConnectivity(
     )
 
     if (!response.ok) {
+      // If /models fails (e.g. 404/405/403), fallback to a lightweight generation call.
+      try {
+        const content = await requestLlmTextCompletion({
+          baseUrl,
+          apiKey,
+          modelName,
+          apiMode,
+          timeoutMs,
+          maxTokens: 8,
+          messages: [{ role: "user", content: "ping" }],
+        })
+        if (content) {
+          return {
+            ok: true,
+            checkedAt,
+            baseUrl,
+            modelName,
+            apiMode,
+            message: `Provider reachable (verified via ${apiMode} generation fallback).`,
+          }
+        }
+      } catch (chatErr) {
+        // Ignore fallback errors and bubble up the primary failure
+      }
+
       return {
         ok: false,
         checkedAt,
         baseUrl,
         modelName,
+        apiMode,
         message: `Provider test failed with status ${response.status}.`,
       }
     }
@@ -543,6 +711,7 @@ export async function testProviderConnectivity(
       checkedAt,
       baseUrl,
       modelName,
+      apiMode,
       message: `Provider reachable. ${modelCount} models listed.`,
     }
   } catch (error) {
@@ -552,6 +721,7 @@ export async function testProviderConnectivity(
       checkedAt,
       baseUrl,
       modelName,
+      apiMode,
       message: `Provider test failed: ${message}`,
     }
   }

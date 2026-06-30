@@ -77,7 +77,7 @@ const AUTOPILOT_RATE_LIMIT_RETRY_MAX_MS = process.env.AI_NOVEL_TEST_MODE === "1"
 const AUTOPILOT_NO_PROGRESS_BACKOFF_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 15000
 const AUTOPILOT_STALE_LLM_REQUEST_MS = process.env.AI_NOVEL_TEST_MODE === "1"
   ? 25
-  : Math.max(180000, Number(process.env.LLM_TIMEOUT_MS || 120000) + 60000)
+  : 180000
 const KNOWLEDGE_JOB_LEASE_SECONDS = 120
 const ACTIVE_WRITING_MESSAGE_STATUSES: MessageStatus[] = ["queued", "streaming"]
 

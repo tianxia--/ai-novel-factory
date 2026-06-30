@@ -16,6 +16,8 @@ import {
   type AigcBatchDetectionResult,
   type AigcSegmentDetectionResult,
 } from "./aigc-detector"
+import { evaluateStyleEvolutionGate, type StyleEvolutionContract, type WritingPlanContract } from "./production-contracts"
+import { loadStyleEvolution } from "./production-style-evolution"
 
 export interface NovelWorkspacePaths {
   workspaceDir: string
@@ -50,6 +52,8 @@ export interface ProductionPipelineOptions {
   forceQualityScoreForTest?: number
   preferDeterministicPlanning?: boolean
   writingMode?: ProductionWritingMode
+  bypassAigcGate?: boolean
+  draftSubcallRoles?: Array<"plot" | "narration" | "dialogue" | "character_action" | "continuity" | "assembly">
 }
 
 export type ProductionWritingMode = "fast" | "quality"
@@ -119,6 +123,63 @@ export interface ProductionWritingResources {
   evidenceConflictStrategy?: string
 }
 
+export interface ProductionStoryBibleAsset {
+  filename: string
+  title: string
+  content: string
+  stage: string
+  format?: "markdown" | "json"
+}
+
+export interface ProductionStoryAssetContext {
+  prompt: string
+  files: string[]
+}
+
+export interface ApprovedWritingStyleContext {
+  status: "ready" | "missing"
+  prompt: string
+  contract?: StyleEvolutionContract
+  rulebook?: string
+  references?: string
+  antiPatterns?: string
+  chapterInheritanceAdapter?: ChapterInheritanceAdapterPayload
+}
+
+export interface ChapterInheritanceAdapterPayload {
+  name: "Chapter Inheritance Adapter"
+  status: "ready" | "blocked"
+  contractVersion: number
+  approvedAt: string
+  freezerVerdict: "block" | "continue" | "ready" | "missing"
+  freezerSummary: string
+  verificationStatus: string
+  verificationSummary: string
+  inheritedArtifacts: string[]
+  inheritedRules: string[]
+  styleContractFields: string[]
+  loopProtocolStatus?: string
+  loopProtocolStages?: {
+    required: string[]
+    completed: string[]
+    blocked: string[]
+  }
+  loopProtocolEvidence?: string[]
+  promptSections: string[]
+  requiredChapterEvidence: string[]
+  approvedSampleExcerpt: string
+}
+
+export class ProductionReadinessBlockedError extends Error {
+  code = "production_readiness_blocked"
+  gate = "style_approval"
+
+  constructor(message: string) {
+    super(message)
+    this.name = "ProductionReadinessBlockedError"
+  }
+}
+
 interface VocabularyEntry {
   word: string
   definition: string
@@ -129,6 +190,19 @@ interface VocabularyCatalog {
   totalWords: number
   entriesByCategory: Record<string, VocabularyEntry[]>
   entriesByWord: Map<string, VocabularyEntry>
+}
+
+interface StyleTextMetrics {
+  characterCount: number
+  paragraphCount: number
+  sentenceCount: number
+  averageParagraphLength: number
+  averageSentenceLength: number
+  dialogueDensity: number
+  sensoryDensity: number
+  actionDensity: number
+  introspectionDensity: number
+  expositionDensity: number
 }
 
 export interface QualityGateResult {
@@ -165,6 +239,86 @@ export interface CharacterProfileContract {
   characterDossiers?: CharacterDossier[]
 }
 
+export interface DraftSceneCard {
+  index: number
+  goal: string
+  conflict: string
+  turn: string
+  endHook: string
+  requiredCharacters: string[]
+  requiredFacts: string[]
+  forbiddenFacts: string[]
+}
+
+export interface DraftSegmentPlan {
+  index: number
+  total: number
+  label: string
+  timelinePosition: string
+  narrativeFocus: string
+  requiredBeats: string[]
+  continuityFocus: string[]
+  targetWords: number
+  source?: "scene_card" | "timeline"
+  sceneCard?: DraftSceneCard
+}
+
+export interface DraftSegmentCompositionPlan {
+  plot: string[]
+  narration: string[]
+  dialogue: string[]
+  characterAction: string[]
+  continuity: string[]
+  assemblyRules: string[]
+}
+
+export interface DraftSegmentSubArtifactInfo {
+  kind: "plot" | "narration" | "dialogue" | "character_action" | "continuity" | "assembly"
+  role: "brief" | "material"
+  path: string
+  relativePath: string
+  chars: number
+}
+
+export interface DraftSegmentAssemblyUsage {
+  requested: boolean
+  decision: "not_requested" | "used" | "fallback_author"
+  reason: string
+  materialChars: number
+  finalChars: number
+  fallbackChars: number
+}
+
+export interface ChapterContextPackageInfo {
+  path: string
+  relativePath: string
+  promptBudget: {
+    basePromptChars: number
+    fixedDynamicPromptChars: number
+    guardrailsChars: number
+    activeWorldSliceChars: number
+    storyAssetsChars: number
+    consensusChars: number
+    memoryChars: number
+    ledgerChars: number
+    ragChars: number
+  }
+  segmentCount: number
+  segmentationSource: "scene_card" | "timeline"
+}
+
+export interface DraftSegmentArtifactInfo {
+  path: string
+  relativePath: string
+  segmentIndex: number
+  segmentTotal: number
+  source: "scene_card" | "timeline"
+  chars: number
+  manifestPath: string
+  manifestRelativePath: string
+  subArtifacts: DraftSegmentSubArtifactInfo[]
+}
+
 export interface NaturalnessReport {
   status: "passed" | "needs_revision" | "blocked"
   score: number
@@ -182,6 +336,32 @@ export interface SemanticPreservationReport {
   changedFacts: string[]
   preservedFacts: string[]
   reason: string
+}
+
+export interface StyleConformanceDriftReport {
+  status: "conformant" | "warning" | "drifted" | "pending"
+  conformanceScore: number
+  driftScore: number
+  score: number
+  reason: string
+  evidence: string[]
+  risks: string[]
+  metrics: {
+    bodyChars: number
+    contractRuleCount: number
+    matchedRuleCount: number
+    approvedSampleOverlap: number
+    positiveExampleHitCount: number
+    allowedDeviceHitCount: number
+    forbiddenHitCount: number
+    narrativeStyleStatus: ReturnType<typeof evaluateNarrativeStyleQuality>["status"]
+    averageSentenceLength: number
+    dialogueRatio: number
+  }
+  forbiddenHits: Array<{ pattern: string; count: number; evidence: string[] }>
+  matchedContractRules: string[]
+  missingContractRules: string[]
+  checkedAt: string
 }
 
 function currentBundleDir() {
@@ -235,12 +415,562 @@ async function writeJsonFileAtomic(filePath: string, value: unknown) {
   await fs.rename(tempPath, filePath)
 }
 
+async function writeChapterVersionManifest(input: {
+  projectRoot: string
+  options: ProductionPipelineOptions
+  chapterId: string
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  draftPath: string
+  reviewedPath: string
+  finalPath: string
+  reportPath: string
+  memoryPath: string
+  finalDraft: string
+  draft: string
+  finalGate: QualityGateResult
+	  writingMode: ProductionWritingMode
+	  aigcDetection: AigcWritingDetectionReport
+	  chapterInheritanceAdapter?: ChapterInheritanceAdapterPayload | null
+	  styleInheritanceVerification?: Record<string, unknown> | null
+	  styleConformanceDrift?: StyleConformanceDriftReport | null
+	}) {
+  const now = new Date().toISOString()
+  const finalWordCount = wordCount(input.finalDraft)
+  const draftWordCount = wordCount(input.draft)
+	  const styleDriftPassed = input.styleConformanceDrift
+	    ? input.styleConformanceDrift.status === "conformant"
+	    : true
+	  const aigcPassed = input.aigcDetection.status === "passed"
+	  const styleInheritancePassed = input.styleInheritanceVerification
+	    ? String(input.styleInheritanceVerification.status || "") === "ready"
+	    : true
+	  const adapterPassed = input.chapterInheritanceAdapter
+	    ? input.chapterInheritanceAdapter.status === "ready"
+	    : true
+	  const finalVersionPassed = input.finalGate.status === "passed" && styleDriftPassed && aigcPassed && styleInheritancePassed && adapterPassed
+  const versions = [
+    {
+      id: "draft",
+      label: "Draft",
+      source: "draft",
+      path: relativeArtifactPath(input.projectRoot, input.draftPath),
+      wordCount: draftWordCount,
+      status: "available",
+      createdAt: now,
+    },
+    {
+      id: "reviewed",
+      label: "Reviewed",
+      source: "reviewed",
+      path: relativeArtifactPath(input.projectRoot, input.reviewedPath),
+      wordCount: draftWordCount,
+      status: "available",
+      createdAt: now,
+    },
+    {
+      id: "final",
+      label: "Final",
+      source: "final",
+      path: relativeArtifactPath(input.projectRoot, input.finalPath),
+      wordCount: finalWordCount,
+      status: finalVersionPassed ? "passed" : "needs_revision",
+      createdAt: now,
+    },
+  ]
+  const manifest = {
+    version: 1,
+    chapterNumber: input.task.chapterNumber,
+    chapterTitle: input.task.title,
+    publishedVersionId: "final",
+    locked: finalVersionPassed,
+    status: finalVersionPassed ? "published" : "needs_review",
+    writingMode: input.writingMode,
+    targetWords: input.task.targetWords,
+    wordCount: finalWordCount,
+	    updatedAt: now,
+	    qualityGate: input.finalGate,
+	    aigcDetection: input.aigcDetection,
+	    chapterInheritanceAdapter: input.chapterInheritanceAdapter || null,
+	    styleInheritanceVerification: input.styleInheritanceVerification || null,
+	    styleConformanceDrift: input.styleConformanceDrift || null,
+    artifacts: {
+      report: relativeArtifactPath(input.projectRoot, input.reportPath),
+      memory: relativeArtifactPath(input.projectRoot, input.memoryPath),
+    },
+    versions,
+  }
+  const manifestPath = path.join(path.dirname(input.finalPath), `${input.chapterId}.versions.json`)
+  await writeJsonFileAtomic(manifestPath, manifest)
+  await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_version_manifest",
+    publishedVersionId: manifest.publishedVersionId,
+    status: manifest.status,
+    locked: manifest.locked,
+    versionCount: versions.length,
+	    qualityGate: input.finalGate,
+	    chapterInheritanceAdapter: input.chapterInheritanceAdapter || null,
+	    styleInheritanceVerification: input.styleInheritanceVerification || null,
+	    styleConformanceDrift: input.styleConformanceDrift || null,
+	  })
+  return manifestPath
+}
+
+async function fileHasContent(filePath: string) {
+  try {
+    const stat = await fs.stat(filePath)
+    return stat.isFile() && stat.size > 0
+  } catch {
+    return false
+  }
+}
+
+async function buildChapterStyleInheritanceVerification(input: {
+  paths: NovelWorkspacePaths
+  approvedStyleContext: ApprovedWritingStyleContext
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  finalGate: QualityGateResult
+  aigcDetection: AigcWritingDetectionReport
+  styleConformanceDrift: StyleConformanceDriftReport
+  extractedStyleFingerprint?: string
+}) {
+	  const contract = input.approvedStyleContext.contract || null
+	  const approvedVersion = Number(contract?.loop?.approvalVersion || contract?.approval?.approvedVersion || 0)
+	  const contractApproved = input.approvedStyleContext.status === "ready" && Boolean(contract?.approvedAt || approvedVersion)
+	  const inheritanceStatus = String(contract?.inheritance?.status || "")
+	  const inheritedRules = Array.isArray(contract?.inheritance?.inheritedRules) ? contract.inheritance.inheritedRules : []
+	  const inheritedArtifacts = Array.isArray(contract?.inheritance?.inheritedArtifacts) ? contract.inheritance.inheritedArtifacts : []
+	  const chapterInheritanceAdapter = input.approvedStyleContext.chapterInheritanceAdapter || buildChapterInheritanceAdapterPayload(contract)
+	  const adapterReady = chapterInheritanceAdapter?.status === "ready"
+	  const freezerVerdict = chapterInheritanceAdapter?.freezerVerdict || contract?.freezer?.verdict || "missing"
+	  const freezeAssetsReady = Boolean(contract?.approvedSample?.trim() && contract?.frozenBasePrompt?.trim() && contract?.styleContract)
+  const inheritanceAssetsReady = Boolean(
+    await fileHasContent(input.paths.styleRulebookPath)
+      && await fileHasContent(input.paths.styleReferencesPath)
+      && await fileHasContent(input.paths.styleAntiPatternsPath),
+  )
+  const currentFingerprint = input.extractedStyleFingerprint || ""
+  const styleFingerprintReady = Boolean(
+    currentFingerprint
+      || (input.task.chapterNumber > 1 && contractApproved),
+  )
+  const aigcStatus = input.aigcDetection.status
+  const highRiskCount = Array.isArray(input.aigcDetection.highRiskSegments) ? input.aigcDetection.highRiskSegments.length : 0
+  const styleConformanceDrift = input.styleConformanceDrift
+  const styleDriftBlocked = styleConformanceDrift.status === "drifted"
+  const styleDriftWarning = styleConformanceDrift.status === "warning" || styleConformanceDrift.status === "pending"
+  const evidence = [
+    contractApproved
+      ? approvedVersion > 0
+        ? `整书写法合同已冻结为 v${approvedVersion}`
+        : "整书写法合同已冻结"
+      : "",
+	    inheritanceStatus === "enforced" ? "章节继承链已标记为 enforced" : "",
+	    adapterReady ? "Chapter Inheritance Adapter 已绑定冻结合同、Freezer 与验证证据" : "",
+	    freezerVerdict === "ready" ? "Style Contract Freezer 已 ready" : "",
+	    freezeAssetsReady ? "冻结写法合同、基础 prompt 与 style contract 已存在" : "",
+    inheritanceAssetsReady ? "style/rulebook、references、anti-patterns 已同步到章节资产" : "",
+    input.finalGate.status === "passed" ? "本章质量门已通过" : "",
+    aigcStatus === "passed" ? "本章 AIGC 检测已通过" : "",
+    styleFingerprintReady ? "章节写法已有可追踪继承参照" : "",
+    styleConformanceDrift.status === "conformant" ? styleConformanceDrift.reason : "",
+    ...styleConformanceDrift.evidence.slice(0, 5),
+  ].filter(Boolean)
+  const risks = [
+	    !contractApproved ? "整书写法合同尚未冻结。" : "",
+	    contractApproved && inheritanceStatus !== "enforced" ? `写法继承状态仍为 ${inheritanceStatus || "pending"}。` : "",
+	    !adapterReady ? "Chapter Inheritance Adapter 尚未 ready，冻结合同不能作为章节硬基线。" : "",
+	    freezerVerdict !== "ready" ? `Style Contract Freezer verdict 为 ${freezerVerdict}。` : "",
+	    !freezeAssetsReady ? "冻结写法合同资产不完整。" : "",
+    !inheritanceAssetsReady ? "章节继承资产未完全同步。" : "",
+    input.finalGate.status === "blocked" ? `质量门阻塞：${input.finalGate.reason}` : "",
+    aigcStatus === "blocked" ? `AIGC 检测阻塞：${highRiskCount} 个高风险片段。` : "",
+    aigcStatus === "unavailable" || aigcStatus === "skipped" ? `AIGC 检测状态为 ${aigcStatus}：${input.aigcDetection.reason}` : "",
+    !styleFingerprintReady ? "章节写法继承参照尚不完整。" : "",
+    styleDriftBlocked || styleDriftWarning
+      ? styleConformanceDrift.reason
+      : "",
+    ...styleConformanceDrift.risks.slice(0, 5),
+  ].filter(Boolean)
+  let status: "ready" | "warning" | "blocked" | "pending" = "ready"
+  if (!contractApproved) {
+    status = "pending"
+  } else if (
+	    inheritanceStatus !== "enforced"
+	    || !adapterReady
+	    || input.finalGate.status === "blocked"
+    || aigcStatus === "blocked"
+    || styleDriftBlocked
+  ) {
+    status = "blocked"
+  } else if (
+    !freezeAssetsReady
+    || !inheritanceAssetsReady
+    || !styleFingerprintReady
+    || aigcStatus !== "passed"
+    || styleDriftWarning
+  ) {
+    status = "warning"
+  }
+  const summary = status === "ready"
+    ? "本章已继承冻结写法合同，并通过质量门、AIGC 与风格漂移生产验证。"
+    : status === "warning"
+      ? "本章已接入冻结写法合同，但仍有风格继承证据或漂移风险需要补强。"
+      : status === "blocked"
+        ? "本章写法继承验证未放行，需先处理阻塞项。"
+        : "本章还没有可确认的冻结写法合同继承基线。"
+
+  return {
+    status,
+    summary,
+    chapterNumber: input.task.chapterNumber,
+    contractVersion: approvedVersion,
+    contractApproved,
+    approvedAt: String(contract?.approvedAt || contract?.approval?.approvedAt || ""),
+	    inheritanceStatus,
+	    chapterInheritanceAdapter,
+	    adapterReady,
+	    freezerVerdict,
+	    inheritedRuleCount: inheritedRules.length,
+    inheritedArtifactCount: inheritedArtifacts.length,
+    freezeAssetsReady,
+    inheritanceAssetsReady,
+    styleFingerprintReady,
+    styleFingerprint: currentFingerprint,
+    styleConformanceDrift,
+    styleDrift: {
+      status: styleConformanceDrift.status,
+      conformanceScore: Math.round(styleConformanceDrift.conformanceScore * 10),
+      driftScore: Math.round(styleConformanceDrift.driftScore * 10),
+      threshold: 72,
+      rawConformanceScore: styleConformanceDrift.conformanceScore,
+      rawDriftScore: styleConformanceDrift.driftScore,
+      forbiddenHitCount: styleConformanceDrift.metrics.forbiddenHitCount,
+      matchedTerms: styleConformanceDrift.matchedContractRules,
+      missingTerms: styleConformanceDrift.missingContractRules,
+      summary: styleConformanceDrift.reason,
+    },
+    qualityGateStatus: input.finalGate.status,
+    qualityGateReason: input.finalGate.reason,
+    aigc: {
+      status: aigcStatus,
+      score: input.aigcDetection.score,
+      threshold: input.aigcDetection.threshold,
+      highRiskCount,
+      reason: input.aigcDetection.reason,
+    },
+    verificationStatus: String(contract?.verification?.status || contract?.loop?.verificationStatus || ""),
+    verificationSummary: String(contract?.verification?.summary || contract?.loop?.verificationSummary || ""),
+    checkedAt: new Date().toISOString(),
+    evidence,
+    risks,
+  }
+}
+
+const STYLE_CONFORMANCE_STOPWORDS = new Set([
+  "一个", "一种", "这一", "这个", "这些", "那些", "必须", "不得", "不要", "不能", "应该", "保持", "后续", "章节",
+  "正文", "写法", "风格", "合同", "规则", "用户", "确认", "冻结", "全书", "样段", "文本", "进行", "通过",
+  "需要", "避免", "减少", "增加", "呈现", "使用", "推动", "不要写", "不得写",
+])
+
+function roundStyleScore(value: number) {
+  return Math.max(0, Math.min(10, Math.round(value * 10) / 10))
+}
+
+function averageNarrativeSentenceLength(text = "") {
+  const sentences = text
+    .split(/[。！？!?；;\n]+/u)
+    .map((sentence) => sentence.replace(/\s+/gu, "").trim())
+    .filter(Boolean)
+  if (!sentences.length) return 0
+  return Math.round((sentences.reduce((sum, sentence) => sum + sentence.length, 0) / sentences.length) * 10) / 10
+}
+
+function dialogueStats(text = "") {
+  const quoted = text.match(/[「“][^」”]{1,160}[」”]/gu) || []
+  const colonLines = text.match(/^[\p{Script=Han}A-Za-z0-9_·]{1,12}[：:][^\n]{1,120}$/gmu) || []
+  const dialogue = [...quoted, ...colonLines]
+  const chars = dialogue.reduce((sum, line) => sum + line.replace(/[「」“”：:\s]/gu, "").length, 0)
+  const avgLength = dialogue.length ? Math.round((chars / dialogue.length) * 10) / 10 : 0
+  return {
+    count: dialogue.length,
+    chars,
+    avgLength,
+    ratio: text.length ? Math.round((chars / text.length) * 1000) / 1000 : 0,
+  }
+}
+
+function extractStyleEvidenceTokens(text = "", limit = 80) {
+  const normalized = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/gu, " ")
+  const raw = normalized.match(/[\p{Script=Han}A-Za-z0-9]{2,8}/gu) || []
+  const tokens = raw
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+    .filter((token) => !STYLE_CONFORMANCE_STOPWORDS.has(token))
+    .filter((token) => !/^(pending|style|contract|prompt|rule|rules|chapter|voice)$/iu.test(token))
+  return uniqueStrings(tokens).slice(0, limit)
+}
+
+function styleEvidenceWindow(text: string, token: string, limit = 90) {
+  const compactToken = token.trim()
+  if (!compactToken) return ""
+  const index = text.indexOf(compactToken)
+  if (index < 0) return ""
+  const start = Math.max(0, index - 36)
+  const end = Math.min(text.length, index + compactToken.length + 36)
+  return conciseEvidence(text.slice(start, end), limit)
+}
+
+function countLiteralPatternHits(text: string, pattern: string) {
+  const normalized = pattern.trim()
+  if (!normalized || normalized.length < 2) return 0
+  const escaped = escapeRegExpLiteral(normalized)
+  return (text.match(new RegExp(escaped, "gu")) || []).length
+}
+
+function collectForbiddenStyleHits(text: string, patterns: string[] = []) {
+  return uniqueStrings(patterns)
+    .map((pattern) => {
+      const literalCount = countLiteralPatternHits(text, pattern)
+      const tokens = extractStyleEvidenceTokens(pattern, 8)
+      const tokenHits = tokens
+        .map((token) => ({ token, count: countLiteralPatternHits(text, token) }))
+        .filter((hit) => hit.count > 0)
+      const count = literalCount || tokenHits.reduce((sum, hit) => sum + hit.count, 0)
+      const evidence = uniqueStrings([
+        ...(literalCount > 0 ? [styleEvidenceWindow(text, pattern)] : []),
+        ...tokenHits.map((hit) => styleEvidenceWindow(text, hit.token)),
+      ].filter(Boolean)).slice(0, 3)
+      return { pattern, count, evidence }
+    })
+    .filter((hit) => hit.count > 0)
+    .slice(0, 12)
+}
+
+function styleRuleMatchesText(input: {
+  rule: string
+  body: string
+  avgSentenceLength: number
+  dialogue: ReturnType<typeof dialogueStats>
+  actionSignals: number
+  sensorySignals: number
+  objectSignals: number
+  emotionLabelSignals: number
+}) {
+  const rule = input.rule.trim()
+  if (!rule) return false
+  const tokens = extractStyleEvidenceTokens(rule, 12)
+  const tokenMatches = tokens.filter((token) => input.body.includes(token))
+  if (tokenMatches.length >= Math.min(2, Math.max(1, Math.ceil(tokens.length * 0.25)))) return true
+  if (/短句|句子短|短促|冷感|克制|白描/u.test(rule) && input.avgSentenceLength > 0 && input.avgSentenceLength <= 24) return true
+  if (/长短|错落|节奏/u.test(rule) && input.avgSentenceLength >= 10 && input.avgSentenceLength <= 34) return true
+  if (/对白|对话/u.test(rule)) {
+    if (/短|压力|留白|不解释|少解释/u.test(rule)) {
+      return input.dialogue.count > 0 && (input.dialogue.avgLength === 0 || input.dialogue.avgLength <= 34)
+    }
+    return input.dialogue.count > 0
+  }
+  if (/动作|物件|器物|声音|感官|身体|场景|细节|白描/u.test(rule)) {
+    return input.actionSignals + input.sensorySignals + input.objectSignals >= 8
+  }
+  if (/情绪|克制|外化|不解释|少解释/u.test(rule)) {
+    return input.actionSignals >= Math.max(3, input.emotionLabelSignals)
+  }
+  if (/视角|POV|主角|第三人称|第一人称/iu.test(rule)) {
+    return input.body.length >= 120
+  }
+  return false
+}
+
+export function evaluateChapterStyleConformanceDrift(input: {
+  approvedStyleContext: ApprovedWritingStyleContext
+  chapterText: string
+  extractedStyleFingerprint?: string
+}): StyleConformanceDriftReport {
+  const contract = input.approvedStyleContext.contract
+  const style = contract?.styleContract
+  const body = extractNarrativeBody(input.chapterText)
+  const checkedAt = new Date().toISOString()
+  const styleQuality = evaluateNarrativeStyleQuality(body)
+  const bodyChars = body.trim().length
+  if (input.approvedStyleContext.status !== "ready" || !contract?.approvedAt || !style) {
+    return {
+      status: "pending",
+      conformanceScore: 0,
+      driftScore: 10,
+      score: 0,
+      reason: "风格漂移评分待定：缺少已冻结并获批的 style contract，无法计算真实继承基线。",
+      evidence: [],
+      risks: ["缺少可评分的 frozen style contract。"],
+      metrics: {
+        bodyChars,
+        contractRuleCount: 0,
+        matchedRuleCount: 0,
+        approvedSampleOverlap: 0,
+        positiveExampleHitCount: 0,
+        allowedDeviceHitCount: 0,
+        forbiddenHitCount: 0,
+        narrativeStyleStatus: styleQuality.status,
+        averageSentenceLength: averageNarrativeSentenceLength(body),
+        dialogueRatio: dialogueStats(body).ratio,
+      },
+      forbiddenHits: [],
+      matchedContractRules: [],
+      missingContractRules: [],
+      checkedAt,
+    }
+  }
+
+  const avgSentenceLength = averageNarrativeSentenceLength(body)
+  const dialogue = dialogueStats(body)
+  const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|写|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length
+  const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉|光|影/gu) || []).length
+  const objectSignals = (body.match(/账册|账本|密信|官印|印章|钥匙|玉佩|粮袋|银钱|文书|案卷|药包|伤口|马车|城门|坊门|县衙|市集|粮仓|名单|证据|刀|剑|灯|门|桌|碗|纸|窗|袖/gu) || []).length
+  const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然|痛苦|焦虑/gu) || []).length
+  const ruleCandidates = uniqueStrings([
+    style.voice || "",
+    style.sentenceRhythm || "",
+    ...(style.dialogueRules || []),
+    ...(style.descriptionRules || []),
+    ...(style.emotionRules || []),
+    ...(style.pacingRules || []),
+    ...(style.povRules || []),
+    ...(style.openingRules || []),
+    ...(style.endingHookRules || []),
+  ]).filter((rule) => !isPlaceholderProfileText(rule))
+  const matchedContractRules = ruleCandidates.filter((rule) => styleRuleMatchesText({
+    rule,
+    body,
+    avgSentenceLength,
+    dialogue,
+    actionSignals,
+    sensorySignals,
+    objectSignals,
+    emotionLabelSignals,
+  })).slice(0, 16)
+  const missingContractRules = ruleCandidates
+    .filter((rule) => !matchedContractRules.includes(rule))
+    .slice(0, 16)
+  const approvedSampleTokens = extractStyleEvidenceTokens(contract.approvedSample || "", 80)
+  const approvedSampleMatched = approvedSampleTokens.filter((token) => body.includes(token))
+  const approvedSampleOverlap = approvedSampleTokens.length
+    ? Math.round((approvedSampleMatched.length / approvedSampleTokens.length) * 1000) / 1000
+    : 0
+  const positiveExamples = style.positiveExamples || []
+  const positiveExampleHits = positiveExamples.filter((example) =>
+    extractStyleEvidenceTokens(example, 12).some((token) => body.includes(token))
+  )
+  const allowedDevices = style.allowedDevices || []
+  const allowedDeviceHits = allowedDevices.filter((device) =>
+    extractStyleEvidenceTokens(device, 8).some((token) => body.includes(token))
+  )
+  const forbiddenHits = collectForbiddenStyleHits(body, [
+    ...(style.forbiddenPatterns || []),
+    ...(style.negativeExamples || []),
+    ...(contract.antiPatterns || []),
+  ])
+  const forbiddenHitCount = forbiddenHits.reduce((sum, hit) => sum + hit.count, 0)
+  const ruleRatio = ruleCandidates.length ? matchedContractRules.length / ruleCandidates.length : 0
+  const styleQualityPenalty = styleQuality.status === "quarantined" ? 1.6 : 0
+  const forbiddenPenalty = Math.min(4, forbiddenHitCount * 1.15)
+  const sampleScore = approvedSampleTokens.length ? Math.min(1.4, approvedSampleOverlap * 3.2) : 0.4
+  const positiveScore = Math.min(1.2, (positiveExampleHits.length + allowedDeviceHits.length) * 0.35)
+  const signalScore = Math.min(1.2, (actionSignals + sensorySignals + objectSignals) / 26)
+  const ruleScore = ruleCandidates.length ? ruleRatio * 6.2 : 3
+  const conformanceScore = roundStyleScore(ruleScore + sampleScore + positiveScore + signalScore - forbiddenPenalty - styleQualityPenalty)
+  const driftScore = roundStyleScore(10 - conformanceScore)
+  const risks = [
+    ...(missingContractRules.length ? [`合同规则缺少正文证据：${missingContractRules.slice(0, 4).map((rule) => conciseEvidence(rule, 64)).join("；")}`] : []),
+    ...(forbiddenHits.length ? [`命中冻结禁忌模式：${forbiddenHits.slice(0, 4).map((hit) => `${hit.pattern}(${hit.count})`).join("；")}`] : []),
+    ...(styleQuality.status === "quarantined" ? [styleQuality.reason] : []),
+    ...(approvedSampleTokens.length && approvedSampleOverlap < 0.08 ? ["与 approved sample 的可复核风格 token 重叠偏低。"] : []),
+    ...(dialogue.count === 0 && /对白|对话/u.test(ruleCandidates.join("\n")) ? ["合同要求对白质感，但正文未检测到对白。"] : []),
+  ].slice(0, 10)
+  const evidence = uniqueStrings([
+    matchedContractRules.length ? `命中合同规则 ${matchedContractRules.length}/${Math.max(1, ruleCandidates.length)}：${matchedContractRules.slice(0, 4).map((rule) => conciseEvidence(rule, 64)).join("；")}` : "",
+    approvedSampleMatched.length ? `approved sample token 命中：${approvedSampleMatched.slice(0, 8).join("、")}` : "",
+    positiveExampleHits.length ? `正例/允许装置命中 ${positiveExampleHits.length + allowedDeviceHits.length} 项。` : "",
+    `句长均值 ${avgSentenceLength}；对白 ${dialogue.count} 段；动作/感官/物件信号 ${actionSignals}/${sensorySignals}/${objectSignals}。`,
+    input.extractedStyleFingerprint ? `当前章节风格指纹：${conciseEvidence(input.extractedStyleFingerprint, 120)}` : "",
+    styleQuality.status === "eligible" ? styleQuality.reason : "",
+  ].filter(Boolean)).slice(0, 10)
+  const status = conformanceScore >= 7.2 && risks.length === 0
+    ? "conformant"
+    : conformanceScore < 5.8 || forbiddenHitCount >= 2 || styleQuality.status === "quarantined"
+      ? "drifted"
+      : "warning"
+
+  return {
+    status,
+    conformanceScore,
+    driftScore,
+    score: conformanceScore,
+    reason: status === "conformant"
+      ? `风格继承评分通过：conformance=${conformanceScore}/10，drift=${driftScore}/10，正文证据覆盖冻结合同且未命中禁忌。`
+      : status === "warning"
+        ? `风格继承评分预警：conformance=${conformanceScore}/10，drift=${driftScore}/10，存在可修复的继承证据缺口。`
+        : `风格漂移评分阻塞：conformance=${conformanceScore}/10，drift=${driftScore}/10，正文证据显示偏离冻结合同。`,
+    evidence,
+    risks,
+    metrics: {
+      bodyChars,
+      contractRuleCount: ruleCandidates.length,
+      matchedRuleCount: matchedContractRules.length,
+      approvedSampleOverlap,
+      positiveExampleHitCount: positiveExampleHits.length,
+      allowedDeviceHitCount: allowedDeviceHits.length,
+      forbiddenHitCount,
+      narrativeStyleStatus: styleQuality.status,
+      averageSentenceLength: avgSentenceLength,
+      dialogueRatio: dialogue.ratio,
+    },
+    forbiddenHits,
+    matchedContractRules,
+    missingContractRules,
+    checkedAt,
+  }
+}
+
+function formatStyleConformanceDriftReport(report: StyleConformanceDriftReport) {
+  return [
+    "## Style Conformance Drift",
+    `- Status: ${report.status}`,
+    `- Conformance score: ${report.conformanceScore}/10`,
+    `- Drift score: ${report.driftScore}/10`,
+    `- Reason: ${report.reason}`,
+    `- Contract rule evidence: ${report.metrics.matchedRuleCount}/${report.metrics.contractRuleCount}`,
+    `- Approved sample overlap: ${report.metrics.approvedSampleOverlap}`,
+    `- Forbidden hits: ${report.metrics.forbiddenHitCount}`,
+    report.evidence.length ? "### Evidence" : "",
+    ...report.evidence.map((item) => `- ${item}`),
+    report.risks.length ? "### Risks" : "",
+    ...report.risks.map((item) => `- ${item}`),
+  ].filter(Boolean).join("\n")
+}
+
 function compactList(values: string[] = [], limit = 3) {
   return values
     .map((value) => value.trim())
     .filter(Boolean)
     .slice(0, limit)
     .join("; ") || "pending"
+}
+
+function clipPromptSection(value = "", maxLength = 800) {
+  const normalized = value.trim()
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+  return `${normalized.slice(0, maxLength).trimEnd()}\n...[prompt section clipped; full text saved in chapter context package]`
+}
+
+function summarizePromptSection(value = "", maxLength = 700) {
+  const normalized = value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+  return clipPromptSection(normalized, maxLength)
 }
 
 function escapeRegExpLiteral(value: string) {
@@ -267,6 +997,59 @@ function formatCharacterDossiersMarkdown(dossiers: CharacterDossier[]) {
     "This file is generated from the structured production character dossier state.",
     "",
     summarizeCharacterDossiers(dossiers, 12) || "- no structured dossiers available",
+  ].join("\n")
+}
+
+function createCharacterRelationshipGraph(dossiers: CharacterDossier[], updatedAt = new Date().toISOString()) {
+  const nodes = dossiers.map((dossier) => ({
+    id: dossier.id,
+    name: dossier.canonicalName,
+    role: dossier.role,
+    aliases: dossier.aliases || [],
+    relationshipState: dossier.relationshipState,
+    currentChapterDelta: dossier.currentChapterDelta,
+    updatedAt: dossier.updatedAt || updatedAt,
+  }))
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const edges = dossiers.flatMap((dossier) => (dossier.relationshipEdges || []).map((edge) => ({
+    sourceId: dossier.id,
+    sourceName: dossier.canonicalName,
+    targetId: edge.targetId,
+    targetName: nodes.find((node) => node.id === edge.targetId)?.name || edge.targetId,
+    label: edge.label,
+    pressure: edge.pressure,
+    status: nodeIds.has(edge.targetId) ? "linked" : "unresolved",
+    updatedAt: dossier.updatedAt || updatedAt,
+  })))
+  return {
+    version: 1,
+    updatedAt,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    nodes,
+    edges,
+  }
+}
+
+function formatCharacterRelationshipGraphMarkdown(graph: ReturnType<typeof createCharacterRelationshipGraph>) {
+  return [
+    "# Character Relationship Graph",
+    "",
+    `Updated at: ${graph.updatedAt}`,
+    "",
+    "## Nodes",
+    ...(graph.nodes.length
+      ? graph.nodes.slice(0, 24).map((node) =>
+        `- ${node.id} (${node.role}) ${node.name}: ${node.relationshipState || "relationship pending"}`
+      )
+      : ["- no character nodes available"]),
+    "",
+    "## Edges",
+    ...(graph.edges.length
+      ? graph.edges.slice(0, 48).map((edge) =>
+        `- ${edge.sourceId} -> ${edge.targetId}: ${edge.label}; pressure: ${edge.pressure}; status: ${edge.status}`
+      )
+      : ["- no relationship edges available"]),
   ].join("\n")
 }
 
@@ -907,7 +1690,8 @@ function enforceFinalDraftQualityGate(
     }
   }
   const styleQuality = evaluateNarrativeStyleQuality(finalDraft)
-  if (styleQuality.status === "quarantined") {
+  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality)
+  if (styleQuality.status === "quarantined" && !softStyleIssue) {
     return {
       ...gate,
       passed: false,
@@ -957,7 +1741,7 @@ function enforceFinalDraftQualityGate(
   return {
     ...gate,
     reason: gate.passed || gate.status === "passed"
-      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
+      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${softStyleIssue ? "该风格问题已作为后续润色建议记录，不阻断章节推进。" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
       : gate.reason,
     wordCount: finalWordCount,
     targetWords,
@@ -980,7 +1764,7 @@ export function inferGenreProfile(state: AutonomousNovelState) {
   ].join("\n")
   const text = `${state.project.title}\n${state.project.idea}`.toLowerCase()
   const profileText = `${selectedProfileText}\n${text}`.toLowerCase()
-  
+
   const preset = findGenrePreset(profileText)
 
   const withProfile = (profile: {
@@ -1109,6 +1893,440 @@ async function updateStyleFingerprintFromFirstChapter(input: {
     ].join("\n")
   await fs.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}\n`)
   return extracted
+}
+
+function compactStyleList(values: string[] | undefined, limit = 4) {
+  return (values || [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+}
+
+function compactStyleValue(value: string | undefined, maxLength = 160) {
+  return value?.trim().replace(/\s+/gu, " ").slice(0, maxLength) || ""
+}
+
+export function buildChapterInheritanceAdapterPayload(contract: StyleEvolutionContract | null | undefined): ChapterInheritanceAdapterPayload | null {
+  if (!contract?.approvedAt || !contract.styleContract) {
+    return null
+  }
+  const style = contract.styleContract
+  const inheritedArtifacts = (contract.inheritance?.inheritedArtifacts?.length
+    ? contract.inheritance.inheritedArtifacts
+    : ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"])
+  const inheritedRules = (contract.inheritance?.inheritedRules?.length
+    ? contract.inheritance.inheritedRules
+    : [
+        "后续每章必须继承用户冻结后的 base writing prompt。",
+        "后续每章必须继承 style contract 中的 voice、节奏、对白与禁忌约束。",
+      ])
+  const styleContractFields = [
+    style.voice ? "voice" : "",
+    style.sentenceRhythm ? "sentenceRhythm" : "",
+    compactStyleList(style.dialogueRules, 1).length ? "dialogueRules" : "",
+    compactStyleList(style.descriptionRules, 1).length ? "descriptionRules" : "",
+    compactStyleList(style.emotionRules, 1).length ? "emotionRules" : "",
+    compactStyleList(style.pacingRules, 1).length ? "pacingRules" : "",
+    compactStyleList(style.povRules, 1).length ? "povRules" : "",
+    compactStyleList(style.openingRules, 1).length ? "openingRules" : "",
+    compactStyleList(style.endingHookRules, 1).length ? "endingHookRules" : "",
+    Array.isArray(style.allowedDevices) ? "allowedDevices" : "",
+    compactStyleList(style.forbiddenPatterns, 1).length ? "forbiddenPatterns" : "",
+    compactStyleList(style.positiveExamples, 1).length ? "positiveExamples" : "",
+    Array.isArray(style.negativeExamples) ? "negativeExamples" : "",
+  ].filter(Boolean)
+  const contractVersion = Number(contract.loop?.approvalVersion || contract.approval?.approvedVersion || 0)
+  const freezerVerdict = contract.freezer?.verdict || "missing"
+  const verificationStatus = String(contract.verification?.status || contract.loop?.verificationStatus || "")
+  const loopProtocol = contract.loopProtocol
+  const requiredLoopStages = Array.isArray(loopProtocol?.requiredStages) ? loopProtocol.requiredStages : []
+  const completedLoopStages = Array.isArray(loopProtocol?.completedStages) ? loopProtocol.completedStages : []
+  const blockedLoopStages = Array.isArray(loopProtocol?.blockedStages) ? loopProtocol.blockedStages : []
+  const loopProtocolReady = loopProtocol?.status === "approved"
+    && requiredLoopStages.length > 0
+    && requiredLoopStages.every((stage) => completedLoopStages.includes(stage))
+  const adapterReady = freezerVerdict === "ready"
+    && verificationStatus === "passed"
+    && loopProtocolReady
+    && contract.inheritance?.status === "enforced"
+    && inheritedArtifacts.length > 0
+    && inheritedRules.length > 0
+  return {
+    name: "Chapter Inheritance Adapter",
+    status: adapterReady ? "ready" : "blocked",
+    contractVersion,
+    approvedAt: String(contract.approvedAt || contract.approval?.approvedAt || ""),
+    freezerVerdict,
+    freezerSummary: String(contract.freezer?.summary || ""),
+    verificationStatus,
+    verificationSummary: String(contract.verification?.summary || contract.loop?.verificationSummary || ""),
+    inheritedArtifacts,
+    inheritedRules,
+    styleContractFields,
+    loopProtocolStatus: loopProtocol?.status || "missing",
+    loopProtocolStages: {
+      required: requiredLoopStages,
+      completed: completedLoopStages,
+      blocked: blockedLoopStages,
+    },
+    loopProtocolEvidence: (loopProtocol?.evidence || [])
+      .filter((item) => item.status === "passed")
+      .map((item) => `${item.label}: ${item.summary}`)
+      .slice(0, 9),
+    promptSections: [
+      "User Approved Writing Style Contract",
+      "Style Rulebook",
+      "Style References",
+      "Style Anti-Patterns",
+    ],
+    requiredChapterEvidence: [
+      "quality gate passed",
+      "AIGC detection passed",
+      "style conformance drift conformant",
+      "styleInheritanceVerification ready",
+    ],
+    approvedSampleExcerpt: compactStyleValue(contract.approvedSample, 240),
+  }
+}
+
+function formatStyleRulebook(contract: StyleEvolutionContract | null | undefined): string {
+  const style = contract?.styleContract
+  if (!contract?.approvedAt || !style) {
+    return ""
+  }
+  const dialogueRules = style.dialogueRules || []
+  const descriptionRules = style.descriptionRules || []
+  const emotionRules = style.emotionRules || []
+  const pacingRules = style.pacingRules || []
+  const povRules = style.povRules || []
+  const openingRules = style.openingRules || []
+  const endingHookRules = style.endingHookRules || []
+  return [
+    "# Style Rulebook",
+    "",
+    "This asset is frozen from the approved Style Evolution contract and must be inherited by every chapter draft, review, and polish pass.",
+    "",
+    `Approved at: ${contract.approvedAt}`,
+    contract.approval?.approvedVersion ? `Approved version: v${contract.approval.approvedVersion}` : "",
+    contract.approval?.freezeSummary ? `Freeze summary: ${contract.approval.freezeSummary}` : "",
+    "",
+    "## Voice",
+    style.voice || "- pending",
+    "",
+    "## Sentence Rhythm",
+    style.sentenceRhythm || "- pending",
+    "",
+    "## Dialogue Rules",
+    ...(dialogueRules.length ? dialogueRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Description Rules",
+    ...(descriptionRules.length ? descriptionRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Emotion Rules",
+    ...(emotionRules.length ? emotionRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Pacing Rules",
+    ...(pacingRules.length ? pacingRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## POV Rules",
+    ...(povRules.length ? povRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Opening Rules",
+    ...(openingRules.length ? openingRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Ending Hook Rules",
+    ...(endingHookRules.length ? endingHookRules.map((rule) => `- ${rule}`) : ["- pending"]),
+    "",
+    "## Retry Policy",
+    `- Approval threshold: ${Number(contract.retryPolicy?.approvalScoreThreshold || 8.6).toFixed(1)}`,
+    `- Approval min rounds: ${Math.max(1, Number(contract.retryPolicy?.approvalMinRounds || 2))}`,
+    `- Stability min rounds: ${Math.max(1, Number(contract.retryPolicy?.stabilityMinRounds || 2))}`,
+    `- Max forbidden hits: ${Math.max(0, Number(contract.retryPolicy?.maxForbiddenHitCount || 1))}`,
+  ].filter(Boolean).join("\n")
+}
+
+function formatStyleReferences(contract: StyleEvolutionContract | null | undefined): string {
+  const style = contract?.styleContract
+  if (!contract?.approvedAt || !style) {
+    return ""
+  }
+  const positiveExamples = style.positiveExamples || []
+  const allowedDevices = style.allowedDevices || []
+  return [
+    "# Style References",
+    "",
+    "These are the positive references frozen from the approved style loop. They are not to be copied mechanically, but they define the acceptable writing band for the whole book.",
+    "",
+    "## Positive Examples",
+    ...(positiveExamples.length ? positiveExamples.map((example) => `- ${example}`) : ["- pending"]),
+    "",
+    "## Allowed Devices",
+    ...(allowedDevices.length ? allowedDevices.map((item) => `- ${item}`) : ["- pending"]),
+    "",
+    "## Approved Sample Excerpt",
+    contract.approvedSample?.trim() || "- pending",
+  ].join("\n")
+}
+
+function formatStyleAntiPatterns(contract: StyleEvolutionContract | null | undefined): string {
+  const style = contract?.styleContract
+  if (!contract?.approvedAt || !style) {
+    return ""
+  }
+  const forbiddenPatterns = [...new Set([...(style.forbiddenPatterns || []), ...(contract.antiPatterns || [])])]
+  const negativeExamples = style.negativeExamples || []
+  const inheritedRules = contract.inheritance?.inheritedRules || []
+  return [
+    "# Style Anti-Patterns",
+    "",
+    "These patterns are frozen as disallowed or high-risk writing moves for subsequent chapter production.",
+    "",
+    "## Forbidden Patterns",
+    ...(forbiddenPatterns.length ? forbiddenPatterns.map((item) => `- ${item}`) : ["- pending"]),
+    "",
+    "## Negative Examples",
+    ...(negativeExamples.length ? negativeExamples.map((item) => `- ${item}`) : ["- pending"]),
+    "",
+    "## Inheritance Rules",
+    ...(inheritedRules.length ? inheritedRules.map((rule) => `- ${rule}`) : ["- pending"]),
+  ].join("\n")
+}
+
+export function formatApprovedWritingStylePrompt(contract: StyleEvolutionContract | null | undefined): string {
+  const approvedAt = contract?.approvedAt
+  const approvedSample = contract?.approvedSample?.trim()
+  const style = contract?.styleContract
+  if (!approvedAt || !approvedSample || !style) {
+    return ""
+  }
+  const acceptedAsBookStyle = contract.approval?.acceptedAsBookStyle !== false
+  const inheritedArtifacts = (contract.inheritance?.inheritedArtifacts?.length
+    ? contract.inheritance.inheritedArtifacts
+    : ["base writing prompt", "style contract", "forbidden patterns", "positive examples", "retry policy"])
+  const inheritedRules = (contract.inheritance?.inheritedRules?.length
+    ? contract.inheritance.inheritedRules
+    : [
+        "后续每章必须继承用户冻结后的 base writing prompt。",
+        "后续每章必须继承 style contract 中的 voice、节奏、对白与禁忌约束。",
+      ])
+  const verification = contract.verification
+  const chapterInheritanceAdapter = buildChapterInheritanceAdapterPayload(contract)
+  const lines = [
+    "## User Approved Writing Style Contract",
+    "这是用户确认后冻结的全书基础写法，优先级高于通用写作指南。正文、质检、润色都必须执行。",
+    `- Approved at: ${approvedAt}`,
+    contract.approval?.approvedVersion ? `- Approved version: v${contract.approval.approvedVersion}` : "",
+    contract.loop?.stableVersion ? `- Stable version before freeze: v${contract.loop.stableVersion}` : "",
+    contract.loop?.stableRounds ? `- Stable rounds before freeze: ${contract.loop.stableRounds}` : "",
+    contract.approval?.freezeSummary ? `- Freeze summary: ${contract.approval.freezeSummary}` : "",
+    acceptedAsBookStyle ? "- Acceptance scope: this approval applies to the whole book, not a single sample." : "",
+    contract.runtime?.engine ? `- Style engine: ${contract.runtime.engine}` : "",
+    contract.runtime?.runtime ? `- Loop runtime: ${contract.runtime.runtime}` : "",
+    contract.runtime?.gate ? `- Freeze gate: ${contract.runtime.gate}` : "",
+	    contract.runtime?.verificationGate ? `- Verification gate: ${contract.runtime.verificationGate}` : "",
+	    contract.freezer?.verdict ? `- Freezer verdict: ${contract.freezer.verdict}` : "",
+	    contract.freezer?.summary ? `- Freezer summary: ${contract.freezer.summary}` : "",
+	    ...(contract.loop?.stabilityReasons || []).map((reason) => `- Stability reason: ${reason}`),
+    verification?.summary ? `- Verification summary: ${verification.summary}` : "",
+    verification?.status ? `- Verification status: ${verification.status}` : "",
+    ...(verification?.reasons || []).map((reason) => `- Verification reason: ${reason}`),
+    typeof verification?.score === "number" ? `- AIGC verification score: ${verification.score.toFixed(3)}` : "",
+    typeof verification?.threshold === "number" ? `- AIGC verification threshold: ${verification.threshold.toFixed(3)}` : "",
+    verification?.highRiskCount ? `- High risk segments before freeze: ${verification.highRiskCount}` : "",
+    verification?.forbiddenHitCount ? `- Forbidden hits before freeze: ${verification.forbiddenHitCount}` : "",
+    style.voice ? `- Voice: ${style.voice}` : "",
+    style.sentenceRhythm ? `- Sentence rhythm: ${style.sentenceRhythm}` : "",
+    ...compactStyleList(style.dialogueRules).map((rule) => `- Dialogue rule: ${rule}`),
+    ...compactStyleList(style.descriptionRules).map((rule) => `- Description rule: ${rule}`),
+    ...compactStyleList(style.emotionRules).map((rule) => `- Emotion rule: ${rule}`),
+    ...compactStyleList(style.pacingRules).map((rule) => `- Pacing rule: ${rule}`),
+    ...compactStyleList(style.povRules, 3).map((rule) => `- POV rule: ${rule}`),
+    ...compactStyleList(style.openingRules, 3).map((rule) => `- Opening rule: ${rule}`),
+    ...compactStyleList(style.endingHookRules, 3).map((rule) => `- Ending hook rule: ${rule}`),
+    compactStyleList(style.allowedDevices, 8).length
+      ? `- Allowed devices: ${compactStyleList(style.allowedDevices, 8).join("、")}`
+      : "",
+    compactStyleList([...(style.forbiddenPatterns || []), ...(contract.antiPatterns || [])], 10).length
+      ? `- Forbidden patterns: ${compactStyleList([...(style.forbiddenPatterns || []), ...(contract.antiPatterns || [])], 10).join("；")}`
+      : "",
+    compactStyleList(style.positiveExamples, 2).length
+      ? `- Positive examples: ${compactStyleList(style.positiveExamples, 2).join(" / ")}`
+      : "",
+    compactStyleList(style.negativeExamples, 2).length
+      ? `- Negative examples to avoid: ${compactStyleList(style.negativeExamples, 2).join(" / ")}`
+      : "",
+    contract.frozenBasePrompt?.trim()
+      ? `- Frozen base prompt: ${contract.frozenBasePrompt.trim().replace(/\s+/gu, " ").slice(0, 480)}`
+      : "",
+    contract.retryPolicy?.approvalScoreThreshold
+      ? `- Retry policy: approval threshold ${Number(contract.retryPolicy.approvalScoreThreshold).toFixed(1)} / min rounds ${Math.max(1, Number(contract.retryPolicy.approvalMinRounds || 2))} / max forbidden hits ${Math.max(0, Number(contract.retryPolicy.maxForbiddenHitCount || 1))}`
+      : "",
+	    ...inheritedArtifacts.map((artifact) => `- Inherited artifact: ${artifact}`),
+	    ...inheritedRules.map((rule) => `- Inheritance rule: ${rule}`),
+	    chapterInheritanceAdapter?.status
+	      ? `- Chapter Inheritance Adapter: ${chapterInheritanceAdapter.status}`
+	      : "",
+	    chapterInheritanceAdapter?.loopProtocolStatus
+	      ? `- Loop protocol status: ${chapterInheritanceAdapter.loopProtocolStatus}`
+	      : "",
+	    chapterInheritanceAdapter?.loopProtocolStages?.completed?.length
+	      ? `- Loop protocol completed stages: ${chapterInheritanceAdapter.loopProtocolStages.completed.join(", ")}`
+	      : "",
+	    ...(chapterInheritanceAdapter?.loopProtocolEvidence || []).slice(0, 4).map((item) => `- Loop protocol evidence: ${item}`),
+	    `- Approved sample excerpt: ${approvedSample.replace(/\s+/gu, " ").slice(0, 360)}`,
+	  ].filter(Boolean)
+  return lines.join("\n")
+}
+
+export async function loadApprovedWritingStyleContext(projectRoot: string): Promise<ApprovedWritingStyleContext> {
+  try {
+    const snapshot = await loadStyleEvolution(projectRoot)
+	    const prompt = formatApprovedWritingStylePrompt(snapshot.contract)
+	    const gate = evaluateStyleEvolutionGate(snapshot.contract)
+	    const rulebook = formatStyleRulebook(snapshot.contract)
+	    const references = formatStyleReferences(snapshot.contract)
+	    const antiPatterns = formatStyleAntiPatterns(snapshot.contract)
+	    const chapterInheritanceAdapter = buildChapterInheritanceAdapterPayload(snapshot.contract)
+	    return prompt && gate.canProceed
+	      ? { status: "ready", prompt, contract: snapshot.contract, rulebook, references, antiPatterns, chapterInheritanceAdapter: chapterInheritanceAdapter || undefined }
+	      : { status: "missing", prompt: "" }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "missing", prompt: "" }
+    }
+    throw error
+  }
+}
+
+function summarizeApprovedStyleCarryover(approvedStyleContext: ApprovedWritingStyleContext) {
+  if (approvedStyleContext.status !== "ready") {
+    return ""
+  }
+  const contract = approvedStyleContext.contract
+  const style = contract?.styleContract
+  if (!contract?.approvedAt || !style) {
+    return summarizePromptSection(approvedStyleContext.prompt, 900)
+  }
+	  const forbiddenPatterns = compactStyleList(uniqueStrings([...(style.forbiddenPatterns || []), ...(contract.antiPatterns || [])]), 4)
+	  const positiveExamples = compactStyleList(style.positiveExamples, 1)
+	  const negativeExamples = compactStyleList(style.negativeExamples, 1)
+	  const dialogueRules = compactStyleList(style.dialogueRules, 1)
+	  const descriptionRules = compactStyleList(style.descriptionRules, 1)
+	  const emotionRules = compactStyleList(style.emotionRules, 1)
+	  const pacingRules = compactStyleList(style.pacingRules, 1)
+	  const povRules = compactStyleList(style.povRules, 1)
+	  const openingRules = compactStyleList(style.openingRules, 1)
+	  const endingHookRules = compactStyleList(style.endingHookRules, 1)
+	  const allowedDevices = compactStyleList(style.allowedDevices, 3)
+	  const inheritedRules = compactStyleList(contract.inheritance?.inheritedRules, 1)
+	  const adapter = approvedStyleContext.chapterInheritanceAdapter || buildChapterInheritanceAdapterPayload(contract)
+	  const lines = [
+	    "## User Approved Writing Style Contract",
+	    "冻结全书基础写法；后续章节必须继承，不得重置成通用模板腔。",
+	    `- Approved at: ${contract.approvedAt}`,
+	    adapter?.contractVersion ? `- Adapter contract version: v${adapter.contractVersion}` : "",
+	    adapter?.loopProtocolStatus
+	      ? `- Loop protocol: ${adapter.loopProtocolStatus} (${adapter.loopProtocolStages?.completed?.length || 0}/${adapter.loopProtocolStages?.required?.length || 0} stages)`
+	      : "",
+	    adapter?.freezerVerdict ? `- Freezer verdict: ${adapter.freezerVerdict}` : "",
+	    contract.runtime?.verificationGate ? `- Verification gate: ${contract.runtime.verificationGate}` : "",
+	    contract.verification?.status ? `- Verification status: ${contract.verification.status}` : "",
+	    compactStyleValue(style.voice, 140) ? `- Voice: ${compactStyleValue(style.voice, 140)}` : "",
+	    compactStyleValue(style.sentenceRhythm, 100) ? `- Sentence rhythm: ${compactStyleValue(style.sentenceRhythm, 100)}` : "",
+	    ...dialogueRules.map((rule) => `- Dialogue rule: ${rule}`),
+	    ...descriptionRules.map((rule) => `- Description rule: ${rule}`),
+	    ...emotionRules.map((rule) => `- Emotion rule: ${rule}`),
+	    ...pacingRules.map((rule) => `- Pacing rule: ${rule}`),
+	    ...povRules.map((rule) => `- POV rule: ${rule}`),
+	    ...openingRules.map((rule) => `- Opening rule: ${rule}`),
+	    ...endingHookRules.map((rule) => `- Ending hook rule: ${rule}`),
+	    allowedDevices.length ? `- Allowed devices: ${allowedDevices.join("、")}` : "",
+	    forbiddenPatterns.length ? `- Forbidden patterns: ${forbiddenPatterns.join("；")}` : "",
+	    positiveExamples.length ? `- Positive example: ${positiveExamples[0]}` : "",
+	    negativeExamples.length ? `- Negative example to avoid: ${negativeExamples[0]}` : "",
+	    compactStyleValue(contract.frozenBasePrompt, 160) ? `- Frozen base prompt focus: ${compactStyleValue(contract.frozenBasePrompt, 160)}` : "",
+	    ...inheritedRules.map((rule) => `- Inheritance rule: ${rule}`),
+	    compactStyleValue(contract.approvedSample, 180) ? `- Approved sample excerpt: ${compactStyleValue(contract.approvedSample, 180)}` : "",
+	  ].filter(Boolean)
+	  return summarizePromptSection(lines.join("\n"), 980)
+	}
+
+async function persistApprovedWritingStyleAssets(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  approvedStyleContext: ApprovedWritingStyleContext,
+  options: ProductionPipelineOptions = {},
+) {
+  if (approvedStyleContext.status !== "ready") {
+    return
+  }
+  await fs.mkdir(paths.styleDir, { recursive: true })
+  const writes: Array<[string, string, string]> = [
+    [paths.styleRulebookPath, approvedStyleContext.rulebook || "", "style_rulebook"],
+    [paths.styleReferencesPath, approvedStyleContext.references || "", "style_references"],
+    [paths.styleAntiPatternsPath, approvedStyleContext.antiPatterns || "", "style_anti_patterns"],
+  ]
+  for (const [filePath, content, kind] of writes) {
+    if (!content.trim()) continue
+    await fs.writeFile(filePath, `${content.trimEnd()}\n`)
+    await recordPipelineArtifact(projectRoot, filePath, "style", options, {
+      kind,
+      source: "approved_style_contract",
+    })
+  }
+}
+
+async function enforceApprovedWritingStyleGate(
+  options: ProductionPipelineOptions,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  approvedStyleContext: ApprovedWritingStyleContext,
+) {
+  if (approvedStyleContext.status === "ready") {
+    return
+  }
+  const message = "本书写法尚未获得用户确认，正文生产已阻塞。请先在 Style Evolution Engine 中生成样段，并通过 Style Contract Freeze Gate 确认一个版本。"
+  await emitWritingProgress(options, {
+    step: "production_readiness_blocked",
+    role: "Showrunner",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: "blocked",
+    message,
+    preview: "Blocked gate: style_approval",
+  })
+  throw new ProductionReadinessBlockedError(message)
+}
+
+function normalizeTailParagraph(paragraph: string) {
+  return paragraph
+    .replace(/\s+/gu, "")
+    .replace(/[，。、“”‘’：；！？,.!?:"'()\[\]【】《》]/gu, "")
+    .slice(0, 160)
+}
+
+export function compactPreviousSegmentTail(text: string, maxChars = 800): string {
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+  const selected: string[] = []
+  const seen = new Set<string>()
+
+  for (let index = paragraphs.length - 1; index >= 0; index -= 1) {
+    const paragraph = paragraphs[index]
+    const fingerprint = normalizeTailParagraph(paragraph)
+    if (!fingerprint || seen.has(fingerprint)) {
+      continue
+    }
+    seen.add(fingerprint)
+    selected.unshift(paragraph)
+    if (selected.join("\n\n").length >= maxChars) {
+      break
+    }
+  }
+
+  const compacted = selected.join("\n\n")
+  return compacted.length > maxChars ? compacted.slice(-maxChars).trim() : compacted
 }
 
 function sceneTypeForChapter(state: AutonomousNovelState, chapterNumber: number) {
@@ -1349,6 +2567,7 @@ function createVocabularyUsagePrompt(input: {
       "",
       "- 词汇索引暂未命中；优先使用具体动作、物件、感官和人物关系推动场景。",
       "- 成语只能在总结、对比、强调处点到为止，每章不超过 3-5 个。",
+      "- 成语关联性检查：每个成语前后必须有场景铺垫、人物判断或因果变化支撑。",
     ].join("\n")
   }
   const base = entries.slice(0, 10)
@@ -1362,6 +2581,7 @@ function createVocabularyUsagePrompt(input: {
     "- 不要孤零零地使用，不要堆砌叠加，不要强行植入。",
     "- 词汇金字塔：基础词汇约 50%，进阶词汇约 30%，高级词汇约 15%，稀有/成语约 5%。",
     "- 每段最多 1 个成语，每章通常不超过 3-5 个；更重要的是动作、感官和因果句。",
+    "- 成语关联性检查：每个成语前后必须有场景铺垫、人物判断或因果变化支撑。",
     "",
     "### 关键词来源",
     keywords.length ? `- ${keywords.slice(0, 12).join("、")}` : "- 暂无明确关键词，按场景类型推荐。",
@@ -1630,11 +2850,54 @@ function extractContinuityAnchors(input: {
 }
 
 export function evaluateNarrativeStyleQuality(text = "") {
-  return {
-    status: "eligible" as "eligible" | "quarantined",
-    reason: "风格硬门槛通过：未发现高频短词/单字碎片化重复。",
-    fragments: [] as string[],
+  const body = text
+    .replace(/```[\s\S]*?```/g, "")
+    .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0] || ""
+
+  const paragraphs = body.split(/\n+/u).map(p => p.trim()).filter(Boolean)
+  const ultraShortParagraphs = paragraphs.filter(p => p.length > 0 && p.length <= 6)
+
+  const fragments: string[] = []
+
+  if (paragraphs.length >= 10 && ultraShortParagraphs.length / paragraphs.length > 0.15) {
+    fragments.push(`超短段落（段落字数≤6）数量达 ${ultraShortParagraphs.length} 处，段落碎片化堆叠严重（占比达 ${Math.round(ultraShortParagraphs.length / paragraphs.length * 100)}%）。`)
   }
+
+  const bodyNoPunc = body.replace(/[\s\p{Punctuation}\p{Script=Common}]/gu, "")
+  const matchFrequencies = {
+    "一僵": (bodyNoPunc.match(/一僵/g) || []).length,
+    "一滞": (bodyNoPunc.match(/一滞/g) || []).length,
+    "一缩": (bodyNoPunc.match(/一缩/g) || []).length,
+    "一震": (bodyNoPunc.match(/一震/g) || []).length,
+    "身体僵": (bodyNoPunc.match(/身体.{0,2}僵/g) || []).length,
+    "瞳孔缩": (bodyNoPunc.match(/瞳孔.{0,2}缩/g) || []).length,
+  }
+
+  const highFreqs = Object.entries(matchFrequencies)
+    .filter(([_, count]) => count >= 3)
+    .map(([word, count]) => `「${word}」重复达 ${count} 次`)
+
+  if (highFreqs.length > 0) {
+    fragments.push(`套路性身体或感知描写高频重复：${highFreqs.join("；")}。`)
+  }
+
+  const isQuarantined = fragments.length > 0
+
+  return {
+    status: isQuarantined ? ("quarantined" as const) : ("eligible" as const),
+    reason: isQuarantined
+      ? `风格门禁拦截：${fragments.join(" ")} 请精简碎片化氛围词与高频肌肉/感知套路。`
+      : "风格硬门槛通过：未发现高频短词/单字碎片化重复或高频套路描写。",
+    fragments,
+  }
+}
+
+function isSoftNarrativeStyleIssue(styleQuality: ReturnType<typeof evaluateNarrativeStyleQuality>) {
+  return styleQuality.status === "quarantined"
+    && styleQuality.fragments.length > 0
+    && styleQuality.fragments.every((fragment) =>
+      /超短段落|段落碎片|套路性身体|感知描写|高频重复/u.test(fragment)
+    )
 }
 
 export function evaluateWritingResourceUsage(
@@ -1846,9 +3109,10 @@ export function createNaturalnessReport(input: {
   const dialogueCount = (body.match(/[「“][^」”]{2,120}[」”]/gu) || []).length
   const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length
   const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length
-  const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心深处|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length
+  const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心开阔|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length
   const analyticSignals = (body.match(/第一|第二|首先|其次|最后|原因是|从.*角度|可以看出|体现了|说明了|证明了/gu) || []).length
   const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然/gu) || []).length
+  const fatigueWordSignals = (body.match(/突然|忽然|猛然|竟然|居然|渐渐|逐渐|然而|与此同时|似乎|也许|大概|仿佛/gu) || []).length
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract)
   const styleQuality = evaluateNarrativeStyleQuality(input.afterDraft)
   const plotContinuity = evaluatePlotContinuityBridge(input.afterDraft, input.task, input.continuityContract)
@@ -1877,16 +3141,19 @@ export function createNaturalnessReport(input: {
       : []),
     ...(dialogueCount === 0 && wordTotal > 900 ? ["长章节缺少对白，角色声音不够自然。"] : []),
     ...(actionSignals + sensorySignals < Math.max(6, Math.floor(wordTotal / 350)) ? ["动作/感官信号不足，文本可能偏摘要。"] : []),
+    ...(fatigueWordSignals >= 5 ? [`AI 写作疲劳词（突然/然而/与此同时/仿佛等）高频堆积达 ${fatigueWordSignals} 次`] : []),
   ]
   const changedBlocks = input.beforeDraft === input.afterDraft
     ? 0
     : Math.abs(input.afterDraft.split(/\n{2,}/u).length - input.beforeDraft.split(/\n{2,}/u).length)
       + (input.afterDraft.length === input.beforeDraft.length ? 1 : Math.max(1, Math.round(Math.abs(input.afterDraft.length - input.beforeDraft.length) / 500)))
-  const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3)))
+  const score = Math.max(0, Math.min(10, 10 - riskFlags.length * 2 - Math.max(0, aiSummarySignals - 1) - Math.max(0, analyticSignals - 3) - Math.max(0, Math.floor(fatigueWordSignals / 2))))
   const status = semanticPreservation.status === "drifted"
     ? "blocked"
-    : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞|角色差异化不足|同质化/u.test(flag))
+    : riskFlags.some((flag) => /硬门槛失败|连续性|角色档案硬门槛|阻塞/u.test(flag))
     ? "blocked"
+    : riskFlags.length > 0
+      ? "needs_revision"
     : score >= 7
       ? "passed"
       : "needs_revision"
@@ -2198,6 +3465,639 @@ function formatForeshadowingPayoffSchedule(state: AutonomousNovelState, limit = 
   })
 }
 
+function formatVolumeStrategy(state: AutonomousNovelState) {
+  const volumeSize = Math.max(6, Math.ceil(state.plan.totalChapters / 3))
+  const volumes = Array.from({ length: Math.ceil(state.plan.totalChapters / volumeSize) }, (_, index) => {
+    const start = index * volumeSize + 1
+    const end = Math.min(state.plan.totalChapters, start + volumeSize - 1)
+    const firstTask = state.plan.chapterTasks[start - 1]
+    const lastTask = state.plan.chapterTasks[end - 1]
+    const firstPlan = firstTask ? getTaskCausalPlan(state, firstTask) : null
+    const lastPlan = lastTask ? getTaskCausalPlan(state, lastTask) : null
+    return [
+      `### 第 ${index + 1} 卷：第 ${start}-${end} 章`,
+      `- 卷目标：从「${firstPlan?.previousInput || state.project.idea}」推进到「${lastPlan?.nextHandoff || state.project.idea}」。`,
+      `- 读者兑现：每卷必须完成一次局部答案，同时把更大问题推向下一卷。`,
+      `- 角色压力：本卷至少让主角付出一次资源、关系、身份或信念代价。`,
+      `- 伏笔策略：本卷至少新增 2 个伏笔，回收或变形兑现 1 个伏笔。`,
+    ].join("\n")
+  })
+  return volumes
+}
+
+const PRODUCTION_STORY_MARKDOWN_ASSET_FILES = [
+  "world-matrix.md",
+  "plot-architecture.md",
+  "story-bible.md",
+  "volume-strategy.md",
+  "foreshadowing-ledger.md",
+  "character-dynamics.md",
+]
+
+const PRODUCTION_STORY_STRUCTURED_ASSET_FILES = [
+  "story-foundation-contract.json",
+  "world-matrix.json",
+  "plot-architecture.json",
+  "story-bible.json",
+  "volume-strategy.json",
+  "foreshadowing-ledger.json",
+  "character-dynamics.json",
+]
+
+const PRODUCTION_STORY_ASSET_FILES = [
+  ...PRODUCTION_STORY_MARKDOWN_ASSET_FILES,
+  ...PRODUCTION_STORY_STRUCTURED_ASSET_FILES,
+]
+
+function extractStoryAssetRelevantLines(content: string, task: AutonomousNovelState["plan"]["chapterTasks"][number], maxLines = 18) {
+  const chapterNumber = task.chapterNumber
+  const trimmed = content.trim()
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, any>
+      const matchingChapter = [
+        ...(Array.isArray(parsed?.plot?.chapters) ? parsed.plot.chapters : []),
+        ...(Array.isArray(parsed?.chapters) ? parsed.chapters : []),
+        ...(Array.isArray(parsed?.timeline) ? parsed.timeline : []),
+      ].find((entry: Record<string, any>) => Number(entry?.chapterNumber) === chapterNumber)
+      const matchingForeshadowing = [
+        ...(Array.isArray(parsed?.foreshadowing?.entries) ? parsed.foreshadowing.entries : []),
+        ...(Array.isArray(parsed?.entries) ? parsed.entries : []),
+      ].filter((entry: Record<string, any>) => Number(entry?.sourceChapter || entry?.chapterNumber) === chapterNumber)
+      const matchingCharacterDelta = [
+        ...(Array.isArray(parsed?.characters?.stateDeltas) ? parsed.characters.stateDeltas : []),
+        ...(Array.isArray(parsed?.characterStateDeltas) ? parsed.characterStateDeltas : []),
+        ...(Array.isArray(parsed?.chapterStateDeltas) ? parsed.chapterStateDeltas : []),
+      ].find((entry: Record<string, any>) => Number(entry?.chapterNumber) === chapterNumber)
+      const lines = [
+        parsed?.project?.title ? `- Project: ${parsed.project.title}` : "",
+        parsed?.genre?.readerPromise ? `- Reader Promise: ${parsed.genre.readerPromise}` : "",
+        parsed?.readerPromise ? `- Reader Promise: ${parsed.readerPromise}` : "",
+        matchingChapter?.title ? `- Chapter: ${matchingChapter.chapterNumber} ${matchingChapter.title}` : "",
+        matchingChapter?.sceneObjective ? `- Causal Objective: ${matchingChapter.sceneObjective}` : "",
+        matchingChapter?.previousInput ? `- Previous Input: ${matchingChapter.previousInput}` : "",
+        matchingChapter?.protagonistDecision ? `- Protagonist Decision: ${matchingChapter.protagonistDecision}` : "",
+        matchingChapter?.irreversibleConsequence ? `- Irreversible Change: ${matchingChapter.irreversibleConsequence}` : "",
+        matchingChapter?.nextHandoff ? `- Next Handoff: ${matchingChapter.nextHandoff}` : "",
+        matchingCharacterDelta?.delta ? `- Character Delta: ${matchingCharacterDelta.delta}` : "",
+        ...matchingForeshadowing.slice(0, 3).map((entry: Record<string, any>) => `- Foreshadowing: ${entry.operation || entry.expectedAdvance || entry.status}`),
+        ...(Array.isArray(parsed?.rules) ? parsed.rules.slice(0, 3).map((rule: any) => `- Rule: ${typeof rule === "string" ? rule : rule.rule || rule.execution || JSON.stringify(rule)}`) : []),
+      ].filter(Boolean)
+      return uniqueStrings(lines).slice(0, maxLines)
+    } catch {
+      return []
+    }
+  }
+  const chapterPatterns = [
+    new RegExp(`第\\s*${chapterNumber}\\s*章`, "u"),
+    new RegExp(`Chapter\\s*${chapterNumber}\\b`, "iu"),
+    new RegExp(`\\|\\s*${chapterNumber}\\s*\\|`, "u"),
+  ]
+  const importantPattern = /Frozen World Rules|Non-Negotiable|Causal Spine|Chapter Causality Matrix|Continuity Anchor|Foreshadowing|Character State|Core Relationship|Volume Contract|Reader Promise|Style Contract|Protagonist|Ledger Rules|Escalation Rules|Required Dossier/u
+  const lines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const selected: string[] = []
+  for (const line of lines) {
+    const isHeading = /^#{1,3}\s+/u.test(line) && importantPattern.test(line)
+    const isChapterLine = chapterPatterns.some((pattern) => pattern.test(line))
+    const isRuleLine = /^[-*]\s+/u.test(line) && importantPattern.test(line)
+    if (isHeading || isChapterLine || isRuleLine) {
+      selected.push(line)
+    }
+    if (selected.length >= maxLines) break
+  }
+  if (selected.length === 0) {
+    return lines
+      .filter((line) => /^#{1,3}\s+/u.test(line) || /^[-*]\s+/u.test(line))
+      .slice(0, Math.max(6, Math.floor(maxLines / 2)))
+  }
+  return selected
+}
+
+export async function loadProductionStoryAssetContext(
+  paths: NovelWorkspacePaths,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  maxChars = 2200,
+): Promise<ProductionStoryAssetContext> {
+  const sections: string[] = []
+  const files: string[] = []
+
+  for (const filename of PRODUCTION_STORY_ASSET_FILES) {
+    const content = await readOptionalText(path.join(paths.plansDir, filename))
+    if (!content) continue
+    const relevant = extractStoryAssetRelevantLines(content, task)
+    if (!relevant.length) continue
+    files.push(filename)
+    const section = [
+      `### ${filename}`,
+      ...relevant,
+    ].join("\n")
+    sections.push(section.length > 520 ? `${section.slice(0, 520).trim()}\n...[${filename} clipped]` : section)
+  }
+
+  if (!sections.length) {
+    return { prompt: "", files: [] }
+  }
+
+  const prompt = [
+    "## Production Story Asset Context",
+    "",
+    "这些内容来自已冻结的前置故事资产。蓝图和正文必须服从它们；如与临时上下文冲突，以本资产摘要为准。",
+    "",
+    ...sections,
+  ].join("\n\n")
+
+  return {
+    prompt: prompt.length > maxChars ? `${prompt.slice(0, maxChars).trim()}\n...[story assets clipped]` : prompt,
+    files,
+  }
+}
+
+export function createProductionStoryBibleAssets(
+  state: AutonomousNovelState,
+  context: { consensus: string; protagonist: string; style: string },
+  resources: ProductionWritingResources,
+): ProductionStoryBibleAsset[] {
+  const genre = inferGenreProfile(state)
+  const consensus = context.consensus || "尚无额外共识；以项目初始目标作为最高约束。"
+  const protagonist = context.protagonist || "主角档案待补齐；本阶段必须至少冻结主角身份、欲望、伤口和行动方式。"
+  const style = context.style || "写法尚未完全冻结；进入正文前仍必须完成用户确认的写法样段。"
+  const chapterMatrix = formatChapterCausalityMatrix(state)
+  const continuityPlan = formatContinuityAnchorPlan(state)
+  const characterLedgerPlan = formatCharacterStateLedgerPlan(state)
+  const foreshadowingPlan = formatForeshadowingPayoffSchedule(state)
+  const volumeStrategy = formatVolumeStrategy(state)
+  const projectKey = stableAssetId(`${state.project.title}-${state.project.createdAt}`, "project")
+  const resourceSignals = [
+    `- Style guide loaded: ${resources.styleGuide ? "yes" : "no"}`,
+    `- Vocabulary resources loaded: ${resources.vocabularySamples.length}`,
+    `- Few-shot examples loaded: ${resources.examples.length}`,
+  ]
+  const protagonistName = lockedProtagonistFromState(state, protagonist)
+    || extractChinesePersonNames(protagonist, 1)[0]
+    || "待冻结主角"
+  const chapterContracts = state.plan.chapterTasks.map((task) => {
+    const causalPlan = getTaskCausalPlan(state, task)
+    return {
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: task.status,
+      targetWords: task.targetWords,
+      summary: task.summary,
+      previousInput: causalPlan.previousInput,
+      sceneObjective: causalPlan.sceneObjective,
+      protagonistDecision: causalPlan.protagonistDecision,
+      irreversibleConsequence: causalPlan.irreversibleConsequence,
+      characterStateDelta: causalPlan.characterStateDelta,
+      requiredContinuityAnchors: causalPlan.requiredContinuityAnchors,
+      foreshadowingOperation: causalPlan.foreshadowingOperation,
+      nextHandoff: causalPlan.nextHandoff,
+    }
+  })
+  const continuityAnchors = uniqueStrings(chapterContracts.flatMap((chapter) => chapter.requiredContinuityAnchors)).slice(0, 80)
+  const structuredWorldRules = [
+    {
+      id: "core-idea-boundary",
+      rule: "世界规则必须服务核心创意，不允许为了单章爽点临时改规则。",
+      execution: "每次新增设定都要落到人物选择、资源代价或社会压力。",
+      source: "world-matrix.md",
+    },
+    {
+      id: "scene-first-worldbuilding",
+      rule: "不允许整段解释世界观。",
+      execution: "设定必须嵌入冲突、对话、证据或行动。",
+      source: "world-matrix.md",
+    },
+    {
+      id: "chapter-cost-rule",
+      rule: "每章至少让一个世界规则改变角色的选择成本。",
+      execution: "章节蓝图必须说明该规则如何制造代价。",
+      source: "world-matrix.md",
+    },
+  ]
+  const foreshadowingEntries = chapterContracts.map((chapter) => ({
+    id: `foreshadowing-${String(chapter.chapterNumber).padStart(3, "0")}`,
+    sourceChapter: chapter.chapterNumber,
+    sourceTitle: chapter.title,
+    operation: chapter.foreshadowingOperation,
+    status: "planned",
+    expectedAdvance: chapter.nextHandoff,
+    payoffMode: chapter.chapterNumber >= state.plan.totalChapters
+      ? "final_payoff"
+      : chapter.chapterNumber >= Math.max(1, state.plan.totalChapters - 1)
+        ? "late_payoff"
+        : "advance_or_reframe",
+    linkedAnchors: chapter.requiredContinuityAnchors,
+  }))
+  const timelineEntries = chapterContracts.map((chapter) => ({
+    id: `chapter-${String(chapter.chapterNumber).padStart(3, "0")}`,
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    previousInput: chapter.previousInput,
+    event: chapter.sceneObjective,
+    decision: chapter.protagonistDecision,
+    irreversibleChange: chapter.irreversibleConsequence,
+    nextState: chapter.nextHandoff,
+  }))
+  const relationshipEntries = [
+    {
+      id: stableAssetId(protagonistName, "protagonist"),
+      name: protagonistName,
+      role: "protagonist",
+      desire: "待由人物档案冻结；必须与核心创意和章节因果链一致。",
+      woundOrFear: "待由人物档案冻结；正文前必须补齐。",
+      behaviorHabit: "待由人物档案冻结；不得在章节间重置。",
+      speechMarker: "待由人物档案冻结；用于区分对白声音。",
+      relationshipPressure: "由每章 characterStateDelta 推进。",
+    },
+  ]
+  const characterStateDeltas = chapterContracts.map((chapter) => ({
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    delta: chapter.characterStateDelta,
+    requiredMemoryWrite: true,
+  }))
+  const volumeContracts = volumeStrategy.map((summary, index) => ({
+    id: `volume-${index + 1}`,
+    title: summary.match(/^###\s+(.+)$/mu)?.[1] || `第 ${index + 1} 卷`,
+    summary,
+    status: "planned",
+    requiredChange: "卷尾必须改变主角位置、关系网络或世界认知。",
+  }))
+  const storyFoundationContract = {
+    version: 1,
+    generatedBy: "production-story-bible-assets",
+    project: {
+      key: projectKey,
+      title: state.project.title,
+      idea: state.project.idea,
+      totalChapters: state.plan.totalChapters,
+      chapterWordTarget: state.plan.chapterWordTarget,
+    },
+    genre: {
+      profile: genre.genre,
+      readerPromise: genre.readerPromise,
+      pointOfView: genre.pointOfView,
+      tone: genre.tone,
+    },
+    gates: {
+      markdownAssets: PRODUCTION_STORY_MARKDOWN_ASSET_FILES,
+      structuredAssets: PRODUCTION_STORY_STRUCTURED_ASSET_FILES,
+      mustPassBeforeDrafting: [
+        "core_consensus",
+        "story_foundation",
+        "character_dynamics",
+        "chapter_blueprints",
+        "style_approval",
+      ],
+    },
+    consensus: {
+      text: consensus,
+      protagonist,
+      styleCarryover: style,
+    },
+    world: {
+      rules: structuredWorldRules,
+      continuityAnchors,
+    },
+    plot: {
+      causalModel: "previous_input -> scene_objective -> protagonist_decision -> irreversible_change -> next_handoff",
+      chapters: chapterContracts,
+      timeline: timelineEntries,
+    },
+    characters: {
+      protagonist: protagonistName,
+      relationshipEntries,
+      stateDeltas: characterStateDeltas,
+      requiredDossierFields: [
+        "canonical name",
+        "identity and role function",
+        "core desire",
+        "fear or wound",
+        "behavior habit",
+        "speech marker",
+        "appearance or body marker",
+        "skill, limitation, and cost",
+        "relationship state",
+      ],
+    },
+    foreshadowing: {
+      ledgerRules: [
+        "每条伏笔必须有来源章节、当前状态、预计推进点和回收方式。",
+        "伏笔可以延后，但不能无限悬空；延后必须增加压力或改变读者理解。",
+        "伏笔回收必须通过场景事实兑现，不能只让角色口头解释。",
+      ],
+      entries: foreshadowingEntries,
+    },
+    volumes: volumeContracts,
+    resources: {
+      styleGuideLoaded: Boolean(resources.styleGuide),
+      vocabularySamples: resources.vocabularySamples.length,
+      examples: resources.examples.length,
+    },
+  }
+  const structuredAssets = [
+    {
+      filename: "story-foundation-contract.json",
+      title: "Story Foundation Contract",
+      stage: "story_foundation_contract",
+      value: storyFoundationContract,
+    },
+    {
+      filename: "world-matrix.json",
+      title: "World Matrix JSON",
+      stage: "world_matrix_structured",
+      value: {
+        version: 1,
+        projectKey,
+        title: state.project.title,
+        genre: storyFoundationContract.genre,
+        rules: structuredWorldRules,
+        continuityAnchors,
+        sourceConsensus: consensus,
+        protagonistPressureInterface: protagonist,
+      },
+    },
+    {
+      filename: "plot-architecture.json",
+      title: "Plot Architecture JSON",
+      stage: "plot_architecture_structured",
+      value: {
+        version: 1,
+        causalModel: storyFoundationContract.plot.causalModel,
+        chapters: chapterContracts,
+        timeline: timelineEntries,
+        escalationRules: [
+          "每 3-5 章必须让外部压力升级一次，不能只换地点重复同类事件。",
+          "中段必须让主角的旧方法失效，逼出新的选择或联盟。",
+          "结局前必须回收核心缺口、主要关系债和至少一条早期伏笔。",
+        ],
+      },
+    },
+    {
+      filename: "story-bible.json",
+      title: "Story Bible JSON",
+      stage: "story_bible_structured",
+      value: {
+        version: 1,
+        title: state.project.title,
+        coreIdea: state.project.idea,
+        readerPromise: genre.readerPromise,
+        nonNegotiableContracts: [
+          "不允许漂移题材，不允许脱离核心创意改写成另一部小说。",
+          "不允许正文先行再补设定；章节必须服从世界矩阵、主线架构、人物状态和伏笔账本。",
+          "任何新增人物、地点、组织、物件、规则，都要能说明它承担的剧情功能。",
+        ],
+        styleCarryover: style,
+        protagonist,
+        characterStateDeltas,
+      },
+    },
+    {
+      filename: "volume-strategy.json",
+      title: "Volume Strategy JSON",
+      stage: "volume_strategy_structured",
+      value: {
+        version: 1,
+        volumes: volumeContracts,
+        contractRules: [
+          "每卷都要有清晰的阶段目标、阶段失败风险和阶段兑现。",
+          "卷尾不能只是事件结束，必须改变主角位置、关系网络或世界认知。",
+        ],
+      },
+    },
+    {
+      filename: "foreshadowing-ledger.json",
+      title: "Foreshadowing Ledger JSON",
+      stage: "foreshadowing_ledger_structured",
+      value: {
+        version: 1,
+        rules: storyFoundationContract.foreshadowing.ledgerRules,
+        entries: foreshadowingEntries,
+      },
+    },
+    {
+      filename: "character-dynamics.json",
+      title: "Character Dynamics JSON",
+      stage: "character_dynamics_structured",
+      value: {
+        version: 1,
+        protagonist: protagonistName,
+        relationshipEntries,
+        chapterStateDeltas: characterStateDeltas,
+        requiredDossierFields: storyFoundationContract.characters.requiredDossierFields,
+        relationshipRules: [
+          "人物关系不是姓名列表，而是欲望、债务、恐惧、利益和误解的动态系统。",
+          "每个关键人物都必须有他自己的目标，不能只服务主角询问或推动情节。",
+          "关系变化必须进入章节记忆，后续章节不能重置。",
+        ],
+      },
+    },
+  ]
+
+  const worldMatrix = [
+    "# World Matrix",
+    "",
+    `Project: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Genre profile: ${genre.genre}`,
+    `Reader promise: ${genre.readerPromise}`,
+    `Point of view: ${genre.pointOfView}`,
+    `Tone: ${genre.tone}`,
+    "",
+    "## Frozen World Rules",
+    "- 世界规则必须服务核心创意，不允许为了单章爽点临时改规则。",
+    "- 每条规则都要在人物选择、资源代价或社会压力中体现，不能只做百科说明。",
+    "- 新增设定必须能落到物件、地点、制度、称呼、禁忌或具体行动。",
+    "",
+    "## Source Consensus",
+    consensus,
+    "",
+    "## Protagonist Pressure Interface",
+    protagonist,
+    "",
+    "## Setting Execution Rules",
+    "- 首章建立世界的异常入口，第二章以后用后果展示规则。",
+    "- 每章至少让一个世界规则改变角色的选择成本。",
+    "- 不允许整段解释世界观；设定必须嵌入冲突、对话、证据或行动。",
+  ].join("\n")
+
+  const plotArchitecture = [
+    "# Plot Architecture",
+    "",
+    "## Causal Spine",
+    "- 全书采用承接-选择-代价-交棒链。",
+    "- 每章必须继承上一章至少一个状态、物件、关系、代价或未解问题。",
+    "- 每章结尾必须产生下一章不能绕开的新状态。",
+    "",
+    "## Chapter Causality Matrix",
+    ...chapterMatrix,
+    "",
+    "## Continuity Anchor Plan",
+    ...continuityPlan,
+    "",
+    "## Escalation Rules",
+    "- 每 3-5 章必须让外部压力升级一次，不能只换地点重复同类事件。",
+    "- 中段必须让主角的旧方法失效，逼出新的选择或联盟。",
+    "- 结局前必须回收核心缺口、主要关系债和至少一条早期伏笔。",
+  ].join("\n")
+
+  const storyBible = [
+    "# Story Bible",
+    "",
+    `Title: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Target chapters: ${state.plan.totalChapters}`,
+    `Chapter word target: ${state.plan.chapterWordTarget}`,
+    "",
+    "## Non-Negotiable Story Contract",
+    "- 不允许漂移题材，不允许脱离核心创意改写成另一部小说。",
+    "- 不允许正文先行再补设定；章节必须服从世界矩阵、主线架构、人物状态和伏笔账本。",
+    "- 任何新增人物、地点、组织、物件、规则，都要能说明它承担的剧情功能。",
+    "",
+    "## Reader Promise",
+    genre.readerPromise,
+    "",
+    "## Style Contract Carryover",
+    style,
+    "",
+    "## Character Spine",
+    protagonist,
+    "",
+    "## Character State Ledger Plan",
+    ...characterLedgerPlan,
+    "",
+    "## Planning Resource Signals",
+    ...resourceSignals,
+  ].join("\n")
+
+  const volumeStrategyContent = [
+    "# Volume Strategy",
+    "",
+    "## Volume Contract",
+    "- 每卷都要有清晰的阶段目标、阶段失败风险和阶段兑现。",
+    "- 卷尾不能只是事件结束，必须改变主角位置、关系网络或世界认知。",
+    "",
+    ...volumeStrategy,
+  ].join("\n")
+
+  const foreshadowingLedger = [
+    "# Foreshadowing Ledger",
+    "",
+    "## Ledger Rules",
+    "- 每条伏笔必须有来源章节、当前状态、预计推进点和回收方式。",
+    "- 伏笔可以延后，但不能无限悬空；延后必须增加压力或改变读者理解。",
+    "- 伏笔回收必须通过场景事实兑现，不能只让角色口头解释。",
+    "",
+    "## Initial Schedule",
+    ...foreshadowingPlan,
+  ].join("\n")
+
+  const characterDynamics = [
+    "# Character Dynamics",
+    "",
+    "## Core Relationship Contract",
+    "- 人物关系不是姓名列表，而是欲望、债务、恐惧、利益和误解的动态系统。",
+    "- 每个关键人物都必须有他自己的目标，不能只服务主角询问或推动情节。",
+    "- 关系变化必须进入章节记忆，后续章节不能重置。",
+    "",
+    "## Protagonist",
+    protagonist,
+    "",
+    "## Per-Chapter State Delta",
+    ...characterLedgerPlan,
+    "",
+    "## Required Dossier Fields",
+    "- canonical name",
+    "- identity and role function",
+    "- core desire",
+    "- fear or wound",
+    "- behavior habit",
+    "- speech marker",
+    "- appearance or body marker",
+    "- skill, limitation, and cost",
+    "- relationship state",
+  ].join("\n")
+
+  return [
+    { filename: "world-matrix.md", title: "World Matrix", content: worldMatrix, stage: "world_matrix" },
+    { filename: "plot-architecture.md", title: "Plot Architecture", content: plotArchitecture, stage: "plot_architecture" },
+    { filename: "story-bible.md", title: "Story Bible", content: storyBible, stage: "story_bible" },
+    { filename: "volume-strategy.md", title: "Volume Strategy", content: volumeStrategyContent, stage: "volume_strategy" },
+    { filename: "foreshadowing-ledger.md", title: "Foreshadowing Ledger", content: foreshadowingLedger, stage: "foreshadowing_ledger" },
+    { filename: "character-dynamics.md", title: "Character Dynamics", content: characterDynamics, stage: "character_dynamics" },
+    ...structuredAssets.map((asset) => ({
+      filename: asset.filename,
+      title: asset.title,
+      content: JSON.stringify(asset.value, null, 2),
+      stage: asset.stage,
+      format: "json" as const,
+    })),
+  ]
+}
+
+export function createProductionWritingPlanContract(state: AutonomousNovelState): WritingPlanContract {
+  const chapters = state.plan.chapterTasks.map((task) => {
+    const qualityGate = task.qualityGate || null
+    const status: WritingPlanContract["chapters"][number]["status"] = task.status === "complete"
+      ? "completed"
+      : task.status === "in_progress"
+        ? "in_progress"
+        : task.status === "blocked"
+          ? "blocked"
+          : "pending"
+    return {
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      filePath: `.ai-novel/chapters/chapter-${String(task.chapterNumber).padStart(3, "0")}.final.md`,
+      status,
+      wordCount: qualityGate?.wordCount ?? null,
+      qualityPass: qualityGate ? qualityGate.status === "passed" : null,
+      retryCount: Math.max(0, Number(task.recoveryAttempts || qualityGate?.attempts || 0)),
+      selectedVersionId: qualityGate?.status === "passed" ? "final" : null,
+    }
+  })
+  const completedCount = chapters.filter((chapter) => chapter.status === "completed").length
+  const blockedCount = chapters.filter((chapter) => chapter.status === "blocked").length
+  const inProgressCount = chapters.filter((chapter) => chapter.status === "in_progress").length
+  return {
+    version: 1,
+    novelName: state.project.title,
+    totalChapters: state.plan.totalChapters,
+    minWordsPerChapter: state.plan.chapterWordTarget,
+    status: blockedCount > 0
+      ? "blocked"
+      : completedCount >= state.plan.totalChapters && chapters.length >= state.plan.totalChapters
+        ? "completed"
+        : inProgressCount > 0
+          ? "in_progress"
+          : "planning",
+    writingMode: "serial",
+    chapters,
+  }
+}
+
+export async function writeProductionWritingPlan(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  options: ProductionPipelineOptions = {},
+) {
+  const writingPlan = createProductionWritingPlanContract(state)
+  const writingPlanPath = path.join(paths.plansDir, "writing-plan.json")
+  await writeJsonFileAtomic(writingPlanPath, writingPlan)
+  await recordPipelineArtifact(projectRoot, writingPlanPath, "plan", options, {
+    stage: "writing_plan",
+    production: true,
+    title: "Writing Plan",
+    totalChapters: writingPlan.totalChapters,
+    status: writingPlan.status,
+  })
+  return writingPlanPath
+}
+
 function hasCausalBlueprint(blueprint = "") {
   return blueprint.includes("# Detailed Chapter Blueprint")
     && blueprint.includes("## Previous Inputs")
@@ -2208,8 +4108,50 @@ function hasCausalBlueprint(blueprint = "") {
     && blueprint.includes("## Next Chapter Handoff")
 }
 
+function evaluateCausalExecutionEvidence(
+  draft: string,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract?: ContinuityContract,
+) {
+  const body = extractNarrativeBody(draft)
+  const protagonist = continuityContract?.lockedProtagonistName || ""
+  const anchors = [
+    ...(task.causalPlan?.requiredContinuityAnchors || []),
+    ...(continuityContract?.continuityAnchors || []),
+  ].filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist))
+  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => body.includes(anchor))).slice(0, 8)
+  const protagonistActionPattern = protagonist
+    ? new RegExp(`${escapeRegExpLiteral(protagonist)}.{0,40}(走|站|伸手|拿|推|扣|按|抬|低头|转身|问|答|说|递|收|藏|翻|写|敲|拦|避|停|决定|选择|拒绝|答应|吹灭|塞进|蹲|看|听)`, "u")
+    : /(主角|他|她).{0,40}(决定|选择|拒绝|答应|伸手|转身|递|藏|问|说|停)/u
+  const hasVisibleDecision = protagonistActionPattern.test(body)
+    || /必须|只好|不能|来不及|没有选择|需要|决定|选择|拒绝|答应/u.test(body)
+  const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body)
+  const ending = body.slice(Math.max(0, body.length - 700))
+  const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending)
+  const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length
+  return {
+    status: score >= 3 ? ("eligible" as const) : ("quarantined" as const),
+    score,
+    matchedAnchors,
+    hasVisibleDecision,
+    hasConsequence,
+    hasHandoff,
+    reason: score >= 3
+      ? `正文以可见事件执行因果合同：锚点=${matchedAnchors.slice(0, 4).join("、") || "隐性承接"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`
+      : `因果执行证据不足：锚点=${matchedAnchors.slice(0, 4).join("、") || "无"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`,
+  }
+}
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function stableAssetId(value: string, fallback: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/giu, "-")
+    .replace(/^-+|-+$/gu, "")
+  return normalized.slice(0, 72) || fallback
 }
 
 function lockedProtagonistFromState(state: AutonomousNovelState, protagonistProfile = "") {
@@ -2346,12 +4288,47 @@ function extractKeywords(list: string[] | string): string[] {
   return keywords
 }
 
+function extractCharacterEvidenceWindow(body: string, index: number, nameLength: number) {
+  const leftBoundary = Math.max(
+    body.lastIndexOf("\n", index),
+    body.lastIndexOf("。", index),
+    body.lastIndexOf("！", index),
+    body.lastIndexOf("？", index),
+    body.lastIndexOf("；", index),
+    body.lastIndexOf(";", index),
+  )
+  const rightCandidates = ["\n", "。", "！", "？", "；", ";"]
+    .map((delimiter) => body.indexOf(delimiter, index + nameLength))
+    .filter((position) => position >= 0)
+  const sentenceStart = leftBoundary >= 0 ? leftBoundary + 1 : Math.max(0, index - 24)
+  const sentenceEnd = rightCandidates.length
+    ? Math.min(...rightCandidates)
+    : Math.min(body.length, index + nameLength + 48)
+  return body.slice(sentenceStart, sentenceEnd)
+}
+
 function evaluateCharacterVoiceDifferentiation(draft: string, contract: CharacterProfileContract) {
   const body = extractNarrativeBody(draft)
   const dossiers = contract.characterDossiers || []
+  const abstractCastTerms = new Set([
+    "关系",
+    "关系网络",
+    "关系裂缝",
+    "上章承接",
+    "章节桥接",
+    "章末钩子",
+    "高潮",
+    "程序",
+    "关键方法",
+    "方块",
+    "任何主角",
+    "单章字数",
+    "成语",
+    "章以后",
+  ])
   const cast = contract.knownCast
     .map((name) => name.trim())
-    .filter((name) => name && body.includes(name))
+    .filter((name) => name && !abstractCastTerms.has(name) && body.includes(name))
     .slice(0, 6)
   if (cast.length < 2) {
     return {
@@ -2392,37 +4369,18 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     // 提取每个出现位置附近的纯净证据窗口
     const localWindows: string[] = []
     for (const index of occurrences) {
-      let start = Math.max(0, index - 80)
-      let end = Math.min(body.length, index + name.length + 100)
-
-      // 在当前位置 [start, end) 范围内，寻找除了自己以外的其他角色，进行截断
-      const otherCast = cast.filter(c => c !== name)
-      for (const other of otherCast) {
-        const otherEscaped = escapeRegExpLiteral(other)
-        const otherRegex = new RegExp(otherEscaped, "gu")
-        let otherMatch: RegExpExecArray | null
-        while ((otherMatch = otherRegex.exec(body)) !== null) {
-          const oIndex = otherMatch.index
-          // 如果其他角色在当前角色左侧，截断左边界到其他角色的结束位置
-          if (oIndex < index && oIndex >= start) {
-            start = Math.max(start, oIndex + other.length)
-          }
-          // 如果其他角色在当前角色右侧，截断右边界到其他角色的起始位置
-          if (oIndex > index && oIndex < end) {
-            end = Math.min(end, oIndex)
-          }
-        }
-      }
-
-      if (start < end) {
-        localWindows.push(body.slice(start, end))
+      const window = extractCharacterEvidenceWindow(body, index, name.length)
+      if (window) {
+        localWindows.push(window)
       }
     }
 
     const windows = localWindows.join("\n")
-    
+
     const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
     const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
+    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows)
+    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows)
 
     const dialogues: string[] = []
     const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^。！？!?；;\\n]*?[说问道喊笑叹声道][^」”]*?[「“]([^」”]+?)[」”]`,"gu")
@@ -2434,11 +4392,13 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     const dialogueText = dialogues.join("\n")
 
     const dossier: CharacterDossier | undefined = (dossiers as CharacterDossier[]).find((d: CharacterDossier) => d.canonicalName === name || d.aliases?.includes(name))
-    
+
     let hasHabitEvidence = false
     let hasSpeechEvidence = false
     let hasRelationEvidence = false
     let hasSkillLimitationEvidence = false
+    let hasGoalPressureEvidence = hasGoalPressure
+    let hasActiveStanceEvidence = hasActiveStance
 
     let matchedHabits: string[] = []
     let matchedSpeech: string[] = []
@@ -2470,27 +4430,50 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       const skillKeywords = extractKeywords(skillsAndLimits)
       matchedSkills = skillKeywords.filter(k => windows.includes(k))
       hasSkillLimitationEvidence = matchedSkills.length > 0
+      hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence
+      hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence
     } else {
       hasHabitEvidence = hasGeneralHabit
       hasSpeechEvidence = hasDialogue
       hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows)
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
+      hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence
+      hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence
     }
 
     const evidenceCount = [
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
       hasHabitEvidence,
       hasSpeechEvidence,
       hasRelationEvidence,
       hasSkillLimitationEvidence
     ].filter(Boolean).length
+    const dramaticEvidenceCount = [
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
+      hasRelationEvidence,
+      hasSkillLimitationEvidence,
+      hasSpeechEvidence,
+    ].filter(Boolean).length
+    const isCoreChapterRole = occurrences.length >= 2
+      || hasSpeechEvidence
+      || hasGoalPressureEvidence
+      || hasRelationEvidence
+      || hasSkillLimitationEvidence
 
     return {
       name,
       score: evidenceCount,
+      dramaticScore: dramaticEvidenceCount,
+      occurrenceCount: occurrences.length,
+      isCoreChapterRole,
       hasHabitEvidence,
       hasSpeechEvidence,
       hasRelationEvidence,
       hasSkillLimitationEvidence,
+      hasGoalPressureEvidence,
+      hasActiveStanceEvidence,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
@@ -2498,44 +4481,66 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     }
   })
 
-  const weak = scored.filter((entry) => entry.score < 2)
-  const habitCarriers = scored.filter((entry) => entry.hasHabitEvidence).length
-  const speechCarriers = scored.filter((entry) => entry.hasSpeechEvidence).length
-  const relationCarriers = scored.filter((entry) => entry.hasRelationEvidence).length
-  
+  const coreRoles = scored.filter((entry) => entry.isCoreChapterRole)
+  const cameoRoles = scored.filter((entry) => !entry.isCoreChapterRole)
+  if (coreRoles.length < 2) {
+    return {
+      status: "eligible" as const,
+      reason: cameoRoles.length
+        ? `角色差异化检查降级：${cameoRoles.map((entry) => entry.name).join("、")} 仅短暂出现，未承担本章冲突或选择，不作为硬门槛。`
+        : "角色差异化检查跳过：正文中少于两个核心出场人物承担冲突或选择。",
+      observedCast: cast,
+      missing: [],
+    }
+  }
+
+  const weak = coreRoles.filter((entry) => entry.dramaticScore < 2)
+  const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length
+  const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length
+  const relationCarriers = coreRoles.filter((entry) => entry.hasRelationEvidence).length
+  const goalCarriers = coreRoles.filter((entry) => entry.hasGoalPressureEvidence).length
+  const stanceCarriers = coreRoles.filter((entry) => entry.hasActiveStanceEvidence).length
+
   const missing: string[] = []
-  if (speechCarriers < 2) missing.push("多角色对白/口语习惯差异")
-  if (habitCarriers < 2) missing.push("多角色行为习惯差异")
-  if (relationCarriers < 2) missing.push("多角色关系网络差异")
+  if (goalCarriers < 2) missing.push("核心角色目标/压力差异")
+  if (stanceCarriers < 2) missing.push("核心角色行动选择差异")
+  if (speechCarriers < 2 && habitCarriers < 2) missing.push("核心角色表达方式或行为呈现不足")
+  if (relationCarriers < 2) missing.push("核心角色关系网络差异")
+  if (cameoRoles.length) {
+    missing.push(`短暂出场角色不作硬门槛：${cameoRoles.map((entry) => entry.name).join("、")}`)
+  }
   if (weak.length) {
-    missing.push(`弱角色信号（未体现档案特质）：${weak.map((entry) => entry.name).join("、")}`)
+    missing.push(`弱核心角色信号（缺少目标/选择/关系压力）：${weak.map((entry) => entry.name).join("、")}`)
   }
 
   const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1)
-    && (quotedDialogueCount < 2 || scored.filter(s => s.score >= 2).length < 2)
+    && (quotedDialogueCount < 2 || coreRoles.filter(s => s.dramaticScore >= 2).length < 2)
 
-  const totalWeakProportion = weak.length / cast.length
-  const isFlattenedDialogue = clearlyFlattened || (weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1))
+  const totalWeakProportion = weak.length / coreRoles.length
+  const isFlattenedDialogue = clearlyFlattened
+    || (weak.length > 0 && (totalWeakProportion >= 0.5 || (quotedDialogueCount >= 1 && coreRoles.length <= 2)))
 
   if (isFlattenedDialogue) {
-    const weakDetails = weak.map(entry => {
+    const flaggedRoles = weak.length ? weak : coreRoles
+    const weakDetails = flaggedRoles.map(entry => {
       const missingDims: string[] = []
-      if (!entry.hasHabitEvidence) missingDims.push("日常行为/小动作习惯")
-      if (!entry.hasSpeechEvidence) missingDims.push("口语对白习惯/特征词")
-      if (!entry.hasRelationEvidence) missingDims.push("体现与其他角色信任/敌对的关系纽带")
-      if (!entry.hasSkillLimitationEvidence) missingDims.push("主动动作选择/特定能力的限制性流露")
+      if (!entry.hasGoalPressureEvidence) missingDims.push("本章目标/压力")
+      if (!entry.hasActiveStanceEvidence) missingDims.push("推动局势的动作选择")
+      if (!entry.hasRelationEvidence) missingDims.push("与其他角色的信任/敌对/债务关系")
+      if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("自然对白或可见行为呈现")
+      if (missingDims.length === 0) missingDims.push("表达方式过于同质化，缺少具体场景分歧")
       return `${entry.name}(缺少: ${missingDims.join("、")})`
     }).join("; ")
     return {
       status: "quarantined" as const,
-      reason: `角色差异化不足：登场人物中 ${weak.map(w => w.name).join("、")} 缺乏独特的言行习惯或心境特质，被概括为扁平模板对白。具体细节: ${weakDetails}`,
+      reason: `角色差异化不足：核心出场人物中 ${flaggedRoles.map(w => w.name).join("、")} 缺少目标、选择或关系压力，被概括为同质化模板对白。具体细节: ${weakDetails}`,
       observedCast: cast,
       missing,
     }
   }
   return {
     status: "eligible" as const,
-    reason: `角色差异化通过：${cast.join("、")} 各次呈现了符合档案的动作细节、特定口口吻或关系脉络。`,
+    reason: `角色差异化通过：${coreRoles.map((entry) => entry.name).join("、")} 通过目标、行动选择、对白或关系压力形成区分${cameoRoles.length ? `；${cameoRoles.map((entry) => entry.name).join("、")} 为短暂出场，不作硬门槛` : ""}。`,
     observedCast: cast,
     missing,
   }
@@ -3137,6 +5142,7 @@ export function createDetailedChapterBlueprint(
   context: { consensus: string; protagonist: string; style: string },
   resources: ProductionWritingResources,
   continuityContract = createContinuityContract({ state, task, context }),
+  storyAssetContext: ProductionStoryAssetContext = { prompt: "", files: [] },
 ) {
 	  const genre = inferGenreProfile(state)
 	  const sceneType = sceneTypeForChapter(state, task.chapterNumber)
@@ -3170,6 +5176,84 @@ export function createDetailedChapterBlueprint(
 	    continuityContract,
 	    blueprint: context.consensus,
 	  })
+	  const sceneCardCount = Math.min(6, Math.max(4, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)))
+	  const sceneCardTemplates = [
+	    {
+	      goal: `用具体异常打开本章问题：${causalPlan.previousInput}`,
+	      conflict: "主角遇到无法回避的现场压力或关系压力。",
+	      turn: effectiveAnchors.length ? `至少让锚点进入事件：${effectiveAnchors.slice(0, 2).join("、")}` : "建立后续可追踪的物件、线索或关系。",
+	      endHook: "读者明确知道本章局部问题是什么。",
+	      requiredFacts: effectiveAnchors.slice(0, 2),
+	    },
+	    {
+	      goal: `推进本章目标：${causalPlan.sceneObjective}`,
+	      conflict: "外部压力进入人物关系，至少一名配角暴露立场或利益。",
+	      turn: "出现新证据、新阻力或新代价。",
+	      endHook: "主角被迫接近选择点。",
+	      requiredFacts: effectiveAnchors.slice(1, 4),
+	    },
+	    {
+	      goal: `把主角选择写成行动：${causalPlan.protagonistDecision}`,
+	      conflict: "选择必须暴露欲望、短板、能力边界或价值取舍。",
+	      turn: `角色状态发生变化：${causalPlan.characterStateDelta}`,
+	      endHook: "选择带来的代价开始显形。",
+	      requiredFacts: effectiveAnchors.slice(2, 5),
+	    },
+	    {
+	      goal: `让不可逆变化成为事实：${causalPlan.irreversibleConsequence}`,
+	      conflict: "阻力兑现，局面不能无损回到开场状态。",
+	      turn: `伏笔操作进入正文：${causalPlan.foreshadowingOperation}`,
+	      endHook: "留下可被下一章追踪的画面、物件、线索或关系压力。",
+	      requiredFacts: effectiveAnchors.slice(3, 6),
+	    },
+	    {
+	      goal: `完成下一章交棒：${causalPlan.nextHandoff}`,
+	      conflict: "余波不能用总结代替，必须有现场动作或对白。",
+	      turn: "本章局部结果落定，同时产生下一章无法绕开的压力。",
+	      endHook: causalPlan.nextHandoff,
+	      requiredFacts: effectiveAnchors.slice(-3),
+	    },
+	  ]
+	  const executionContract = {
+	    version: 1,
+	    chapterNumber: task.chapterNumber,
+	    title: task.title,
+	    chapterRole: task.summary || `${arcLabel} chapter`,
+	    chapterPurpose: causalPlan.sceneObjective,
+	    macroBeat: task.chapterNumber === 1 ? "E" : "P",
+	    suspenseLevel: task.chapterNumber === state.plan.totalChapters ? "payoff" : "active",
+	    foreshadowingOperation: causalPlan.foreshadowingOperation,
+	    plotTwistLevel: task.chapterNumber % 4 === 0 ? 3 : 2,
+	    emotionTarget: "紧张/疑问 -> 压力加深 -> 选择代价 -> 章末期待",
+	    conflictLevel: Math.min(5, Math.max(2, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 5))))),
+	    revealLevel: task.chapterNumber === state.plan.totalChapters ? 5 : Math.min(4, Math.max(1, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 4))))),
+	    targetWordCount: task.targetWords,
+	    mustAvoid: [
+	      "禁止用剧情摘要替代正文",
+	      "禁止跳过上一章代价另起剧情",
+	      "禁止提前泄露未到场真相",
+	      "禁止所有角色使用同一种解释腔",
+	    ],
+	    allowedCharacters: continuityContract.knownCast.length ? continuityContract.knownCast : ["主角", "对抗力量", "关键关系对象"],
+	    forbiddenCharacters: [],
+	    allowedNewCharacters: task.chapterNumber === 1 ? ["服务首章事件的关系角色"] : ["仅允许服务本章冲突且进入记忆账本的新角色"],
+	    entranceProtocol: {
+	      newCharacterStage: task.chapterNumber === 1 ? "meet" : "need-based",
+	      requiredIntroElements: ["身份线索", "与主角的关系压力", "可记忆的动作/称呼/体态"],
+	    },
+	    sceneCards: sceneCardTemplates.slice(0, sceneCardCount).map((card, index) => ({
+	      index: index + 1,
+	      goal: card.goal,
+	      conflict: card.conflict,
+	      turn: card.turn,
+	      endHook: card.endHook,
+	      requiredCharacters: continuityContract.knownCast.slice(0, 4),
+	      requiredFacts: card.requiredFacts,
+	      forbiddenFacts: ["未来章节真相", "未登场幕后主使身份", "未冻结世界规则"],
+	    })),
+	    endingHook: causalPlan.nextHandoff,
+	    nextChapterEntryState: causalPlan.nextHandoff,
+	  }
 
 	  return [
 	    "# Detailed Chapter Blueprint",
@@ -3186,6 +5270,13 @@ export function createDetailedChapterBlueprint(
     `Target words: ${task.targetWords}`,
     `Primary scene type: ${sceneType}`,
     "",
+    "## Chapter Execution Contract",
+    "```json",
+    JSON.stringify(executionContract, null, 2),
+    "```",
+    "",
+    storyAssetContext.prompt,
+    storyAssetContext.prompt ? "" : "",
     continuityContract.prompt,
     "",
     characterProfileContract.prompt,
@@ -3320,6 +5411,7 @@ async function createChapterBlueprintContent(
   context: { consensus: string; protagonist: string; style: string },
   resources: ProductionWritingResources,
   options: ProductionPipelineOptions,
+  storyAssetContext: ProductionStoryAssetContext = { prompt: "", files: [] },
 ) {
   throwIfPipelineAborted(options)
   const continuityContract = createContinuityContract({ state, task, context })
@@ -3329,7 +5421,7 @@ async function createChapterBlueprintContent(
     protagonistProfile: context.protagonist,
     continuityContract,
   })
-  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract)
+  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract, storyAssetContext)
   await emitWritingProgress(options, {
     step: "chapter_blueprint_started",
     role: "Chapter Planner",
@@ -3430,6 +5522,8 @@ async function createChapterBlueprintContent(
 	      "Knowledge/RAG References:",
       knowledgeContext.prompt,
       "",
+      storyAssetContext.prompt ? `Production Story Assets:\n${storyAssetContext.prompt}` : "",
+      storyAssetContext.prompt ? "" : "",
       continuityContract.prompt,
       "",
       characterProfileContract.prompt,
@@ -3452,6 +5546,9 @@ async function createChapterBlueprintContent(
       "",
       "## Master/Consensus Context",
       context.consensus || "(empty)",
+      "",
+      "## Production Story Assets",
+      storyAssetContext.prompt || "(empty)",
       "",
       "## Character Context",
       context.protagonist || "(empty)",
@@ -3563,6 +5660,92 @@ export function createDraftBodyFromBlueprint(
 	    `- Next handoff: ${causalPlan.nextHandoff}`,
 	    `- Blueprint basis: ${blueprint.includes("Detailed Chapter Blueprint") ? "detailed-blueprint" : "fallback"}`,
 	  ].join("\n\n")
+}
+
+function createStyleContractTestDraftBody(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract: ContinuityContract,
+  approvedStyleContext: ApprovedWritingStyleContext,
+) {
+  const title = task.title || `第 ${task.chapterNumber} 章`
+  const protagonistName = continuityContract.lockedProtagonistName || "沈砚"
+  const causalPlan = getTaskCausalPlan(state, task)
+  const style = approvedStyleContext.contract?.styleContract
+  const requiredAnchors = uniqueStrings([
+    ...(task.causalPlan?.requiredContinuityAnchors || []),
+    ...(continuityContract.continuityAnchors || []),
+    "账册",
+    "雨声",
+    "灯火",
+    "门外脚步",
+  ].filter(Boolean)).slice(0, 8)
+  const anchorSentence = requiredAnchors.length
+    ? `本章承接${requiredAnchors.slice(0, 4).join("、")}，不换主角，不换线索。`
+    : "本章承接账册、雨声、灯火和门外脚步，不换主角，不换线索。"
+  const chapterShift = task.chapterNumber <= 1
+    ? "缺页处露出浅墨，官仓添七，民户减三。"
+    : `上一章留下的${requiredAnchors.slice(0, 3).join("、") || "账册与门外脚步"}还在，少尹的人已经到了廊下。`
+  const positiveExample = style?.positiveExamples?.[0] || "沈砚合上账册，只问一句：谁动过这一页？"
+  const baseParagraphs = [
+    `开场落在具体异常与现场压力上。雨声贴着窗纸往下滑。${protagonistName}把缺页账册推到灯下。纸边齐得过分，像刚从刀口退出来。灯火一跳，门外脚步停在槛外。`,
+    `老周站在那里，袖口压着半枚湿印。${protagonistName}看见了，没有立刻问。${anchorSentence}`,
+    `“谁动过？”${protagonistName}问。`,
+    "老周没答。鞋尖往后收了半寸。雨声压住他的呼吸，也压住廊下那个人的影子。",
+    `${chapterShift}${protagonistName}想要查清税册，不是为了清白。他欠过一条命，欠在同一册账里。这条线索推进关系，也推进代价；这个弱点不能给少尹看见。`,
+    `他伸手按住账册，指节很白。${protagonistName}擅长看数字的缝，却不会在权势面前说软话。老周知道这点，所以没有帮他，只拦在门口。`,
+    `“别翻了。”老周低声说。`,
+    `“你怕谁？”`,
+    "老周抬眼。肩上的旧衣湿了一线。那一线水从肩头滑到袖边，像有人刚从雨里抓过他。",
+    `门外的人敲了两下。很轻。${protagonistName}把缺页夹进袖里，吹低灯火。每段都必须推进线索、关系或代价；关系裂缝就在这一息里开了口：老周帮他藏账，也把他卖给了门外的人。`,
+    positiveExample,
+    `纸页贴着掌心发凉。${protagonistName}没有退。他决定先开门。只开半扇。门缝里露出一枚官印，印面倒着“仓曹”两个字。`,
+    "“少尹请你走一趟。”门外的人说。",
+    `“账呢？”`,
+    "“带上。”",
+    `${protagonistName}听见老周在身后吸气。他没回头。他把账册收进怀里，又把缺页留在灯下。那一页空着，却比写满更像证据。`,
+    `巷口的鼓声过了三下。雨没有停。${protagonistName}知道自己只能选一边：交账，老周活；藏页，他自己活。`,
+    "他把门推开。冷风进屋，灯火向后一伏。老周伸手要拦，手到半路又停住。",
+    `“沈砚。”老周第一次叫他的名字，“你不能去。”`,
+    `“我不去，他们会来问你。”`,
+    "老周的脸色灰下去。那不是害怕，是早知道这句话会来。关系到这里已经不能补回原样。",
+    `${protagonistName}跨过门槛。门外脚步让开半步，官印却没有收。雨点打在账册封皮上，墨味从旧线里泛出来。`,
+    `他把缺页留给老周，也把怀疑留在屋里。结尾留下可追踪问题、关系裂缝或线索余波：老周拿着空白证据，少尹拿着整本账，${protagonistName}只剩袖中一行浅墨。`,
+  ]
+  const expansionSeeds = [
+    `廊下的水聚成窄线。${protagonistName}低头看了一眼，水线从老周脚边绕开，说明他站了很久。`,
+    "账册的线装松了一扣。松扣里夹着细小米粒，不是书房里的东西，是仓门口的碎粮。",
+    `老周说话总慢半拍。今天不是慢，是在等门外的人替他开口。${protagonistName}看懂了，只把声音压得更低。`,
+    "灯火照到官印边缘。印泥未干，红色在雨气里发暗。那枚印本不该出现在小吏门前。",
+    `${protagonistName}的短板也在这里。他能算出税册缺口，却算不出一个旧友会在几步之内站到哪边。`,
+    "门外的人不催。权力不急的时候，更像刀背。它贴在颈后，不见血，也不肯离开。",
+    `沈砚合上账册，只问一句：谁动过这一页？这句话落下，屋里三个人都没有再动。`,
+    "雨声更密。屋檐下的黑影向前半寸，又停住。那半寸够了，够把旧信任割开。",
+  ]
+  const paragraphs = [...baseParagraphs]
+  let index = 0
+  while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
+    paragraphs.push(expansionSeeds[index % expansionSeeds.length])
+    index += 1
+  }
+  const body = paragraphs.join("\n\n")
+  return [
+    `# ${title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Target words: ${task.targetWords}`,
+    `- Estimated production words: ${wordCount(body)}`,
+    "- Draft source: deterministic style-contract test fixture",
+    `- Continuity status: ${continuityContract.status}`,
+    `- Locked protagonist: ${continuityContract.lockedProtagonistName || "(first chapter pending)"}`,
+    `- Causal objective: ${causalPlan.sceneObjective}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`,
+  ].join("\n")
 }
 
 async function generateProductionTextWithLlm({
@@ -3726,10 +5909,83 @@ async function generateProductionTextWithLlm({
 interface GlobalContextResult {
   prunedConsensus: string
   prunedOutline: string
+  prunedStoryAssets: string
+  activeWorldSlice: string
   prunedRag: string
   prunedMemory: string
   prunedLedger: string
   previousDraftFragment: string
+}
+
+function createActiveWorldSlice(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  blueprint: string
+  storyAssets: string
+  consensus: string
+  continuityContract: ContinuityContract
+  maxChars?: number
+}) {
+  const causalPlan = getTaskCausalPlan(input.state, input.task)
+  const knownCast = Array.isArray(input.continuityContract.knownCast) ? input.continuityContract.knownCast : []
+  const continuityAnchors = Array.isArray(input.continuityContract.continuityAnchors) ? input.continuityContract.continuityAnchors : []
+  const keywords = uniqueStrings([
+    input.state.project.title,
+    input.state.project.idea,
+    input.continuityContract.lockedProtagonistName,
+    ...knownCast.slice(0, 8),
+    ...continuityAnchors.slice(0, 8),
+    ...causalPlan.requiredContinuityAnchors,
+    ...String(input.task.title || "").match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/gu) || [],
+    ...causalPlan.sceneObjective.match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/gu) || [],
+  ].filter(Boolean).map((item) => String(item).trim()).filter((item) => item.length >= 2))
+  const chapterPatterns = [
+    new RegExp(`第\\s*${input.task.chapterNumber}\\s*章`, "u"),
+    new RegExp(`Chapter\\s*${input.task.chapterNumber}\\b`, "iu"),
+    new RegExp(`\\|\\s*${input.task.chapterNumber}\\s*\\|`, "u"),
+  ]
+  const alwaysRelevant = /Frozen World Rules|Non-Negotiable|Causal Spine|Chapter Causality Matrix|Continuity Anchor|Foreshadowing|Character|Relationship|World|Rule|Pressure|Ledger|主角|配角|人物|关系|世界|规则|设定|伏笔|线索|代价|压力|承接|交棒/u
+  const sources = [
+    ["Story Assets", input.storyAssets],
+    ["Consensus", input.consensus],
+    ["Blueprint", input.blueprint],
+  ] as const
+  const rows: string[] = []
+
+  for (const [label, text] of sources) {
+    const lines = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const picked = lines.filter((line) =>
+      chapterPatterns.some((pattern) => pattern.test(line))
+      || alwaysRelevant.test(line)
+      || keywords.some((keyword) => line.includes(keyword))
+    ).slice(0, 28)
+    if (picked.length) {
+      rows.push(`## ${label}`)
+      rows.push(...picked.map((line) => `- ${line.replace(/^[-#]\s*/u, "")}`))
+    }
+  }
+
+  const fallback = [
+    "## Causal Focus",
+    `- Scene objective: ${causalPlan.sceneObjective}`,
+    `- Required anchors: ${causalPlan.requiredContinuityAnchors.join("、") || "none"}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`,
+  ]
+  const content = [
+    "# Active World Slice",
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter: ${input.task.chapterNumber}`,
+    "",
+    ...(rows.length ? rows : fallback),
+  ].join("\n")
+  const maxChars = input.maxChars || 1600
+  return content.length > maxChars
+    ? `${content.slice(0, maxChars).trimEnd()}\n...[active world slice clipped]`
+    : content
 }
 
 export async function loadAndPruneGlobalContext(params: {
@@ -3745,7 +6001,7 @@ export async function loadAndPruneGlobalContext(params: {
   additionalFixedLength?: number
 }): Promise<GlobalContextResult> {
   const { state, task, blueprint, resources, continuityContract, paths } = params
-  
+
   // 1. 加载上一章正文片段
   let previousDraftFragment = ""
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : ""
@@ -3762,11 +6018,25 @@ export async function loadAndPruneGlobalContext(params: {
     rawOutline = await readOptionalText(paths.masterOutlinePath)
   }
 
+  let rawStoryAssets = ""
+  if (paths) {
+    const storyAssets = await loadProductionStoryAssetContext(paths, task, 1800)
+    rawStoryAssets = storyAssets.prompt
+  }
+
   // 3. 加载共识与设定
   let rawConsensus = ""
   if (paths) {
     rawConsensus = await readOptionalText(paths.consensusPath)
   }
+  const activeWorldSlice = createActiveWorldSlice({
+    state,
+    task,
+    blueprint,
+    storyAssets: rawStoryAssets,
+    consensus: rawConsensus,
+    continuityContract,
+  })
 
   // 4. 加载角色记忆
   let rawMemory = ""
@@ -3801,6 +6071,9 @@ export async function loadAndPruneGlobalContext(params: {
   if (rawMemory.length > 1200) {
     rawMemory = rawMemory.slice(0, 1200) + "\n...[角色与召回记忆超额局部裁剪]"
   }
+  if (rawStoryAssets.length > 1800) {
+    rawStoryAssets = rawStoryAssets.slice(0, 1800) + "\n...[故事资产摘要超额局部裁剪]"
+  }
   if (ledgerList.join("\n").length > 1500) {
     const tempLedger: string[] = []
     let currentLen = 0
@@ -3827,6 +6100,7 @@ export async function loadAndPruneGlobalContext(params: {
   let prunedLedgerList = [...ledgerList]
   let prunedConsensus = rawConsensus
   let prunedOutline = rawOutline
+  let prunedStoryAssets = rawStoryAssets
 
   // --- 阶段 B: 解析共识设定与大纲，获取核心关联块 ---
   // 匹配 blueprint 里的主要实体与动作关键词，确保共识只保留关联块
@@ -3885,7 +6159,7 @@ export async function loadAndPruneGlobalContext(params: {
 
   const getDynamicLength = () => {
     const ledgerText = prunedLedgerList.join("\n")
-    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length
+    return prunedRag.length + prunedMemory.length + ledgerText.length + prunedConsensus.length + prunedOutline.length + prunedStoryAssets.length
   }
 
   // --- 阶段 C: 动态类型优先级裁剪算法 ---
@@ -3894,6 +6168,7 @@ export async function loadAndPruneGlobalContext(params: {
   let wMemory = 4.0
   let wLedger = 3.0
   let wOutline = 2.0
+  let wStoryAssets = 0.8
   let wConsensus = 1.0
 
   if (/案件|线索|疑点|记忆|上一章/i.test(prioritiesText)) {
@@ -3902,9 +6177,11 @@ export async function loadAndPruneGlobalContext(params: {
     wLedger = 1.0
     wConsensus = 4.0
     wOutline = 3.5
+    wStoryAssets = 1.2
   } else if (/境界|功法|世界观|设定|法则|物理/i.test(prioritiesText)) {
-    // 玄幻科幻类：高度偏向保留共识设定边界，优先裁剪历史 RAG 
+    // 玄幻科幻类：高度偏向保留共识设定边界，优先裁剪历史 RAG
     wConsensus = 0.5
+    wStoryAssets = 0.4
     wRag = 5.0
     wMemory = 4.0
   } else if (/关系|情感|创伤|角色/i.test(prioritiesText)) {
@@ -3912,6 +6189,7 @@ export async function loadAndPruneGlobalContext(params: {
     wMemory = 1.0
     wLedger = 2.0
     wConsensus = 4.0
+    wStoryAssets = 1.0
   }
 
   // 动态收缩队列
@@ -3922,6 +6200,7 @@ export async function loadAndPruneGlobalContext(params: {
       prunedLedgerList = val ? val.split("\n") : []
     }, weight: wLedger },
     { name: "Outline", get: () => prunedOutline, set: (val: string) => prunedOutline = val, weight: wOutline },
+    { name: "StoryAssets", get: () => prunedStoryAssets, set: (val: string) => prunedStoryAssets = val, weight: wStoryAssets },
     { name: "Consensus", get: () => prunedConsensus, set: (val: string) => prunedConsensus = val, weight: wConsensus }
   ]
 
@@ -3960,6 +6239,8 @@ export async function loadAndPruneGlobalContext(params: {
   return {
     prunedConsensus,
     prunedOutline,
+    prunedStoryAssets,
+    activeWorldSlice,
     prunedRag,
     prunedMemory,
     prunedLedger: prunedLedgerList.join("\n"),
@@ -3973,6 +6254,10 @@ export async function loadAndPruneGlobalContext(params: {
  */
 function trimBlueprintForDrafting(blueprint: string): string {
   let trimmed = blueprint
+  trimmed = trimmed.replace(
+    /## Chapter Execution Contract\s+```json\s+[\s\S]*?```\s*/u,
+    "## Chapter Execution Contract\n- 结构化场景卡已作为当前片段合同单独注入。\n\n",
+  )
   const carryoverIndex = trimmed.indexOf("## Consensus Carryover")
   if (carryoverIndex > 0) {
     trimmed = trimmed.slice(0, carryoverIndex).trim()
@@ -3982,6 +6267,1282 @@ function trimBlueprintForDrafting(blueprint: string): string {
     trimmed = trimmed.slice(0, vocabIndex).trim()
   }
   return trimmed
+}
+
+function extractJsonArrayAfterKey(text: string, key: string): string {
+  const keyIndex = text.indexOf(`"${key}"`)
+  if (keyIndex < 0) return ""
+  const start = text.indexOf("[", keyIndex)
+  if (start < 0) return ""
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === "\\") {
+        escaped = true
+      } else if (char === "\"") {
+        inString = false
+      }
+      continue
+    }
+    if (char === "\"") {
+      inString = true
+      continue
+    }
+    if (char === "[") {
+      depth += 1
+    } else if (char === "]") {
+      depth -= 1
+      if (depth === 0) {
+        return text.slice(start, index + 1)
+      }
+    }
+  }
+  return ""
+}
+
+function extractSceneCardsFromBlueprint(blueprint: string): DraftSceneCard[] {
+  const sceneCardsJson = extractJsonArrayAfterKey(blueprint, "sceneCards")
+  if (!sceneCardsJson) return []
+  try {
+    const parsed = JSON.parse(sceneCardsJson) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((card: unknown, cardIndex): DraftSceneCard | null => {
+        if (!card || typeof card !== "object") return null
+        const rawCard = card as Record<string, unknown>
+        const requiredCharacters = Array.isArray(rawCard.requiredCharacters)
+          ? rawCard.requiredCharacters.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : []
+        const requiredFacts = Array.isArray(rawCard.requiredFacts)
+          ? rawCard.requiredFacts.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : []
+        const forbiddenFacts = Array.isArray(rawCard.forbiddenFacts)
+          ? rawCard.forbiddenFacts.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : []
+        const goal = String(rawCard.goal || "").trim()
+        const conflict = String(rawCard.conflict || "").trim()
+        const turn = String(rawCard.turn || "").trim()
+        const endHook = String(rawCard.endHook || "").trim()
+        if (!goal && !conflict && !turn && !endHook) return null
+        return {
+          index: Number(rawCard.index) || cardIndex + 1,
+          goal,
+          conflict,
+          turn,
+          endHook,
+          requiredCharacters,
+          requiredFacts,
+          forbiddenFacts,
+        }
+      })
+      .filter((card): card is NonNullable<typeof card> => Boolean(card))
+  } catch {
+    return []
+  }
+}
+
+export function createDraftSegmentPlan(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract = createContinuityContract({ state, task, blueprint: "" }),
+  blueprint = "",
+): DraftSegmentPlan[] {
+  const causalPlan = getTaskCausalPlan(state, task)
+  const targetWords = Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500)
+  const protagonist = continuityContract.lockedProtagonistName || "主角"
+  const anchors = continuityContract.continuityAnchors.length
+    ? continuityContract.continuityAnchors
+    : causalPlan.requiredContinuityAnchors
+  const sceneCards = extractSceneCardsFromBlueprint(blueprint).slice(0, 8)
+  if (sceneCards.length >= 2) {
+    const baseTarget = Math.max(260, Math.floor(targetWords / sceneCards.length))
+    return sceneCards.map((card, index) => ({
+      index: index + 1,
+      total: sceneCards.length,
+      label: `场景卡 ${card.index}`,
+      timelinePosition: `按章节任务单推进第 ${card.index} 个场景`,
+      narrativeFocus: [
+        card.goal ? `目标：${card.goal}` : "",
+        card.conflict ? `冲突：${card.conflict}` : "",
+        card.turn ? `转折：${card.turn}` : "",
+      ].filter(Boolean).join("；") || `${protagonist}必须在本场景中完成一次可见推进。`,
+      requiredBeats: [
+        card.goal ? `Scene Goal 落地：${card.goal}` : "",
+        card.conflict ? `Scene Conflict 必须写成现场压力：${card.conflict}` : "",
+        card.turn ? `Scene Turn 必须改变局面：${card.turn}` : "",
+        card.endHook ? `Scene End Hook 收束到：${card.endHook}` : "",
+        card.requiredCharacters.length ? `Required Characters: ${card.requiredCharacters.join("、")}` : "",
+        card.requiredFacts.length ? `Required Facts: ${card.requiredFacts.join("、")}` : "",
+        card.forbiddenFacts.length ? `Forbidden Facts 不得泄露：${card.forbiddenFacts.join("、")}` : "",
+      ].filter(Boolean),
+      continuityFocus: [...new Set([...card.requiredFacts, ...anchors.slice(index, index + 2)])],
+      targetWords: index === sceneCards.length - 1
+        ? Math.max(240, targetWords - baseTarget * (sceneCards.length - 1))
+        : baseTarget,
+      source: "scene_card",
+      sceneCard: card,
+    }))
+  }
+
+  const segmentCount = Math.min(6, Math.max(4, Math.round(targetWords / 650)))
+  const baseSegments: Array<Omit<DraftSegmentPlan, "index" | "total" | "targetWords">> = [
+    {
+      label: "开场承接",
+      timelinePosition: "本章开场，紧接上一章余波",
+      narrativeFocus: `让${protagonist}在具体场景里碰到上一章留下的问题，先写动作和压力，再写判断。`,
+      requiredBeats: [
+        `Previous Input 落地：${causalPlan.previousInput}`,
+        "用物件、声音、气味或身体反应建立第一场冲突。",
+      ],
+      continuityFocus: anchors.slice(0, 2),
+    },
+    {
+      label: "压力升级",
+      timelinePosition: "开场之后，矛盾从外部压力进入人物关系",
+      narrativeFocus: "让旁白贴近现场，推动配角立场、误会、试探或威胁显形。",
+      requiredBeats: [
+        `Causal Objective 开始被事件推进：${causalPlan.sceneObjective}`,
+        "至少让一名配角通过称呼、停顿、动作或利益选择表现差异。",
+      ],
+      continuityFocus: anchors.slice(1, 4),
+    },
+    {
+      label: "主角决策",
+      timelinePosition: "中段转折，主角必须主动选择",
+      narrativeFocus: `${protagonist}不能只旁观，必须用可见行动改变局势，并暴露能力边界或短板。`,
+      requiredBeats: [
+        `Protagonist Decision 写成行动：${causalPlan.protagonistDecision}`,
+        `Character State Delta 必须出现：${causalPlan.characterStateDelta}`,
+      ],
+      continuityFocus: anchors.slice(2, 5),
+    },
+    {
+      label: "不可逆后果",
+      timelinePosition: "高潮或临近章末，选择带来代价",
+      narrativeFocus: "写出反击、兑现、暴露、损失或关系裂缝，不用解释总结代替事件。",
+      requiredBeats: [
+        `Irreversible Change 成为事实：${causalPlan.irreversibleConsequence}`,
+        `Foreshadowing Operation 推进或回收：${causalPlan.foreshadowingOperation}`,
+      ],
+      continuityFocus: anchors.slice(3, 6),
+    },
+    {
+      label: "章末交接",
+      timelinePosition: "章末余波，留下下一章必须处理的具体问题",
+      narrativeFocus: "收住本章局部结果，保留一个具体画面、线索或关系压力交给下一章。",
+      requiredBeats: [
+        `Next Chapter Handoff 自然产生：${causalPlan.nextHandoff}`,
+        "不要把答案讲完，最后一段必须有可追踪的画面或物件。",
+      ],
+      continuityFocus: anchors.slice(-3),
+    },
+  ]
+
+  const selected = segmentCount <= 4
+    ? [baseSegments[0], baseSegments[1], baseSegments[2], baseSegments[4]]
+    : baseSegments.slice(0, segmentCount)
+  const baseTarget = Math.max(260, Math.floor(targetWords / selected.length))
+  return selected.map((segment, index) => ({
+    ...segment,
+    index: index + 1,
+    total: selected.length,
+    targetWords: index === selected.length - 1
+      ? Math.max(240, targetWords - baseTarget * (selected.length - 1))
+      : baseTarget,
+    source: "timeline",
+  }))
+}
+
+export function createDraftSegmentCompositionPlan(
+  segment: DraftSegmentPlan,
+  continuityContract: ContinuityContract,
+): DraftSegmentCompositionPlan {
+  const sceneCard = segment.sceneCard
+  const continuityFocus = segment.continuityFocus.length
+    ? segment.continuityFocus
+    : continuityContract.continuityAnchors.slice(0, 3)
+  const protagonist = continuityContract.lockedProtagonistName || "主角"
+  return {
+    plot: [
+      sceneCard?.goal || segment.narrativeFocus,
+      sceneCard?.conflict || "把压力写成现场事件，而不是解释性概述。",
+      sceneCard?.turn || "让本片段至少发生一次可见局面变化。",
+      sceneCard?.endHook || "以具体问题、物件、关系压力或未完成动作收束。",
+    ].filter(Boolean),
+    narration: [
+      "旁白只服务现场推进、感官落点和角色选择，不提前解释后续真相。",
+      "先写物件、动作、声音、气味或身体反应，再给极少量判断。",
+      "每段至少有一个可见动作或可追踪物件，避免纯心理总结。",
+    ],
+    dialogue: [
+      "对白必须短、有压力，并体现关系或利益，不用对白解释世界观背景。",
+      "每个重要说话者至少带一个称呼、停顿、动作或语气差异。",
+      sceneCard?.requiredCharacters.length
+        ? `对白优先服务这些角色：${sceneCard.requiredCharacters.join("、")}。`
+        : `对白必须围绕${protagonist}的选择和现场压力展开。`,
+    ],
+    characterAction: [
+      continuityContract.lockedProtagonistName
+        ? `${continuityContract.lockedProtagonistName}必须通过行动、感知或选择推进本片段。`
+        : "首章必须建立唯一可追踪主角姓名，并保持主视角聚焦。",
+      "重要配角不能只贴性格标签，必须用动作、称呼、习惯或利益选择呈现。",
+      "至少让一个角色的欲望、短板、关系状态或风险代价露出痕迹。",
+    ],
+    continuity: [
+      ...continuityFocus.map((item) => `必须自然命中连续性锚点：${item}`),
+      sceneCard?.forbiddenFacts.length ? `不得泄露：${sceneCard.forbiddenFacts.join("、")}` : "",
+      "不得新增与本片段目标无关的主线真相、幕后身份或未冻结世界规则。",
+    ].filter(Boolean),
+    assemblyRules: [
+      "组装顺序建议：现场锚点 -> 压力/对白 -> 主角动作选择 -> 转折后果 -> 片段钩子。",
+      "对话、动作、旁白必须交错，不要连续输出设定说明或讨论式段落。",
+      "本片段只能完成当前 segment contract，不提前写完后续 segment。",
+      "最终片段要能和上一片段尾巴自然衔接，并给下一片段留下可承接状态。",
+    ],
+  }
+}
+
+function formatChapterContextPackage(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  genre: ReturnType<typeof inferGenreProfile>
+  sceneType: string
+  writingMode: ProductionWritingMode
+  segmentPlan: DraftSegmentPlan[]
+  continuityContract: ContinuityContract
+  characterProfileContract: CharacterProfileContract
+  approvedStyleContext: ApprovedWritingStyleContext
+  prunedContext: GlobalContextResult
+  trimmedBlueprint: string
+  basePromptText: string
+  fixedDynamicPromptText: string
+  cappedVocabularyPrompt: string
+  cappedVocabularySkillExamples: string
+  cappedResourceManifest: string
+}): string {
+  const causalPlan = getTaskCausalPlan(input.state, input.task)
+  const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card")
+    ? "scene_card"
+    : "timeline"
+  const budgetRows = [
+    ["basePrompt", input.basePromptText.length],
+    ["fixedDynamicPrompt", input.fixedDynamicPromptText.length],
+    ["chapterGuardrails", input.trimmedBlueprint.length],
+    ["activeWorldSlice", input.prunedContext.activeWorldSlice.length],
+    ["storyAssets", input.prunedContext.prunedStoryAssets.length],
+    ["consensus", input.prunedContext.prunedConsensus.length],
+    ["outline", input.prunedContext.prunedOutline.length],
+    ["memory", input.prunedContext.prunedMemory.length],
+    ["ledger", input.prunedContext.prunedLedger.length],
+    ["rag", input.prunedContext.prunedRag.length],
+    ["previousTail", input.prunedContext.previousDraftFragment.length],
+    ["vocabularyPrompt", input.cappedVocabularyPrompt.length],
+    ["skillExamples", input.cappedVocabularySkillExamples.length],
+    ["resourceManifest", input.cappedResourceManifest.length],
+    ["approvedStyle", input.approvedStyleContext.prompt.length],
+    ["continuityContract", input.continuityContract.prompt.length],
+    ["characterProfileContract", input.characterProfileContract.prompt.length],
+  ]
+  const segmentRows = input.segmentPlan.map((segment) => [
+    `### Segment ${segment.index}/${segment.total}: ${segment.label}`,
+    `- Source: ${segment.source || "timeline"}`,
+    `- Target words: ${segment.targetWords}`,
+    `- Timeline: ${segment.timelinePosition}`,
+    `- Focus: ${segment.narrativeFocus}`,
+    segment.continuityFocus.length ? `- Continuity focus: ${segment.continuityFocus.join("、")}` : "",
+    segment.sceneCard?.requiredCharacters.length ? `- Required characters: ${segment.sceneCard.requiredCharacters.join("、")}` : "",
+    segment.sceneCard?.requiredFacts.length ? `- Required facts: ${segment.sceneCard.requiredFacts.join("、")}` : "",
+    segment.sceneCard?.forbiddenFacts.length ? `- Forbidden facts: ${segment.sceneCard.forbiddenFacts.join("、")}` : "",
+    "- Required beats:",
+    ...segment.requiredBeats.map((beat) => `  - ${beat}`),
+  ].filter(Boolean).join("\n"))
+  const compositionRows = input.segmentPlan.map((segment) => {
+    const composition = createDraftSegmentCompositionPlan(segment, input.continuityContract)
+    return [
+      `### Segment ${segment.index}/${segment.total}: ${segment.label}`,
+      "#### Plot",
+      ...composition.plot.map((item) => `- ${item}`),
+      "#### Narration",
+      ...composition.narration.map((item) => `- ${item}`),
+      "#### Dialogue",
+      ...composition.dialogue.map((item) => `- ${item}`),
+      "#### Character Action",
+      ...composition.characterAction.map((item) => `- ${item}`),
+      "#### Continuity",
+      ...composition.continuity.map((item) => `- ${item}`),
+      "#### Assembly Rules",
+      ...composition.assemblyRules.map((item) => `- ${item}`),
+    ].join("\n")
+  })
+
+  return [
+    "# Chapter Context Package",
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter: ${input.task.chapterNumber}`,
+    `Title: ${input.task.title}`,
+    `Writing mode: ${input.writingMode}`,
+    `Genre: ${input.genre.genre}`,
+    `Scene type: ${input.sceneType}`,
+    `Segmentation source: ${segmentationSource}`,
+    `Generated at: ${new Date().toISOString()}`,
+    "",
+    "## Prompt Budget",
+    "| Section | Chars |",
+    "|---|---:|",
+    ...budgetRows.map(([label, value]) => `| ${label} | ${value} |`),
+    "",
+    "## Chapter Causal Plan",
+    `- Previous Input: ${causalPlan.previousInput}`,
+    `- Causal Objective: ${causalPlan.sceneObjective}`,
+    `- Protagonist Decision: ${causalPlan.protagonistDecision}`,
+    `- Irreversible Change: ${causalPlan.irreversibleConsequence}`,
+    `- Character State Delta: ${causalPlan.characterStateDelta}`,
+    `- Foreshadowing Operation: ${causalPlan.foreshadowingOperation}`,
+    `- Next Chapter Handoff: ${causalPlan.nextHandoff}`,
+    `- Required Continuity Anchors: ${causalPlan.requiredContinuityAnchors.join("、") || "none"}`,
+    "",
+    "## Segment Plan",
+    ...segmentRows,
+    "",
+    "## Segment Composition Plans",
+    ...compositionRows,
+    "",
+    "## Approved Style Contract",
+    input.approvedStyleContext.prompt || "(missing)",
+    "",
+    "## Active World Slice",
+    input.prunedContext.activeWorldSlice || "(empty)",
+    "",
+    "## Story Assets",
+    input.prunedContext.prunedStoryAssets || "(empty)",
+    "",
+    "## Consensus And Setting Freeze",
+    input.prunedContext.prunedConsensus || "(empty)",
+    "",
+    "## Character Memory",
+    input.prunedContext.prunedMemory || "(empty)",
+    "",
+    "## Previous Chapter Ledger",
+    input.prunedContext.prunedLedger || "(empty)",
+    "",
+    "## Knowledge/RAG References",
+    input.prunedContext.prunedRag || "(empty)",
+    "",
+    "## Continuity Contract",
+    input.continuityContract.prompt,
+    "",
+    "## Character Profile Contract",
+    input.characterProfileContract.prompt.slice(0, 2400),
+    "",
+    "## Chapter Guardrails",
+    input.trimmedBlueprint,
+  ].join("\n")
+}
+
+async function writeChapterContextPackage(input: {
+  projectRoot: string
+  paths: NovelWorkspacePaths
+  options: ProductionPipelineOptions
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  genre: ReturnType<typeof inferGenreProfile>
+  sceneType: string
+  writingMode: ProductionWritingMode
+  segmentPlan: DraftSegmentPlan[]
+  continuityContract: ContinuityContract
+  characterProfileContract: CharacterProfileContract
+  approvedStyleContext: ApprovedWritingStyleContext
+  prunedContext: GlobalContextResult
+  trimmedBlueprint: string
+  basePromptText: string
+  fixedDynamicPromptText: string
+  cappedVocabularyPrompt: string
+  cappedVocabularySkillExamples: string
+  cappedResourceManifest: string
+}): Promise<ChapterContextPackageInfo | null> {
+  const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`
+  const checkpointsRoot = path.join(input.paths.workspaceDir, "checkpoints")
+  const contextDir = path.join(checkpointsRoot, "chapter-contexts")
+  const contextPath = path.join(contextDir, `${chapterId}-context.md`)
+  const activeWorldSliceDir = path.join(checkpointsRoot, "active-world-slices")
+  const activeWorldSlicePath = path.join(activeWorldSliceDir, `${chapterId}-world-slice.md`)
+  await fs.mkdir(contextDir, { recursive: true })
+  await fs.mkdir(activeWorldSliceDir, { recursive: true })
+  const content = formatChapterContextPackage(input)
+  await fs.writeFile(contextPath, `${content.trimEnd()}\n`)
+  await fs.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}\n`)
+  const relativePath = relativeArtifactPath(input.projectRoot, contextPath)
+  const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card")
+    ? "scene_card"
+    : "timeline"
+  await recordPipelineArtifact(input.projectRoot, contextPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_context_package",
+    segmentationSource,
+    segmentCount: input.segmentPlan.length,
+    promptBudget: {
+      basePromptChars: input.basePromptText.length,
+      fixedDynamicPromptChars: input.fixedDynamicPromptText.length,
+      guardrailsChars: input.trimmedBlueprint.length,
+      activeWorldSliceChars: input.prunedContext.activeWorldSlice.length,
+      storyAssetsChars: input.prunedContext.prunedStoryAssets.length,
+      consensusChars: input.prunedContext.prunedConsensus.length,
+      memoryChars: input.prunedContext.prunedMemory.length,
+      ledgerChars: input.prunedContext.prunedLedger.length,
+      ragChars: input.prunedContext.prunedRag.length,
+    },
+  })
+  await recordPipelineArtifact(input.projectRoot, activeWorldSlicePath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "active_world_slice",
+    chars: input.prunedContext.activeWorldSlice.length,
+  })
+  return {
+    path: contextPath,
+    relativePath,
+    promptBudget: {
+      basePromptChars: input.basePromptText.length,
+      fixedDynamicPromptChars: input.fixedDynamicPromptText.length,
+      guardrailsChars: input.trimmedBlueprint.length,
+      activeWorldSliceChars: input.prunedContext.activeWorldSlice.length,
+      storyAssetsChars: input.prunedContext.prunedStoryAssets.length,
+      consensusChars: input.prunedContext.prunedConsensus.length,
+      memoryChars: input.prunedContext.prunedMemory.length,
+      ledgerChars: input.prunedContext.prunedLedger.length,
+      ragChars: input.prunedContext.prunedRag.length,
+    },
+    segmentCount: input.segmentPlan.length,
+    segmentationSource,
+  }
+}
+
+function formatSegmentBriefArtifact(input: {
+  title: string
+  kind: DraftSegmentSubArtifactInfo["kind"]
+  items: string[]
+  segment: DraftSegmentPlan
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  promptBudgetChars: number
+  executionPrompt: string[]
+  generatedBody?: string
+}): string {
+  const roleLabel = input.kind
+    .replace("character_action", "character action")
+    .replace("_", " ")
+  return [
+    `# ${input.title}`,
+    "",
+    `Chapter: ${input.task.chapterNumber}`,
+    `Segment: ${input.segment.index}/${input.segment.total}`,
+    `Kind: ${input.kind}`,
+    `Label: ${input.segment.label}`,
+    `Timeline: ${input.segment.timelinePosition}`,
+    `Target words: ${input.segment.targetWords}`,
+    `Suggested prompt budget: ${input.promptBudgetChars} chars`,
+    "",
+    "## Brief",
+    ...input.items.map((item) => `- ${item}`),
+    "",
+    "## LLM Execution Prompt",
+    `你是本片段的 ${roleLabel} 子任务执行器。`,
+    "只处理本 brief 覆盖的职责，不扩写完整章节，不提前泄露后续剧情。",
+    ...input.executionPrompt.map((line) => `- ${line}`),
+    "",
+    "## Expected Output Contract",
+    "- 返回可被组装器使用的正文素材或约束清单。",
+    "- 不要输出解释、计划标题、Markdown 表格或与本片段无关的世界观补充。",
+    "- 必须服从 Segment Focus、Required Beats 和连续性约束。",
+    "",
+    "## Segment Focus",
+    input.segment.narrativeFocus,
+    "",
+    input.segment.requiredBeats.length
+      ? ["## Required Beats", ...input.segment.requiredBeats.map((beat) => `- ${beat}`)].join("\n")
+      : "",
+    "",
+    input.generatedBody ? `## Assembled Segment Body\n${input.generatedBody.trim()}` : "",
+  ].filter(Boolean).join("\n")
+}
+
+function formatSegmentMaterialArtifact(input: {
+  title: string
+  kind: DraftSegmentSubArtifactInfo["kind"]
+  items: string[]
+  segment: DraftSegmentPlan
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  generatedBody: string
+}): string {
+  const bodyPreview = input.generatedBody.trim().slice(0, 1800)
+  const materialLabel = input.kind
+    .replace("character_action", "character action")
+    .replace("_", " ")
+  return [
+    `# ${input.title.replace("Brief", "Material")}`,
+    "",
+    `Chapter: ${input.task.chapterNumber}`,
+    `Segment: ${input.segment.index}/${input.segment.total}`,
+    `Kind: ${input.kind}`,
+    `Material mode: deterministic-placeholder`,
+    "",
+    "## Source Brief",
+    ...input.items.map((item) => `- ${item}`),
+    "",
+    "## Material Contract",
+    `- This file is the ${materialLabel} result slot for future per-part LLM execution.`,
+    "- 当前版本使用确定性占位内容，不额外调用模型。",
+    "- 后续可以把本文件的生成替换为对应 brief 的独立模型调用。",
+    "",
+    "## Deterministic Material",
+    input.kind === "assembly"
+      ? "当前组装结果直接引用已生成片段正文；未来会由多类素材组装生成。"
+      : `当前 ${materialLabel} 素材来自组合计划和已生成片段摘要，用于占位和审计。`,
+    "",
+    "## Segment Body Reference",
+    bodyPreview || "(empty)",
+  ].join("\n")
+}
+
+async function writeDraftSegmentSubArtifacts(input: {
+  projectRoot: string
+  options: ProductionPipelineOptions
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  segmentDir: string
+  composition: DraftSegmentCompositionPlan
+  generatedBody: string
+  materialOverrides?: Partial<Record<DraftSegmentSubArtifactInfo["kind"], string>>
+}): Promise<DraftSegmentSubArtifactInfo[]> {
+  const briefs: Array<{
+    kind: DraftSegmentSubArtifactInfo["kind"]
+    filename: string
+    materialFilename: string
+    title: string
+    items: string[]
+    promptBudgetChars: number
+    executionPrompt: string[]
+    body?: string
+  }> = [
+    {
+      kind: "plot",
+      filename: "brief-plot.md",
+      materialFilename: "material-plot.md",
+      title: "Plot Turn Brief",
+      items: input.composition.plot,
+      promptBudgetChars: 1200,
+      executionPrompt: [
+        "把本片段的现场压力、选择、转折和钩子压成 3-5 个可执行情节拍点。",
+        "每个拍点必须能被写成动作、对白或物件变化。",
+        "不要新增幕后真相，只明确本片段内部因果。",
+      ],
+    },
+    {
+      kind: "narration",
+      filename: "brief-narration.md",
+      materialFilename: "material-narration.md",
+      title: "Narration Brief",
+      items: input.composition.narration,
+      promptBudgetChars: 1600,
+      executionPrompt: [
+        "生成本片段可用的旁白素材，优先写物件、声音、触感、空间移动和身体反应。",
+        "旁白必须贴近当前视角，不总结未来，不解释谜底。",
+        "输出应能穿插到对白和动作之间，而不是整段说明。",
+      ],
+    },
+    {
+      kind: "dialogue",
+      filename: "brief-dialogue.md",
+      materialFilename: "material-dialogue.md",
+      title: "Dialogue Brief",
+      items: input.composition.dialogue,
+      promptBudgetChars: 1400,
+      executionPrompt: [
+        "生成本片段可用的短对白素材，每句对白都要带现场压力或关系信息。",
+        "每个说话者用称呼、停顿、动作或语气区分，不要同一种解释腔。",
+        "对白不要承担大段设定说明。",
+      ],
+    },
+    {
+      kind: "character_action",
+      filename: "brief-character-action.md",
+      materialFilename: "material-character-action.md",
+      title: "Character Action Brief",
+      items: input.composition.characterAction,
+      promptBudgetChars: 1400,
+      executionPrompt: [
+        "列出主角和关键配角在本片段必须发生的可见行动。",
+        "行动要暴露欲望、短板、风险代价或关系变化。",
+        "不要只写心理标签，必须落到手、眼、步伐、物件处理或具体选择。",
+      ],
+    },
+    {
+      kind: "continuity",
+      filename: "brief-continuity.md",
+      materialFilename: "material-continuity.md",
+      title: "Continuity Brief",
+      items: input.composition.continuity,
+      promptBudgetChars: 1000,
+      executionPrompt: [
+        "提炼本片段必须命中的连续性锚点、禁写事实和不可新增信息。",
+        "只保留会影响本片段生成的硬约束。",
+        "输出要能作为组装前的检查清单。",
+      ],
+    },
+    {
+      kind: "assembly",
+      filename: "brief-assembly.md",
+      materialFilename: "material-assembly.md",
+      title: "Assembly Brief",
+      items: input.composition.assemblyRules,
+      promptBudgetChars: 1800,
+      executionPrompt: [
+        "根据情节、旁白、对白、动作和连续性素材组装为一个连续正文片段。",
+        "正文必须动作、对白、旁白交错，不输出子任务痕迹。",
+        "结尾给下一片段留下可承接状态。",
+      ],
+      body: input.generatedBody,
+    },
+  ]
+
+  const written: DraftSegmentSubArtifactInfo[] = []
+  for (const brief of briefs) {
+    const briefPath = path.join(input.segmentDir, brief.filename)
+    const content = formatSegmentBriefArtifact({
+      title: brief.title,
+      kind: brief.kind,
+      items: brief.items,
+      segment: input.segment,
+      task: input.task,
+      promptBudgetChars: brief.promptBudgetChars,
+      executionPrompt: brief.executionPrompt,
+      generatedBody: brief.body,
+    })
+    await fs.writeFile(briefPath, `${content.trimEnd()}\n`)
+    const relativePath = relativeArtifactPath(input.projectRoot, briefPath)
+    await recordPipelineArtifact(input.projectRoot, briefPath, "checkpoint", input.options, {
+      chapterNumber: input.task.chapterNumber,
+      kind: "chapter_draft_segment_brief",
+      segmentIndex: input.segment.index,
+      segmentTotal: input.segment.total,
+      briefKind: brief.kind,
+      chars: content.length,
+    })
+    written.push({
+      kind: brief.kind,
+      role: "brief",
+      path: briefPath,
+      relativePath,
+      chars: content.length,
+    })
+    const materialPath = path.join(input.segmentDir, brief.materialFilename)
+    const override = input.materialOverrides?.[brief.kind]?.trim()
+    const materialContent = override
+      ? [
+          `# ${brief.title.replace("Brief", "Material")}`,
+          "",
+          `Chapter: ${input.task.chapterNumber}`,
+          `Segment: ${input.segment.index}/${input.segment.total}`,
+          `Kind: ${brief.kind}`,
+          `Material mode: llm-subcall`,
+          "",
+          "## Source Brief",
+          ...brief.items.map((item) => `- ${item}`),
+          "",
+          "## LLM Material",
+          override,
+        ].join("\n")
+      : formatSegmentMaterialArtifact({
+          title: brief.title,
+          kind: brief.kind,
+          items: brief.items,
+          segment: input.segment,
+          task: input.task,
+          generatedBody: input.generatedBody,
+        })
+    await fs.writeFile(materialPath, `${materialContent.trimEnd()}\n`)
+    const materialRelativePath = relativeArtifactPath(input.projectRoot, materialPath)
+    await recordPipelineArtifact(input.projectRoot, materialPath, "checkpoint", input.options, {
+      chapterNumber: input.task.chapterNumber,
+      kind: "chapter_draft_segment_material",
+      segmentIndex: input.segment.index,
+      segmentTotal: input.segment.total,
+      materialKind: brief.kind,
+      chars: materialContent.length,
+      mode: override ? "llm-subcall" : "deterministic-placeholder",
+    })
+    written.push({
+      kind: brief.kind,
+      role: "material",
+      path: materialPath,
+      relativePath: materialRelativePath,
+      chars: materialContent.length,
+    })
+  }
+  return written
+}
+
+async function generateDraftSegmentDialogueMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("dialogue")) {
+    return null
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Dialogue",
+    state: input.state,
+    options: input.options,
+    temperature: 0.55,
+    progress: {
+      step: `draft_dialogue_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Dialogue 正在生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的对白素材。`,
+      completeMessage: `Dialogue 已生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的对白素材。`,
+    },
+    basePrompt: [
+      "你是小说片段对白素材生成器。",
+      "只生成本片段可供组装器使用的对白素材，不写完整章节。",
+      "对白必须短、有压力，并体现关系、利益或现场选择。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Dialogue Brief",
+      ...input.composition.dialogue.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      "输出要求：只返回 4-8 条可用对白素材；可以附极短动作提示；不要解释设定；不要写标题。",
+    ].filter(Boolean).join("\n"),
+    message: "请生成当前片段的对白素材，供后续 assembly 组装使用。",
+  })
+}
+
+async function generateDraftSegmentPlotMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("plot")) {
+    return null
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Plot Turn",
+    state: input.state,
+    options: input.options,
+    temperature: 0.45,
+    progress: {
+      step: `draft_plot_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Plot Turn 正在生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的情节拍点素材。`,
+      completeMessage: `Plot Turn 已生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的情节拍点素材。`,
+    },
+    basePrompt: [
+      "你是小说片段情节拍点素材生成器。",
+      "只生成本片段可供组装器使用的情节拍点，不写完整章节。",
+      "每个拍点必须包含现场压力、人物选择、转折后果或片段钩子。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Plot Brief",
+      ...input.composition.plot.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      "输出要求：只返回 3-5 个可执行情节拍点；每个拍点能落到动作、对白或物件变化；不要写标题。",
+    ].filter(Boolean).join("\n"),
+    message: "请生成当前片段的情节拍点素材，供后续 assembly 组装使用。",
+  })
+}
+
+async function generateDraftSegmentNarrationMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("narration")) {
+    return null
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Narration",
+    state: input.state,
+    options: input.options,
+    temperature: 0.58,
+    progress: {
+      step: `draft_narration_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Narration 正在生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的旁白素材。`,
+      completeMessage: `Narration 已生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的旁白素材。`,
+    },
+    basePrompt: [
+      "你是小说片段旁白素材生成器。",
+      "只生成本片段可供组装器使用的旁白素材，不写完整章节。",
+      "旁白必须贴近视角，用物件、声音、触感、空间移动和身体反应推动场景。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Narration Brief",
+      ...input.composition.narration.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      "输出要求：只返回 3-6 条可穿插旁白素材；不要总结未来；不要解释设定；不要写标题。",
+    ].filter(Boolean).join("\n"),
+    message: "请生成当前片段的旁白素材，供后续 assembly 组装使用。",
+  })
+}
+
+async function generateDraftSegmentCharacterActionMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("character_action")) {
+    return null
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Character Action",
+    state: input.state,
+    options: input.options,
+    temperature: 0.52,
+    progress: {
+      step: `draft_character_action_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Character Action 正在生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的人物行动素材。`,
+      completeMessage: `Character Action 已生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的人物行动素材。`,
+    },
+    basePrompt: [
+      "你是小说片段人物行动素材生成器。",
+      "只生成本片段可供组装器使用的人物行动素材，不写完整章节。",
+      "行动必须可见、具体，并暴露欲望、短板、风险代价或关系变化。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Character Action Brief",
+      ...input.composition.characterAction.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      "输出要求：只返回 4-8 条人物行动素材；每条必须落到手、眼、步伐、物件处理或具体选择；不要写标题。",
+    ].filter(Boolean).join("\n"),
+    message: "请生成当前片段的人物行动素材，供后续 assembly 组装使用。",
+  })
+}
+
+async function generateDraftSegmentContinuityMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("continuity")) {
+    return null
+  }
+  return generateProductionTextWithLlm({
+    roleName: "Continuity",
+    state: input.state,
+    options: input.options,
+    temperature: 0.2,
+    progress: {
+      step: `draft_continuity_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Continuity 正在生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的连续性素材。`,
+      completeMessage: `Continuity 已生成第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的连续性素材。`,
+    },
+    basePrompt: [
+      "你是小说片段连续性素材生成器。",
+      "只生成本片段组装前必须遵守的连续性清单，不写完整章节。",
+      "必须明确必写锚点、禁写事实、不能提前泄露的内容和片段结束状态。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Continuity Brief",
+      ...input.composition.continuity.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      "输出要求：只返回检查清单；包含 must-hit、must-not-write、handoff-state 三类；不要写标题。",
+    ].filter(Boolean).join("\n"),
+    message: "请生成当前片段的连续性检查素材，供后续 assembly 组装使用。",
+  })
+}
+
+async function generateDraftSegmentAssemblyMaterial(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  composition: DraftSegmentCompositionPlan
+  options: ProductionPipelineOptions
+  previousSegmentTail: string
+  materials: Partial<Record<DraftSegmentSubArtifactInfo["kind"], string>>
+  fallbackBody: string
+}): Promise<string | null> {
+  if (!input.options.draftSubcallRoles?.includes("assembly")) {
+    return null
+  }
+  const materialBlock = (kind: DraftSegmentSubArtifactInfo["kind"], content?: string) =>
+    content?.trim()
+      ? [`## ${kind} material`, content.trim()].join("\n")
+      : ""
+  return generateProductionTextWithLlm({
+    roleName: "Assembly",
+    state: input.state,
+    options: input.options,
+    temperature: 0.64,
+    progress: {
+      step: `draft_assembly_material_segment_${input.segment.index}`,
+      role: "Author",
+      chapterNumber: input.task.chapterNumber,
+      title: input.task.title,
+      startMessage: `Assembly 正在组装第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的候选正文。`,
+      completeMessage: `Assembly 已组装第 ${input.task.chapterNumber} 章片段 ${input.segment.index}/${input.segment.total} 的候选正文。`,
+    },
+    basePrompt: [
+      "你是小说片段组装器。",
+      "根据情节、旁白、对白、人物行动和连续性素材，组装为一个连续正文片段。",
+      "只输出小说正文，不输出标题、解释、清单或 Markdown。",
+    ].join("\n"),
+    dynamicPrompt: [
+      `章节：第 ${input.task.chapterNumber} 章`,
+      `标题：${input.task.title}`,
+      `片段：${input.segment.index}/${input.segment.total} ${input.segment.label}`,
+      `时间线：${input.segment.timelinePosition}`,
+      `片段目标字数：${input.segment.targetWords}`,
+      `片段焦点：${input.segment.narrativeFocus}`,
+      "",
+      "## Assembly Rules",
+      ...input.composition.assemblyRules.map((item) => `- ${item}`),
+      "",
+      "## Required Beats",
+      ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+      "",
+      input.previousSegmentTail ? `## Previous Tail\n${input.previousSegmentTail}` : "",
+      "",
+      materialBlock("plot", input.materials.plot),
+      "",
+      materialBlock("narration", input.materials.narration),
+      "",
+      materialBlock("dialogue", input.materials.dialogue),
+      "",
+      materialBlock("character_action", input.materials.character_action),
+      "",
+      materialBlock("continuity", input.materials.continuity),
+      "",
+      input.fallbackBody ? `## Existing Author Segment For Reference\n${clipPromptSection(input.fallbackBody, 1400)}` : "",
+      "",
+      "输出要求：只返回连续小说正文；动作、对白、旁白必须交错；不得提前写后续片段；不得泄露 continuity 禁写事实。",
+    ].filter(Boolean).join("\n"),
+    message: "请根据分项素材组装当前片段候选正文，只返回小说正文。",
+  })
+}
+
+function cleanDraftAssemblyBody(text = "") {
+  return text
+    .replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1")
+    .replace(/^#+\s+.*$/gmu, "")
+    .replace(/^(片段|Segment)\s*\d+[\s\S]*?\n/iu, "")
+    .trim()
+}
+
+function isUsableDraftAssemblyBody(text = "", fallbackBody = "") {
+  const normalized = text.trim()
+  const fallbackLength = fallbackBody.trim().length
+  const minimumLength = fallbackLength > 0 ? Math.min(24, Math.max(8, Math.floor(fallbackLength * 0.08))) : 8
+  if (normalized.length < minimumLength) {
+    return false
+  }
+  if (!/[。！？!?」”]/u.test(normalized)) {
+    return false
+  }
+  if (/^\s*[{[]/u.test(normalized)) {
+    return false
+  }
+  const lines = normalized.split(/\n+/u).map((line) => line.trim()).filter(Boolean)
+  const listLikeLines = lines.filter((line) => /^([-*]|\d+[.)、]|must-|##|#|```)/iu.test(line)).length
+  if (lines.length > 0 && listLikeLines / lines.length > 0.4) {
+    return false
+  }
+  if (/^(以下|下面|这里|这是|根据|组装|候选正文|输出|正文如下)[:：]/u.test(normalized)) {
+    return false
+  }
+  if (/^(我将|我会|可以|无法|不能|抱歉|作为|说明|分析)/u.test(normalized)) {
+    return false
+  }
+  return true
+}
+
+async function writeDraftSegmentManifest(input: {
+  projectRoot: string
+  options: ProductionPipelineOptions
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  segmentDir: string
+  segmentPath: string
+  segmentRelativePath: string
+  subArtifacts: DraftSegmentSubArtifactInfo[]
+  segmentationSource: "scene_card" | "timeline"
+  materialModes?: Partial<Record<DraftSegmentSubArtifactInfo["kind"], "deterministic-placeholder" | "llm-subcall">>
+  assemblyUsage?: DraftSegmentAssemblyUsage
+  chars: number
+}): Promise<{ path: string; relativePath: string }> {
+  const manifestPath = path.join(input.segmentDir, "segment-manifest.json")
+  const byKind = input.subArtifacts.reduce<Record<string, { brief?: string; material?: string }>>((acc, artifact) => {
+    const current = acc[artifact.kind] || {}
+    current[artifact.role] = artifact.relativePath
+    acc[artifact.kind] = current
+    return acc
+  }, {})
+  const manifest = {
+    version: 1,
+    mode: Object.values(input.materialModes || {}).some((mode) => mode === "llm-subcall")
+      ? "mixed"
+      : "deterministic-placeholder",
+    project: input.state.project.title,
+    chapterNumber: input.task.chapterNumber,
+    chapterTitle: input.task.title,
+    segment: {
+      index: input.segment.index,
+      total: input.segment.total,
+      label: input.segment.label,
+      source: input.segment.source || input.segmentationSource,
+      targetWords: input.segment.targetWords,
+      timeline: input.segment.timelinePosition,
+      focus: input.segment.narrativeFocus,
+      chars: input.chars,
+    },
+    files: {
+      body: input.segmentRelativePath,
+      subArtifacts: input.subArtifacts.map((artifact) => ({
+        kind: artifact.kind,
+        role: artifact.role,
+        path: artifact.relativePath,
+        chars: artifact.chars,
+        mode: artifact.role === "material"
+          ? input.materialModes?.[artifact.kind] || "deterministic-placeholder"
+          : "prompt-brief",
+      })),
+      byKind,
+    },
+    execution: {
+      current: Object.values(input.materialModes || {}).some((mode) => mode === "llm-subcall")
+        ? "single_author_call_with_selected_llm_submaterials"
+        : "single_author_call_with_deterministic_submaterials",
+      nextReadyStep: "replace_one_material_role_with_llm_call",
+      recommendedFirstRoles: ["dialogue", "narration", "character_action"],
+      assemblyRole: "assembly",
+      assembly: input.assemblyUsage || {
+        requested: false,
+        decision: "not_requested",
+        reason: "assembly role was not enabled for this segment",
+        materialChars: 0,
+        finalChars: input.chars,
+        fallbackChars: input.chars,
+      },
+    },
+  }
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  const relativePath = relativeArtifactPath(input.projectRoot, manifestPath)
+  await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_draft_segment_manifest",
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    segmentSource: input.segment.source || input.segmentationSource,
+    subArtifactCount: input.subArtifacts.length,
+    mode: manifest.mode,
+  })
+  return { path: manifestPath, relativePath }
+}
+
+async function writeDraftSegmentArtifact(input: {
+  projectRoot: string
+  paths: NovelWorkspacePaths
+  options: ProductionPipelineOptions
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  segment: DraftSegmentPlan
+  content: string
+  previousSegmentTail: string
+  segmentationSource: "scene_card" | "timeline"
+  continuityContract: ContinuityContract
+  materialOverrides?: Partial<Record<DraftSegmentSubArtifactInfo["kind"], string>>
+  materialModes?: Partial<Record<DraftSegmentSubArtifactInfo["kind"], "deterministic-placeholder" | "llm-subcall">>
+  assemblyUsage?: DraftSegmentAssemblyUsage
+}): Promise<DraftSegmentArtifactInfo | null> {
+  const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`
+  const segmentId = `segment-${String(input.segment.index).padStart(2, "0")}`
+  const segmentsRoot = path.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId)
+  const segmentDir = path.join(segmentsRoot, segmentId)
+  const segmentPath = path.join(segmentDir, `${segmentId}.md`)
+  await fs.mkdir(segmentDir, { recursive: true })
+  const sceneCardLines = input.segment.sceneCard
+    ? [
+        "## Scene Card",
+        `- Index: ${input.segment.sceneCard.index}`,
+        `- Goal: ${input.segment.sceneCard.goal}`,
+        `- Conflict: ${input.segment.sceneCard.conflict}`,
+        `- Turn: ${input.segment.sceneCard.turn}`,
+        `- End hook: ${input.segment.sceneCard.endHook}`,
+        input.segment.sceneCard.requiredCharacters.length ? `- Required characters: ${input.segment.sceneCard.requiredCharacters.join("、")}` : "",
+        input.segment.sceneCard.requiredFacts.length ? `- Required facts: ${input.segment.sceneCard.requiredFacts.join("、")}` : "",
+        input.segment.sceneCard.forbiddenFacts.length ? `- Forbidden facts: ${input.segment.sceneCard.forbiddenFacts.join("、")}` : "",
+      ].filter(Boolean)
+    : []
+  const composition = createDraftSegmentCompositionPlan(input.segment, input.continuityContract)
+  const content = [
+    `# Chapter ${input.task.chapterNumber} Segment ${input.segment.index}/${input.segment.total}`,
+    "",
+    `Project: ${input.state.project.title}`,
+    `Chapter title: ${input.task.title}`,
+    `Source: ${input.segment.source || input.segmentationSource}`,
+    `Label: ${input.segment.label}`,
+    `Target words: ${input.segment.targetWords}`,
+    `Timeline: ${input.segment.timelinePosition}`,
+    `Focus: ${input.segment.narrativeFocus}`,
+    input.segment.continuityFocus.length ? `Continuity focus: ${input.segment.continuityFocus.join("、")}` : "Continuity focus: none",
+    "",
+    "## Required Beats",
+    ...input.segment.requiredBeats.map((beat) => `- ${beat}`),
+    "",
+    ...sceneCardLines,
+    sceneCardLines.length ? "" : "",
+    "## Composition Plan",
+    "### Plot",
+    ...composition.plot.map((item) => `- ${item}`),
+    "### Narration",
+    ...composition.narration.map((item) => `- ${item}`),
+    "### Dialogue",
+    ...composition.dialogue.map((item) => `- ${item}`),
+    "### Character Action",
+    ...composition.characterAction.map((item) => `- ${item}`),
+    "### Continuity",
+    ...composition.continuity.map((item) => `- ${item}`),
+    "### Assembly Rules",
+    ...composition.assemblyRules.map((item) => `- ${item}`),
+    "",
+    input.previousSegmentTail ? `## Previous Segment Tail\n${input.previousSegmentTail}\n` : "",
+    "## Generated Body",
+    input.content.trim(),
+  ].filter((line) => line !== undefined).join("\n")
+  await fs.writeFile(segmentPath, `${content.trimEnd()}\n`)
+  const subArtifacts = await writeDraftSegmentSubArtifacts({
+    projectRoot: input.projectRoot,
+    options: input.options,
+    task: input.task,
+    segment: input.segment,
+    segmentDir,
+    composition,
+    generatedBody: input.content,
+    materialOverrides: input.materialOverrides,
+  })
+  const relativePath = relativeArtifactPath(input.projectRoot, segmentPath)
+  const manifest = await writeDraftSegmentManifest({
+    projectRoot: input.projectRoot,
+    options: input.options,
+    state: input.state,
+    task: input.task,
+    segment: input.segment,
+    segmentDir,
+    segmentPath,
+    segmentRelativePath: relativePath,
+    subArtifacts,
+    segmentationSource: input.segmentationSource,
+    materialModes: input.materialModes,
+    assemblyUsage: input.assemblyUsage,
+    chars: input.content.length,
+  })
+  await recordPipelineArtifact(input.projectRoot, segmentPath, "checkpoint", input.options, {
+    chapterNumber: input.task.chapterNumber,
+    kind: "chapter_draft_segment",
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    segmentSource: input.segment.source || input.segmentationSource,
+    label: input.segment.label,
+    chars: input.content.length,
+    subArtifactCount: subArtifacts.length,
+    manifestPath: manifest.relativePath,
+  })
+  return {
+    path: segmentPath,
+    relativePath,
+    segmentIndex: input.segment.index,
+    segmentTotal: input.segment.total,
+    source: input.segment.source || input.segmentationSource,
+    chars: input.content.length,
+    manifestPath: manifest.path,
+    manifestRelativePath: manifest.relativePath,
+    subArtifacts,
+  }
 }
 
 async function createDraftBody(
@@ -3994,6 +7555,7 @@ async function createDraftBody(
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
   characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   throwIfPipelineAborted(options)
   if (options.projectId) {
@@ -4050,19 +7612,13 @@ async function createDraftBody(
     title: task.title,
     rows: knowledgeContext.rows,
   })
-  if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return fallback
-  }
-
-  // 对词汇/示例/资源清单加硬上限，防止无限膨胀（这三项不在裁剪级联内）
-  const cappedVocabularyPrompt = vocabularyPrompt.slice(0, 1000)
-  const cappedVocabularySkillExamples = vocabularySkillExamples.slice(0, 800)
-  const cappedResourceManifest = resourceManifest.slice(0, 500)
-
-  // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
-  const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
-  const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500)
-  const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500)
+  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 650)
+  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 420)
+  const cappedResourceManifest = summarizePromptSection(resourceManifest, 280)
+  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 620)
+  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 340)
+  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 300)
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
 
   const basePromptLines = [
     cappedWriterGuide || "你是小说正文创作执行者。",
@@ -4077,6 +7633,9 @@ async function createDraftBody(
     "角色档案是生产硬约束：重要角色必须有欲望、伤口、行为习惯、说话方式、外貌体态、特长短板和关系状态。",
     "第 2 章以后不能只沿用主角姓名；必须让上一章锚点在正文事件中发生作用。",
     "禁止 AI 化碎片写法：不得让单个字或 1-4 字短词反复独立成句/成行堆场景。",
+    hasApprovedStyleSummaryPrompt(approvedStyleContext)
+      ? "用户确认写法合同是硬约束：必须模仿其叙述声音、句式节奏、对白密度、描写顺序和禁用模式。"
+      : "",
   ]
 
   if (cappedAntiHallucination) {
@@ -4104,9 +7663,11 @@ async function createDraftBody(
     "",
     cappedResourceManifest,
     "",
+    approvedStyleCarryover,
+    "",
     continuityContract.prompt,
     "",
-    characterProfileContract.prompt.slice(0, 1800),
+    clipPromptSection(characterProfileContract.prompt, 700),
     "",
     "资源使用硬要求：",
     "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
@@ -4159,100 +7720,380 @@ async function createDraftBody(
     ` vocabPrompt=${cappedVocabularyPrompt.length}字` +
     ` skillExamples=${cappedVocabularySkillExamples.length}字` +
     ` manifest=${cappedResourceManifest.length}字` +
+    ` activeWorldSlice=${prunedContext.activeWorldSlice.length}字` +
     ` consensus=${prunedContext.prunedConsensus.length}字` +
     ` outline=${prunedContext.prunedOutline.length}字` +
+    ` storyAssets=${prunedContext.prunedStoryAssets.length}字` +
     ` memory=${prunedContext.prunedMemory.length}字` +
     ` ledger=${prunedContext.prunedLedger.length}字` +
     ` prevFragment=${prunedContext.previousDraftFragment.length}字` +
     ` rag=${prunedContext.prunedRag.length}字`,
   )
 
-  const generated = await generateProductionTextWithLlm({
-    roleName: "Author",
-    state,
-    options,
-    temperature: 0.8,
-    progress: {
-      step: "draft_generation",
-      role: "Author",
+  const segmentPlan = createDraftSegmentPlan(state, task, continuityContract, blueprint)
+  const usesSceneCards = segmentPlan.some((segment) => segment.source === "scene_card")
+  const activeWorldSlicePrompt = prunedContext.activeWorldSlice
+    ? `## Active World Slice\n${prunedContext.activeWorldSlice}`
+    : ""
+  const compactStoryAssetsPrompt = prunedContext.prunedStoryAssets
+    ? `## Story Assets Audit Summary\n${prunedContext.prunedStoryAssets.slice(0, 900)}`
+    : ""
+  const blueprintGuardrails = activeWorldSlicePrompt || compactStoryAssetsPrompt
+    ? trimBlueprintForDrafting(blueprint).replace(
+        /## Production Story Asset Context[\s\S]*?(?=\n## Canon Continuity Contract|\n## Character Profile Contract|\n## Chapter Position|$)/u,
+        [activeWorldSlicePrompt, compactStoryAssetsPrompt].filter(Boolean).join("\n\n"),
+      )
+    : trimBlueprintForDrafting(blueprint)
+  const trimmedBlueprint = blueprintGuardrails.slice(0, usesSceneCards ? 2200 : 5000)
+  const contextPackage = paths && projectRoot
+    ? await writeChapterContextPackage({
+        projectRoot,
+        paths,
+        options,
+        state,
+        task,
+        genre,
+        sceneType,
+        writingMode: productionWritingMode(options),
+        segmentPlan,
+        continuityContract,
+        characterProfileContract,
+        approvedStyleContext,
+        prunedContext,
+        trimmedBlueprint,
+        basePromptText,
+        fixedDynamicPromptText,
+        cappedVocabularyPrompt,
+        cappedVocabularySkillExamples,
+        cappedResourceManifest,
+      })
+    : null
+  if (contextPackage) {
+    await emitWritingProgress(options, {
+      step: "chapter_context_package_saved",
+      role: "Showrunner",
       chapterNumber: task.chapterNumber,
       title: task.title,
-      startMessage: `Author 正在根据第 ${task.chapterNumber} 章蓝图生成正文初稿。`,
-      completeMessage: `Author 已返回第 ${task.chapterNumber} 章初稿，准备进入质检。`,
-    },
-    basePrompt: basePromptText,
-    dynamicPrompt: [
-      `章节：第 ${task.chapterNumber} 章`,
-      `标题：${task.title}`,
-      `目标字数：${task.targetWords}`,
-      `类型：${genre.genre}`,
-      `场景类型：${sceneType}`,
-      `旁白策略：${genre.narration}`,
-      "",
-      cappedVocabularyPrompt,
-      "",
-      cappedVocabularySkillExamples,
-      "",
-      cappedResourceManifest,
-      "",
-      prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${prunedContext.prunedConsensus}` : "",
-      "",
-      prunedContext.prunedOutline ? `Master Outline:\n${prunedContext.prunedOutline}` : "",
-      "",
-      prunedContext.prunedMemory ? `Character Memory:\n${prunedContext.prunedMemory}` : "",
-      "",
-      prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${prunedContext.prunedLedger}` : "",
-      "",
-      prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (末尾承接段):\n${prunedContext.previousDraftFragment}` : "",
-      "",
-      "Knowledge/RAG References:",
-      prunedContext.prunedRag,
-      "",
-      continuityContract.prompt,
-      "",
-      characterProfileContract.prompt.slice(0, 1800),
-      "",
-      "资源使用硬要求：",
-      "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
-      "- 必须学习 Migrated Vocabulary Skill Examples 的正确示范方法：基础词汇写清内容，少量成语只做点睛。",
-      "- 必须避开 Anti Patterns：连续成语、孤立成语、单字短词连发、只有氛围没有动作。",
-      "- 场景必须有具体动作、物件、气味/声音/触感中的至少两类细节。",
-      "- 章节必须围绕蓝图推进，不得输出修改说明或泛化模板段落。",
-      `- Previous Input 必须进入开场或第一场冲突：${causalPlan.previousInput}`,
-      `- Causal Objective 必须在正文中被事件推进：${causalPlan.sceneObjective}`,
-      `- Protagonist Decision 必须写成可见行动：${causalPlan.protagonistDecision}`,
-      `- Irreversible Change 必须成为章末事实：${causalPlan.irreversibleConsequence}`,
-      `- Next Chapter Handoff 必须从本章后果自然产生：${causalPlan.nextHandoff}`,
-      continuityContract.lockedProtagonistName
-        ? `- 正文必须多次围绕「${continuityContract.lockedProtagonistName}」的行动、感知 and 选择推进。`
-        : "- 正文必须明确唯一主角姓名，并保持主视角聚焦。",
-      "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
-      "- 新增或沿用的重要角色必须通过动作、称呼、停顿、外貌体态、习惯和利益选择呈现人格，不能只贴性格标签。",
-      "- 正文必须体现至少一个角色的特长/短板或能力边界，以及至少一个关系状态变化。",
-      "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
-      continuityContract.continuityAnchors.length
-        ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
-        : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
-      "- 不要把推荐词、成语或氛围词孤立成行；所有词都必须嵌入完整动作、对话、感官或因果句。",
-    ].join("\n"),
-    message: [
-      "请按以下详细章节蓝图生成本章正文草稿。",
-      "输出 Markdown，必须包含 `# 章节标题` 和 `## Draft Body`。",
-      "不要写解释，不要让用户选择，不要跳章。",
-      "",
-      "## Causal Chapter Plan",
-      ...formatCausalPlanBullets(state, task),
-      "",
-      trimBlueprintForDrafting(blueprint),
-    ].join("\n"),
-  })
+      status: "completed",
+      message: `第 ${task.chapterNumber} 章上下文包已保存：${contextPackage.segmentCount} 个片段，${contextPackage.segmentationSource === "scene_card" ? "场景卡" : "时间线"}分段。`,
+      artifactPath: contextPackage.relativePath,
+      preview: [
+        `segmentation=${contextPackage.segmentationSource}`,
+        `segments=${contextPackage.segmentCount}`,
+        `guardrails=${contextPackage.promptBudget.guardrailsChars} chars`,
+        `activeWorldSlice=${contextPackage.promptBudget.activeWorldSliceChars} chars`,
+        `storyAssets=${contextPackage.promptBudget.storyAssetsChars} chars`,
+      ].join(" | "),
+    })
+  }
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return approvedStyleContext.status === "ready"
+      ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext)
+      : fallback
+  }
+  const generatedSegments: string[] = []
+  const segmentArtifacts: DraftSegmentArtifactInfo[] = []
+  let previousSegmentTail = compactPreviousSegmentTail(prunedContext.previousDraftFragment)
 
-  return generated.includes("## Draft Body")
-    ? generated
-    : [`# ${task.title}`, "", "## Draft Body", "", generated, "", "## Drafting Metadata", `- Chapter: ${task.chapterNumber}`].join("\n")
+  for (const segment of segmentPlan) {
+    throwIfPipelineAborted(options)
+    const priorSegmentTail = previousSegmentTail
+    const sceneCardPrompt = segment.sceneCard
+      ? [
+          "## Current Scene Card",
+          `- Scene card: ${segment.sceneCard.index}`,
+          segment.sceneCard.goal ? `- Goal: ${segment.sceneCard.goal}` : "",
+          segment.sceneCard.conflict ? `- Conflict: ${segment.sceneCard.conflict}` : "",
+          segment.sceneCard.turn ? `- Turn: ${segment.sceneCard.turn}` : "",
+          segment.sceneCard.endHook ? `- End hook: ${segment.sceneCard.endHook}` : "",
+          segment.sceneCard.requiredCharacters.length
+            ? `- Required characters: ${segment.sceneCard.requiredCharacters.join("、")}`
+            : "",
+          segment.sceneCard.requiredFacts.length
+            ? `- Required facts: ${segment.sceneCard.requiredFacts.join("、")}`
+            : "",
+          segment.sceneCard.forbiddenFacts.length
+            ? `- Forbidden facts: ${segment.sceneCard.forbiddenFacts.join("、")}`
+            : "",
+          "- 只写当前场景卡覆盖的时间段，不要提前完成后续场景卡。",
+        ].filter(Boolean).join("\n")
+      : ""
+    const compositionPlan = createDraftSegmentCompositionPlan(segment, continuityContract)
+    const compositionPrompt = [
+      "## Segment Composition Contract",
+      "### Plot",
+      ...compositionPlan.plot.map((item) => `- ${item}`),
+      "### Narration",
+      ...compositionPlan.narration.map((item) => `- ${item}`),
+      "### Dialogue",
+      ...compositionPlan.dialogue.map((item) => `- ${item}`),
+      "### Character Action",
+      ...compositionPlan.characterAction.map((item) => `- ${item}`),
+      "### Continuity",
+      ...compositionPlan.continuity.map((item) => `- ${item}`),
+      "### Assembly Rules",
+      ...compositionPlan.assemblyRules.map((item) => `- ${item}`),
+    ].join("\n")
+    const generated = await generateProductionTextWithLlm({
+      roleName: "Author",
+      state,
+      options,
+      temperature: 0.78,
+      progress: {
+        step: `draft_generation_segment_${segment.index}`,
+        role: "Author",
+        chapterNumber: task.chapterNumber,
+        title: task.title,
+        startMessage: `Author 正在生成第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total}：${segment.label}。`,
+        completeMessage: `Author 已返回第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total}：${segment.label}。`,
+      },
+      basePrompt: basePromptText,
+      dynamicPrompt: [
+        `章节：第 ${task.chapterNumber} 章`,
+        `标题：${task.title}`,
+        `类型：${genre.genre}`,
+        `场景类型：${sceneType}`,
+        `旁白策略：${genre.narration}`,
+        `本次只写片段：${segment.index}/${segment.total} - ${segment.label}`,
+        `片段目标字数：${segment.targetWords}`,
+        `时间线位置：${segment.timelinePosition}`,
+        `叙事焦点：${segment.narrativeFocus}`,
+        "",
+        sceneCardPrompt,
+        "",
+        "本片段必须完成：",
+        ...segment.requiredBeats.map((beat) => `- ${beat}`),
+        "",
+        segment.continuityFocus.length
+          ? `本片段优先承接这些锚点：${segment.continuityFocus.join("、")}`
+          : "本片段必须建立可追踪的物件、关系、线索或代价。",
+        "",
+        cappedVocabularyPrompt,
+        "",
+        cappedVocabularySkillExamples,
+        "",
+        cappedResourceManifest,
+        "",
+        approvedStyleCarryover,
+        "",
+        prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${clipPromptSection(prunedContext.prunedConsensus, 900)}` : "",
+        "",
+        prunedContext.prunedOutline ? `Master Outline:\n${clipPromptSection(prunedContext.prunedOutline, 700)}` : "",
+        "",
+        prunedContext.prunedStoryAssets ? `Story Assets:\n${clipPromptSection(prunedContext.prunedStoryAssets, 900)}` : "",
+        "",
+        prunedContext.prunedMemory ? `Character Memory:\n${clipPromptSection(prunedContext.prunedMemory, 520)}` : "",
+        "",
+        prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${clipPromptSection(prunedContext.prunedLedger, 520)}` : "",
+        "",
+        prunedContext.prunedRag ? `Knowledge/RAG References:\n${clipPromptSection(prunedContext.prunedRag, 520)}` : "",
+        "",
+        clipPromptSection(continuityContract.prompt, 1050),
+        "",
+        clipPromptSection(characterProfileContract.prompt, 760),
+        "",
+        "片段写作硬要求：",
+        "- 只输出这一段小说正文，不要输出 Markdown 标题、片段编号、说明或总结。",
+        "- 从上一片段尾巴自然接续，但不要复述上一片段。",
+        "- 每段都必须包含动作、对话或感官细节，不能只写旁白概述。",
+        "- 对话、旁白和动作要服务本片段时间线，不要提前写完后续片段。",
+        "- 不能堆砌成语，不能把氛围词孤立成行。",
+        hasApprovedStyleSummaryPrompt(approvedStyleContext)
+          ? "- 必须贴合 User Approved Writing Style Contract；如果通用写作指南与该合同冲突，以用户确认写法合同为准。"
+          : "",
+        continuityContract.lockedProtagonistName
+          ? `- 必须保持主角「${continuityContract.lockedProtagonistName}」一致。`
+          : "- 必须明确唯一主角姓名，并保持主视角聚焦。",
+      ].filter(Boolean).join("\n"),
+      message: [
+        "请按时间线生成本章的一个连续正文片段。",
+        "只返回小说正文，不要返回标题、计划、解释、列表或代码块。",
+        "",
+        "## Chapter Causal Plan",
+        ...formatCausalPlanBullets(state, task),
+        "",
+        "## Segment Contract",
+        `- Segment: ${segment.index}/${segment.total} ${segment.label}`,
+        `- Timeline: ${segment.timelinePosition}`,
+        `- Focus: ${segment.narrativeFocus}`,
+        `- Target words: ${segment.targetWords}`,
+        ...segment.requiredBeats.map((beat) => `- ${beat}`),
+        "",
+        compositionPrompt,
+        "",
+        previousSegmentTail ? `## Previous Tail\n${previousSegmentTail}` : "",
+        "",
+        usesSceneCards ? "## Chapter Guardrails (Trimmed)" : "## Trimmed Chapter Blueprint",
+        trimmedBlueprint,
+      ].filter(Boolean).join("\n"),
+    })
+
+    const cleanedSegment = generated
+      .replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1")
+      .replace(/^#+\s+.*$/gmu, "")
+      .replace(/^(片段|Segment)\s*\d+[\s\S]*?\n/iu, "")
+      .trim()
+    const segmentBody = cleanedSegment || generated.trim()
+    const plotMaterial = await generateDraftSegmentPlotMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+    })
+    const dialogueMaterial = await generateDraftSegmentDialogueMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+    })
+    const narrationMaterial = await generateDraftSegmentNarrationMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+    })
+    const characterActionMaterial = await generateDraftSegmentCharacterActionMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+    })
+    const continuityMaterial = await generateDraftSegmentContinuityMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+    })
+    const materialOverrides: Partial<Record<DraftSegmentSubArtifactInfo["kind"], string>> = {}
+    const materialModes: Partial<Record<DraftSegmentSubArtifactInfo["kind"], "llm-subcall">> = {}
+    if (plotMaterial) {
+      materialOverrides.plot = plotMaterial
+      materialModes.plot = "llm-subcall"
+    }
+    if (dialogueMaterial) {
+      materialOverrides.dialogue = dialogueMaterial
+      materialModes.dialogue = "llm-subcall"
+    }
+    if (narrationMaterial) {
+      materialOverrides.narration = narrationMaterial
+      materialModes.narration = "llm-subcall"
+    }
+    if (characterActionMaterial) {
+      materialOverrides.character_action = characterActionMaterial
+      materialModes.character_action = "llm-subcall"
+    }
+    if (continuityMaterial) {
+      materialOverrides.continuity = continuityMaterial
+      materialModes.continuity = "llm-subcall"
+    }
+    const assemblyMaterial = await generateDraftSegmentAssemblyMaterial({
+      state,
+      task,
+      segment,
+      composition: compositionPlan,
+      options,
+      previousSegmentTail: priorSegmentTail,
+      materials: materialOverrides,
+      fallbackBody: segmentBody,
+    })
+    if (assemblyMaterial) {
+      materialOverrides.assembly = assemblyMaterial
+      materialModes.assembly = "llm-subcall"
+    }
+    const cleanedAssemblySegment = cleanDraftAssemblyBody(assemblyMaterial || "")
+    const usesAssemblySegment = isUsableDraftAssemblyBody(cleanedAssemblySegment, segmentBody)
+    const finalSegmentBody = usesAssemblySegment
+      ? cleanedAssemblySegment
+      : segmentBody
+    const assemblyUsage: DraftSegmentAssemblyUsage = assemblyMaterial
+      ? {
+          requested: true,
+          decision: usesAssemblySegment ? "used" : "fallback_author",
+          reason: usesAssemblySegment
+            ? "assembly material passed fiction-body guard and replaced the author segment"
+            : "assembly material was saved for audit but rejected by fiction-body guard",
+          materialChars: cleanedAssemblySegment.length,
+          finalChars: finalSegmentBody.length,
+          fallbackChars: segmentBody.length,
+        }
+      : {
+          requested: false,
+          decision: "not_requested",
+          reason: "assembly role was not enabled or returned no material",
+          materialChars: 0,
+          finalChars: finalSegmentBody.length,
+          fallbackChars: segmentBody.length,
+        }
+    const hasMaterialOverrides = Object.keys(materialOverrides).length > 0
+    const segmentArtifact = paths && projectRoot
+      ? await writeDraftSegmentArtifact({
+          projectRoot,
+          paths,
+          options,
+          state,
+          task,
+          segment,
+          content: finalSegmentBody,
+          previousSegmentTail: priorSegmentTail,
+          segmentationSource: usesSceneCards ? "scene_card" : "timeline",
+          continuityContract,
+          materialOverrides: hasMaterialOverrides ? materialOverrides : undefined,
+          materialModes: hasMaterialOverrides ? materialModes : undefined,
+          assemblyUsage,
+        })
+      : null
+    if (segmentArtifact) {
+      segmentArtifacts.push(segmentArtifact)
+      await emitWritingProgress(options, {
+        step: `draft_segment_artifact_saved_${segment.index}`,
+        role: "Author",
+        chapterNumber: task.chapterNumber,
+        title: task.title,
+        status: "completed",
+        message: `第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total} 已保存为独立产物。`,
+        artifactPath: segmentArtifact.relativePath,
+        preview: [
+          `source=${segmentArtifact.source}`,
+          `chars=${segmentArtifact.chars}`,
+          `briefs=${segmentArtifact.subArtifacts.filter((artifact) => artifact.role === "brief").length}`,
+          `materials=${segmentArtifact.subArtifacts.filter((artifact) => artifact.role === "material").length}`,
+          `path=${segmentArtifact.relativePath}`,
+        ].join(" | "),
+      })
+    }
+    generatedSegments.push(finalSegmentBody)
+    previousSegmentTail = compactPreviousSegmentTail(generatedSegments.join("\n\n"))
+  }
+
+  const body = generatedSegments.join("\n\n")
+  return [
+    `# ${task.title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Target words: ${task.targetWords}`,
+    `- Segmented drafting: ${segmentPlan.length} LLM calls`,
+    usesSceneCards ? "- Draft segmentation source: scene cards" : "- Draft segmentation source: timeline fallback",
+    `- Segment artifacts: ${segmentArtifacts.map((artifact) => artifact.relativePath).join(", ") || "none"}`,
+    `- Estimated production words: ${wordCount(body)}`,
+  ].join("\n")
 }
 
-async function repairAigcHighRiskDraft(
+export async function repairAigcHighRiskDraft(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   finalDraft: string,
@@ -4285,11 +8126,11 @@ async function repairAigcHighRiskDraft(
 
   // 并行进行高风险片段的局部重构
   const replacements: Array<{ startOffset: number; endOffset: number; repairedText: string }> = []
-  
+
   await Promise.all(
     aigcReport.highRiskSegments.map(async (segment) => {
       throwIfPipelineAborted(options)
-      
+
       // 提取高风险原文
       const originalText = bodyOnly.substring(segment.startOffset, segment.endOffset)
       if (!originalText.trim()) return
@@ -4331,7 +8172,7 @@ async function repairAigcHighRiskDraft(
       cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim() // 移除 markdown 代码块包裹
       cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim()
       cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim() // 移除前后引号包裹
-      
+
       console.log(`[AIGC PATCH RECV] 高风险片段 #${segment.index + 1} 局部重构完毕: \n- 原文: 「${originalText.slice(0, 40)}...」\n- 修复: 「${cleanText.slice(0, 40)}...」`);
 
       replacements.push({
@@ -4368,7 +8209,7 @@ function sanitizeMarkdownCell(text: string): string {
     .replace(/\|/g, "\\|")
 }
 
-	function createQualityReport(
+export function createQualityReport(
 	  state: AutonomousNovelState,
 	  task: AutonomousNovelState["plan"]["chapterTasks"][number],
 	  draft: string,
@@ -4394,15 +8235,16 @@ function sanitizeMarkdownCell(text: string): string {
 	  const characterProfileQuality = evaluateCharacterProfilePresence(draft, characterProfileContract)
 	  const wordScore = wordCountBlockingIssue ? 4 : 8
 	  const hasHook = /钩子|问题|章末|最后|门|信|名字|表情/u.test(draft)
-	  const hasConflict = /冲突|压力|选择|代价|反击|局势/u.test(draft)
+	  const hasConflict = /冲突|压力|选择|代价|反击|局势|刀|密信|伤口|怀疑|拦|问|追|藏|风险|少尹|兵曹|官|火|流民/u.test(draft)
 	  const hasBlueprint = blueprint.includes("Event Sequence")
 	  const hasCausalContract = hasCausalBlueprint(blueprint)
-	  const hasCausalSignals = /承接|上一章|前文|选择|代价|不可逆|交给|下一章|后果/u.test(draft)
-	  const hasCausalExecution = hasCausalContract && (hasCausalSignals || (hasBlueprint && hasConflict && hasHook))
+	  const causalExecution = evaluateCausalExecutionEvidence(draft, task, continuityContract)
+	  const hasCausalExecution = hasCausalContract && causalExecution.status === "eligible"
 	  const resourceUsageScore = resourceUsage.status === "eligible" ? 8 : resourceUsage.status === "warning" ? 6 : 4
+	  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality)
 	  const hardBlocked = wordCountBlockingIssue
 	    || plotContinuity.status === "quarantined"
-	    || styleQuality.status === "quarantined"
+	    || (styleQuality.status === "quarantined" && !softStyleIssue)
 	    || resourceUsage.status === "quarantined"
 	    || characterProfileQuality.status === "quarantined"
 	    || !hasCausalContract
@@ -4426,7 +8268,7 @@ function sanitizeMarkdownCell(text: string): string {
 	    `| 情节推进 | ${hasConflict ? 8 : 5}/10 | ${hasConflict ? "包含冲突、压力或选择。" : "冲突信号不足，需要返工。"} |`,
 	    `| 章末钩子 | ${hasHook ? 8 : 5}/10 | ${hasHook ? "包含钩子或后续期待。" : "章末期待不足。"} |`,
 	    `| 蓝图执行 | ${hasBlueprint ? 8 : 5}/10 | ${hasBlueprint ? "基于详细章节蓝图执行。" : "缺少详细蓝图依据。"} |`,
-	    `| 因果合同执行 | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${hasCausalContract && hasCausalExecution ? "蓝图包含因果合同，正文体现承接、选择、代价或交棒。" : "缺少清晰因果合同或正文未执行承接-选择-代价-交棒。"} |`,
+	    `| 因果合同执行 | ${hasCausalContract && hasCausalExecution ? 8 : 4}/10 | ${sanitizeMarkdownCell(hasCausalContract && hasCausalExecution ? causalExecution.reason : `缺少清晰因果合同或正文执行证据不足：${causalExecution.reason}`)} |`,
 	    `| 写作资源吸收 | ${resourceUsageScore}/10 | ${sanitizeMarkdownCell(resourceUsage.reason)} |`,
 	    `| 角色鲜明度 | ${characterProfileQuality.status === "eligible" ? 8 : 4}/10 | ${sanitizeMarkdownCell(characterProfileQuality.reason)} |`,
 	    `| 综合评分 | ${score}/10 | ${score >= 7 ? "可进入润色。" : "需要返工。"} |`,
@@ -4438,7 +8280,7 @@ function sanitizeMarkdownCell(text: string): string {
 	    "- Consistency Checker: 检查设定、时间线、伏笔和人物关系。",
 	    "- Style Controller: 检查文风、成语密度、文言比例、对白差异。",
 	    "- Prose Stylist: 去除模板感，增强具体场景和自然表达。",
-	    `- Causal Contract: ${hasCausalContract && hasCausalExecution ? "通过：章节不是孤立事件，已有承接、选择、代价或交棒。" : "失败：章节可能变成流水账或孤立事件。"}`,
+	    `- Causal Contract: ${hasCausalContract && hasCausalExecution ? `通过：${causalExecution.reason}` : `失败：${causalExecution.reason}`}`,
 	    `- Plot Continuity: ${plotContinuity.reason}`,
 	    `- Style Hard Gate: ${styleQuality.reason}`,
 	    `- Resource Usage Gate: ${resourceUsage.reason}`,
@@ -4450,11 +8292,12 @@ function sanitizeMarkdownCell(text: string): string {
       : [
 	        ...(wordCountBlockingIssue ? [`- 需要返工：正文有效字数 ${count}/${target}，低于 80% 门槛，不能进入 complete。`] : []),
 	        ...(plotContinuity.status === "quarantined" ? [`- 需要返工：${plotContinuity.reason}`] : []),
-	        ...(styleQuality.status === "quarantined" ? [`- 需要返工：${styleQuality.reason}`] : []),
+	        ...(styleQuality.status === "quarantined" && !softStyleIssue ? [`- 需要返工：${styleQuality.reason}`] : []),
+	        ...(softStyleIssue ? [`- 润色建议：${styleQuality.reason}`] : []),
 	        ...(resourceUsage.status === "quarantined" ? [`- 需要返工：${resourceUsage.reason}`] : []),
 	        ...(characterProfileQuality.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	        ...(!hasCausalContract ? ["- 需要返工：蓝图缺少 Causal Objective / Irreversible Change / Next Chapter Handoff，不能支撑连续写作。"] : []),
-	        ...(!hasCausalExecution ? ["- 需要返工：正文没有清晰执行承接-选择-代价-交棒，容易变成流水账。"] : []),
+	        ...(!hasCausalExecution ? [`- 需要返工：${causalExecution.reason}`] : []),
 	        ...(count < target ? ["- 扩写正文场景。"] : []),
 	        ...(!hasConflict ? ["- 增强冲突动作。"] : []),
 	        ...(!hasHook ? ["- 补足章末钩子。"] : []),
@@ -4493,9 +8336,11 @@ function appendQualityHardChecks(
 	  const characterProfileQuality = characterProfileContract
 	    ? evaluateCharacterProfilePresence(draft, characterProfileContract)
 	    : null
+	  const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality)
 	  const narrativeFixes = [
 	    ...(plotContinuity?.status === "quarantined" ? [`- 需要返工：${plotContinuity.reason}`] : []),
-	    ...(styleQuality.status === "quarantined" ? [`- 需要返工：${styleQuality.reason}`] : []),
+	    ...(styleQuality.status === "quarantined" && !softStyleIssue ? [`- 需要返工：${styleQuality.reason}`] : []),
+	    ...(softStyleIssue ? [`- 润色建议：${styleQuality.reason}`] : []),
 	    ...(characterProfileQuality?.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	  ]
   const resourceUsage = continuityContract
@@ -4530,6 +8375,32 @@ function appendQualityHardChecks(
   return [report.trimEnd(), ...hardFixes].join("\n")
 }
 
+function extractQualityRepairChecklist(report: string) {
+  const lines = report.split("\n")
+  const fixes: string[] = []
+  let inRequiredFixes = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (/^##\s+Required Fixes/u.test(trimmed)) {
+      inRequiredFixes = true
+      continue
+    }
+    if (inRequiredFixes && /^##\s+/u.test(trimmed)) {
+      inRequiredFixes = false
+    }
+    if (inRequiredFixes && /^-\s+/u.test(trimmed)) {
+      fixes.push(trimmed)
+    }
+  }
+
+  const scoreFixes = lines
+    .filter((line) => /^\|\s*(情节推进|因果合同执行|写作资源吸收|角色鲜明度)\s*\|/u.test(line))
+    .filter((line) => /[1-6]\/10/u.test(line))
+    .map((line) => `- 低分项：${line.replace(/^\|\s*|\s*\|$/g, "").replace(/\s*\|\s*/g, " - ")}`)
+
+  return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10)
+}
+
 async function createProductionQualityReport(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -4539,6 +8410,7 @@ async function createProductionQualityReport(
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task, blueprint }),
   characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   throwIfPipelineAborted(options)
   const characterProfileContract = buildCharacterProfileContract({
@@ -4553,6 +8425,7 @@ async function createProductionQualityReport(
   if (process.env.AI_NOVEL_TEST_MODE === "1" || !shouldUseLlmQualityPass(options)) {
     return fallback
   }
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
 
   const generated = await generateProductionTextWithLlm({
     roleName: "Editor",
@@ -4584,6 +8457,9 @@ async function createProductionQualityReport(
 		      "第 2 章以后如果只复用主角姓名，却没有承接上一章物件、关系、线索、代价或未解决问题，必须判为不通过。",
 		      "如果章节只是按时间罗列事件，没有让上一章输入导致本章选择、代价和下一章交棒，必须判为不通过。",
 	      "如果正文像蓝图、计划、修改说明或模板段落，而不是小说正文，必须判为不通过。",
+	      approvedStyleCarryover
+	        ? "如果正文明显违背用户确认写法合同中的声音、节奏、对白规则、描写规则或禁用模式，必须要求返工。"
+	        : "",
 	      "如果看不出写作资源、词汇/成语策略和场景资源的自然吸收，必须要求返工。",
 	      "如果出现单字/短词频繁独立成句或成行、推荐词孤立堆砌、氛围词连发，必须判为不通过。",
 	    ].join("\n"),
@@ -4594,6 +8470,8 @@ async function createProductionQualityReport(
       blueprint,
       "",
       continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
       "",
       characterProfileContract.prompt,
       "",
@@ -4621,6 +8499,7 @@ async function reviseDraftForQualityGate(
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
   characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   throwIfPipelineAborted(options)
 
@@ -4644,6 +8523,7 @@ async function reviseDraftForQualityGate(
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2000)
   const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500)
   const cappedConflictStrategy = (resources.evidenceConflictStrategy || "").slice(0, 1500)
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
 
   const basePromptLines = [
     cappedWriterGuide || "你是小说正文创作执行者。",
@@ -4656,6 +8536,9 @@ async function reviseDraftForQualityGate(
     "必须修复章节断裂：上一章锚点要进入本章事件因果，不得只换场景重开。",
     "必须修复流水账问题：不要只按时间罗列，所有场景都要因选择、代价、信息变化或关系变化而发生。",
     "必须修复 AI 化碎片：把孤立短词改成完整动作、感官、对话或因果句。",
+    approvedStyleCarryover
+      ? "必须同时修复与用户确认写法合同不一致的声音、句式、对白、描写和禁用模式问题。"
+      : "",
   ]
 
   if (cappedAntiHallucination) {
@@ -4672,6 +8555,7 @@ async function reviseDraftForQualityGate(
     previousFinalDraft: draft,
     blueprint,
   })
+  const repairChecklist = extractQualityRepairChecklist(report)
 
   const fixedDynamicPromptLines = [
     `章节：第 ${task.chapterNumber} 章`,
@@ -4680,11 +8564,13 @@ async function reviseDraftForQualityGate(
     "必须针对质量报告中的问题重写/扩写正文。",
     "必须输出 Markdown，保留 `## Draft Body`。",
     "",
-    `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
+    `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${repairChecklist.join("\n") || report.slice(0, 1200)}\n请在本次重写中特别注意并修复这些问题。`,
+    "",
+    approvedStyleCarryover,
     "",
     continuityContract.prompt,
     "",
-    characterProfileContract.prompt,
+    characterProfileContract.prompt.slice(0, 1000),
   ]
 
   const basePromptText = basePromptLines.join("\n\n")
@@ -4724,9 +8610,12 @@ async function reviseDraftForQualityGate(
       `标题：${task.title}`,
       `返工轮次：${attempt}`,
       "必须针对质量报告中的问题重写/扩写正文。",
+      "必须把低分项转化为可见正文证据：上一章锚点进入开场事件；主角做一个会改变局势的动作选择；选择带来身份/关系/线索/资源后果；结尾把这个后果交给下一章。",
+      "如果角色鲜明度低，只补强本章承担冲突、选择或关系变化的核心人物；不要硬塞口癖和标志动作，而是让人物通过目标、立场、选择代价、对主角关系的反应产生差异。",
+      "如果写作资源吸收低，把短词/成语改成动作、感官、物件和因果句，不要写孤立成语或四字短句。",
       "必须输出 Markdown，保留 `## Draft Body`。",
       "",
-      `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${report.slice(0, 1500)}\n请在本次重写中特别注意并修复这些问题。`,
+      `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${repairChecklist.join("\n") || report.slice(0, 1200)}\n请在本次重写中特别注意并修复这些问题。`,
       attempt >= 2 ? `\n【WARNING: 连续返工硬警告】这已经是第 ${attempt} 轮重写！前几轮的重写由于改动太小或未彻底纠偏已被打回。本次重写你必须进行大范围、颠覆性的文字重组和句式变换（例如多使用具体动作和环境触感来替换单薄的解释句），严禁直接复用或微调上一轮被拒的内容！\n` : "",
       "",
       prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${prunedContext.prunedConsensus}` : "",
@@ -4739,6 +8628,8 @@ async function reviseDraftForQualityGate(
       "",
       prunedContext.previousDraftFragment ? `Previous Chapter Draft Fragment (末尾承接段):\n${prunedContext.previousDraftFragment}` : "",
       "",
+      approvedStyleCarryover,
+      "",
       continuityContract.prompt,
     ].join("\n"),
     message: [
@@ -4748,7 +8639,7 @@ async function reviseDraftForQualityGate(
       trimBlueprintForDrafting(blueprint),
       "",
       "## Quality Report",
-      report,
+      repairChecklist.length ? repairChecklist.join("\n") : report,
       "",
       "## Draft",
       draft,
@@ -4771,6 +8662,7 @@ async function runQualityGateWithRevisions(
   paths?: NovelWorkspacePaths,
   projectRoot?: string,
   characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   const maxAttempts = options.maxRevisionAttempts !== undefined ? options.maxRevisionAttempts : 3
   let draft = initialDraft
@@ -4785,7 +8677,7 @@ async function runQualityGateWithRevisions(
 
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options)
-    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers)
+    report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers, approvedStyleContext)
     if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
       report = report.replace(/综合评分 \| \d+\/10/u, `综合评分 | ${options.forceQualityScoreForTest}/10`)
       if (options.forceQualityScoreForTest < 7 && !report.includes("需要返工")) {
@@ -4810,7 +8702,8 @@ async function runQualityGateWithRevisions(
       continuityContract,
       paths,
       projectRoot,
-      characterDossiers
+      characterDossiers,
+      approvedStyleContext
     )
   }
 
@@ -4863,7 +8756,7 @@ function isAigcDetectorConfigured(options: ProductionPipelineOptions) {
   return config.provider !== "disabled" && Boolean(config.url?.trim())
 }
 
-function normalizeAigcWritingDetectionReport(result: AigcBatchDetectionResult): AigcWritingDetectionReport {
+export function normalizeAigcWritingDetectionReport(result: AigcBatchDetectionResult): AigcWritingDetectionReport {
   const threshold = result.threshold
   const maxSegmentScore = result.segments.reduce<number | null>((max, segment) => {
     if (typeof segment.score !== "number") {
@@ -4898,7 +8791,7 @@ function normalizeAigcWritingDetectionReport(result: AigcBatchDetectionResult): 
   }
 }
 
-function skippedAigcWritingDetectionReport(reason: string): AigcWritingDetectionReport {
+export function skippedAigcWritingDetectionReport(reason: string): AigcWritingDetectionReport {
   return {
     enabled: false,
     status: "skipped",
@@ -4912,7 +8805,7 @@ function skippedAigcWritingDetectionReport(reason: string): AigcWritingDetection
   }
 }
 
-async function runAigcWritingDetection(finalDraft: string, options: ProductionPipelineOptions): Promise<AigcWritingDetectionReport> {
+export async function runAigcWritingDetection(finalDraft: string, options: ProductionPipelineOptions): Promise<AigcWritingDetectionReport> {
   const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options))
   if (!isAigcDetectorConfigured(options)) {
     return skippedAigcWritingDetectionReport("AIGC detector is not configured.")
@@ -4971,6 +8864,7 @@ async function createProductionPolishedDraft(
   options: ProductionPipelineOptions,
   continuityContract = createContinuityContract({ state, task }),
   characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   throwIfPipelineAborted(options)
   const characterProfileContract = buildCharacterProfileContract({
@@ -4980,6 +8874,7 @@ async function createProductionPolishedDraft(
     continuityContract,
     previousFinalDraft: draft,
   })
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
   const fallbackNaturalnessReport = createNaturalnessReport({
     beforeDraft: draft,
     afterDraft: draft,
@@ -5017,6 +8912,9 @@ async function createProductionPolishedDraft(
     dynamicPrompt: [
       "只允许在不改变核心剧情、不改变设定、不跳章的前提下润色。",
       "必须保留章节正文结构，增强动作、感官、对白差异和具体细节。",
+      approvedStyleCarryover
+        ? "必须保持用户确认写法合同，不得把已确认的文风润色成通用模板腔。"
+        : "",
 	      "控制成语密度，避免堆砌和模板化情绪解释。",
 	      "必须消除单字/短词独立成行的 AI 化碎片感；推荐词只能自然嵌入句子。",
 	      "必须移除任何 AI 痕迹、逻辑连词（严禁出现'不仅如此'、'与此同时'、'然而'、'事实上'）、报告腔、总结腔、过度解释、整齐排比、情绪标签堆叠和万能升华结尾。彻底贯彻“摄像机限知呈现（Show, don't tell）”：禁止旁白对剧情的严重性、反转、阴谋等进行跨视角的脑补与主观解释（如严禁出现“被抓住是通敌斩首的重罪”、“自己是不是被卖了”等剧透句），所有因果完全留白让读者意会；只拍摄物理画面、物件、台词和生理反应。",
@@ -5031,6 +8929,8 @@ async function createProductionPolishedDraft(
       "",
       continuityContract.prompt,
       "",
+      approvedStyleCarryover,
+      "",
       characterProfileContract.prompt,
     ].join("\n"),
     message: [
@@ -5042,6 +8942,8 @@ async function createProductionPolishedDraft(
       report,
       "",
       continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
       "",
       characterProfileContract.prompt,
       "",
@@ -5097,6 +8999,11 @@ function createChapterMemoryUpdate(
     continuityContract,
     characterProfileContract,
   })
+  const foreshadowingLedgerUpdate = createForeshadowingHealthLedger({
+    causalPlan,
+    nextAnchors,
+    plotContinuity,
+  })
   return [
     `# Chapter ${task.chapterNumber} Memory Update`,
     "",
@@ -5136,6 +9043,7 @@ function createChapterMemoryUpdate(
       ? nextAnchors.slice(0, 8).map((anchor) => `- Continuity anchor: ${anchor}`)
       : ["- Continuity anchor: 本章未抽取到明确锚点，下一轮必须人工/模型补足物品、线索、关系或代价。"]),
     "- 下一章必须承接上述 Continuity anchor 中至少两个，让它们进入正文事件因果。",
+    ...foreshadowingLedgerUpdate,
     "",
     "## Style Notes",
     `- ${styleQuality.reason}`,
@@ -5148,6 +9056,32 @@ function createChapterMemoryUpdate(
     "## Draft Excerpt",
     finalDraft.split("\n").filter(Boolean).slice(0, 8).join("\n"),
   ].join("\n")
+}
+
+function createForeshadowingHealthLedger(input: {
+  causalPlan: ReturnType<typeof getTaskCausalPlan>
+  nextAnchors: string[]
+  plotContinuity: ReturnType<typeof evaluatePlotContinuityBridge>
+}) {
+  const anchorLines = input.nextAnchors.length
+    ? input.nextAnchors.slice(0, 6).map((anchor) => `- Anchor advanced: ${anchor}`)
+    : ["- Anchor advanced: none extracted; 下一章必须先补足可追踪物品、线索、关系或代价。"]
+  const status = input.nextAnchors.length >= 2 && input.plotContinuity.status === "eligible"
+    ? "active"
+    : "needs_manual_followup"
+  const risk = status === "active"
+    ? "low; 已形成可承接锚点。"
+    : "high; 伏笔可能悬空，下一章蓝图必须显式处理。"
+
+  return [
+    "### Foreshadowing Ledger Update",
+    `- Operation: ${input.causalPlan.foreshadowingOperation}`,
+    `- Status: ${status}`,
+    ...anchorLines,
+    `- Expected payoff / next touchpoint: ${input.causalPlan.nextHandoff}`,
+    "- Carryover rule: 下一章必须让至少两个锚点进入可见事件，并通过行动、代价或关系变化兑现，不能只口头解释。",
+    `- Risk: ${risk}`,
+  ]
 }
 
 async function recordPipelineArtifact(
@@ -5242,6 +9176,69 @@ export async function writeProductionMasterOutline(
   return content
 }
 
+export async function writeProductionStoryBibleAssets(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  context: { consensus: string; protagonist: string; style: string },
+  options: ProductionPipelineOptions = {},
+) {
+  const resources = await loadProductionWritingResources(projectRoot)
+  const assets = createProductionStoryBibleAssets(state, context, resources)
+  await fs.mkdir(paths.plansDir, { recursive: true })
+
+  const written: string[] = []
+  for (const asset of assets) {
+    const assetPath = path.join(paths.plansDir, asset.filename)
+    await fs.writeFile(assetPath, `${asset.content}\n`)
+    await recordPipelineArtifact(projectRoot, assetPath, "plan", options, {
+      stage: asset.stage,
+      production: true,
+      title: asset.title,
+    })
+    written.push(assetPath)
+  }
+  const writingPlanPath = await writeProductionWritingPlan(projectRoot, paths, state, options)
+  written.push(writingPlanPath)
+
+  await emitWritingProgress(options, {
+    step: "story_bible_assets_saved",
+    role: "Showrunner",
+    status: "completed",
+    message: "世界矩阵、主线架构、故事圣经、分卷策略、伏笔账本、人物关系资产和写作执行计划已保存。",
+    artifactPath: relativeArtifactPath(projectRoot, path.join(paths.plansDir, "story-bible.md")),
+    preview: [...assets.map((asset) => `- ${asset.filename}`), "- writing-plan.json"].join("\n"),
+    wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n")),
+  })
+
+  return written
+}
+
+async function ensureProductionStoryBibleAssets(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  context: { consensus: string; protagonist: string; style: string },
+  options: ProductionPipelineOptions = {},
+) {
+  const required = [...PRODUCTION_STORY_ASSET_FILES, "writing-plan.json"]
+  const missing: string[] = []
+  for (const filename of required) {
+    const content = await readOptionalText(path.join(paths.plansDir, filename))
+    if (!content.trim()) missing.push(filename)
+  }
+  if (missing.length === 0) return []
+  await emitWritingProgress(options, {
+    step: "story_bible_assets_repair_started",
+    role: "Showrunner",
+    chapterNumber: undefined,
+    status: "started",
+    message: `生产前置故事资产缺失 ${missing.length} 项，系统将在正文生产前自动补齐。`,
+    preview: missing.map((filename) => `- ${filename}`).join("\n"),
+  })
+  return writeProductionStoryBibleAssets(projectRoot, paths, state, context, options)
+}
+
 export async function writeAllDetailedChapterBlueprints(
   projectRoot: string,
   paths: NovelWorkspacePaths,
@@ -5254,13 +9251,14 @@ export async function writeAllDetailedChapterBlueprints(
   const written: string[] = []
 
   for (const task of state.plan.chapterTasks) {
-    const deterministicBlueprint = createDetailedChapterBlueprint(state, task, context, resources)
+    const storyAssetContext = await loadProductionStoryAssetContext(paths, task)
+    const deterministicBlueprint = createDetailedChapterBlueprint(state, task, context, resources, undefined, storyAssetContext)
     const shouldUseLlmPlanner = process.env.AI_NOVEL_TEST_MODE !== "1"
       && !options.preferDeterministicPlanning
       && task.chapterNumber <= 3
     let content = deterministicBlueprint
     if (shouldUseLlmPlanner) {
-      content = await createChapterBlueprintContent(state, task, context, resources, options)
+      content = await createChapterBlueprintContent(state, task, context, resources, options, storyAssetContext)
     } else {
       await emitWritingProgress(options, {
         step: "chapter_blueprint_started",
@@ -5330,6 +9328,10 @@ export async function runChapterProductionPipeline(
   }
   const writingMode = productionWritingMode(options)
   const resources = await loadProductionWritingResources(projectRoot)
+  const approvedStyleContext = await loadApprovedWritingStyleContext(projectRoot)
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
+  await enforceApprovedWritingStyleGate(options, task, approvedStyleContext)
+  await persistApprovedWritingStyleAssets(projectRoot, paths, approvedStyleContext, options)
   const protagonistProfile = await readOptionalText(paths.protagonistPath)
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath)
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`
@@ -5344,8 +9346,12 @@ export async function runChapterProductionPipeline(
   const context = {
     consensus: await readOptionalText(paths.consensusPath),
     protagonist: protagonistProfile,
-    style: await readOptionalText(paths.styleProfilePath),
+    style: [
+      await readOptionalText(paths.styleProfilePath),
+      approvedStyleCarryover,
+    ].filter(Boolean).join("\n\n"),
   }
+  await ensureProductionStoryBibleAssets(projectRoot, paths, state, context, options)
   await emitWritingProgress(options, {
     step: "chapter_started",
     role: "Showrunner",
@@ -5358,6 +9364,7 @@ export async function runChapterProductionPipeline(
   })
   let blueprint = await readOptionalText(blueprintPath)
   if (!hasCausalBlueprint(blueprint)) {
+    const storyAssetContext = await loadProductionStoryAssetContext(paths, task)
     const planningContract = createContinuityContract({
       state,
       task,
@@ -5366,7 +9373,7 @@ export async function runChapterProductionPipeline(
       previousMemory,
       previousFinalDraft,
     })
-    blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract)
+    blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext)
     await fs.mkdir(paths.chapterBlueprintsDir, { recursive: true })
     await fs.writeFile(blueprintPath, `${blueprint}\n`)
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
@@ -5420,7 +9427,31 @@ export async function runChapterProductionPipeline(
       : "Canon 连续性合同已载入：首章将锁定唯一主角，并建立后续角色/情节账本。",
     preview: continuityContract.prompt.slice(0, 720),
   })
-  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers)
+  if (approvedStyleContext.status === "ready") {
+    await emitWritingProgress(options, {
+      step: "approved_style_contract_loaded",
+      role: "Showrunner",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "completed",
+      message: "用户确认写法合同已载入：正文生成、质检和自然化会以冻结样段与规则为最高风格约束。",
+      preview: approvedStyleCarryover.slice(0, 720),
+    })
+    await emitWritingProgress(options, {
+      step: "approved_style_assets_synced",
+      role: "Showrunner",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "completed",
+      message: "冻结后的写法规则书、正向参考和禁忌清单已同步到生产资产，正文链路会强制继承。",
+      preview: [
+        relativeArtifactPath(projectRoot, paths.styleRulebookPath),
+        relativeArtifactPath(projectRoot, paths.styleReferencesPath),
+        relativeArtifactPath(projectRoot, paths.styleAntiPatternsPath),
+      ].join("\n"),
+    })
+  }
+  const initialDraft = await createDraftBody(state, task, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers, approvedStyleContext)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "draft_completed",
@@ -5434,7 +9465,7 @@ export async function runChapterProductionPipeline(
     preview: initialDraft.slice(0, 420),
     wordCount: wordCount(initialDraft),
   })
-  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers)
+  const { draft, report, gate } = await runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract, paths, projectRoot, characterDossiers, approvedStyleContext)
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "quality_gate_completed",
@@ -5452,23 +9483,30 @@ export async function runChapterProductionPipeline(
   })
   let finalDraft = gate.status === "blocked"
     ? createPolishedDraft(state, task, draft, report, gate, writingMode)
-    : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers)
-  let aigcDetection = await runAigcWritingDetection(finalDraft, options)
+    : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers, approvedStyleContext)
+  const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || options.bypassAigcGate === true
+  let aigcDetection = isAigcGateBypassed
+    ? skippedAigcWritingDetectionReport("AIGC检测在生成阶段已被旁路，将在后续统一精修。")
+    : await runAigcWritingDetection(finalDraft, options)
+  const isAigcBlocked = aigcDetection.status === "blocked" && !isAigcGateBypassed
+
   await emitWritingProgress(options, {
     step: "aigc_detection_completed",
     role: "Reviewer",
     chapterNumber: task.chapterNumber,
     title: task.title,
-    status: aigcDetection.status === "blocked" ? "blocked" : "completed",
-    message: aigcDetection.status === "blocked"
+    status: isAigcBlocked ? "blocked" : "completed",
+    message: isAigcBlocked
       ? `第 ${task.chapterNumber} 章 AIGC 检测发现 ${aigcDetection.highRiskSegments.length} 个高风险片段，准备执行局部自然化修复。`
-      : aigcDetection.status === "passed"
-        ? `第 ${task.chapterNumber} 章 AIGC 检测通过，平均概率 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}。`
-        : `第 ${task.chapterNumber} 章 AIGC 检测未启用或不可用：${aigcDetection.reason}`,
+      : aigcDetection.status === "blocked"
+        ? `第 ${task.chapterNumber} 章 AIGC 检测发现 ${aigcDetection.highRiskSegments.length} 个高风险片段（已开启 AIGC 门禁旁路，直接通过）。`
+        : aigcDetection.status === "passed"
+          ? `第 ${task.chapterNumber} 章 AIGC 检测通过，平均概率 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}。`
+          : `第 ${task.chapterNumber} 章 AIGC 检测未启用或不可用：${aigcDetection.reason}`,
     preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
     wordCount: wordCount(finalDraft),
   })
-  if (aigcDetection.status === "blocked" && gate.status !== "blocked") {
+  if (isAigcBlocked && gate.status !== "blocked") {
     finalDraft = await repairAigcHighRiskDraft(state, task, finalDraft, aigcDetection, resources, options, continuityContract, characterDossiers)
     aigcDetection = await runAigcWritingDetection(finalDraft, options)
     await emitWritingProgress(options, {
@@ -5484,14 +9522,16 @@ export async function runChapterProductionPipeline(
       wordCount: wordCount(finalDraft),
     })
   }
-  const reportWithAigcDetection = `${report.trimEnd()}\n\n${formatAigcWritingDetectionReport(aigcDetection)}`
   const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
-  const finalGate = aigcDetection.status === "blocked"
+  let finalGate = (aigcDetection.status !== "passed" && !isAigcGateBypassed)
     ? {
         ...baseFinalGate,
         passed: false,
         status: "blocked" as const,
-        reason: `${baseFinalGate.reason} AIGC 检测阻塞：${aigcDetection.highRiskSegments.length} 个片段超过阈值，最高概率 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}。`.trim(),
+        reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked"
+          ? `AIGC 检测阻塞：${aigcDetection.highRiskSegments.length} 个片段超过阈值，最高概率 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}。`
+          : `AIGC 检测未通过：${aigcDetection.status}，${aigcDetection.reason || "需要配置并通过 AIGC 检测后才能放行。"}`
+        }`.trim(),
       }
     : baseFinalGate
   throwIfPipelineAborted(options)
@@ -5541,6 +9581,30 @@ export async function runChapterProductionPipeline(
     finalDraft,
     finalGate,
   })
+  const styleConformanceDrift = evaluateChapterStyleConformanceDrift({
+    approvedStyleContext,
+    chapterText: finalDraft,
+    extractedStyleFingerprint,
+  })
+  if (styleConformanceDrift.status === "drifted") {
+    finalGate = {
+      ...finalGate,
+      passed: false,
+      status: "blocked" as const,
+      reason: `${finalGate.reason} 风格继承漂移阻塞：${styleConformanceDrift.reason}`.trim(),
+    }
+  }
+	  const styleInheritanceVerification = await buildChapterStyleInheritanceVerification({
+	    paths,
+	    approvedStyleContext,
+    task,
+    finalGate,
+    aigcDetection,
+    styleConformanceDrift,
+	    extractedStyleFingerprint,
+	  })
+	  const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null
+	  const reportWithAigcDetection = `${report.trimEnd()}\n\n${formatAigcWritingDetectionReport(aigcDetection)}\n\n${formatStyleConformanceDriftReport(styleConformanceDrift)}`
   throwIfPipelineAborted(options)
 
   const draftPath = path.join(paths.chaptersDir, `${chapterId}.draft.md`)
@@ -5548,6 +9612,15 @@ export async function runChapterProductionPipeline(
   const finalPath = path.join(paths.chaptersDir, `${chapterId}.final.md`)
   const reportPath = path.join(paths.reportsDir, `${chapterId}-quality.md`)
   const memoryPath = path.join(paths.memoryDir, `${chapterId}-memory.md`)
+  const characterRelationshipsPath = paths.characterDossiersPath
+    ? path.join(path.dirname(paths.characterDossiersPath), "relationships.json")
+    : ""
+  const characterRelationsMarkdownPath = paths.characterDossiersPath
+    ? path.join(path.dirname(paths.characterDossiersPath), "relations.md")
+    : ""
+  const characterRelationshipGraph = updatedCharacterDossiers.length
+    ? createCharacterRelationshipGraph(updatedCharacterDossiers)
+    : null
 
   await fs.mkdir(paths.chaptersDir, { recursive: true })
   await fs.mkdir(paths.reportsDir, { recursive: true })
@@ -5563,23 +9636,58 @@ export async function runChapterProductionPipeline(
   if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
     await fs.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}\n`)
   }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph)
+  }
+  if (characterRelationsMarkdownPath && characterRelationshipGraph) {
+    await fs.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}\n`)
+  }
+  const versionManifestPath = await writeChapterVersionManifest({
+    projectRoot,
+    options,
+    chapterId,
+    task,
+    draftPath,
+    reviewedPath,
+    finalPath,
+    reportPath,
+    memoryPath,
+    finalDraft,
+    draft,
+    finalGate,
+	    writingMode,
+	    aigcDetection,
+	    chapterInheritanceAdapter,
+	    styleInheritanceVerification,
+	    styleConformanceDrift,
+	  })
 
   await recordPipelineArtifact(projectRoot, draftPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "draft" })
   await recordPipelineArtifact(projectRoot, reviewedPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "reviewed", qualityGate: finalGate })
   await recordPipelineArtifact(projectRoot, finalPath, "chapter", options, {
     chapterNumber: task.chapterNumber,
     pass: "final",
-    qualityGate: finalGate,
-    aigcDetection,
+	    qualityGate: finalGate,
+	    aigcDetection,
+	    chapterInheritanceAdapter,
+	    styleInheritanceVerification,
+	    styleConformanceDrift,
     wordCount: wordCount(finalDraft),
     targetWords: task.targetWords,
   })
-  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection })
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, { chapterNumber: task.chapterNumber, quality: true, qualityGate: finalGate, aigcDetection, styleInheritanceVerification, styleConformanceDrift })
   await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate })
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
       chapterNumber: task.chapterNumber,
       kind: "character_dossiers",
+      qualityGate: finalGate,
+    })
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await recordPipelineArtifact(projectRoot, characterRelationshipsPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_relationship_graph",
       qualityGate: finalGate,
     })
   }
@@ -5671,8 +9779,11 @@ export async function runChapterProductionPipeline(
         chapterNumber: task.chapterNumber,
         draftPath: relativeArtifactPath(projectRoot, draftPath),
         finalPath: relativeArtifactPath(projectRoot, finalPath),
+        versionManifestPath: relativeArtifactPath(projectRoot, versionManifestPath),
         reportPath: relativeArtifactPath(projectRoot, reportPath),
         qualityGate: finalGate,
+        styleInheritanceVerification,
+        styleConformanceDrift,
         writingMode,
         directorCommandId: options.directorCommandId ?? null,
       })
@@ -5683,10 +9794,15 @@ export async function runChapterProductionPipeline(
     draftPath,
     reviewedPath,
     finalPath,
+    versionManifestPath,
     reportPath,
     memoryPath,
     wordCount: wordCount(finalDraft),
     qualityGate: finalGate,
     writingMode,
   }
+}
+
+function hasApprovedStyleSummaryPrompt(approvedStyleContext: ApprovedWritingStyleContext) {
+  return approvedStyleContext.status === "ready" && Boolean(approvedStyleContext.prompt.trim())
 }

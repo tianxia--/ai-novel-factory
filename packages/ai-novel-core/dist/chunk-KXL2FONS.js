@@ -1,15 +1,27 @@
 import {
+  evaluateProductionReadiness,
+  evaluateStyleEvolutionGate,
   generateAgentReply,
-  loadLlmConfigFromEnv,
+  loadLlmConfigForCapability,
+  loadProductionWritingResources,
+  loadStyleEvolution,
+  normalizeAigcWritingDetectionReport,
+  repairAigcHighRiskDraft,
+  requestLlmTextCompletion,
   runChapterProductionPipeline,
   throwIfStopped,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
+  writeProductionStoryBibleAssets,
   writeProductionWritingResourceArtifacts
-} from "./chunk-TI62PTKZ.js";
+} from "./chunk-SK3T47GJ.js";
+import {
+  detectAigcSegments,
+  getAigcDetectorConfig
+} from "./chunk-4ND3ONGM.js";
 import {
   retrieveKnowledge
-} from "./chunk-M45WOEFA.js";
+} from "./chunk-Q7A3BTJU.js";
 import {
   FactoryDb,
   createLocalTextEmbedding,
@@ -17,14 +29,185 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-4PMKQQNV.js";
+} from "./chunk-XEYMG4OS.js";
 import {
   createAgentMessage
 } from "./chunk-GZKJNHMN.js";
 
-// src/super-graph.ts
-import fs from "fs/promises";
+// src/env-manager.ts
+import fs from "fs";
 import path from "path";
+var PRIMARY_ENV_KEYS = {
+  baseUrl: "LLM_BASE_URL",
+  apiKey: "LLM_API_KEY",
+  modelName: "LLM_MODEL_ID"
+};
+var FALLBACK_ENV_KEYS = {
+  baseUrl: "OPENAI_BASE_URL",
+  apiKey: "OPENAI_API_KEY",
+  modelName: "OPENAI_MODEL_NAME"
+};
+var PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"];
+var MANAGED_PROJECTS_SEGMENT = `${path.sep}.ai-novel-projects${path.sep}`;
+function uniquePaths(paths) {
+  return [...new Set(paths.map((candidate) => path.resolve(candidate)))];
+}
+function inferWorkspaceRootFromManagedProject(rootDir) {
+  const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT);
+  if (index < 0) {
+    return null;
+  }
+  return rootDir.slice(0, index) || path.parse(rootDir).root;
+}
+function parseProjectEnv(raw) {
+  const values = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
+    values[key] = value;
+  }
+  return values;
+}
+function pickResolvedValue(primaryKey, fallbackKey, values) {
+  const processValue = process.env[primaryKey]?.trim() || process.env[fallbackKey]?.trim();
+  if (processValue) {
+    return processValue;
+  }
+  const fileValue = values[primaryKey]?.trim() || values[fallbackKey]?.trim();
+  return fileValue || null;
+}
+function getProjectEnvPath(rootDir = process.cwd()) {
+  return path.resolve(rootDir, ".env");
+}
+function getProjectEnvCandidatePaths(rootDir = process.cwd()) {
+  const resolvedRootDir = path.resolve(rootDir);
+  const candidates = [
+    getProjectEnvPath(resolvedRootDir),
+    path.join(resolvedRootDir, ...PACKAGE_ENV_PARTS)
+  ];
+  const workspaceRoot = inferWorkspaceRootFromManagedProject(resolvedRootDir);
+  if (workspaceRoot) {
+    candidates.push(
+      getProjectEnvPath(workspaceRoot),
+      path.join(workspaceRoot, ...PACKAGE_ENV_PARTS)
+    );
+  }
+  return uniquePaths(candidates);
+}
+function readProjectEnv(rootDir = process.cwd()) {
+  const candidates = getProjectEnvCandidatePaths(rootDir);
+  const existingPaths = candidates.filter((envPath) => fs.existsSync(envPath));
+  if (existingPaths.length > 0) {
+    const values = existingPaths.slice().reverse().reduce((merged, envPath) => {
+      const raw = fs.readFileSync(envPath, "utf8");
+      return {
+        ...merged,
+        ...parseProjectEnv(raw)
+      };
+    }, {});
+    return {
+      envPath: existingPaths[0],
+      exists: true,
+      sourcePaths: existingPaths,
+      values
+    };
+  }
+  return {
+    envPath: getProjectEnvPath(rootDir),
+    exists: false,
+    sourcePaths: [],
+    values: {}
+  };
+}
+function resolveProjectEnvWritePath(rootDir = process.cwd()) {
+  for (const envPath of getProjectEnvCandidatePaths(rootDir)) {
+    if (fs.existsSync(envPath)) {
+      return envPath;
+    }
+  }
+  return getProjectEnvPath(rootDir);
+}
+function getProjectEnvStatus(rootDir = process.cwd()) {
+  const { envPath, exists, sourcePaths, values } = readProjectEnv(rootDir);
+  const resolved = {
+    baseUrl: pickResolvedValue(PRIMARY_ENV_KEYS.baseUrl, FALLBACK_ENV_KEYS.baseUrl, values),
+    apiKeyPresent: Boolean(pickResolvedValue(PRIMARY_ENV_KEYS.apiKey, FALLBACK_ENV_KEYS.apiKey, values)),
+    modelName: pickResolvedValue(PRIMARY_ENV_KEYS.modelName, FALLBACK_ENV_KEYS.modelName, values)
+  };
+  const missing = [
+    resolved.baseUrl ? null : PRIMARY_ENV_KEYS.baseUrl,
+    resolved.apiKeyPresent ? null : PRIMARY_ENV_KEYS.apiKey,
+    resolved.modelName ? null : PRIMARY_ENV_KEYS.modelName
+  ].filter(Boolean);
+  return {
+    envPath,
+    exists,
+    sourcePaths,
+    configured: missing.length === 0,
+    missing,
+    values,
+    resolved
+  };
+}
+function redactEnvValues(values) {
+  const redacted = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (/api[_-]?key|token|secret|password/i.test(key)) {
+      redacted[key] = value ? "[configured]" : "";
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+function getPublicProjectEnvStatus(rootDir = process.cwd()) {
+  const status = getProjectEnvStatus(rootDir);
+  return {
+    ...status,
+    values: redactEnvValues(status.values)
+  };
+}
+function upsertProjectEnvValues(rootDir, updates) {
+  const envPath = resolveProjectEnvWritePath(rootDir);
+  const original = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+  const lines = original ? original.split("\n") : [];
+  const nextKeys = new Set(Object.keys(updates));
+  const rewritten = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      return line;
+    }
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      return line;
+    }
+    const key = line.slice(0, separator).trim();
+    const replacement = updates[key];
+    if (replacement === void 0) {
+      return line;
+    }
+    nextKeys.delete(key);
+    return `${key}=${replacement}`;
+  });
+  for (const key of nextKeys) {
+    rewritten.push(`${key}=${updates[key]}`);
+  }
+  const finalContent = `${rewritten.filter((line, index, array) => !(index === array.length - 1 && line === "")).join("\n")}
+`;
+  fs.writeFileSync(envPath, finalContent, "utf8");
+}
+
+// src/super-graph.ts
+import fs2 from "fs/promises";
+import path2 from "path";
 var GRAPH_SCHEMA_VERSION = 1;
 var WORKSPACE_DIR = ".ai-novel";
 var STAGES = [
@@ -59,15 +242,15 @@ function readJson(value, fallback) {
   }
 }
 function workspacePath(rootDir, ...parts) {
-  return path.join(rootDir, WORKSPACE_DIR, ...parts);
+  return path2.join(rootDir, WORKSPACE_DIR, ...parts);
 }
 function graphPaths(rootDir) {
   const graphDir = workspacePath(rootDir, "graph");
   return {
     graphDir,
-    graphPath: path.join(graphDir, "super-graph.json"),
-    indexPath: path.join(graphDir, "index.json"),
-    violationsPath: path.join(graphDir, "violations.json")
+    graphPath: path2.join(graphDir, "super-graph.json"),
+    indexPath: path2.join(graphDir, "index.json"),
+    violationsPath: path2.join(graphDir, "violations.json")
   };
 }
 function makeNode(type, id, label, properties = {}) {
@@ -196,7 +379,7 @@ function buildInitialSuperGraph(state) {
 }
 async function loadSuperGraph(rootDir) {
   const { graphPath } = graphPaths(rootDir);
-  const raw = await fs.readFile(graphPath, "utf8");
+  const raw = await fs2.readFile(graphPath, "utf8");
   return JSON.parse(raw);
 }
 async function loadSuperGraphForUpdate(rootDir, options = {}) {
@@ -241,13 +424,13 @@ function normalizeProjectId(projectId) {
 }
 async function saveSuperGraph(rootDir, graph, options = {}) {
   const paths = graphPaths(rootDir);
-  await fs.mkdir(paths.graphDir, { recursive: true });
+  await fs2.mkdir(paths.graphDir, { recursive: true });
   graph.generatedAt = now();
-  await fs.writeFile(paths.graphPath, `${JSON.stringify(graph, null, 2)}
+  await fs2.writeFile(paths.graphPath, `${JSON.stringify(graph, null, 2)}
 `);
-  await fs.writeFile(paths.indexPath, `${JSON.stringify(buildSuperGraphIndex(graph), null, 2)}
+  await fs2.writeFile(paths.indexPath, `${JSON.stringify(buildSuperGraphIndex(graph), null, 2)}
 `);
-  await fs.writeFile(paths.violationsPath, `${JSON.stringify(validateSuperGraph(graph), null, 2)}
+  await fs2.writeFile(paths.violationsPath, `${JSON.stringify(validateSuperGraph(graph), null, 2)}
 `);
   const projectId = normalizeProjectId(options.projectId);
   if (options.factoryRootDir && projectId) {
@@ -284,7 +467,7 @@ async function upsertDiscussionInSuperGraph(rootDir, discussion, options = {}) {
 }
 async function upsertCheckpointInSuperGraph(rootDir, checkpoint, options = {}) {
   const graph = await loadSuperGraphForUpdate(rootDir, options);
-  const checkpointId = `checkpoint:${path.basename(checkpoint.path).replace(/\.json$/i, "")}`;
+  const checkpointId = `checkpoint:${path2.basename(checkpoint.path).replace(/\.json$/i, "")}`;
   upsertNode(graph, makeNode("Checkpoint", checkpointId, checkpoint.label, {
     path: checkpoint.path,
     drift: checkpoint.drift
@@ -369,8 +552,8 @@ function validateSuperGraph(graph) {
 }
 
 // src/context-packet.ts
-import fs2 from "fs/promises";
-import path2 from "path";
+import fs3 from "fs/promises";
+import path3 from "path";
 function compactList(values = [], limit = 2) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
@@ -492,11 +675,11 @@ function createCurrentContextPacketText(state) {
   ].join("\n");
 }
 async function syncCurrentContextPacketFile(projectRoot, state) {
-  const contextPath = path2.join(projectRoot, ".ai-novel", "context", "current-context.md");
-  const current = await fs2.readFile(contextPath, "utf8").catch(() => "");
+  const contextPath = path3.join(projectRoot, ".ai-novel", "context", "current-context.md");
+  const current = await fs3.readFile(contextPath, "utf8").catch(() => "");
   if (!current) {
-    await fs2.mkdir(path2.dirname(contextPath), { recursive: true });
-    await fs2.writeFile(contextPath, `${createCurrentContextPacketText(state)}
+    await fs3.mkdir(path3.dirname(contextPath), { recursive: true });
+    await fs3.writeFile(contextPath, `${createCurrentContextPacketText(state)}
 `);
     return;
   }
@@ -504,14 +687,15 @@ async function syncCurrentContextPacketFile(projectRoot, state) {
   if (next === current) {
     return;
   }
-  await fs2.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
+  await fs3.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
 `);
 }
 
 // src/orchestrator.ts
-import fs3 from "fs/promises";
+import fs4 from "fs/promises";
 import { randomUUID } from "crypto";
-import path3 from "path";
+import path4 from "path";
+import { createHash } from "crypto";
 var WORKSPACE_DIR2 = ".ai-novel";
 var PROJECTS_DIR = ".ai-novel-projects";
 var PROJECTS_REGISTRY_FILE = "projects.json";
@@ -538,6 +722,18 @@ var AGENT_ROLES = [
   "reviewer",
   "prose-stylist"
 ];
+var COVER_IMAGE_PATH = ".ai-novel/assets/cover/cover.png";
+var COVER_METADATA_PATH = ".ai-novel/assets/cover/cover-metadata.json";
+var COVER_PROMPT_PATH = ".ai-novel/assets/cover/cover-prompt.md";
+var DRAFT_SUBCALL_ROLE_VALUES = ["plot", "narration", "dialogue", "character_action", "continuity", "assembly"];
+var STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json";
+function parseDraftSubcallRolesSetting(value) {
+  if (!value) return void 0;
+  const roles = value.split(",").map((role) => role.trim()).filter(
+    (role) => DRAFT_SUBCALL_ROLE_VALUES.includes(role)
+  );
+  return roles.length ? [...new Set(roles)] : void 0;
+}
 function slugifyTitle(title) {
   const cleaned = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return cleaned || "untitled-novel";
@@ -573,16 +769,16 @@ function stampRuntimeProgress(state, action, route = stageRoute(state.runtime.st
   state.runtime.lastAction = action;
 }
 function getProjectsPaths(rootDir) {
-  const projectsRoot = path3.join(rootDir, PROJECTS_DIR);
+  const projectsRoot = path4.join(rootDir, PROJECTS_DIR);
   return {
     projectsRoot,
-    registryPath: path3.join(projectsRoot, PROJECTS_REGISTRY_FILE)
+    registryPath: path4.join(projectsRoot, PROJECTS_REGISTRY_FILE)
   };
 }
 async function readProjectRegistry(rootDir) {
   const { registryPath } = getProjectsPaths(rootDir);
   try {
-    const raw = await fs3.readFile(registryPath, "utf8");
+    const raw = await fs4.readFile(registryPath, "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -591,8 +787,8 @@ async function readProjectRegistry(rootDir) {
 }
 async function writeProjectRegistry(rootDir, projects) {
   const { projectsRoot, registryPath } = getProjectsPaths(rootDir);
-  await fs3.mkdir(projectsRoot, { recursive: true });
-  await fs3.writeFile(registryPath, `${JSON.stringify(projects, null, 2)}
+  await fs4.mkdir(projectsRoot, { recursive: true });
+  await fs4.writeFile(registryPath, `${JSON.stringify(projects, null, 2)}
 `);
 }
 function createUniqueProjectId(baseSlug, projects) {
@@ -607,15 +803,15 @@ function createUniqueProjectId(baseSlug, projects) {
   return `${baseSlug}-${suffix}`;
 }
 function resolveProjectRoot(rootDir, projectId) {
-  return path3.join(rootDir, PROJECTS_DIR, projectId);
+  return path4.join(rootDir, PROJECTS_DIR, projectId);
 }
 function resolveStoredProjectRoot(rootDir, projectRoot, projectId) {
-  if (path3.isAbsolute(projectRoot)) {
+  if (path4.isAbsolute(projectRoot)) {
     return projectRoot;
   }
-  const rootRelative = path3.resolve(rootDir, projectRoot);
+  const rootRelative = path4.resolve(rootDir, projectRoot);
   const managedRoot = resolveProjectRoot(rootDir, projectId);
-  if (path3.normalize(projectRoot).includes(`${PROJECTS_DIR}${path3.sep}`)) {
+  if (path4.normalize(projectRoot).includes(`${PROJECTS_DIR}${path4.sep}`)) {
     return managedRoot;
   }
   return rootRelative;
@@ -835,7 +1031,8 @@ function buildInitialState(options) {
     assets: {
       cover: {
         status: "pending",
-        briefPath: ".ai-novel/assets/cover/cover-brief.md"
+        briefPath: ".ai-novel/assets/cover/cover-brief.md",
+        promptPath: COVER_PROMPT_PATH
       },
       comic: {
         status: "pending",
@@ -845,37 +1042,39 @@ function buildInitialState(options) {
   };
 }
 function getWorkspacePaths(rootDir) {
-  const workspaceDir = path3.join(rootDir, WORKSPACE_DIR2);
+  const workspaceDir = path4.join(rootDir, WORKSPACE_DIR2);
   return {
     workspaceDir,
-    statePath: path3.join(workspaceDir, "state.json"),
-    promptsDir: path3.join(workspaceDir, "prompts"),
-    agentPromptsDir: path3.join(workspaceDir, "prompts", "agents"),
-    consensusPath: path3.join(workspaceDir, "prompts", "global-consensus.md"),
-    plansDir: path3.join(workspaceDir, "plans"),
-    reportsDir: path3.join(workspaceDir, "reports"),
-    styleDir: path3.join(workspaceDir, "style"),
-    styleProfilePath: path3.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: path3.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: path3.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: path3.join(workspaceDir, "style", "anti-patterns.md"),
-    chaptersDir: path3.join(workspaceDir, "chapters"),
-    assetsDir: path3.join(workspaceDir, "assets"),
-    coverDir: path3.join(workspaceDir, "assets", "cover"),
-    comicDir: path3.join(workspaceDir, "assets", "comic"),
-    memoryDir: path3.join(workspaceDir, "memory"),
-    charactersDir: path3.join(workspaceDir, "memory", "characters"),
-    characterCoreDir: path3.join(workspaceDir, "memory", "characters", "core"),
-    characterDossiersPath: path3.join(workspaceDir, "memory", "characters", "dossiers.json"),
-    characterDossiersMarkdownPath: path3.join(workspaceDir, "memory", "characters", "dossiers.md"),
-    protagonistPath: path3.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
-    relationsPath: path3.join(workspaceDir, "memory", "characters", "relations.md"),
-    characterEvolutionPath: path3.join(workspaceDir, "memory", "characters", "evolution.md"),
-    configPath: path3.join(workspaceDir, "config.json"),
-    settingFreezePath: path3.join(workspaceDir, "plans", "setting-freeze.md"),
-    masterOutlinePath: path3.join(workspaceDir, "plans", "master-outline.md"),
-    chapterBlueprintsDir: path3.join(workspaceDir, "plans", "chapter-blueprints"),
-    coverPromptPath: path3.join(workspaceDir, "assets", "cover", "cover-prompt.md")
+    statePath: path4.join(workspaceDir, "state.json"),
+    promptsDir: path4.join(workspaceDir, "prompts"),
+    agentPromptsDir: path4.join(workspaceDir, "prompts", "agents"),
+    consensusPath: path4.join(workspaceDir, "prompts", "global-consensus.md"),
+    plansDir: path4.join(workspaceDir, "plans"),
+    reportsDir: path4.join(workspaceDir, "reports"),
+    styleDir: path4.join(workspaceDir, "style"),
+    styleProfilePath: path4.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: path4.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: path4.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: path4.join(workspaceDir, "style", "anti-patterns.md"),
+    chaptersDir: path4.join(workspaceDir, "chapters"),
+    assetsDir: path4.join(workspaceDir, "assets"),
+    coverDir: path4.join(workspaceDir, "assets", "cover"),
+    comicDir: path4.join(workspaceDir, "assets", "comic"),
+    memoryDir: path4.join(workspaceDir, "memory"),
+    charactersDir: path4.join(workspaceDir, "memory", "characters"),
+    characterCoreDir: path4.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: path4.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: path4.join(workspaceDir, "memory", "characters", "dossiers.md"),
+    protagonistPath: path4.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path4.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: path4.join(workspaceDir, "memory", "characters", "evolution.md"),
+    configPath: path4.join(workspaceDir, "config.json"),
+    settingFreezePath: path4.join(workspaceDir, "plans", "setting-freeze.md"),
+    masterOutlinePath: path4.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: path4.join(workspaceDir, "plans", "chapter-blueprints"),
+    coverPromptPath: path4.join(workspaceDir, "assets", "cover", "cover-prompt.md"),
+    coverImagePath: path4.join(workspaceDir, "assets", "cover", "cover.png"),
+    coverMetadataPath: path4.join(workspaceDir, "assets", "cover", "cover-metadata.json")
   };
 }
 function formatCharacterDossier(dossier) {
@@ -920,7 +1119,22 @@ function formatCharacterDossierSummary(dossiers) {
 }
 async function writeWorkspaceArtifacts(rootDir, state) {
   const paths = getWorkspacePaths(rootDir);
-  const llmConfig = loadLlmConfigFromEnv(rootDir);
+  const textLlmConfig = await loadLlmConfigForCapability(rootDir, "text").catch(() => null);
+  const llmConfig = {
+    provider: {
+      baseUrl: textLlmConfig?.provider.baseUrl || "",
+      apiKeyEnv: textLlmConfig ? "DB_ACTIVE_CONFIG" : "unset",
+      modelName: textLlmConfig?.provider.modelName || "",
+      apiMode: textLlmConfig?.provider.apiMode || "chat",
+      timeoutMs: textLlmConfig?.provider.timeoutMs || 12e4,
+      temperature: textLlmConfig?.provider.temperature || 0.1,
+      reactMaxSteps: 25
+    },
+    writing: {
+      chapterWordTarget: state.plan.chapterWordTarget,
+      chapterWordMinimum: MIN_CHAPTER_WORD_TARGET
+    }
+  };
   const creativeProfile = state.project.creativeProfile || buildCreativeProfile({
     rootDir,
     idea: state.project.idea,
@@ -938,18 +1152,16 @@ async function writeWorkspaceArtifacts(rootDir, state) {
     characterDossiers
   };
   const protagonistDossier = characterDossiers.find((dossier) => dossier.role === "protagonist") || characterDossiers[0];
-  await fs3.mkdir(paths.promptsDir, { recursive: true });
-  await fs3.mkdir(paths.agentPromptsDir, { recursive: true });
-  await fs3.mkdir(paths.plansDir, { recursive: true });
-  await fs3.mkdir(paths.reportsDir, { recursive: true });
-  await fs3.mkdir(paths.styleDir, { recursive: true });
-  await fs3.mkdir(paths.chaptersDir, { recursive: true });
-  await fs3.mkdir(paths.coverDir, { recursive: true });
-  await fs3.mkdir(paths.comicDir, { recursive: true });
-  await fs3.mkdir(paths.characterCoreDir, { recursive: true });
+  await fs4.mkdir(paths.promptsDir, { recursive: true });
+  await fs4.mkdir(paths.agentPromptsDir, { recursive: true });
+  await fs4.mkdir(paths.plansDir, { recursive: true });
+  await fs4.mkdir(paths.reportsDir, { recursive: true });
+  await fs4.mkdir(paths.styleDir, { recursive: true });
+  await fs4.mkdir(paths.chaptersDir, { recursive: true });
+  await fs4.mkdir(paths.coverDir, { recursive: true });
+  await fs4.mkdir(paths.comicDir, { recursive: true });
+  await fs4.mkdir(paths.characterCoreDir, { recursive: true });
   await writeJsonFileAtomic(paths.statePath, state);
-  llmConfig.writing.chapterWordTarget = state.plan.chapterWordTarget;
-  llmConfig.writing.chapterWordMinimum = MIN_CHAPTER_WORD_TARGET;
   await writeJsonFileAtomic(paths.configPath, llmConfig);
   await writeJsonFileAtomic(paths.characterDossiersPath, characterDossiers);
   const reactPrompt = [
@@ -1189,40 +1401,40 @@ Current focus:
 `
     ])
   );
-  await fs3.writeFile(path3.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
+  await fs4.writeFile(path4.join(paths.promptsDir, "react-worldbuilding.md"), `${reactPrompt}
 `);
-  await fs3.writeFile(path3.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
+  await fs4.writeFile(path4.join(paths.plansDir, "plan-and-solve-brief.md"), `${planBrief}
 `);
-  await fs3.writeFile(paths.consensusPath, `${globalConsensus}
+  await fs4.writeFile(paths.consensusPath, `${globalConsensus}
 `);
-  await fs3.writeFile(paths.styleProfilePath, `${styleProfile}
+  await fs4.writeFile(paths.styleProfilePath, `${styleProfile}
 `);
-  await fs3.writeFile(paths.styleRulebookPath, `${styleRulebook}
+  await fs4.writeFile(paths.styleRulebookPath, `${styleRulebook}
 `);
-  await fs3.writeFile(paths.styleReferencesPath, `${styleReferences}
+  await fs4.writeFile(paths.styleReferencesPath, `${styleReferences}
 `);
-  await fs3.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
+  await fs4.writeFile(paths.styleAntiPatternsPath, `${styleAntiPatterns}
 `);
-  await fs3.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
+  await fs4.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossierSummary(characterDossiers)}
 `);
-  await fs3.writeFile(paths.protagonistPath, `${protagonistSeed}
+  await fs4.writeFile(paths.protagonistPath, `${protagonistSeed}
 `);
-  await fs3.writeFile(paths.relationsPath, `${relations}
+  await fs4.writeFile(paths.relationsPath, `${relations}
 `);
-  await fs3.writeFile(paths.characterEvolutionPath, `${evolution}
+  await fs4.writeFile(paths.characterEvolutionPath, `${evolution}
 `);
-  await fs3.writeFile(path3.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
+  await fs4.writeFile(path4.join(paths.coverDir, "cover-brief.md"), `${coverBrief}
 `);
-  await fs3.writeFile(path3.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
+  await fs4.writeFile(path4.join(paths.comicDir, "comic-plan.md"), `${comicPlan}
 `);
   await Promise.all(
     AGENT_ROLES.flatMap((role) => {
-      const base = path3.join(paths.agentPromptsDir, `${role}.base.md`);
-      const dynamic = path3.join(paths.agentPromptsDir, `${role}.dynamic.md`);
+      const base = path4.join(paths.agentPromptsDir, `${role}.base.md`);
+      const dynamic = path4.join(paths.agentPromptsDir, `${role}.dynamic.md`);
       return [
-        fs3.writeFile(base, `${basePrompts.get(role) ?? ""}
+        fs4.writeFile(base, `${basePrompts.get(role) ?? ""}
 `),
-        fs3.writeFile(dynamic, `${dynamicPrompts.get(role) ?? ""}
+        fs4.writeFile(dynamic, `${dynamicPrompts.get(role) ?? ""}
 `)
       ];
     })
@@ -1230,29 +1442,256 @@ Current focus:
 }
 async function readOptionalText(filePath) {
   try {
-    return (await fs3.readFile(filePath, "utf8")).trim();
+    return (await fs4.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
 }
+async function readOptionalJson(filePath) {
+  try {
+    const raw = await fs4.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function fileHasContent(filePath) {
+  return Boolean((await readOptionalText(filePath)).trim());
+}
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function hasItems(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function createStoryFoundationFingerprint(payload) {
+  return createHash("sha256").update(stableJson(payload)).digest("hex").slice(0, 24);
+}
+function buildStoryFoundationFingerprintInput({
+  planningAssetDetails,
+  storyFoundationContract,
+  worldMatrix,
+  plotArchitecture,
+  storyBible,
+  volumeStrategy,
+  foreshadowingLedger,
+  characterDynamics,
+  writingPlan
+}) {
+  return {
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan
+  };
+}
+function planningAssetStructuralIssue(asset, value, totalChapters) {
+  if (!value) return "JSON \u65E0\u6CD5\u89E3\u6790";
+  switch (asset) {
+    case "story-foundation-contract.json": {
+      const plot = value.plot && typeof value.plot === "object" ? value.plot : {};
+      const characters = value.characters && typeof value.characters === "object" ? value.characters : {};
+      if (!nonEmptyString(value.project?.title) && !nonEmptyString(value.project?.idea)) return "\u7F3A\u5C11\u9879\u76EE\u6838\u5FC3\u4FE1\u606F";
+      if (!hasItems(plot.chapters) && !hasItems(plot.causalModel?.chapters)) return "\u7F3A\u5C11\u4E3B\u7EBF\u7AE0\u8282\u56E0\u679C";
+      if (!hasItems(characters.requiredDossierFields)) return "\u7F3A\u5C11\u4EBA\u7269\u6863\u6848\u8981\u6C42";
+      return "";
+    }
+    case "world-matrix.json":
+      return hasItems(value.rules) ? "" : "\u7F3A\u5C11\u4E16\u754C\u89C4\u5219";
+    case "plot-architecture.json":
+      return hasItems(value.chapters) ? "" : "\u7F3A\u5C11\u7AE0\u8282\u56E0\u679C\u67B6\u6784";
+    case "story-bible.json":
+      return nonEmptyString(value.readerPromise) && hasItems(value.nonNegotiableContracts) ? "" : "\u7F3A\u5C11\u8BFB\u8005\u627F\u8BFA\u6216\u6545\u4E8B\u5408\u540C";
+    case "volume-strategy.json":
+      return hasItems(value.volumes) ? "" : "\u7F3A\u5C11\u5206\u5377\u7B56\u7565";
+    case "foreshadowing-ledger.json":
+      return hasItems(value.entries) ? "" : "\u7F3A\u5C11\u4F0F\u7B14\u6761\u76EE";
+    case "character-dynamics.json":
+      return hasItems(value.relationshipEntries) || hasItems(value.dossiers) || hasItems(value.relationships) ? "" : "\u7F3A\u5C11\u4EBA\u7269\u5173\u7CFB\u52A8\u6001";
+    case "writing-plan.json": {
+      const chapters = Array.isArray(value.chapters) ? value.chapters : [];
+      if (!Number.isFinite(Number(value.totalChapters)) || Number(value.totalChapters) <= 0) return "\u7F3A\u5C11\u603B\u7AE0\u8282\u6570";
+      if (chapters.length < Math.max(1, totalChapters)) return "\u5199\u4F5C\u8BA1\u5212\u672A\u8986\u76D6\u5168\u4E66\u7AE0\u8282";
+      return "";
+    }
+    default:
+      return "";
+  }
+}
+async function countMarkdownFiles(dirPath) {
+  try {
+    const entries = await fs4.readdir(dirPath, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && /\.md$/iu.test(entry.name)).length;
+  } catch {
+    return 0;
+  }
+}
+async function evaluateDraftingStartReadiness(rootDir, paths, state) {
+  const requiredPlanningAssets = [
+    "world-matrix.md",
+    "plot-architecture.md",
+    "story-bible.md",
+    "volume-strategy.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "story-foundation-contract.json",
+    "world-matrix.json",
+    "plot-architecture.json",
+    "story-bible.json",
+    "volume-strategy.json",
+    "foreshadowing-ledger.json",
+    "character-dynamics.json",
+    "writing-plan.json"
+  ];
+  const totalChapters = Math.max(0, Number(state.plan.totalChapters || state.plan.chapterTasks.length || 0));
+  const planningAssetDetails = await Promise.all(requiredPlanningAssets.map(async (asset) => {
+    const assetPath = path4.join(paths.plansDir, asset);
+    const present = await fileHasContent(assetPath);
+    const issue = present && asset.endsWith(".json") ? planningAssetStructuralIssue(asset, await readOptionalJson(assetPath), totalChapters) : "";
+    return {
+      key: asset.replace(/\.md$/u, "").replace(/[^a-z0-9]+/giu, "_"),
+      label: asset,
+      path: `.ai-novel/plans/${asset}`,
+      status: present && !issue ? "passed" : "blocked",
+      detail: present ? issue || "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+    };
+  }));
+  const presentPlanningAssets = planningAssetDetails.filter((asset) => asset.status === "passed").map((asset) => asset.label);
+  const storyFoundationApproval = await readOptionalJson(path4.join(paths.plansDir, STORY_FOUNDATION_APPROVAL_FILE));
+  const storyFoundationApproved = Boolean(storyFoundationApproval?.approved === true && String(storyFoundationApproval.approvedAt || "").trim());
+  const storyFoundationApprovalFingerprint = typeof storyFoundationApproval?.assetFingerprint === "string" ? String(storyFoundationApproval.assetFingerprint) : "";
+  const styleEvolution = await loadStyleEvolution(rootDir).catch(() => null);
+  const hasCharacterDynamicsAsset = await fileHasContent(path4.join(paths.plansDir, "character-dynamics.json"));
+  const hasDossiers = await fileHasContent(paths.characterDossiersPath) || hasCharacterDynamicsAsset;
+  const hasRelationships = await fileHasContent(path4.join(paths.charactersDir, "relationships.json")) || hasCharacterDynamicsAsset;
+  const blueprintCount = await countMarkdownFiles(paths.chapterBlueprintsDir);
+  const consensus = await readOptionalText(paths.consensusPath);
+  const storyFoundationContract = await readOptionalJson(path4.join(paths.plansDir, "story-foundation-contract.json"));
+  const worldMatrix = await readOptionalJson(path4.join(paths.plansDir, "world-matrix.json"));
+  const plotArchitecture = await readOptionalJson(path4.join(paths.plansDir, "plot-architecture.json"));
+  const storyBible = await readOptionalJson(path4.join(paths.plansDir, "story-bible.json"));
+  const volumeStrategy = await readOptionalJson(path4.join(paths.plansDir, "volume-strategy.json"));
+  const foreshadowingLedger = await readOptionalJson(path4.join(paths.plansDir, "foreshadowing-ledger.json"));
+  const characterDynamics = await readOptionalJson(path4.join(paths.plansDir, "character-dynamics.json"));
+  const writingPlan = await readOptionalJson(path4.join(paths.plansDir, "writing-plan.json"));
+  const storyFoundationFingerprintInput = buildStoryFoundationFingerprintInput({
+    planningAssetDetails,
+    storyFoundationContract,
+    worldMatrix,
+    plotArchitecture,
+    storyBible,
+    volumeStrategy,
+    foreshadowingLedger,
+    characterDynamics,
+    writingPlan
+  });
+  const storyFoundationAssetFingerprint = createStoryFoundationFingerprint(storyFoundationFingerprintInput);
+  return evaluateProductionReadiness({
+    consensusText: consensus,
+    planningArtifactCount: presentPlanningAssets.length,
+    planningRequiredAssetCount: presentPlanningAssets.length,
+    planningRequiredAssets: requiredPlanningAssets,
+    planningMissingRequiredAssets: requiredPlanningAssets.filter((asset) => !presentPlanningAssets.includes(asset)),
+    planningAssetDetails,
+    storyFoundationApproved,
+    storyFoundationApprovalPath: `.ai-novel/plans/${STORY_FOUNDATION_APPROVAL_FILE}`,
+    storyFoundationApprovedAt: typeof storyFoundationApproval?.approvedAt === "string" ? storyFoundationApproval.approvedAt : void 0,
+    storyFoundationApprovalFingerprint,
+    storyFoundationAssetFingerprint,
+    characterAssetDetails: [
+      {
+        key: "character_dossiers",
+        label: "\u4EBA\u7269\u6863\u6848",
+        path: ".ai-novel/memory/characters/dossiers.json",
+        status: hasDossiers ? "passed" : "blocked",
+        detail: hasDossiers ? "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+      },
+      {
+        key: "relationship_graph",
+        label: "\u4EBA\u7269\u5173\u7CFB\u56FE",
+        path: ".ai-novel/memory/characters/relationships.json",
+        status: hasRelationships ? "passed" : "blocked",
+        detail: hasRelationships ? "\u5DF2\u751F\u6210" : "\u7F3A\u5931"
+      }
+    ],
+    executionAssetDetails: [
+      {
+        key: "chapter_blueprints",
+        label: "\u7AE0\u8282\u84DD\u56FE",
+        path: ".ai-novel/plans/chapter-blueprints/",
+        status: totalChapters > 0 && blueprintCount >= totalChapters ? "passed" : "blocked",
+        detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} \u4E2A\u84DD\u56FE`
+      },
+      {
+        key: "style_contract",
+        label: "\u5199\u6CD5\u5408\u540C",
+        path: ".ai-novel/style/evolution/style-contract.json",
+        status: styleEvolution?.gate?.status || "blocked",
+        detail: styleEvolution?.gate?.status === "passed" ? "\u5DF2\u51BB\u7ED3" : styleEvolution?.gate?.blockedReason || "\u5F85\u786E\u8BA4"
+      }
+    ],
+    blueprintCount,
+    totalChapters,
+    characterDossierCount: hasDossiers ? Math.max(1, state.memory?.characterDossiers?.length || 0) : 0,
+    styleGate: styleEvolution?.gate || evaluateStyleEvolutionGate(null),
+    memoryRecallRows: Math.max(0, Number(state.memory?.characterDossiers?.length || 0)),
+    memoryLag: 0,
+    contextBudgetPercent: 0
+  });
+}
+async function blockDraftingUntilReady(rootDir, paths, state, pipelineOptions) {
+  const readiness = await evaluateDraftingStartReadiness(rootDir, paths, state);
+  if (readiness.canProceed) {
+    return false;
+  }
+  state.runtime.stage = "chapter_task_generation";
+  state.runtime.statusMessage = `Drafting is blocked by production readiness: ${readiness.blockedReason || readiness.summary}`;
+  stampRuntimeProgress(state, "drafting_blocked_by_production_readiness");
+  await saveAutonomousState(rootDir, state);
+  await recordWorkflowEvent(pipelineOptions, "DRAFTING_START_BLOCKED_BY_READINESS", {
+    status: readiness.status,
+    score: readiness.score,
+    blockedReason: readiness.blockedReason,
+    issueCodes: readiness.issues.map((issue) => issue.code)
+  });
+  if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+    await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+  }
+  return true;
+}
 async function writeJsonFileAtomic(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
-  await fs3.mkdir(path3.dirname(filePath), { recursive: true });
+  await fs4.mkdir(path4.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const tempPath = path3.join(path3.dirname(filePath), `.${path3.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+    const tempPath = path4.join(path4.dirname(filePath), `.${path4.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
     try {
-      const handle = await fs3.open(tempPath, "wx");
+      const handle = await fs4.open(tempPath, "wx");
       try {
         await handle.writeFile(data, "utf8");
         await handle.sync();
       } finally {
         await handle.close();
       }
-      await fs3.rename(tempPath, filePath);
+      await fs4.rename(tempPath, filePath);
       return;
     } catch (error) {
-      await fs3.unlink(tempPath).catch(() => void 0);
+      await fs4.unlink(tempPath).catch(() => void 0);
       if (attempt === 0 && error instanceof Error && "code" in error && error.code === "ENOENT") {
         continue;
       }
@@ -1287,12 +1726,246 @@ function extractSectionBullets(source, heading, limit = 4) {
   }
   return collected;
 }
+function extractMeaningfulLines(source, limit = 4) {
+  return source.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#")).slice(0, limit);
+}
+function trimForPrompt(source, maxChars) {
+  const normalized = source.trim().replace(/\n{3,}/g, "\n\n");
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars).trim()}
+[truncated]`;
+}
+function getEnvValue(rootDir, name) {
+  return process.env[name] || getProjectEnvStatus(rootDir).values[name] || "";
+}
+function buildFallbackCoverVisualBrief(state, context) {
+  const consensusLines = extractMeaningfulLines(context.consensus, 5);
+  const protagonistLines = extractMeaningfulLines(context.protagonist, 4);
+  const styleLines = extractMeaningfulLines(context.style, 3);
+  const genre = state.project.creativeProfile?.genre || "genre-forward commercial fiction";
+  return [
+    "# Cover Visual Brief",
+    "",
+    `Title: ${state.project.title}`,
+    `Core concept: ${state.project.idea}`,
+    `Genre signal: ${genre}`,
+    "",
+    "Primary cover concept:",
+    "- A single iconic protagonist silhouette or symbolic emblem dominates the cover.",
+    "- The image should feel like a premium illustrated novel cover, not a generic stock poster.",
+    "- The central visual metaphor must communicate the protagonist's pressure, ambition, and story promise at a glance.",
+    "",
+    "Story signals to visualize:",
+    ...consensusLines.length ? consensusLines.map((line) => `- ${line}`) : ["- Use the frozen world assumptions and central conflict."],
+    "",
+    "Character or emblem focus:",
+    ...protagonistLines.length ? protagonistLines.map((line) => `- ${line}`) : ["- Foreground one memorable protagonist silhouette or emblem."],
+    "",
+    "Style direction:",
+    ...styleLines.length ? styleLines.map((line) => `- ${line}`) : ["- Signal the genre promise immediately."],
+    "",
+    "Composition:",
+    "- Vertical 2:3 book-cover layout with a clear foreground, midground, and background.",
+    "- One strong focal shape, dramatic lighting, readable silhouette, and title-safe negative space near the upper third.",
+    "- Avoid busy collage layouts, plastic fantasy armor, random flames, over-rendered faces, and cheap mobile-game poster aesthetics.",
+    "",
+    "Color and finish:",
+    "- Use a disciplined color script with one dominant mood color and one accent color.",
+    "- High-end editorial illustration, cinematic but painterly, crisp edges on the focal subject, atmospheric depth in the background."
+  ].join("\n");
+}
+function buildCoverBriefRequest(state, context) {
+  return [
+    `Novel title: ${state.project.title}`,
+    `Core idea: ${state.project.idea}`,
+    `Genre: ${state.project.creativeProfile?.genre || "unknown"}`,
+    `Reader promise: ${state.project.creativeProfile?.readerPromise || "unknown"}`,
+    "",
+    "Global consensus:",
+    trimForPrompt(context.consensus || "(not finalized)", 3500),
+    "",
+    "Protagonist dossier:",
+    trimForPrompt(context.protagonist || "(not finalized)", 1800),
+    "",
+    "Style profile:",
+    trimForPrompt(context.style || "(not finalized)", 1500)
+  ].join("\n");
+}
+async function generateCoverVisualBrief(rootDir, state, context) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    return { brief: buildFallbackCoverVisualBrief(state, context), source: "fallback", error: "test_mode" };
+  }
+  try {
+    const config = await loadLlmConfigForCapability(rootDir, "text");
+    const apiKey = config?._dbApiKey || "";
+    if (!config || !apiKey) {
+      throw new Error("text_llm_config_missing");
+    }
+    const brief = await requestLlmTextCompletion({
+      baseUrl: config.provider.baseUrl,
+      apiKey,
+      modelName: config.provider.modelName,
+      apiMode: config.provider.apiMode,
+      timeoutMs: config.provider.timeoutMs,
+      temperature: 0.35,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a senior commercial book-cover art director.",
+            "Create an English visual brief for a text-to-image model.",
+            "Do not write prose fiction. Do not ask questions. Do not include typography copy.",
+            "Prioritize specific visual anchors, composition, mood, palette, lighting, and negative constraints."
+          ].join(" ")
+        },
+        {
+          role: "user",
+          content: [
+            buildCoverBriefRequest(state, context),
+            "",
+            "Return markdown with exactly these sections:",
+            "1. Core Visual Metaphor",
+            "2. Main Subject",
+            "3. Setting And Background",
+            "4. Composition",
+            "5. Palette And Lighting",
+            "6. Texture And Rendering Style",
+            "7. Must Avoid",
+            "",
+            "Make the brief concrete enough that the generated image will not look like a generic webnovel poster."
+          ].join("\n")
+        }
+      ]
+    });
+    if (!brief) {
+      throw new Error("text_llm_returned_empty_cover_brief");
+    }
+    return { brief, source: "llm" };
+  } catch (error) {
+    return {
+      brief: buildFallbackCoverVisualBrief(state, context),
+      source: "fallback",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+function buildFinalCoverImagePrompt(state, visualBrief) {
+  return [
+    `Create a premium illustrated vertical novel cover for "${state.project.title}".`,
+    `Core story concept: ${state.project.idea}.`,
+    "",
+    "Use this art-direction brief as binding visual guidance:",
+    trimForPrompt(visualBrief, 5e3),
+    "",
+    "Image requirements:",
+    "- Vertical 2:3 book-cover composition, commercial publishing quality, polished editorial illustration.",
+    "- One dominant focal subject or emblem, strong silhouette, cinematic depth, clear foreground/midground/background separation.",
+    "- Leave clean negative space for title and author typography; do not render any letters, pseudo-text, subtitles, logos, or watermarks.",
+    "- Avoid generic stock-poster composition, cheap mobile-game aesthetics, cluttered collage layouts, malformed anatomy, extra limbs, distorted faces, celebrity likeness, and blurry low-detail output."
+  ].join("\n");
+}
+function buildCoverPrompt(state, visualBrief) {
+  const imagePrompt = buildFinalCoverImagePrompt(state, visualBrief.brief);
+  return {
+    markdown: [
+      "# Cover Image Prompt",
+      "",
+      `Project: ${state.project.title}`,
+      `Core idea: ${state.project.idea}`,
+      `Visual brief source: ${visualBrief.source}`,
+      visualBrief.error ? `Visual brief fallback reason: ${visualBrief.error}` : "",
+      "",
+      "## Visual Brief",
+      "",
+      visualBrief.brief,
+      "",
+      "## Final Image Prompt",
+      "",
+      imagePrompt
+    ].filter(Boolean).join("\n"),
+    imagePrompt
+  };
+}
+async function getImageGenerationConfig(rootDir) {
+  const imageConfig = await loadLlmConfigForCapability(rootDir, "image").catch(() => null);
+  const baseUrl = imageConfig?.provider.baseUrl || "";
+  const apiKey = imageConfig?._dbApiKey || "";
+  const model = imageConfig?.provider.modelName || "";
+  const size = getEnvValue(rootDir, "IMAGE_SIZE") || "1024x1536";
+  return { baseUrl, apiKey, model, size };
+}
+async function requestCoverImage(rootDir, prompt) {
+  if (process.env.AI_NOVEL_TEST_MODE === "1") {
+    throw new Error("image_generation_skipped_in_test_mode");
+  }
+  const config = await getImageGenerationConfig(rootDir);
+  if (!config.apiKey) {
+    throw new Error("image_generation_api_key_missing");
+  }
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/images/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.model,
+      prompt,
+      size: config.size,
+      n: 1
+    })
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || text || response.statusText;
+    throw new Error(`image_generation_failed:${response.status}:${message}`);
+  }
+  const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+  const base64 = first?.b64_json || first?.base64 || first?.image;
+  if (typeof base64 === "string" && base64.trim()) {
+    return {
+      bytes: Buffer.from(base64.replace(/^data:image\/\w+;base64,/, ""), "base64"),
+      mimeType: "image/png",
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size
+      }
+    };
+  }
+  const url = first?.url;
+  if (typeof url === "string" && url.trim()) {
+    const imageResponse = await fetch(url);
+    if (!imageResponse.ok) {
+      throw new Error(`image_download_failed:${imageResponse.status}:${imageResponse.statusText}`);
+    }
+    return {
+      bytes: Buffer.from(await imageResponse.arrayBuffer()),
+      mimeType: imageResponse.headers.get("content-type") || "image/png",
+      sourceUrl: url,
+      provider: {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        size: config.size
+      }
+    };
+  }
+  throw new Error("image_generation_returned_no_image");
+}
 async function initAutonomousProject(options) {
   const paths = getWorkspacePaths(options.rootDir);
   if (options.chapterWordTarget < MIN_CHAPTER_WORD_TARGET) {
     throw new Error(`Chapter word target must be at least ${MIN_CHAPTER_WORD_TARGET}.`);
   }
-  await fs3.mkdir(paths.workspaceDir, { recursive: true });
+  await fs4.mkdir(paths.workspaceDir, { recursive: true });
   const state = buildInitialState(options);
   await writeWorkspaceArtifacts(options.rootDir, state);
   await initializeSuperGraph(options.rootDir, state);
@@ -1308,8 +1981,8 @@ async function deleteManagedAutonomousProject(rootDir, projectId) {
     return null;
   }
   const projectRoot = resolveStoredProjectRoot(rootDir, project.projectRoot, project.id);
-  const expectedProjectRoot = path3.resolve(resolveProjectRoot(rootDir, project.id));
-  if (path3.resolve(projectRoot) !== expectedProjectRoot) {
+  const expectedProjectRoot = path4.resolve(resolveProjectRoot(rootDir, project.id));
+  if (path4.resolve(projectRoot) !== expectedProjectRoot) {
     throw new Error(`Refusing to delete project outside managed workspace: ${projectRoot}`);
   }
   await withFactoryDb(rootDir, async (db) => {
@@ -1321,7 +1994,7 @@ async function deleteManagedAutonomousProject(rootDir, projectId) {
       cancelledJobs
     });
   });
-  await fs3.rm(projectRoot, { recursive: true, force: true });
+  await fs4.rm(projectRoot, { recursive: true, force: true });
   await writeProjectRegistry(rootDir, projects.filter((entry) => entry.id !== project.id));
   await withFactoryDb(rootDir, async (db) => {
     db.deleteProject(project.id);
@@ -1414,7 +2087,7 @@ async function createManagedAutonomousProject(options) {
 }
 async function loadAutonomousState(rootDir) {
   const { statePath } = getWorkspacePaths(rootDir);
-  const raw = await fs3.readFile(statePath, "utf8");
+  const raw = await fs4.readFile(statePath, "utf8");
   return JSON.parse(raw);
 }
 async function saveAutonomousState(rootDir, state) {
@@ -1563,6 +2236,7 @@ async function produceChapterTask(rootDir, paths, state, task, pipelineOptions) 
     ...produced.qualityGate,
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
+  task.aigcStatus = pipelineOptions.bypassAigcGate ? "pending" : produced.qualityGate.status === "blocked" ? "blocked" : "passed";
   if (task.status === "complete") {
     task.recoveryBlocked = false;
   }
@@ -1726,9 +2400,9 @@ async function recoverIncompleteInProgressChapterTasks(paths, state, pipelineOpt
       continue;
     }
     const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
-    const finalPath = path3.join(paths.chaptersDir, `${chapterId}.final.md`);
+    const finalPath = path4.join(paths.chaptersDir, `${chapterId}.final.md`);
     try {
-      await fs3.access(finalPath);
+      await fs4.access(finalPath);
       if (fact?.status === "complete") {
         task.status = "complete";
         task.recoveryBlocked = false;
@@ -1817,7 +2491,20 @@ function createSettingFreeze(state, context) {
   ].join("\n");
 }
 async function advanceAutonomousProject(rootDir, options = {}) {
-  const pipelineOptions = { envRootDir: rootDir, ...options };
+  const dbSettings = await withFactoryDb(options.factoryRootDir || rootDir, async (db) => {
+    return {
+      bypassAigcGate: db.getSystemSetting("bypassAigcGate"),
+      draftSubcallRoles: db.getSystemSetting("draftSubcallRoles")
+    };
+  }).catch(() => null);
+  const bypassAigcGateDb = dbSettings?.bypassAigcGate === "1";
+  const draftSubcallRolesDb = parseDraftSubcallRolesSetting(dbSettings?.draftSubcallRoles);
+  const pipelineOptions = {
+    envRootDir: rootDir,
+    bypassAigcGate: bypassAigcGateDb,
+    ...draftSubcallRolesDb ? { draftSubcallRoles: draftSubcallRolesDb } : {},
+    ...options
+  };
   throwIfStopped(pipelineOptions.signal);
   const state = await loadAutonomousState(rootDir);
   const paths = getWorkspacePaths(rootDir);
@@ -1845,10 +2532,95 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     protagonist: await readOptionalText(paths.protagonistPath),
     style: await readOptionalText(paths.styleProfilePath)
   };
+  if (state.runtime.stage === "aigc_refinement") {
+    throwIfStopped(pipelineOptions.signal);
+    const autoRefineVal = await withFactoryDb(pipelineOptions.factoryRootDir || rootDir, async (db) => {
+      return db.getSystemSetting("autoAigcRefinement");
+    }).catch(() => null);
+    const isAutoRefineEnabled = autoRefineVal === "1";
+    if (!isAutoRefineEnabled) {
+      state.runtime.statusMessage = "All chapter drafts generated. Waiting for manual AIGC batch scanning and refinement.";
+      await saveAutonomousState(rootDir, state);
+      return state;
+    }
+    const refineTask = state.plan.chapterTasks.find(
+      (t) => t.aigcStatus === "pending" || t.aigcStatus === "blocked" || !t.aigcStatus
+    );
+    if (!refineTask) {
+      state.runtime.stage = "complete";
+      state.runtime.statusMessage = "All chapter drafts generated and AIGC batch refinement finalized successfully.";
+      state.runtime.lastRoute = "workflow";
+      state.runtime.lastAction = "workflow_complete";
+      await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
+    const chapterId = `chapter-${String(refineTask.chapterNumber).padStart(3, "0")}`;
+    const finalPath = path4.join(paths.chaptersDir, `${chapterId}.final.md`);
+    let finalDraft = "";
+    try {
+      finalDraft = await fs4.readFile(finalPath, "utf8");
+    } catch {
+      refineTask.aigcStatus = "skipped";
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} final draft not found, skipping.`;
+      await saveAutonomousState(rootDir, state);
+      return state;
+    }
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} scanning AIGC risk...`;
+    await saveAutonomousState(rootDir, state);
+    try {
+      const detectorConfig = getAigcDetectorConfig(rootDir);
+      const bodyOnly = finalDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+      const detectResult = await detectAigcSegments(bodyOnly || finalDraft, detectorConfig);
+      const aigcReport = normalizeAigcWritingDetectionReport(detectResult);
+      if (aigcReport.status === "blocked" && aigcReport.highRiskSegments.length > 0) {
+        state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} has ${aigcReport.highRiskSegments.length} high risk segments, fixing...`;
+        await saveAutonomousState(rootDir, state);
+        const resources = await loadProductionWritingResources(rootDir);
+        const refinedDraft = await repairAigcHighRiskDraft(
+          state,
+          refineTask,
+          finalDraft,
+          aigcReport,
+          resources,
+          pipelineOptions,
+          {},
+          state.memory?.characterDossiers || []
+        );
+        await fs4.writeFile(finalPath, `${refinedDraft}
+`, "utf8");
+        const finalBodyOnly = refinedDraft.split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+        const finalDetectResult = await detectAigcSegments(finalBodyOnly || refinedDraft, detectorConfig);
+        const finalAigcReport = normalizeAigcWritingDetectionReport(finalDetectResult);
+        refineTask.aigcStatus = finalAigcReport.status === "blocked" ? "blocked" : "passed";
+        if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+          await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
+            db.recordEvent(pipelineOptions.projectId, `auto_refine_ch_${refineTask.chapterNumber}`, "AIGC_DETECTION_COMPLETED", {
+              chapterNumber: refineTask.chapterNumber,
+              aigcReport: finalAigcReport
+            });
+          }).catch(() => void 0);
+        }
+      } else {
+        refineTask.aigcStatus = "passed";
+      }
+    } catch (e) {
+      refineTask.aigcStatus = "skipped";
+      state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} failed with error: ${String(e)}, skipping.`;
+    }
+    state.runtime.statusMessage = `Automated AIGC refining: Chapter ${refineTask.chapterNumber} processed with status ${refineTask.aigcStatus}.`;
+    await saveAutonomousState(rootDir, state);
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+    }
+    return state;
+  }
   if (state.runtime.stage === "worldbuilding_dialogue") {
     throwIfStopped(pipelineOptions.signal);
     await writeProductionWritingResourceArtifacts(rootDir, paths, state, pipelineOptions);
-    await fs3.writeFile(paths.settingFreezePath, `${createSettingFreeze(state, context)}
+    await fs4.writeFile(paths.settingFreezePath, `${createSettingFreeze(state, context)}
 `);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
@@ -1860,6 +2632,14 @@ async function advanceAutonomousProject(rootDir, options = {}) {
           metadata: { production: true, stage: state.runtime.stage }
         });
       }).catch(() => void 0);
+    }
+    const coverState = await prepareCoverGeneration(rootDir, {
+      factoryRootDir: pipelineOptions.factoryRootDir,
+      projectId: pipelineOptions.projectId,
+      reason: "worldbuilding_completed"
+    }).catch(() => void 0);
+    if (coverState?.assets?.cover) {
+      state.assets.cover = coverState.assets.cover;
     }
     state.runtime.stage = "setting_review";
     state.runtime.statusMessage = "Setting freeze drafted. Review the frozen world assumptions before outlining.";
@@ -1874,7 +2654,7 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     throwIfStopped(pipelineOptions.signal);
     await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions);
     state.runtime.stage = "master_planning";
-    state.runtime.statusMessage = "Production master outline generated. Next step is to expand detailed chapter blueprints.";
+    state.runtime.statusMessage = "Production master outline generated. Next step is to write story bible assets before chapter blueprints.";
     stampRuntimeProgress(state, "master_outline_generated");
     await saveAutonomousState(rootDir, state);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
@@ -1883,10 +2663,11 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     return state;
   }
   if (state.runtime.stage === "master_planning") {
+    await writeProductionStoryBibleAssets(rootDir, paths, state, context, pipelineOptions);
     await writeAllDetailedChapterBlueprints(rootDir, paths, state, context, pipelineOptions);
-    state.runtime.stage = "drafting";
-    state.runtime.statusMessage = "Detailed chapter blueprints generated for the full book. Drafting has started from the queued chapter tasks.";
-    stampRuntimeProgress(state, "chapter_blueprints_generated");
+    state.runtime.stage = "chapter_task_generation";
+    state.runtime.statusMessage = "Story bible assets and detailed chapter blueprints generated. Review and confirm story foundation and writing style before drafting starts.";
+    stampRuntimeProgress(state, "story_bible_and_chapter_blueprints_generated");
     await saveAutonomousState(rootDir, state);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
@@ -1912,7 +2693,20 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     }
     return state;
   }
-  if (state.runtime.stage === "chapter_task_generation" || state.runtime.stage === "drafting") {
+  if (state.runtime.stage === "chapter_task_generation") {
+    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions);
+    if (blocked) {
+      return state;
+    }
+    state.runtime.stage = "drafting";
+    state.runtime.statusMessage = "Production readiness passed. Drafting has started from the queued chapter tasks.";
+    stampRuntimeProgress(state, "drafting_started_after_readiness");
+    await saveAutonomousState(rootDir, state);
+    if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+      await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+    }
+  }
+  if (state.runtime.stage === "drafting") {
     const inProgressTask = state.plan.chapterTasks.find((task) => task.status === "in_progress");
     if (inProgressTask) {
       state.runtime.stage = "drafting";
@@ -1935,11 +2729,26 @@ async function advanceAutonomousProject(rootDir, options = {}) {
     }
     const nextTask = state.plan.chapterTasks.find((task) => task.status === "pending");
     if (!nextTask) {
-      state.runtime.stage = "complete";
-      state.runtime.statusMessage = "All chapter drafts have been generated.";
-      state.plan.pendingChapters = 0;
-      stampRuntimeProgress(state, "workflow_complete");
+      const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || pipelineOptions.bypassAigcGate === true;
+      if (isAigcGateBypassed) {
+        state.runtime.stage = "aigc_refinement";
+        state.runtime.statusMessage = "All chapter drafts have been generated. Waiting for batch AIGC scanning and refinement.";
+        state.plan.pendingChapters = 0;
+        stampRuntimeProgress(state, "aigc_refinement_entered");
+      } else {
+        state.runtime.stage = "complete";
+        state.runtime.statusMessage = "All chapter drafts have been generated.";
+        state.plan.pendingChapters = 0;
+        stampRuntimeProgress(state, "workflow_complete");
+      }
       await saveAutonomousState(rootDir, state);
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
+    const blocked = await blockDraftingUntilReady(rootDir, paths, state, pipelineOptions);
+    if (blocked) {
       return state;
     }
     return (await produceChapterTask(rootDir, paths, state, nextTask, pipelineOptions)).state;
@@ -1998,30 +2807,112 @@ async function retryChapterProduction(rootDir, chapterNumber, options = {}) {
   }
   return state;
 }
-async function prepareCoverGeneration(rootDir) {
+async function prepareCoverGeneration(rootDir, options = {}) {
   const state = await loadAutonomousState(rootDir);
   const paths = getWorkspacePaths(rootDir);
-  const prompt = [
-    "# Cover Image Prompt",
-    "",
-    `Project: ${state.project.title}`,
-    `Core idea: ${state.project.idea}`,
-    "",
-    "Art direction:",
-    "- foreground one memorable protagonist silhouette or emblem",
-    "- signal genre promise immediately",
-    "- leave clean title space",
-    "- avoid generic stock-poster composition",
-    "",
-    "Image prompt seed:",
-    `"Create a novel cover for '${state.project.title}' inspired by: ${state.project.idea}"`
-  ].join("\n");
-  await fs3.writeFile(paths.coverPromptPath, `${prompt}
+  const context = {
+    consensus: await readOptionalText(paths.consensusPath),
+    protagonist: await readOptionalText(paths.protagonistPath),
+    style: await readOptionalText(paths.styleProfilePath)
+  };
+  const visualBrief = await generateCoverVisualBrief(rootDir, state, context);
+  const prompt = buildCoverPrompt(state, visualBrief);
+  const requestedAt = (/* @__PURE__ */ new Date()).toISOString();
+  await fs4.writeFile(path4.join(paths.coverDir, "cover-brief.md"), `${visualBrief.brief}
+`);
+  await fs4.writeFile(paths.coverPromptPath, `${prompt.markdown}
 `);
   state.assets.cover.status = "in_progress";
-  state.runtime.statusMessage = "Cover prompt prepared. Ready for an image-generation step.";
+  state.assets.cover.briefPath = ".ai-novel/assets/cover/cover-brief.md";
+  state.assets.cover.promptPath = COVER_PROMPT_PATH;
+  state.assets.cover.imagePath = state.assets.cover.imagePath || COVER_IMAGE_PATH;
+  state.assets.cover.metadataPath = COVER_METADATA_PATH;
+  delete state.assets.cover.error;
+  state.runtime.statusMessage = "Cover prompt prepared. Generating cover image...";
   stampRuntimeProgress(state, "cover_prompt_prepared", "cover");
   await saveAutonomousState(rootDir, state);
+  try {
+    const generated = await requestCoverImage(rootDir, prompt.imagePrompt);
+    await fs4.writeFile(paths.coverImagePath, generated.bytes);
+    const metadata = {
+      status: "complete",
+      requestedAt,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      mimeType: generated.mimeType,
+      sourceUrl: "sourceUrl" in generated ? generated.sourceUrl : void 0,
+      provider: generated.provider,
+      reason: options.reason || "manual"
+    };
+    await writeJsonFileAtomic(paths.coverMetadataPath, metadata);
+    state.assets.cover.status = "complete";
+    state.assets.cover.imagePath = COVER_IMAGE_PATH;
+    state.assets.cover.metadataPath = COVER_METADATA_PATH;
+    state.assets.cover.generatedAt = metadata.generatedAt;
+    delete state.assets.cover.error;
+    state.runtime.statusMessage = "Cover image generated and saved.";
+    stampRuntimeProgress(state, "cover_image_generated", "cover");
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_IMAGE_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover" }
+        });
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" }
+        });
+        db.recordEvent(options.projectId, null, "COVER_IMAGE_GENERATED", metadata);
+      }).catch(() => void 0);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const metadata = {
+      status: "failed",
+      requestedAt,
+      failedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      promptPath: COVER_PROMPT_PATH,
+      briefPath: ".ai-novel/assets/cover/cover-brief.md",
+      briefSource: visualBrief.source,
+      briefError: visualBrief.error,
+      imagePath: COVER_IMAGE_PATH,
+      reason: options.reason || "manual",
+      error: message
+    };
+    await writeJsonFileAtomic(paths.coverMetadataPath, metadata);
+    state.assets.cover.status = "failed";
+    state.assets.cover.imagePath = COVER_IMAGE_PATH;
+    state.assets.cover.metadataPath = COVER_METADATA_PATH;
+    state.assets.cover.error = message;
+    state.runtime.statusMessage = `Cover generation failed but workflow can continue: ${message}`;
+    stampRuntimeProgress(state, "cover_image_failed", "cover");
+    if (options.factoryRootDir && options.projectId) {
+      await withFactoryDb(options.factoryRootDir, async (db) => {
+        db.recordArtifact({
+          projectId: options.projectId,
+          kind: "plan",
+          path: COVER_PROMPT_PATH,
+          status: "completed",
+          metadata: { ...metadata, asset: "cover_prompt" }
+        });
+        db.recordEvent(options.projectId, null, "COVER_IMAGE_FAILED", metadata);
+      }).catch(() => void 0);
+    }
+  }
+  await saveAutonomousState(rootDir, state);
+  if (options.factoryRootDir && options.projectId) {
+    await syncManagedProjectState(options.factoryRootDir, options.projectId, state).catch(() => void 0);
+  }
   return state;
 }
 function classifyInterruption(message) {
@@ -2103,15 +2994,15 @@ async function reviewInterruption(options) {
     await syncManagedProjectState(options.factoryRootDir, options.projectId, state).catch(() => void 0);
   }
   const { reportsDir } = getWorkspacePaths(options.rootDir);
-  await fs3.mkdir(reportsDir, { recursive: true });
-  const logPath = path3.join(reportsDir, "interruptions.log.md");
+  await fs4.mkdir(reportsDir, { recursive: true });
+  const logPath = path4.join(reportsDir, "interruptions.log.md");
   const header = `## ${review.timestamp}
 - Scope: ${review.scope}
 - Message: ${review.message}
 - Action: ${review.recommendedAction}
 
 `;
-  await fs3.appendFile(logPath, header);
+  await fs4.appendFile(logPath, header);
   return review;
 }
 function formatStatus(state) {
@@ -2135,13 +3026,13 @@ function getWorkspaceSummary(rootDir) {
   return {
     rootDir,
     workspaceDir: paths.workspaceDir,
-    slug: slugifyTitle(path3.basename(rootDir))
+    slug: slugifyTitle(path4.basename(rootDir))
   };
 }
 
 // src/discussion.ts
-import fs4 from "fs/promises";
-import path4 from "path";
+import fs5 from "fs/promises";
+import path5 from "path";
 
 // src/context-budget.ts
 var CONTEXT_BUDGET = {
@@ -2255,10 +3146,10 @@ var AGENT_FLOW = [
 ];
 var SPECIALIST_FLOW = AGENT_FLOW.filter((agent) => agent.id !== "showrunner");
 function workspacePath2(rootDir, ...parts) {
-  return path4.join(rootDir, ".ai-novel", ...parts);
+  return path5.join(rootDir, ".ai-novel", ...parts);
 }
 async function readText(filePath) {
-  return fs4.readFile(filePath, "utf8");
+  return fs5.readFile(filePath, "utf8");
 }
 async function readOptionalText2(filePath) {
   try {
@@ -2276,11 +3167,11 @@ async function readCharacterDossiers(filePath) {
   }
 }
 async function writeJsonFileAtomic2(filePath, value) {
-  await fs4.mkdir(path4.dirname(filePath), { recursive: true });
-  const tempPath = path4.join(path4.dirname(filePath), `.${path4.basename(filePath)}.${Date.now()}.tmp`);
-  await fs4.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await fs5.mkdir(path5.dirname(filePath), { recursive: true });
+  const tempPath = path5.join(path5.dirname(filePath), `.${path5.basename(filePath)}.${Date.now()}.tmp`);
+  await fs5.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await fs4.rename(tempPath, filePath);
+  await fs5.rename(tempPath, filePath);
 }
 function appendSection(current, heading, bullet) {
   if (current.includes(heading)) {
@@ -2438,8 +3329,8 @@ function discussionMessageParts(messageId, input) {
 async function writeDiscussionConsensusArchive(rootDir, input) {
   const consensusDir = workspacePath2(rootDir, "consensus");
   const fileName = `discussion-${safeArtifactName(input.runId)}.md`;
-  const archivePath = path4.join(consensusDir, fileName);
-  await fs4.mkdir(consensusDir, { recursive: true });
+  const archivePath = path5.join(consensusDir, fileName);
+  await fs5.mkdir(consensusDir, { recursive: true });
   const content = [
     "# Discussion Consensus Archive",
     "",
@@ -2469,7 +3360,7 @@ async function writeDiscussionConsensusArchive(rootDir, input) {
       ""
     ])
   ].join("\n").replace(/\n{4,}/g, "\n\n\n");
-  await fs4.writeFile(archivePath, `${content.trim()}
+  await fs5.writeFile(archivePath, `${content.trim()}
 `);
   return {
     absolutePath: archivePath,
@@ -2650,9 +3541,9 @@ function buildContextPacketText(options) {
 }
 async function writeCurrentContextPacket(rootDir, content) {
   const contextDir = workspacePath2(rootDir, "context");
-  const contextPath = path4.join(contextDir, "current-context.md");
-  await fs4.mkdir(contextDir, { recursive: true });
-  await fs4.writeFile(contextPath, `${content.trim()}
+  const contextPath = path5.join(contextDir, "current-context.md");
+  await fs5.mkdir(contextDir, { recursive: true });
+  await fs5.writeFile(contextPath, `${content.trim()}
 `);
   return contextPath;
 }
@@ -2721,8 +3612,8 @@ async function runMultiAgentDiscussion(rootDir, message, options = {}) {
   const characterDossiersMarkdownPath = workspacePath2(rootDir, "memory", "characters", "dossiers.md");
   const styleProfilePath = workspacePath2(rootDir, "style", "profile.md");
   const discussionDir = workspacePath2(rootDir, "chat");
-  const discussionLogPath = path4.join(discussionDir, "discussion-log.md");
-  await fs4.mkdir(discussionDir, { recursive: true });
+  const discussionLogPath = path5.join(discussionDir, "discussion-log.md");
+  await fs5.mkdir(discussionDir, { recursive: true });
   const rawConsensus = await readText(consensusPath);
   const state = JSON.parse(await readText(statePath));
   const discussionTarget = inferDiscussionTarget(message);
@@ -2796,7 +3687,7 @@ ${state.project.idea}`,
       directorCommandId: options.directorCommandId ?? null
     });
   }
-  await fs4.appendFile(
+  await fs5.appendFile(
     discussionLogPath,
     [
       `## ${transcriptStartedAt}`,
@@ -2941,7 +3832,7 @@ ${storyCoreDossierBrief}` : "";
     replies.push({ role: agent.label, content: reply });
     const completedAt = (/* @__PURE__ */ new Date()).toISOString();
     transcriptContext.push(`${agent.label}: ${reply}`);
-    await fs4.appendFile(
+    await fs5.appendFile(
       discussionLogPath,
       [`## ${completedAt}`, `${agent.label}: ${reply}`, ""].join("\n")
     );
@@ -3003,11 +3894,11 @@ ${storyCoreDossierBrief}` : "";
       await runAgentTurn(agent, "specialist_turn");
     }
     synthesisReply = await runAgentTurn(showrunner, "closing_synthesis");
-    await fs4.appendFile(discussionLogPath, "Status: complete\n\n");
+    await fs5.appendFile(discussionLogPath, "Status: complete\n\n");
     factoryDb?.updateRun(runId, "completed");
   } catch (error) {
     const message2 = error instanceof Error ? error.message : String(error);
-    await fs4.appendFile(discussionLogPath, `Status: error
+    await fs5.appendFile(discussionLogPath, `Status: error
 Error: ${message2}
 
 `);
@@ -3030,7 +3921,7 @@ Error: ${message2}
     state.runtime.lastRoute = discussionTarget.kind;
     state.runtime.lastAction = `discussion_guard_blocked:${discussionTarget.kind}`;
     state.runtime.statusMessage = `\u8BA8\u8BBA\u8F93\u51FA\u88AB\u9636\u6BB5\u5B88\u536B\u62E6\u622A\uFF0C\u672A\u5199\u5165\u751F\u4EA7\u5171\u8BC6\uFF1A${stageGuard.reason}`;
-    await fs4.appendFile(discussionLogPath, `Stage Guard: blocked
+    await fs5.appendFile(discussionLogPath, `Stage Guard: blocked
 Reason: ${stageGuard.reason}
 
 `);
@@ -3110,14 +4001,14 @@ Reason: ${stageGuard.reason}
   state.runtime.lastRoute = discussionTarget.kind;
   state.runtime.lastAction = `discussion:${discussionTarget.kind}`;
   state.runtime.statusMessage = `\u5DF2\u5B8C\u6210${discussionTarget.label}\uFF0C\u5171\u8BC6\u5DF2\u5199\u56DE ${discussionTarget.assetPath}\u3002`;
-  await fs4.writeFile(consensusPath, updatedConsensus);
-  await fs4.writeFile(protagonistPath, updatedProtagonist);
+  await fs5.writeFile(consensusPath, updatedConsensus);
+  await fs5.writeFile(protagonistPath, updatedProtagonist);
   if (updatedDossiers.length) {
     await writeJsonFileAtomic2(characterDossiersPath, updatedDossiers);
-    await fs4.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedDossiers)}
+    await fs5.writeFile(characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedDossiers)}
 `);
   }
-  await fs4.writeFile(styleProfilePath, updatedStyle);
+  await fs5.writeFile(styleProfilePath, updatedStyle);
   await saveAutonomousState(rootDir, state);
   if (factoryDb && options.projectId) {
     factoryDb.updateProjectState(options.projectId, state);
@@ -3218,6 +4109,13 @@ Reason: ${stageGuard.reason}
 }
 
 export {
+  getProjectEnvPath,
+  getProjectEnvCandidatePaths,
+  readProjectEnv,
+  resolveProjectEnvWritePath,
+  getProjectEnvStatus,
+  getPublicProjectEnvStatus,
+  upsertProjectEnvValues,
   buildInitialSuperGraph,
   loadSuperGraph,
   loadSuperGraphForUpdate,

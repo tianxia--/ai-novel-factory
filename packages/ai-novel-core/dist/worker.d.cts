@@ -1,6 +1,6 @@
-import { P as PublicProjectEnvStatus } from './env-manager-BY-bHMi5.cjs';
-import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-Ba0neSIC.cjs';
-import { A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, T as TaskStatus } from './cli-types-sWRA2Cw2.cjs';
+import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-Rvjshu2J.cjs';
+import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-DdCUw3Hq.cjs';
+import { A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, e as AssetStatus, T as TaskStatus } from './cli-types-dnbh9JaE.cjs';
 import './messages.cjs';
 
 declare function createWorkerWorkspacePayload(projectRoot: string, state?: AutonomousNovelState | null, options?: {
@@ -38,8 +38,13 @@ declare function createWorkerWorkspacePayload(projectRoot: string, state?: Auton
         };
         assets: {
             cover: {
-                status: TaskStatus;
+                status: AssetStatus;
                 briefPath: string;
+                promptPath?: string;
+                imagePath?: string;
+                metadataPath?: string;
+                generatedAt?: string;
+                error?: string;
             };
             comic: {
                 status: TaskStatus;
@@ -67,6 +72,21 @@ declare function getNovelAutopilotWorkerStatus(rootDir: string): Promise<{
     rootDir: string;
     factory: FactoryOperationalStatus;
     envStatus: PublicProjectEnvStatus;
+    llm: {
+        capability: string;
+        configId: string | null;
+        baseUrl: string;
+        modelName: string;
+        apiMode: LlmApiMode;
+        source: string;
+    } | {
+        capability: string;
+        configId: null;
+        baseUrl: string;
+        modelName: string;
+        apiMode: string;
+        source: string;
+    };
 }>;
 declare function runNovelAutopilotWorkerOnce(rootDir: string): Promise<{
     ok: boolean;
@@ -74,6 +94,21 @@ declare function runNovelAutopilotWorkerOnce(rootDir: string): Promise<{
     rootDir: string;
     factory: FactoryOperationalStatus;
     envStatus: PublicProjectEnvStatus;
+    llm: {
+        capability: string;
+        configId: string | null;
+        baseUrl: string;
+        modelName: string;
+        apiMode: LlmApiMode;
+        source: string;
+    } | {
+        capability: string;
+        configId: null;
+        baseUrl: string;
+        modelName: string;
+        apiMode: string;
+        source: string;
+    };
 }>;
 declare function runNovelAutopilotWorkerCli(args?: string[]): Promise<void>;
 

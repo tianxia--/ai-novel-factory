@@ -8,6 +8,30 @@ const COLLAPSED_PREVIEW_LINE_LIMIT = 8
 const STREAMING_PREVIEW_CHAR_LIMIT = 4200
 const STREAMING_PREVIEW_LINE_LIMIT = 90
 
+function parseRobustTimestamp(value) {
+  if (!value) return NaN
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === "number") return value
+  const str = String(value).trim()
+
+  if (/^\d{2}:\d{2}:\d{2}/.test(str)) {
+    const today = new Date().toISOString().split("T")[0]
+    const parsed = Date.parse(`${today}T${str}`)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(str)) {
+    const formatted = str.replace(/\s+/, "T")
+    const parsed = Date.parse(formatted)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  const parsed = Date.parse(str)
+  if (Number.isFinite(parsed)) return parsed
+
+  return NaN
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -581,8 +605,8 @@ export function buildRenderableDiscussionEntries({
 
   return entries
     .sort((left, right) => {
-      const leftTime = Date.parse(left.timestamp || "")
-      const rightTime = Date.parse(right.timestamp || "")
+      const leftTime = parseRobustTimestamp(left.timestamp)
+      const rightTime = parseRobustTimestamp(right.timestamp)
       const leftHasTime = Number.isFinite(leftTime)
       const rightHasTime = Number.isFinite(rightTime)
 

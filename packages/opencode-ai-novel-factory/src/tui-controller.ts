@@ -8,7 +8,6 @@ import {
   runMultiAgentDiscussion,
   routeUserMessage,
   testProviderConnectivity,
-  upsertProjectEnvValues,
 } from "ai-novel-core"
 import type { AutonomousNovelState } from "ai-novel-core"
 
@@ -19,7 +18,6 @@ export type ComposerAction =
   | { type: "provider-test" }
   | { type: "refresh" }
   | { type: "interrupt"; message: string }
-  | { type: "env-update"; updates: Record<string, string> }
 
 export interface ComposerActionResult {
   state: AutonomousNovelState
@@ -28,33 +26,6 @@ export interface ComposerActionResult {
 
 interface ComposerExecutionOptions {
   onStream?: (event: { role: string; content: string }) => void | Promise<void>
-}
-
-function parseEnvAssignments(tokens: string[]) {
-  const updates: Record<string, string> = {}
-
-  for (const token of tokens) {
-    const separator = token.indexOf("=")
-    if (separator <= 0) {
-      continue
-    }
-
-    const key = token.slice(0, separator).trim()
-    const value = token.slice(separator + 1).trim()
-    if (!value) {
-      continue
-    }
-
-    if (key === "base_url") {
-      updates.LLM_BASE_URL = value
-    } else if (key === "api_key") {
-      updates.LLM_API_KEY = value
-    } else if (key === "model") {
-      updates.LLM_MODEL_ID = value
-    }
-  }
-
-  return updates
 }
 
 export function parseComposerInput(rawInput: string): ComposerAction | null {
@@ -98,8 +69,8 @@ export function parseComposerInput(rawInput: string): ComposerAction | null {
 
   if (normalized === "env") {
     return {
-      type: "env-update",
-      updates: parseEnvAssignments(rest),
+      type: "chat",
+      message: "Model configuration must be managed in settings. The /env command has been removed.",
     }
   }
 
@@ -163,23 +134,6 @@ export async function executeComposerAction(
     return {
       state,
       summary: `Interruption reviewed: ${state.runtime.statusMessage}`,
-    }
-  }
-
-  if (action.type === "env-update") {
-    if (Object.keys(action.updates).length > 0) {
-      upsertProjectEnvValues(rootDir, action.updates)
-    }
-
-    const state = await loadAutonomousState(rootDir)
-    state.runtime.lastRoute = "env_edit"
-    state.runtime.lastAction = "updated project .env provider settings"
-    await saveAutonomousState(rootDir, state)
-    return {
-      state,
-      summary: Object.keys(action.updates).length > 0
-        ? "Updated provider environment settings."
-        : "No environment fields were updated.",
     }
   }
 

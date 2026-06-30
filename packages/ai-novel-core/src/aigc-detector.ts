@@ -201,6 +201,8 @@ export async function detectAigcSegments(
     .filter((result) => result.status === "ai_likely" || (typeof result.score === "number" && result.score >= threshold))
     .sort((left, right) => (right.score ?? 0) - (left.score ?? 0))
 
+  const failedResults = results.filter((result) => !result.ok)
+
   return {
     ok: results.some((result) => result.ok),
     provider,
@@ -213,7 +215,9 @@ export async function detectAigcSegments(
     segments: results,
     reason: highRiskSegments.length > 0
       ? `${highRiskSegments.length} segment(s) reached the AIGC risk threshold.`
-      : "Segmented AIGC detection completed.",
+      : failedResults.length > 0
+        ? `AIGC detection failed: ${Array.from(new Set(failedResults.map((r) => r.reason))).join("; ")}`
+        : "Segmented AIGC detection completed.",
   }
 }
 
@@ -517,9 +521,9 @@ function hardSplitSegment(segment: AigcTextSegment, maxChars: number): AigcTextS
 
 function extractGradioQueueOutput(events: ServerSentEvent[]): unknown {
   const parsedEvents = events
-    .map((event) => parseJson(event.data) ?? event.data)
+    .map((event): any => parseJson(event.data) ?? event.data)
     .filter((event) => event !== "")
-  const completed = parsedEvents.findLast((event) =>
+  const completed = [...parsedEvents].reverse().find((event) =>
     isRecord(event) && (event.msg === "process_completed" || event.output || event.success === true)
   )
   if (isRecord(completed) && "output" in completed) {

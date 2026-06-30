@@ -1,5 +1,6 @@
-type NovelStage = "worldbuilding_dialogue" | "setting_review" | "master_planning" | "chapter_task_generation" | "drafting" | "reviewing" | "replanning" | "complete";
+type NovelStage = "worldbuilding_dialogue" | "setting_review" | "master_planning" | "chapter_task_generation" | "drafting" | "aigc_refinement" | "reviewing" | "replanning" | "complete";
 type TaskStatus = "pending" | "in_progress" | "complete" | "blocked";
+type AssetStatus = TaskStatus | "failed";
 type InterruptionScope = "local" | "chapter_arc" | "global";
 interface CausalChapterPlan {
     previousInput: string;
@@ -37,6 +38,7 @@ interface ChapterTask {
         targetWords?: number;
         updatedAt: string;
     };
+    aigcStatus?: "pending" | "passed" | "blocked" | "skipped";
 }
 interface InterruptionReview {
     message: string;
@@ -51,6 +53,7 @@ interface ProviderTestResult {
     checkedAt: string;
     baseUrl: string;
     modelName: string;
+    apiMode?: string;
     message: string;
 }
 interface CreativeProfile {
@@ -138,8 +141,13 @@ interface AutonomousNovelState {
     };
     assets: {
         cover: {
-            status: TaskStatus;
+            status: AssetStatus;
             briefPath: string;
+            promptPath?: string;
+            imagePath?: string;
+            metadataPath?: string;
+            generatedAt?: string;
+            error?: string;
         };
         comic: {
             status: TaskStatus;
@@ -188,4 +196,4 @@ interface NovelProjectRecord {
     };
 }
 
-export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CharacterDossier as d, CausalChapterPlan as e, InitProjectOptions as f, InterruptOptions as g, InterruptionScope as h };
+export type { AutonomousNovelState as A, CreativeProfile as C, InterruptionReview as I, NovelProjectRecord as N, ProviderTestResult as P, TaskStatus as T, NovelStage as a, AutopilotRuntime as b, ChapterTask as c, CharacterDossier as d, AssetStatus as e, CausalChapterPlan as f, InitProjectOptions as g, InterruptOptions as h, InterruptionScope as i };

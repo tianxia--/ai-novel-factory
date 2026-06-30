@@ -8,6 +8,7 @@ import {
 } from "./chunk-UIQAXZB3.js";
 import {
   advanceAutonomousProject,
+  getPublicProjectEnvStatus,
   listAutonomousProjects,
   loadAutonomousState,
   resolveManagedProjectRoot,
@@ -16,22 +17,21 @@ import {
   runMultiAgentDiscussion,
   saveAutonomousState,
   upsertCheckpointInSuperGraph
-} from "./chunk-IUPCOQUD.js";
+} from "./chunk-KXL2FONS.js";
 import {
   createAutopilotStopError,
-  getPublicProjectEnvStatus,
   isAutopilotStopError,
   throwIfStopped
-} from "./chunk-TI62PTKZ.js";
+} from "./chunk-SK3T47GJ.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   ingestGlobalWritingResources,
   ingestProjectArtifact
-} from "./chunk-M45WOEFA.js";
+} from "./chunk-Q7A3BTJU.js";
 import {
   backfillPendingMemoryEmbeddings,
   withFactoryDb
-} from "./chunk-4PMKQQNV.js";
+} from "./chunk-XEYMG4OS.js";
 
 // src/director-commands.ts
 async function recordDirectorCommandEvent(options, type, command, payload = {}) {
@@ -149,7 +149,7 @@ var AUTOPILOT_PROVIDER_RETRY_MAX_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 2
 var AUTOPILOT_RATE_LIMIT_RETRY_BASE_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 15 : 15e3;
 var AUTOPILOT_RATE_LIMIT_RETRY_MAX_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 30 : 12e4;
 var AUTOPILOT_NO_PROGRESS_BACKOFF_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 15e3;
-var AUTOPILOT_STALE_LLM_REQUEST_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 25 : Math.max(18e4, Number(process.env.LLM_TIMEOUT_MS || 12e4) + 6e4);
+var AUTOPILOT_STALE_LLM_REQUEST_MS = process.env.AI_NOVEL_TEST_MODE === "1" ? 25 : 18e4;
 var KNOWLEDGE_JOB_LEASE_SECONDS = 120;
 var ACTIVE_WRITING_MESSAGE_STATUSES = ["queued", "streaming"];
 function makeWorkerOwner() {

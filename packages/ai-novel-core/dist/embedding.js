@@ -1,7 +1,7 @@
 import {
   backfillPendingMemoryEmbeddings,
   createLocalTextEmbedding
-} from "./chunk-4PMKQQNV.js";
+} from "./chunk-XEYMG4OS.js";
 export {
   backfillPendingMemoryEmbeddings,
   createLocalTextEmbedding

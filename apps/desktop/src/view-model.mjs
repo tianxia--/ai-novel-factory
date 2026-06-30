@@ -19,6 +19,10 @@ const STAGE_METADATA = {
     label: "正文写作",
     description: "章节草稿与润色闭环已经启动，正文正在连续产出。",
   },
+  aigc_refinement: {
+    label: "批量精修",
+    description: "正文写作完成，正在对全书章节进行统一 AIGC 检测与自然化去 AI 润色。",
+  },
   reviewing: {
     label: "审校中",
     description: "编辑、审稿和润色角色正在交叉校验成稿质量。",
@@ -39,6 +43,7 @@ const WORKFLOW_STEPS = [
   { key: "master_planning", title: "主线规划", subtitle: "形成完整剧情脉络" },
   { key: "chapter_task_generation", title: "章节蓝图", subtitle: "拆解卷纲与章节任务" },
   { key: "drafting", title: "正文写作", subtitle: "草稿、润色、审稿联动" },
+  { key: "aigc_refinement", title: "批量精修", subtitle: "统一 AIGC 检测与润色" },
   { key: "complete", title: "全书完成", subtitle: "产物收口与导出" },
 ]
 
@@ -236,6 +241,24 @@ function deriveAutomationStatus(runtime = {}, factorySnapshot = null) {
 
 function artifactPath(row) {
   return String(row?.path || "")
+}
+
+function isDraftSegmentMainArtifact(row) {
+  const path = artifactPath(row)
+  return /chapter-segments\/chapter-\d+\/segment-\d+\/segment-\d+\.md$/u.test(path)
+    || /chapter-segments\/chapter-\d+\/segment-\d+\.md$/u.test(path)
+}
+
+function isDraftSegmentBriefArtifact(row) {
+  return /chapter-segments\/chapter-\d+\/segment-\d+\/brief-[a-z-]+\.md$/u.test(artifactPath(row))
+}
+
+function isDraftSegmentMaterialArtifact(row) {
+  return /chapter-segments\/chapter-\d+\/segment-\d+\/material-[a-z-]+\.md$/u.test(artifactPath(row))
+}
+
+function isDraftSegmentManifestArtifact(row) {
+  return /chapter-segments\/chapter-\d+\/segment-\d+\/segment-manifest\.json$/u.test(artifactPath(row))
 }
 
 function artifactChapterNumber(row) {
@@ -500,6 +523,23 @@ function artifactLabel(row) {
   if (path.includes("global-consensus.md")) return "全局共识"
   if (path.includes("/consensus/")) return "本轮共识归档"
   if (path.includes("current-context.md")) return "当前上下文包"
+  const contextChapterMatch = path.match(/chapter-(\d+)-context\.md$/)
+  if (path.includes("chapter-contexts/") && contextChapterMatch) return `第 ${Number(contextChapterMatch[1])} 章生成上下文包`
+  const segmentManifestMatch = path.match(/chapter-(\d+)\/segment-(\d+)\/segment-manifest\.json$/)
+  if (path.includes("chapter-segments/") && segmentManifestMatch) return `第 ${Number(segmentManifestMatch[1])} 章片段 ${Number(segmentManifestMatch[2])} manifest`
+  const segmentBriefMatch = path.match(/chapter-(\d+)\/segment-(\d+)\/brief-([a-z-]+)\.md$/)
+  if (path.includes("chapter-segments/") && segmentBriefMatch) {
+    const briefLabel = segmentBriefMatch[3]
+      .replace("character-action", "角色动作")
+      .replace("plot", "情节推进")
+      .replace("narration", "旁白")
+      .replace("dialogue", "对话")
+      .replace("continuity", "连续性")
+      .replace("assembly", "组装")
+    return `第 ${Number(segmentBriefMatch[1])} 章片段 ${Number(segmentBriefMatch[2])} ${briefLabel} brief`
+  }
+  const segmentMatch = path.match(/chapter-(\d+)\/segment-(\d+)(?:\/segment-\d+)?\.md$/)
+  if (path.includes("chapter-segments/") && segmentMatch) return `第 ${Number(segmentMatch[1])} 章片段 ${Number(segmentMatch[2])}`
   if (path.includes("discussion-log.md") || kind === "transcript") return "完整讨论记录"
   if (path.includes("setting-freeze.md")) return "设定冻结稿"
   if (path.includes("master-outline.md")) return "主线大纲"
@@ -519,7 +559,7 @@ function artifactCategory(row) {
   const kind = String(row?.kind || "")
   if (kind === "consensus" || path.includes("global-consensus.md")) return "共识"
   if (path.includes("/consensus/")) return "共识"
-  if (kind === "context" || path.includes("current-context.md")) return "上下文"
+  if (kind === "context" || path.includes("current-context.md") || path.includes("chapter-contexts/") || path.includes("chapter-segments/")) return "上下文"
   if (kind === "plan" || path.includes("/plans/") || path.includes("chapter-blueprints/")) return "规划"
   if (path.includes("/knowledge/")) return "知识库"
   if (kind === "style" || path.includes("production-resources/")) return "写作资源"
@@ -545,6 +585,7 @@ function deriveArtifactPreviews(factorySnapshot = null) {
       label: artifactLabel(row),
       category: artifactCategory(row),
       status: row?.status || "unknown",
+      content: row?.content || "",
       updatedAt: artifactUpdatedAt(row),
     }))
 }
@@ -661,6 +702,41 @@ function deriveProductionPipelineStatus(factorySnapshot = null) {
   const finalChapterArtifacts = artifacts.filter((artifact) => artifactPath(artifact).includes(".final.md"))
   const qualityArtifacts = artifacts.filter((artifact) => artifactPath(artifact).includes("-quality.md"))
   const memoryArtifacts = artifacts.filter((artifact) => artifactPath(artifact).includes("-memory.md"))
+  const chapterContextArtifacts = artifacts
+    .filter((artifact) => artifactPath(artifact).includes("chapter-contexts/"))
+    .slice()
+    .sort((left, right) => {
+      const chapterDelta = Number(artifactChapterNumber(right) || 0) - Number(artifactChapterNumber(left) || 0)
+      return chapterDelta || (parseDateMs(artifactUpdatedAt(right)) - parseDateMs(artifactUpdatedAt(left)))
+    })
+  const draftSegmentArtifacts = artifacts
+    .filter((artifact) => isDraftSegmentMainArtifact(artifact))
+    .slice()
+    .sort((left, right) => {
+      const chapterDelta = Number(artifactChapterNumber(right) || 0) - Number(artifactChapterNumber(left) || 0)
+      return chapterDelta || (parseDateMs(artifactUpdatedAt(right)) - parseDateMs(artifactUpdatedAt(left)))
+    })
+  const draftSegmentBriefArtifacts = artifacts
+    .filter((artifact) => isDraftSegmentBriefArtifact(artifact))
+    .slice()
+    .sort((left, right) => {
+      const chapterDelta = Number(artifactChapterNumber(right) || 0) - Number(artifactChapterNumber(left) || 0)
+      return chapterDelta || (parseDateMs(artifactUpdatedAt(right)) - parseDateMs(artifactUpdatedAt(left)))
+    })
+  const draftSegmentMaterialArtifacts = artifacts
+    .filter((artifact) => isDraftSegmentMaterialArtifact(artifact))
+    .slice()
+    .sort((left, right) => {
+      const chapterDelta = Number(artifactChapterNumber(right) || 0) - Number(artifactChapterNumber(left) || 0)
+      return chapterDelta || (parseDateMs(artifactUpdatedAt(right)) - parseDateMs(artifactUpdatedAt(left)))
+    })
+  const draftSegmentManifestArtifacts = artifacts
+    .filter((artifact) => isDraftSegmentManifestArtifact(artifact))
+    .slice()
+    .sort((left, right) => {
+      const chapterDelta = Number(artifactChapterNumber(right) || 0) - Number(artifactChapterNumber(left) || 0)
+      return chapterDelta || (parseDateMs(artifactUpdatedAt(right)) - parseDateMs(artifactUpdatedAt(left)))
+    })
   const transcriptArtifacts = artifacts.filter((artifact) => artifact.kind === "transcript" || artifactPath(artifact).includes("discussion-log.md"))
   const transcriptLooksLikeDrafting = latestEvents.some((event) => {
     const payload = `${event?.payload_json || ""} ${event?.metadata_json || ""}`
@@ -689,6 +765,16 @@ function deriveProductionPipelineStatus(factorySnapshot = null) {
     untrustedPassedGates: Number(artifactSummary.untrustedPassedGates ?? chapterFacts.filter((fact) => fact.qualityGate?.status === "passed" && fact.contentQuality?.status === "quarantined").length),
     qualityReports: Number(artifactSummary.qualityReports ?? qualityArtifacts.length),
     memoryUpdates: Number(artifactSummary.memoryUpdates ?? memoryArtifacts.length),
+    chapterContextPackages: chapterContextArtifacts.length,
+    latestChapterContextPath: artifactPath(chapterContextArtifacts[0]),
+    draftSegmentArtifacts: draftSegmentArtifacts.length,
+    latestDraftSegmentPath: artifactPath(draftSegmentArtifacts[0]),
+    draftSegmentBriefArtifacts: draftSegmentBriefArtifacts.length,
+    latestDraftSegmentBriefPath: artifactPath(draftSegmentBriefArtifacts[0]),
+    draftSegmentMaterialArtifacts: draftSegmentMaterialArtifacts.length,
+    latestDraftSegmentMaterialPath: artifactPath(draftSegmentMaterialArtifacts[0]),
+    draftSegmentManifestArtifacts: draftSegmentManifestArtifacts.length,
+    latestDraftSegmentManifestPath: artifactPath(draftSegmentManifestArtifacts[0]),
     latestFinalPath: artifactSummary.latestFinalPath || (latestFinal ? artifactPath(latestFinal) : ""),
     transcriptDraftOnly: state?.runtime?.stage !== "drafting"
       && finalChapterArtifacts.length === 0
@@ -704,6 +790,83 @@ function deriveProductionPipelineStatus(factorySnapshot = null) {
       }
       : null,
     hasProductionArtifacts: Number(artifactSummary.total || 0) > 0 || blueprintArtifacts.length > 0 || finalChapterArtifacts.length > 0,
+  }
+}
+
+function workflowReadinessFromSnapshot(factorySnapshot = null, productionObservability = null, productionPipeline = null, productionSummary = null, consensus = "") {
+  const provided = factorySnapshot?.productionReadiness && typeof factorySnapshot.productionReadiness === "object"
+    ? factorySnapshot.productionReadiness
+    : null
+  if (provided) {
+    return provided
+  }
+
+  const artifacts = toArray(factorySnapshot?.artifacts)
+  const hasArtifact = (pattern) => artifacts.some((artifact) => pattern.test(artifactPath(artifact)))
+  const observability = productionObservability || {}
+  const summary = productionSummary || {}
+  const pipeline = productionPipeline || {}
+  const totalChapters = Number(summary.totalChapters || factorySnapshot?.project?.totalChapters || 0)
+  const blueprintCount = Number(summary.blueprints || pipeline.blueprints || 0)
+  const characterDossier = observability.characterDossier || {}
+  const memoryRecall = observability.memoryRecall || {}
+  const contextBudget = observability.contextBudget || {}
+  const planningReady = hasArtifact(/master-outline|setting-freeze|plans\/|story-bible|plot-architecture|book-contract/iu)
+  const items = [
+    {
+      key: "core_consensus",
+      label: "核心共识",
+      status: String(consensus || "").trim() ? "passed" : "blocked",
+      detail: String(consensus || "").trim() ? "已有可追踪共识" : "缺少创作共识",
+    },
+    {
+      key: "story_planning",
+      label: "世界/主线",
+      status: planningReady ? "passed" : "warning",
+      detail: planningReady ? "已有规划产物" : "建议补齐世界观、主线和故事圣经",
+    },
+    {
+      key: "character_dynamics",
+      label: "人物关系",
+      status: Number(characterDossier.count || 0) > 0 || characterDossier.status === "ready" ? "passed" : "blocked",
+      detail: Number(characterDossier.count || 0) > 0 ? `${Number(characterDossier.count || 0)} 个档案` : "缺少人物档案",
+    },
+    {
+      key: "chapter_blueprints",
+      label: "章节蓝图",
+      status: totalChapters > 0 && blueprintCount >= totalChapters ? "passed" : "blocked",
+      detail: totalChapters > 0 ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} 个蓝图`,
+    },
+    {
+      key: "style_approval",
+      label: "写法确认",
+      status: "blocked",
+      detail: "需要确认写法样段",
+    },
+    {
+      key: "memory_recall",
+      label: "记忆/RAG",
+      status: memoryRecall.status === "ready" ? "passed" : "warning",
+      detail: `${Number(memoryRecall.characterRows || 0) + Number(memoryRecall.chapterRows || 0)} 条可召回`,
+    },
+    {
+      key: "context_budget",
+      label: "上下文预算",
+      status: contextBudget.status === "warning" ? "warning" : "passed",
+      detail: `${Number(contextBudget.budgetPercent || 0)}%`,
+    },
+  ]
+  const passed = items.filter((item) => item.status === "passed").length
+  const warning = items.filter((item) => item.status === "warning").length
+  const blocked = items.filter((item) => item.status === "blocked").length
+  return {
+    items,
+    score: Math.round(((passed + warning * 0.5) / Math.max(1, items.length)) * 100),
+    status: blocked > 0 ? "blocked" : warning > 0 ? "warning" : "passed",
+    canProceed: blocked === 0,
+    summary: blocked > 0 ? `${blocked} 项阻塞正文生产` : warning > 0 ? `${warning} 项建议补强` : "正文生产准备完成",
+    blockedReason: "",
+    issues: [],
   }
 }
 
@@ -968,6 +1131,14 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
   const productionPipeline = deriveProductionPipelineStatus(factorySnapshot)
   const productionSummary = deriveProductionSummary(safeState, factorySnapshot, productionPipeline)
   const stageKey = projectRuntime?.workflowStage || productionSummary.stage || safeState?.runtime?.stage || "worldbuilding_dialogue"
+
+  const tasks = toArray(safeState?.plan?.chapterTasks)
+  const activeTask = tasks.find((t) => t.status === "in_progress" || t.status === "blocked")
+  const activeChapterNumber = activeTask
+    ? Number(activeTask.chapterNumber)
+    : (productionSummary.completedChapters < productionSummary.totalChapters
+        ? productionSummary.completedChapters + 1
+        : null)
   const currentStage = STAGE_METADATA[stageKey] || {
     label: stageKey,
     description: safeState?.runtime?.statusMessage || "等待初始化。",
@@ -1008,6 +1179,13 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
     factorySnapshot,
     contextPacket,
   })
+  const productionReadiness = workflowReadinessFromSnapshot(
+    factorySnapshot,
+    productionObservability,
+    productionPipeline,
+    productionSummary,
+    consensus,
+  )
   const chapterFactsByNumber = new Map(toArray(factorySnapshot?.chapterFacts).map((fact) => [Number(fact.chapterNumber), fact]))
   const blueprintPathByChapter = new Map(
     toArray(factorySnapshot?.artifacts)
@@ -1024,12 +1202,18 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
       totalChapters: safeState?.plan?.totalChapters || 0,
       chapterWordTarget: safeState?.plan?.chapterWordTarget || 2500,
       coverStatus: safeState?.assets?.cover?.status || "pending",
+      coverImagePath: safeState?.assets?.cover?.imagePath || "",
+      coverPromptPath: safeState?.assets?.cover?.promptPath || safeState?.assets?.cover?.briefPath || "",
+      coverMetadataPath: safeState?.assets?.cover?.metadataPath || "",
+      coverGeneratedAt: safeState?.assets?.cover?.generatedAt || "",
+      coverError: safeState?.assets?.cover?.error || "",
       comicStatus: safeState?.assets?.comic?.status || "pending",
     },
     workflow,
     projectRuntime,
     productionPipeline,
     productionSummary,
+    productionReadiness,
     provider,
     storyMemory: {
       idea: safeState?.project?.idea || "请先初始化项目。",
@@ -1079,6 +1263,8 @@ export function deriveStudioViewModel({ state, transcript = "", discussionEntrie
       lastRoute: safeState?.runtime?.lastRoute || "unknown",
       lastAction: safeState?.runtime?.lastAction || "none",
       lastUpdatedAt: safeState?.runtime?.lastUpdatedAt || null,
+      stage: stageKey,
+      chapterNumber: activeChapterNumber,
     },
   }
 }
