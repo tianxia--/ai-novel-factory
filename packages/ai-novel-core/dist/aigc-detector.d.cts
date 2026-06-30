@@ -1,4 +1,4 @@
-type AigcDetectorProvider = "disabled" | "generic-json" | "gradio-queue";
+type AigcDetectorProvider = "disabled" | "local-heuristic" | "generic-json" | "gradio-queue";
 type AigcDetectionStatus = "ai_likely" | "human_likely" | "uncertain" | "unavailable";
 interface AigcDetectorSegmentOptions {
     maxChars?: number;

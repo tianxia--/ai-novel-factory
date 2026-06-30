@@ -3979,6 +3979,17 @@ var DEFAULT_SEGMENT_MAX_CHARS = 900;
 var DEFAULT_SEGMENT_MIN_CHARS = 180;
 var requireBuiltin = (0, import_node_module.createRequire)(import_node_path4.default.join(process.cwd(), "ai-novel-factory-runtime.js"));
 var MANAGED_PROJECTS_SEGMENT2 = `${import_node_path4.default.sep}.ai-novel-projects${import_node_path4.default.sep}`;
+var LOCAL_HEURISTIC_RISK_PATTERNS = [
+  /模板化|标准生成|AI腔|AI 腔|机器生成|模型生成|生成文本/u,
+  /人物反应被概括|场景被抽象|缺少具体动作|没有细节|没有停顿|命运的安排/u,
+  /宏大叙事|命运的齿轮|这才明白|由此可见|总而言之|综上所述/u,
+  /内心十分|非常震惊|无法形容|某种意义上|复杂的情绪/u
+];
+var LOCAL_HEURISTIC_HUMAN_PATTERNS = [
+  /[“”"'][^“”"']{1,36}[”"']/u,
+  /雨|灯|门槛|袖口|鞋尖|账册|纸边|青苔|瓦檐|指腹|脚步|铜钱|泥腥/u,
+  /推到|缩进|停住|摸到|合上|夹在|沿着|敲了|回头|抬头|收起/u
+];
 var AIGC_SETTING_KEYS = {
   provider: "aigcDetectorProvider",
   url: "aigcDetectorUrl",
@@ -4057,6 +4068,9 @@ async function detectAigcText(input, config = getAigcDetectorConfigFromEnv()) {
   if (!text.trim()) {
     return unavailableResult(provider, "AIGC detector received empty text.", null);
   }
+  if (provider === "local-heuristic") {
+    return detectWithLocalHeuristic(text, config);
+  }
   if (!config.url?.trim()) {
     return unavailableResult(provider, "AIGC detector URL is not configured.", null);
   }
@@ -4074,6 +4088,45 @@ async function detectAigcText(input, config = getAigcDetectorConfigFromEnv()) {
     }
     return unavailableResult(provider, error instanceof Error ? error.message : String(error), null);
   }
+}
+function detectWithLocalHeuristic(text, config) {
+  const normalizedText = text.replace(/\s+/g, "");
+  const charCount = Array.from(normalizedText).length;
+  const riskHits = LOCAL_HEURISTIC_RISK_PATTERNS.filter((pattern) => pattern.test(text)).map((pattern) => pattern.source);
+  const humanSignals = LOCAL_HEURISTIC_HUMAN_PATTERNS.filter((pattern) => pattern.test(text)).length;
+  const quoteCount = (text.match(/[“”"']/g) || []).length;
+  const punctuationCount = (text.match(/[。！？!?；;，,]/g) || []).length;
+  const punctuationDensity = charCount > 0 ? punctuationCount / charCount : 0;
+  const paragraphCount = Math.max(1, text.split(/\n\s*\n/u).filter((item) => item.trim()).length);
+  const averageParagraphChars = charCount / paragraphCount;
+  const abstractionPenalty = /情绪|命运|世界|复杂|震惊|恐惧|愤怒|绝望/u.test(text) && humanSignals === 0 ? 0.12 : 0;
+  const lengthPenalty = averageParagraphChars > 360 ? 0.08 : 0;
+  const quoteBonus = quoteCount >= 2 ? 0.05 : 0;
+  const sceneBonus = Math.min(0.18, humanSignals * 0.045);
+  const punctuationBonus = punctuationDensity >= 0.035 && punctuationDensity <= 0.14 ? 0.04 : 0;
+  const riskScore = Math.min(0.98, 0.22 + riskHits.length * 0.21 + abstractionPenalty + lengthPenalty);
+  const humanScore = Math.min(0.32, sceneBonus + quoteBonus + punctuationBonus);
+  const score = Math.max(0.04, Math.min(0.96, riskScore - humanScore));
+  const threshold = config.threshold ?? DEFAULT_THRESHOLD;
+  const status = riskHits.length >= 3 || score >= threshold ? "ai_likely" : scoreToStatus(score, threshold);
+  const raw = {
+    detector: "local-heuristic",
+    riskHits,
+    humanSignals,
+    quoteCount,
+    punctuationDensity,
+    averageParagraphChars
+  };
+  return {
+    ok: true,
+    provider: "local-heuristic",
+    status,
+    score,
+    label: riskHits.length > 0 ? "local heuristic risk" : "local heuristic pass",
+    confidence: Math.max(score, 1 - score),
+    raw,
+    reason: riskHits.length > 0 ? `Local heuristic found ${riskHits.length} AIGC-style risk signal(s).` : "Local heuristic did not find strong AIGC-style risk signals."
+  };
 }
 async function detectAigcSegments(input, config = getAigcDetectorConfigFromEnv()) {
   const provider = config.provider ?? "disabled";
@@ -4514,7 +4567,7 @@ function normalizeScore(score) {
   return Math.min(1, Math.max(0, score));
 }
 function readProvider(value) {
-  if (value === "generic-json" || value === "gradio-queue" || value === "disabled") {
+  if (value === "local-heuristic" || value === "generic-json" || value === "gradio-queue" || value === "disabled") {
     return value;
   }
   return "disabled";
@@ -15750,6 +15803,7 @@ function resolveAigcDetectorRootDir(options) {
 }
 function isAigcDetectorConfigured(options) {
   const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options));
+  if (config.provider === "local-heuristic") return true;
   return config.provider !== "disabled" && Boolean(config.url?.trim());
 }
 function normalizeAigcWritingDetectionReport(result) {

@@ -10276,6 +10276,11 @@ test("studio API saves and returns draft subcall writing settings", async () => 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-writing-settings-"))
   const { handleNovelStudioApi } = await loadStudioServer()
 
+  const initialResponse = await handleNovelStudioApi(tempDir, "GET", "/api/settings/writing")
+  assert.equal(initialResponse.status, 200)
+  assert.equal(initialResponse.payload.settings.aigcDetector.provider, "local-heuristic")
+  assert.equal(initialResponse.payload.settings.aigcDetector.url, "")
+
   const saveResponse = await handleNovelStudioApi(tempDir, "POST", "/api/settings/writing", {
     settings: {
       bypassAigcGate: true,

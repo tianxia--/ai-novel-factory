@@ -1,7 +1,7 @@
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-LFDGA7OM.js";
+} from "./chunk-3HD6Y2Y7.js";
 import {
   formatKnowledgeForPrompt,
   ingestProjectArtifact,
@@ -10636,6 +10636,7 @@ function resolveAigcDetectorRootDir(options) {
 }
 function isAigcDetectorConfigured(options) {
   const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options));
+  if (config.provider === "local-heuristic") return true;
   return config.provider !== "disabled" && Boolean(config.url?.trim());
 }
 function normalizeAigcWritingDetectionReport(result) {

@@ -56,7 +56,7 @@ function usage() {
     "  --style-prompt <text>          Style Evolution user style prompt.",
     "  --style-iterations <n>         Style loop iterations per request. Default: 3.",
     "  --style-candidates <n>         Candidate count per style iteration. Default: 2.",
-    "  --aigc-detector-provider <id>   AIGC detector provider: generic-json, gradio-queue, disabled.",
+    "  --aigc-detector-provider <id>   AIGC detector provider: local-heuristic, generic-json, gradio-queue, disabled.",
     "  --aigc-detector-url <url>       AIGC detector endpoint URL.",
     "  --aigc-detector-token <token>   AIGC detector bearer token.",
     "  --aigc-detector-threshold <n>   AIGC detector threshold. Default comes from settings.",
@@ -97,7 +97,7 @@ function parseArgs(argv) {
     styleIterations: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STYLE_ITERATIONS, 3),
     styleCandidates: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STYLE_CANDIDATES, 2),
     aigcDetector: {
-      provider: process.env.AIGC_DETECTOR_PROVIDER || "",
+      provider: process.env.AIGC_DETECTOR_PROVIDER || "local-heuristic",
       url: process.env.AIGC_DETECTOR_URL || "",
       token: process.env.AIGC_DETECTOR_TOKEN || "",
       threshold: process.env.AIGC_DETECTOR_THRESHOLD || "",
@@ -332,7 +332,7 @@ function assertModelConfigReady(modelInfo) {
 }
 
 function normalizeAigcProvider(value) {
-  return value === "generic-json" || value === "gradio-queue" || value === "disabled"
+  return value === "local-heuristic" || value === "generic-json" || value === "gradio-queue" || value === "disabled"
     ? value
     : ""
 }
@@ -358,7 +358,9 @@ function hasExplicitAigcDetectorSettings(detector) {
 
 function detectorReady(settingsPayload) {
   const detector = settingsPayload?.settings?.aigcDetector || {}
-  return detector.provider !== "disabled" && Boolean(String(detector.url || "").trim())
+  if (detector.provider === "disabled") return false
+  if (detector.provider === "local-heuristic") return true
+  return Boolean(String(detector.url || "").trim())
 }
 
 async function configureAigcDetector(api, options, report) {
@@ -393,7 +395,7 @@ async function configureAigcDetector(api, options, report) {
     throw new AcceptanceError("AIGC detector is not configured. Configure it in app settings or pass --aigc-detector-provider and --aigc-detector-url.", {
       provider: detector.provider || "disabled",
       urlConfigured: Boolean(detector.url),
-      nextCommandExample: "rtk node scripts/run-production-acceptance.mjs --aigc-detector-provider generic-json --aigc-detector-url http://127.0.0.1:8765/detect --auto-approve-style --auto-approve-foundation",
+      nextCommandExample: "rtk node scripts/run-production-acceptance.mjs --aigc-detector-provider local-heuristic --auto-approve-style --auto-approve-foundation",
     })
   }
   log("AIGC detector config is ready.", {

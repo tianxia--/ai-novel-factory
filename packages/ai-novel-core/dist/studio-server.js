@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-KW4REGT2.js";
+} from "./chunk-R3MWCB6C.js";
 import "./chunk-UIQAXZB3.js";
 import "./chunk-SDIPDDNZ.js";
 import {
@@ -33,7 +33,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-6R4W26M6.js";
+} from "./chunk-DE4Q2HRG.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -73,12 +73,12 @@ import {
   requestLlmTextCompletion,
   testProviderConnectivity,
   writeProductionStoryBibleAssets
-} from "./chunk-MEAXRYHD.js";
+} from "./chunk-FZVBH4PD.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-LFDGA7OM.js";
+} from "./chunk-3HD6Y2Y7.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
@@ -230,11 +230,15 @@ function parseDraftSubcallRolesSetting(value) {
   return normalizeDraftSubcallRoles(value ? value.split(",") : []);
 }
 function normalizeAigcDetectorProviderSetting(value) {
-  return value === "generic-json" || value === "gradio-queue" || value === "disabled" ? value : "disabled";
+  return value === "local-heuristic" || value === "generic-json" || value === "gradio-queue" || value === "disabled" ? value : "local-heuristic";
 }
 function readAigcDetectorSettingsFromDb(db) {
   const readNumber = (key, fallback) => {
-    const value = Number(db.getSystemSetting(key));
+    const rawValue = db.getSystemSetting(key);
+    if (rawValue === null || rawValue === void 0 || rawValue.trim() === "") {
+      return fallback;
+    }
+    const value = Number(rawValue);
     return Number.isFinite(value) ? value : fallback;
   };
   return {
@@ -1195,7 +1199,7 @@ function mergeApiAigcDetectorConfig(base, value) {
     return base;
   }
   const input = value;
-  const provider = input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled" ? input.provider : base.provider;
+  const provider = input.provider === "local-heuristic" || input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled" ? input.provider : base.provider;
   return {
     ...base,
     provider,
@@ -5831,7 +5835,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       autoAigcRefinement: false,
       draftSubcallRoles: [],
       aigcDetector: {
-        provider: "disabled",
+        provider: "local-heuristic",
         url: "",
         tokenConfigured: false,
         timeoutMs: 3e4,

@@ -263,14 +263,18 @@ function parseDraftSubcallRolesSetting(value: string | null | undefined) {
 }
 
 function normalizeAigcDetectorProviderSetting(value: unknown) {
-  return value === "generic-json" || value === "gradio-queue" || value === "disabled"
+  return value === "local-heuristic" || value === "generic-json" || value === "gradio-queue" || value === "disabled"
     ? value
-    : "disabled"
+    : "local-heuristic"
 }
 
 function readAigcDetectorSettingsFromDb(db: { getSystemSetting: (key: string) => string | null }) {
   const readNumber = (key: string, fallback: number) => {
-    const value = Number(db.getSystemSetting(key))
+    const rawValue = db.getSystemSetting(key)
+    if (rawValue === null || rawValue === undefined || rawValue.trim() === "") {
+      return fallback
+    }
+    const value = Number(rawValue)
     return Number.isFinite(value) ? value : fallback
   }
   return {
@@ -1395,7 +1399,7 @@ function mergeApiAigcDetectorConfig(base: AigcDetectionConfig, value: unknown): 
     return base
   }
   const input = value as Record<string, unknown>
-  const provider = input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled"
+  const provider = input.provider === "local-heuristic" || input.provider === "generic-json" || input.provider === "gradio-queue" || input.provider === "disabled"
     ? input.provider
     : base.provider
   return {
@@ -6916,7 +6920,7 @@ export async function handleNovelStudioApi(
       autoAigcRefinement: false,
       draftSubcallRoles: [],
       aigcDetector: {
-        provider: "disabled",
+        provider: "local-heuristic",
         url: "",
         tokenConfigured: false,
         timeoutMs: 30000,

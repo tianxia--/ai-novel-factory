@@ -8753,6 +8753,7 @@ function resolveAigcDetectorRootDir(options: ProductionPipelineOptions) {
 
 function isAigcDetectorConfigured(options: ProductionPipelineOptions) {
   const config = getAigcDetectorConfig(resolveAigcDetectorRootDir(options))
+  if (config.provider === "local-heuristic") return true
   return config.provider !== "disabled" && Boolean(config.url?.trim())
 }
 

@@ -45,6 +45,40 @@ test("aigc detector stays unavailable when disabled", async () => {
   assert.equal(result.provider, "disabled")
 })
 
+test("local heuristic detector flags template prose without an external service", async () => {
+  const { detectAigcSegments } = await loadCore()
+  const result = await detectAigcSegments(
+    [
+      "雨停以后，青石板缝里浮出一点泥腥气。她把账册夹在胳膊下，沿着后门出去，鞋底沾了一线青苔。",
+      "这是一段模板化表达，人物反应被概括，场景被抽象词覆盖。所有冲突都被总结为命运的安排，所有人物都在宏大叙事里重复相同判断。",
+    ].join("\n\n"),
+    {
+      provider: "local-heuristic",
+      threshold: 0.8,
+      segment: { maxChars: 120, minChars: 40 },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(result.provider, "local-heuristic")
+  assert.equal(result.highRiskSegments.length, 1)
+  assert.match(result.highRiskSegments[0].segment.text, /模板化/)
+  assert.equal(result.highRiskSegments[0].status, "ai_likely")
+})
+
+test("local heuristic detector passes concrete scene prose", async () => {
+  const { detectAigcText } = await loadCore()
+  const result = await detectAigcText(
+    "雨线挂在门槛外。沈砚把缺页账本推到灯下，纸边齐得发亮。老周的手缩进袖口，没有接。",
+    { provider: "local-heuristic", threshold: 0.8 },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(result.provider, "local-heuristic")
+  assert.equal(result.status, "human_likely")
+  assert.ok(Number(result.score) < 0.3)
+})
+
 test("aigc detector reads system settings and overrides process env", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-aigc-settings-"))
   const previousThreshold = process.env.AIGC_DETECTOR_THRESHOLD
