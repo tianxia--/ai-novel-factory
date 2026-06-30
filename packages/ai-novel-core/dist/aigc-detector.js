@@ -4,15 +4,18 @@ import {
   detectAigcText,
   getAigcDetectorConfig,
   getAigcDetectorConfigFromEnv,
+  getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-4ND3ONGM.js";
+} from "./chunk-LFDGA7OM.js";
+import "./chunk-ZNVS54L4.js";
 export {
   createAigcDetectorClient,
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig,
   getAigcDetectorConfigFromEnv,
+  getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
 };

@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-7EVIEO4M.js";
+} from "./chunk-KW4REGT2.js";
 import "./chunk-UIQAXZB3.js";
 import "./chunk-SDIPDDNZ.js";
 import {
@@ -33,7 +33,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-KXL2FONS.js";
+} from "./chunk-6R4W26M6.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -73,20 +73,21 @@ import {
   requestLlmTextCompletion,
   testProviderConnectivity,
   writeProductionStoryBibleAssets
-} from "./chunk-SK3T47GJ.js";
+} from "./chunk-MEAXRYHD.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-4ND3ONGM.js";
+} from "./chunk-LFDGA7OM.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-Q7A3BTJU.js";
+} from "./chunk-6FIX7JTJ.js";
+import "./chunk-DBOF57KW.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-XEYMG4OS.js";
+} from "./chunk-ZNVS54L4.js";
 import {
   createStatusMessage,
   createToolMessage,
@@ -227,6 +228,70 @@ function normalizeDraftSubcallRoles(value) {
 }
 function parseDraftSubcallRolesSetting(value) {
   return normalizeDraftSubcallRoles(value ? value.split(",") : []);
+}
+function normalizeAigcDetectorProviderSetting(value) {
+  return value === "generic-json" || value === "gradio-queue" || value === "disabled" ? value : "disabled";
+}
+function readAigcDetectorSettingsFromDb(db) {
+  const readNumber = (key, fallback) => {
+    const value = Number(db.getSystemSetting(key));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  return {
+    provider: normalizeAigcDetectorProviderSetting(db.getSystemSetting("aigcDetectorProvider")),
+    url: db.getSystemSetting("aigcDetectorUrl") || "",
+    tokenConfigured: Boolean(db.getSystemSetting("aigcDetectorToken")),
+    timeoutMs: readNumber("aigcDetectorTimeoutMs", 3e4),
+    threshold: readNumber("aigcDetectorThreshold", 0.8),
+    requestTextField: db.getSystemSetting("aigcDetectorRequestTextField") || "",
+    headersJson: db.getSystemSetting("aigcDetectorHeadersJson") || "",
+    segmentMaxChars: readNumber("aigcDetectorSegmentMaxChars", 900),
+    segmentMinChars: readNumber("aigcDetectorSegmentMinChars", 180),
+    gradioFnIndex: db.getSystemSetting("aigcDetectorGradioFnIndex") || "",
+    gradioSessionHashConfigured: Boolean(db.getSystemSetting("aigcDetectorGradioSessionHash")),
+    gradioJoinUrl: db.getSystemSetting("aigcDetectorGradioJoinUrl") || "",
+    gradioDataUrl: db.getSystemSetting("aigcDetectorGradioDataUrl") || "",
+    gradioSkipJoin: db.getSystemSetting("aigcDetectorGradioSkipJoin") === "1",
+    gradioInputsJson: db.getSystemSetting("aigcDetectorGradioInputsJson") || ""
+  };
+}
+function writeAigcDetectorSettingsToDb(db, settings) {
+  const detector = settings.aigcDetector && typeof settings.aigcDetector === "object" && !Array.isArray(settings.aigcDetector) ? settings.aigcDetector : null;
+  if (!detector) return;
+  const setString = (key, value) => {
+    if (typeof value === "string") {
+      db.setSystemSetting(key, value.trim());
+    }
+  };
+  const setNumber = (key, value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      db.setSystemSetting(key, String(value));
+    } else if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+      db.setSystemSetting(key, String(Number(value)));
+    }
+  };
+  const setSecret = (key, value) => {
+    if (typeof value === "string" && value !== "[configured]") {
+      db.setSystemSetting(key, value.trim());
+    }
+  };
+  db.setSystemSetting("aigcDetectorProvider", normalizeAigcDetectorProviderSetting(detector.provider));
+  setString("aigcDetectorUrl", detector.url);
+  setSecret("aigcDetectorToken", detector.token);
+  setNumber("aigcDetectorTimeoutMs", detector.timeoutMs);
+  setNumber("aigcDetectorThreshold", detector.threshold);
+  setString("aigcDetectorRequestTextField", detector.requestTextField);
+  setString("aigcDetectorHeadersJson", detector.headersJson);
+  setNumber("aigcDetectorSegmentMaxChars", detector.segmentMaxChars);
+  setNumber("aigcDetectorSegmentMinChars", detector.segmentMinChars);
+  setNumber("aigcDetectorGradioFnIndex", detector.gradioFnIndex);
+  setSecret("aigcDetectorGradioSessionHash", detector.gradioSessionHash);
+  setString("aigcDetectorGradioJoinUrl", detector.gradioJoinUrl);
+  setString("aigcDetectorGradioDataUrl", detector.gradioDataUrl);
+  if (typeof detector.gradioSkipJoin === "boolean") {
+    db.setSystemSetting("aigcDetectorGradioSkipJoin", detector.gradioSkipJoin ? "1" : "0");
+  }
+  setString("aigcDetectorGradioInputsJson", detector.gradioInputsJson);
 }
 function resolveStyleLoopIterations(value, fallback) {
   const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number.parseInt(value, 10) : NaN;
@@ -5758,9 +5823,31 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       return {
         bypassAigcGate: bypassVal === "1",
         autoAigcRefinement: autoVal === "1",
-        draftSubcallRoles: parseDraftSubcallRolesSetting(draftSubcallRolesVal)
+        draftSubcallRoles: parseDraftSubcallRolesSetting(draftSubcallRolesVal),
+        aigcDetector: readAigcDetectorSettingsFromDb(db)
       };
-    }).catch(() => ({ bypassAigcGate: false, autoAigcRefinement: false, draftSubcallRoles: [] }));
+    }).catch(() => ({
+      bypassAigcGate: false,
+      autoAigcRefinement: false,
+      draftSubcallRoles: [],
+      aigcDetector: {
+        provider: "disabled",
+        url: "",
+        tokenConfigured: false,
+        timeoutMs: 3e4,
+        threshold: 0.8,
+        requestTextField: "",
+        headersJson: "",
+        segmentMaxChars: 900,
+        segmentMinChars: 180,
+        gradioFnIndex: "",
+        gradioSessionHashConfigured: false,
+        gradioJoinUrl: "",
+        gradioDataUrl: "",
+        gradioSkipJoin: false,
+        gradioInputsJson: ""
+      }
+    }));
     return {
       status: 200,
       payload: {
@@ -5781,6 +5868,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         if (Array.isArray(settings.draftSubcallRoles)) {
           db.setSystemSetting("draftSubcallRoles", normalizeDraftSubcallRoles(settings.draftSubcallRoles).join(","));
         }
+        writeAigcDetectorSettingsToDb(db, settings);
       }).catch(() => void 0);
     }
     return {

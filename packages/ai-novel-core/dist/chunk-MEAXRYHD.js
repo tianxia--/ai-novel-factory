@@ -1,19 +1,21 @@
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-4ND3ONGM.js";
+} from "./chunk-LFDGA7OM.js";
 import {
   formatKnowledgeForPrompt,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-Q7A3BTJU.js";
+} from "./chunk-6FIX7JTJ.js";
 import {
-  createLocalTextEmbedding,
+  createLocalTextEmbedding
+} from "./chunk-DBOF57KW.js";
+import {
   evaluateChapterConsistency,
   extractChinesePersonNames,
   inferLockedProtagonistName,
   withFactoryDb
-} from "./chunk-XEYMG4OS.js";
+} from "./chunk-ZNVS54L4.js";
 import {
   agentTypeFromLabel,
   createAgentMessage,
@@ -10169,7 +10171,7 @@ ${originalText}`
       cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim();
       cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim();
       cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim();
-      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5:
+      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5: 
 - \u539F\u6587: \u300C${originalText.slice(0, 40)}...\u300D
 - \u4FEE\u590D: \u300C${cleanText.slice(0, 40)}...\u300D`);
       replacements.push({

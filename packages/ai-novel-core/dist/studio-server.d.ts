@@ -6896,10 +6896,44 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             bypassAigcGate: boolean;
             autoAigcRefinement: boolean;
             draftSubcallRoles: string[];
+            aigcDetector: {
+                provider: string;
+                url: string;
+                tokenConfigured: boolean;
+                timeoutMs: number;
+                threshold: number;
+                requestTextField: string;
+                headersJson: string;
+                segmentMaxChars: number;
+                segmentMinChars: number;
+                gradioFnIndex: string;
+                gradioSessionHashConfigured: boolean;
+                gradioJoinUrl: string;
+                gradioDataUrl: string;
+                gradioSkipJoin: boolean;
+                gradioInputsJson: string;
+            };
         } | {
             bypassAigcGate: boolean;
             autoAigcRefinement: boolean;
             draftSubcallRoles: never[];
+            aigcDetector: {
+                provider: string;
+                url: string;
+                tokenConfigured: boolean;
+                timeoutMs: number;
+                threshold: number;
+                requestTextField: string;
+                headersJson: string;
+                segmentMaxChars: number;
+                segmentMinChars: number;
+                gradioFnIndex: string;
+                gradioSessionHashConfigured: boolean;
+                gradioJoinUrl: string;
+                gradioDataUrl: string;
+                gradioSkipJoin: boolean;
+                gradioInputsJson: string;
+            };
         };
         error?: undefined;
         result?: undefined;

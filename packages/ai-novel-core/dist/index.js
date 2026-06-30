@@ -4,7 +4,7 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-JKRTWA3N.js";
+} from "./chunk-CR6A56U5.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage
@@ -14,7 +14,7 @@ import {
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-7EVIEO4M.js";
+} from "./chunk-KW4REGT2.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -58,7 +58,7 @@ import {
   upsertDiscussionInSuperGraph,
   upsertProjectEnvValues,
   validateSuperGraph
-} from "./chunk-KXL2FONS.js";
+} from "./chunk-6R4W26M6.js";
 import {
   ProductionReadinessBlockedError,
   acceptStyleEvolutionCandidate,
@@ -144,16 +144,17 @@ import {
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-SK3T47GJ.js";
+} from "./chunk-MEAXRYHD.js";
 import {
   createAigcDetectorClient,
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig,
   getAigcDetectorConfigFromEnv,
+  getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-4ND3ONGM.js";
+} from "./chunk-LFDGA7OM.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -164,11 +165,13 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-Q7A3BTJU.js";
+} from "./chunk-6FIX7JTJ.js";
+import {
+  backfillPendingMemoryEmbeddings,
+  createLocalTextEmbedding
+} from "./chunk-DBOF57KW.js";
 import {
   FactoryDb,
-  backfillPendingMemoryEmbeddings,
-  createLocalTextEmbedding,
   evaluateChapterConsistency,
   extractChinesePersonNames,
   getFactoryDbPath,
@@ -177,7 +180,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-XEYMG4OS.js";
+} from "./chunk-ZNVS54L4.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,
@@ -273,6 +276,7 @@ export {
   generateAgentReply,
   getAigcDetectorConfig,
   getAigcDetectorConfigFromEnv,
+  getAigcDetectorConfigFromSettings,
   getCachedActiveLlmConfig,
   getFactoryDbPath,
   getNovelAutopilotWorkerStatus,

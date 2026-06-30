@@ -10,6 +10,7 @@ const testFilePath = fileURLToPath(import.meta.url)
 const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const coreEntry = path.join(packageRoot, "dist", "index.js")
 const studioServerEntry = path.join(packageRoot, "dist", "studio-server.js")
+const managedProjectsSegment = `${path.sep}.ai-novel-projects${path.sep}`
 
 async function loadCore() {
   return import(`${pathToFileURL(coreEntry).href}?ts=${Date.now()}`)
@@ -25,6 +26,21 @@ async function readBody(request) {
     chunks.push(chunk)
   }
   return Buffer.concat(chunks).toString("utf8")
+}
+
+function inferFactoryRoot(rootDir) {
+  const resolved = path.resolve(rootDir)
+  const index = resolved.indexOf(managedProjectsSegment)
+  return index >= 0 ? resolved.slice(0, index) || path.parse(resolved).root : resolved
+}
+
+async function writeAigcDetectorSettings(rootDir, detectorUrl) {
+  const { withFactoryDb } = await loadCore()
+  await withFactoryDb(inferFactoryRoot(rootDir), async (db) => {
+    db.setSystemSetting("aigcDetectorProvider", "generic-json")
+    db.setSystemSetting("aigcDetectorUrl", detectorUrl)
+    db.setSystemSetting("aigcDetectorThreshold", "0.8")
+  })
 }
 
 test("production acceptance flow proves novel factory can run from creation to readable delivery", async () => {
@@ -147,9 +163,7 @@ test("production acceptance flow proves novel factory can run from creation to r
     })
     const aigcAddress = aigcServer.address()
     assert.ok(aigcAddress && typeof aigcAddress === "object")
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
+    await writeAigcDetectorSettings(tempDir, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const createResponse = await handleNovelStudioApi(tempDir, "POST", "/api/projects", {
       title: "税册风声",

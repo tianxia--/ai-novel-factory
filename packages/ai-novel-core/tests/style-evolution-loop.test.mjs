@@ -10,6 +10,7 @@ const testFilePath = fileURLToPath(import.meta.url)
 const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const coreEntry = path.join(packageRoot, "dist", "index.js")
 const studioServerEntry = path.join(packageRoot, "dist", "studio-server.js")
+const managedProjectsSegment = `${path.sep}.ai-novel-projects${path.sep}`
 
 async function loadCore() {
   return import(`${pathToFileURL(coreEntry).href}?ts=${Date.now()}`)
@@ -39,6 +40,23 @@ async function listen(server) {
   const address = server.address()
   assert.ok(address && typeof address === "object")
   return address
+}
+
+function inferFactoryRoot(rootDir) {
+  const resolved = path.resolve(rootDir)
+  const index = resolved.indexOf(managedProjectsSegment)
+  return index >= 0 ? resolved.slice(0, index) || path.parse(resolved).root : resolved
+}
+
+async function writeAigcDetectorSettings(rootDir, detectorUrl, options = {}) {
+  const { withFactoryDb } = await loadCore()
+  await withFactoryDb(inferFactoryRoot(rootDir), async (db) => {
+    db.setSystemSetting("aigcDetectorProvider", options.provider || "generic-json")
+    if (detectorUrl !== undefined) {
+      db.setSystemSetting("aigcDetectorUrl", detectorUrl)
+    }
+    db.setSystemSetting("aigcDetectorThreshold", options.threshold || "0.8")
+  })
 }
 
 test("style evolution loop prefers structured llm critic output before heuristic fallback", async () => {
@@ -118,10 +136,6 @@ test("style evolution loop prefers structured llm critic output before heuristic
     })
     const aigcAddress = await listen(aigcServer)
 
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
-
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
       idea: "一名审雨官发现降雨记录被篡改",
@@ -129,6 +143,7 @@ test("style evolution loop prefers structured llm critic output before heuristic
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Runtime Loop Model",
@@ -252,10 +267,6 @@ test("style evolution keeps AIGC verification attached when structured evaluator
     const llmAddress = await listen(llmServer)
     const aigcAddress = await listen(aigcServer)
 
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
-
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
       idea: "一名审雨官发现降雨记录被篡改",
@@ -263,6 +274,7 @@ test("style evolution keeps AIGC verification attached when structured evaluator
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "AIGC Loop Model",
@@ -401,12 +413,7 @@ test("style evolution loop reads AIGC detector config from the managed project r
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await fs.writeFile(path.join(created.project.projectRoot, ".env"), [
-      "AIGC_DETECTOR_PROVIDER=generic-json",
-      `AIGC_DETECTOR_URL=http://127.0.0.1:${aigcAddress.port}/detect`,
-      "AIGC_DETECTOR_THRESHOLD=0.8",
-      "",
-    ].join("\n"))
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Project Env AIGC Model",
@@ -505,9 +512,6 @@ test("style evolution loop surfaces AIGC detector diagnostics when URL is missin
 
   try {
     const llmAddress = await listen(llmServer)
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    delete process.env.AIGC_DETECTOR_URL
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
 
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
@@ -516,6 +520,7 @@ test("style evolution loop surfaces AIGC detector diagnostics when URL is missin
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, undefined)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Missing AIGC URL Model",
@@ -667,9 +672,6 @@ test("style evolution loop selects verified candidate before higher scoring bloc
   try {
     const llmAddress = await listen(llmServer)
     const aigcAddress = await listen(aigcServer)
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
 
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
@@ -678,6 +680,7 @@ test("style evolution loop selects verified candidate before higher scoring bloc
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Verified Winner Model",
@@ -831,9 +834,6 @@ test("style evolution loop does not persist a winner when every candidate is blo
   try {
     const llmAddress = await listen(llmServer)
     const aigcAddress = await listen(aigcServer)
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
 
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
@@ -842,6 +842,7 @@ test("style evolution loop does not persist a winner when every candidate is blo
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Blocked Winner Model",
       baseUrl: `http://127.0.0.1:${llmAddress.port}`,
@@ -964,10 +965,6 @@ test("style evolution carries structured seed protocol into contract persistence
     })
     const aigcAddress = await listen(aigcServer)
 
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
-
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
       idea: "一名审雨官发现降雨记录被篡改",
@@ -975,6 +972,7 @@ test("style evolution carries structured seed protocol into contract persistence
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Seed Protocol Model",

@@ -45,31 +45,41 @@ test("aigc detector stays unavailable when disabled", async () => {
   assert.equal(result.provider, "disabled")
 })
 
-test("aigc detector reads project .env configuration with process overrides", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-aigc-env-"))
-  await fs.writeFile(path.join(tempDir, ".env"), [
-    "AIGC_DETECTOR_PROVIDER=generic-json",
-    "AIGC_DETECTOR_URL=http://127.0.0.1:8765/detect",
-    "AIGC_DETECTOR_THRESHOLD=0.7",
-    "AIGC_DETECTOR_SEGMENT_MAX_CHARS=700",
-    "",
-  ].join("\n"))
+test("aigc detector reads system settings and overrides process env", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-aigc-settings-"))
   const previousThreshold = process.env.AIGC_DETECTOR_THRESHOLD
+  const previousUrl = process.env.AIGC_DETECTOR_URL
   process.env.AIGC_DETECTOR_THRESHOLD = "0.9"
+  process.env.AIGC_DETECTOR_URL = "http://127.0.0.1:9999/env-detect"
 
   try {
-    const { getAigcDetectorConfig } = await loadCore()
+    const { getAigcDetectorConfig, getAigcDetectorConfigFromSettings, withFactoryDb } = await loadCore()
+    await withFactoryDb(tempDir, async (db) => {
+      db.setSystemSetting("aigcDetectorProvider", "generic-json")
+      db.setSystemSetting("aigcDetectorUrl", "http://127.0.0.1:8765/detect")
+      db.setSystemSetting("aigcDetectorThreshold", "0.7")
+      db.setSystemSetting("aigcDetectorSegmentMaxChars", "700")
+    })
+
     const config = getAigcDetectorConfig(tempDir)
+    const asyncConfig = await getAigcDetectorConfigFromSettings(tempDir)
 
     assert.equal(config.provider, "generic-json")
     assert.equal(config.url, "http://127.0.0.1:8765/detect")
-    assert.equal(config.threshold, 0.9)
+    assert.equal(config.threshold, 0.7)
     assert.equal(config.segment.maxChars, 700)
+    assert.equal(asyncConfig.url, config.url)
+    assert.equal(asyncConfig.threshold, config.threshold)
   } finally {
     if (previousThreshold === undefined) {
       delete process.env.AIGC_DETECTOR_THRESHOLD
     } else {
       process.env.AIGC_DETECTOR_THRESHOLD = previousThreshold
+    }
+    if (previousUrl === undefined) {
+      delete process.env.AIGC_DETECTOR_URL
+    } else {
+      process.env.AIGC_DETECTOR_URL = previousUrl
     }
   }
 })

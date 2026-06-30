@@ -67,6 +67,7 @@ interface ServerSentEvent {
 }
 declare function getAigcDetectorConfigFromEnv(env?: Record<string, string | undefined>): AigcDetectionConfig;
 declare function getAigcDetectorConfig(rootDir?: string): AigcDetectionConfig;
+declare function getAigcDetectorConfigFromSettings(rootDir: string): Promise<AigcDetectionConfig>;
 declare function createAigcDetectorClient(config?: AigcDetectionConfig): {
     config: AigcDetectionConfig;
     detectText(input: string | AigcDetectionInput, override?: AigcDetectionConfig): Promise<AigcDetectionResult>;
@@ -78,4 +79,4 @@ declare function detectAigcSegments(input: string | AigcDetectionInput | AigcTex
 declare function splitAigcTextIntoSegments(text: string, options?: AigcDetectorSegmentOptions): AigcTextSegment[];
 declare function parseAigcDetectorSse(payload: string): ServerSentEvent[];
 
-export { type AigcBatchDetectionResult, type AigcDetectionConfig, type AigcDetectionInput, type AigcDetectionResult, type AigcDetectionStatus, type AigcDetectorGradioOptions, type AigcDetectorProvider, type AigcDetectorSegmentOptions, type AigcSegmentDetectionResult, type AigcTextSegment, createAigcDetectorClient, detectAigcSegments, detectAigcText, getAigcDetectorConfig, getAigcDetectorConfigFromEnv, parseAigcDetectorSse, splitAigcTextIntoSegments };
+export { type AigcBatchDetectionResult, type AigcDetectionConfig, type AigcDetectionInput, type AigcDetectionResult, type AigcDetectionStatus, type AigcDetectorGradioOptions, type AigcDetectorProvider, type AigcDetectorSegmentOptions, type AigcSegmentDetectionResult, type AigcTextSegment, createAigcDetectorClient, detectAigcSegments, detectAigcText, getAigcDetectorConfig, getAigcDetectorConfigFromEnv, getAigcDetectorConfigFromSettings, parseAigcDetectorSse, splitAigcTextIntoSegments };

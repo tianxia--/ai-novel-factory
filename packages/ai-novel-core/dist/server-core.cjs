@@ -4724,13 +4724,31 @@ function findGenrePreset(searchText) {
 
 // src/aigc-detector.ts
 var import_node_fs4 = __toESM(require("fs"), 1);
+var import_node_module = require("module");
 var import_node_path6 = __toESM(require("path"), 1);
 var DEFAULT_TIMEOUT_MS = 3e4;
 var DEFAULT_THRESHOLD = 0.8;
 var DEFAULT_SEGMENT_MAX_CHARS = 900;
 var DEFAULT_SEGMENT_MIN_CHARS = 180;
-var PACKAGE_ENV_PARTS2 = ["packages", "opencode-ai-novel-factory", ".env"];
+var requireBuiltin = (0, import_node_module.createRequire)(import_node_path6.default.join(process.cwd(), "ai-novel-factory-runtime.js"));
 var MANAGED_PROJECTS_SEGMENT2 = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
+var AIGC_SETTING_KEYS = {
+  provider: "aigcDetectorProvider",
+  url: "aigcDetectorUrl",
+  token: "aigcDetectorToken",
+  timeoutMs: "aigcDetectorTimeoutMs",
+  threshold: "aigcDetectorThreshold",
+  headersJson: "aigcDetectorHeadersJson",
+  requestTextField: "aigcDetectorRequestTextField",
+  segmentMaxChars: "aigcDetectorSegmentMaxChars",
+  segmentMinChars: "aigcDetectorSegmentMinChars",
+  gradioFnIndex: "aigcDetectorGradioFnIndex",
+  gradioSessionHash: "aigcDetectorGradioSessionHash",
+  gradioJoinUrl: "aigcDetectorGradioJoinUrl",
+  gradioDataUrl: "aigcDetectorGradioDataUrl",
+  gradioSkipJoin: "aigcDetectorGradioSkipJoin",
+  gradioInputsJson: "aigcDetectorGradioInputsJson"
+};
 function getAigcDetectorConfigFromEnv(env = process.env) {
   return {
     provider: readProvider(env.AIGC_DETECTOR_PROVIDER),
@@ -4759,8 +4777,8 @@ function getAigcDetectorConfig(rootDir) {
     return getAigcDetectorConfigFromEnv();
   }
   try {
-    const projectEnv = readAigcProjectEnv(rootDir);
-    return getAigcDetectorConfigFromEnv({ ...projectEnv, ...process.env });
+    const settingsEnv = readAigcSettingsEnv(rootDir);
+    return getAigcDetectorConfigFromEnv({ ...process.env, ...settingsEnv });
   } catch {
     return getAigcDetectorConfigFromEnv();
   }
@@ -5269,41 +5287,45 @@ function parseJson(value) {
 function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
-function readAigcProjectEnv(rootDir) {
-  const envPath = getAigcProjectEnvCandidatePaths(rootDir).find((candidate) => import_node_fs4.default.existsSync(candidate));
-  if (!envPath) {
+function readAigcSettingsEnv(rootDir) {
+  const factoryRoot = inferAigcFactoryRoot(rootDir);
+  try {
+    const dbPath = import_node_path6.default.join(factoryRoot, ".ai-novel-factory", "factory.sqlite");
+    if (!import_node_fs4.default.existsSync(dbPath)) {
+      return {};
+    }
+    const sqlite = requireBuiltin("node:sqlite");
+    const db = new sqlite.DatabaseSync(dbPath);
+    try {
+      const rows = db.prepare("SELECT key, value FROM system_settings").all();
+      return aigcSettingsRowsToEnv(rows);
+    } finally {
+      db.close();
+    }
+  } catch {
     return {};
   }
-  const values = {};
-  for (const line of import_node_fs4.default.readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
-    values[key] = value;
-  }
-  return values;
 }
-function getAigcProjectEnvCandidatePaths(rootDir) {
-  const resolvedRootDir = import_node_path6.default.resolve(rootDir);
-  const candidates = [
-    import_node_path6.default.join(resolvedRootDir, ".env"),
-    import_node_path6.default.join(resolvedRootDir, ...PACKAGE_ENV_PARTS2)
-  ];
-  const workspaceRoot = inferAigcWorkspaceRootFromManagedProject(resolvedRootDir);
-  if (workspaceRoot) {
-    candidates.push(
-      import_node_path6.default.join(workspaceRoot, ".env"),
-      import_node_path6.default.join(workspaceRoot, ...PACKAGE_ENV_PARTS2)
-    );
-  }
-  return [...new Set(candidates.map((candidate) => import_node_path6.default.resolve(candidate)))];
+function aigcSettingsRowsToEnv(rows) {
+  const settings = new Map(rows.map((row) => [row.key, row.value]));
+  const value = (key) => settings.get(key) || void 0;
+  return {
+    AIGC_DETECTOR_PROVIDER: value(AIGC_SETTING_KEYS.provider),
+    AIGC_DETECTOR_URL: value(AIGC_SETTING_KEYS.url),
+    AIGC_DETECTOR_TOKEN: value(AIGC_SETTING_KEYS.token),
+    AIGC_DETECTOR_TIMEOUT_MS: value(AIGC_SETTING_KEYS.timeoutMs),
+    AIGC_DETECTOR_THRESHOLD: value(AIGC_SETTING_KEYS.threshold),
+    AIGC_DETECTOR_HEADERS_JSON: value(AIGC_SETTING_KEYS.headersJson),
+    AIGC_DETECTOR_REQUEST_TEXT_FIELD: value(AIGC_SETTING_KEYS.requestTextField),
+    AIGC_DETECTOR_SEGMENT_MAX_CHARS: value(AIGC_SETTING_KEYS.segmentMaxChars),
+    AIGC_DETECTOR_SEGMENT_MIN_CHARS: value(AIGC_SETTING_KEYS.segmentMinChars),
+    AIGC_DETECTOR_GRADIO_FN_INDEX: value(AIGC_SETTING_KEYS.gradioFnIndex),
+    AIGC_DETECTOR_GRADIO_SESSION_HASH: value(AIGC_SETTING_KEYS.gradioSessionHash),
+    AIGC_DETECTOR_GRADIO_JOIN_URL: value(AIGC_SETTING_KEYS.gradioJoinUrl),
+    AIGC_DETECTOR_GRADIO_DATA_URL: value(AIGC_SETTING_KEYS.gradioDataUrl),
+    AIGC_DETECTOR_GRADIO_SKIP_JOIN: value(AIGC_SETTING_KEYS.gradioSkipJoin),
+    AIGC_DETECTOR_GRADIO_INPUTS_JSON: value(AIGC_SETTING_KEYS.gradioInputsJson)
+  };
 }
 function inferAigcWorkspaceRootFromManagedProject(rootDir) {
   const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT2);
@@ -5311,6 +5333,10 @@ function inferAigcWorkspaceRootFromManagedProject(rootDir) {
     return null;
   }
   return rootDir.slice(0, index) || import_node_path6.default.parse(rootDir).root;
+}
+function inferAigcFactoryRoot(rootDir) {
+  const resolvedRootDir = import_node_path6.default.resolve(rootDir);
+  return inferAigcWorkspaceRootFromManagedProject(resolvedRootDir) || resolvedRootDir;
 }
 
 // src/production-contracts.ts

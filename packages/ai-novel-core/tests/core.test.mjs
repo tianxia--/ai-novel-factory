@@ -12,6 +12,7 @@ const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const coreEntry = path.join(packageRoot, "dist", "index.js")
 const studioServerEntry = path.join(packageRoot, "dist", "studio-server.js")
 const autopilotWorkerSource = path.join(packageRoot, "src", "autopilot-worker.ts")
+const managedProjectsSegment = `${path.sep}.ai-novel-projects${path.sep}`
 
 async function loadCore() {
   return import(`${pathToFileURL(coreEntry).href}?ts=${Date.now()}`)
@@ -246,18 +247,26 @@ async function startPassingAigcDetector(overrides = {}) {
   return { server, port: address.port }
 }
 
-async function writeAigcDetectorEnv(projectRoot, detectorUrl, options = {}) {
-  await fs.writeFile(path.join(projectRoot, ".env"), [
-    `AIGC_DETECTOR_PROVIDER=${options.provider || "generic-json"}`,
-    `AIGC_DETECTOR_URL=${detectorUrl}`,
-    `AIGC_DETECTOR_THRESHOLD=${options.threshold || "0.8"}`,
-    options.segmentMaxChars ? `AIGC_DETECTOR_SEGMENT_MAX_CHARS=${options.segmentMaxChars}` : "",
-    "",
-  ].filter(Boolean).join("\n"))
+async function writeAigcDetectorSettings(factoryRoot, detectorUrl, options = {}) {
+  const { withFactoryDb } = await loadCore()
+  await withFactoryDb(inferFactoryRoot(factoryRoot), async (db) => {
+    db.setSystemSetting("aigcDetectorProvider", options.provider || "generic-json")
+    db.setSystemSetting("aigcDetectorUrl", detectorUrl)
+    db.setSystemSetting("aigcDetectorThreshold", options.threshold || "0.8")
+    if (options.segmentMaxChars) {
+      db.setSystemSetting("aigcDetectorSegmentMaxChars", String(options.segmentMaxChars))
+    }
+  })
 }
 
-async function writePassingAigcEnv(projectRoot, port) {
-  await writeAigcDetectorEnv(projectRoot, `http://127.0.0.1:${port}/detect`)
+function inferFactoryRoot(rootDir) {
+  const resolved = path.resolve(rootDir)
+  const index = resolved.indexOf(managedProjectsSegment)
+  return index >= 0 ? resolved.slice(0, index) || path.parse(resolved).root : resolved
+}
+
+async function writePassingAigcSettings(projectRoot, port) {
+  await writeAigcDetectorSettings(projectRoot, `http://127.0.0.1:${port}/detect`)
 }
 
 async function readStoryFoundationFingerprintInput(rootDir, options = {}) {
@@ -3425,13 +3434,9 @@ test("production writing pipeline blocks chapters that fail AIGC detection after
   assert.ok(address && typeof address === "object")
 
   process.env.AI_NOVEL_TEST_MODE = "1"
-  await fs.writeFile(path.join(tempDir, ".env"), [
-    "AIGC_DETECTOR_PROVIDER=generic-json",
-    `AIGC_DETECTOR_URL=http://127.0.0.1:${address.port}/detect`,
-    "AIGC_DETECTOR_THRESHOLD=0.8",
-    "AIGC_DETECTOR_SEGMENT_MAX_CHARS=600",
-    "",
-  ].join("\n"))
+  await writeAigcDetectorSettings(tempDir, `http://127.0.0.1:${address.port}/detect`, {
+    segmentMaxChars: 600,
+  })
 
   try {
 	    const created = await createManagedAutonomousProject({
@@ -6190,7 +6195,7 @@ test("style evolution persists prompt loop runtime as a first-class asset", asyn
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcDetector.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcDetector.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Runtime Loop Model",
@@ -6348,12 +6353,7 @@ test("studio API exposes freeze preview before final style approval", async () =
     })
     const aigcAddress = aigcServer.address()
     assert.ok(aigcAddress && typeof aigcAddress === "object")
-    await fs.writeFile(path.join(created.project.projectRoot, ".env"), [
-      "AIGC_DETECTOR_PROVIDER=generic-json",
-      `AIGC_DETECTOR_URL=http://127.0.0.1:${aigcAddress.port}/detect`,
-      "AIGC_DETECTOR_THRESHOLD=0.8",
-      "",
-    ].join("\n"))
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/init", {
       projectId: created.project.id,
@@ -6922,7 +6922,7 @@ test("AIGC batch scan persists detection and publish readiness into chapter mani
       projectTitle: created.project.title,
       idea: created.project.idea,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcAddress.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcAddress.port)
 
     const projectRoot = created.project.projectRoot
     const chapterDir = path.join(projectRoot, ".ai-novel", "chapters")
@@ -7027,9 +7027,6 @@ test("AIGC batch refine keeps original final draft when refined draft fails veri
     const aigcAddress = aigcServer.address()
     assert.ok(llmAddress && typeof llmAddress === "object")
     assert.ok(aigcAddress && typeof aigcAddress === "object")
-    process.env.AIGC_DETECTOR_PROVIDER = "generic-json"
-    process.env.AIGC_DETECTOR_URL = `http://127.0.0.1:${aigcAddress.port}/detect`
-    process.env.AIGC_DETECTOR_THRESHOLD = "0.8"
 
     const created = await createManagedAutonomousProject({
       rootDir: tempDir,
@@ -7038,6 +7035,7 @@ test("AIGC batch refine keeps original final draft when refined draft fails veri
       totalChapters: 1,
       chapterWordTarget: 2500,
     })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
     await approveProductionReadinessForTest(created.project.projectRoot, created.state, {
       projectTitle: created.project.title,
       idea: created.project.idea,
@@ -7281,7 +7279,7 @@ test("studio API generates style evolution candidates through the configured tex
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcAddress.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcAddress.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Style Text Model",
@@ -7418,7 +7416,7 @@ test("style evolution loop controller can auto-run multiple iterations before re
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcDetector.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcDetector.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Loop Text Model",
@@ -7577,7 +7575,7 @@ test("style evolution loop can generate multiple candidates per iteration and pe
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcDetector.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcDetector.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Multi Candidate Model",
@@ -7660,7 +7658,7 @@ test("style evolution rejection feeds the next loop iteration with explicit user
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcDetector.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcDetector.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Reject Loop Model",
@@ -7797,7 +7795,7 @@ test("style evolution loop prefers structured llm critic output before heuristic
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writePassingAigcEnv(created.project.projectRoot, aigcDetector.port)
+    await writePassingAigcSettings(created.project.projectRoot, aigcDetector.port)
 
     const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
       name: "Critic Model",
@@ -7934,7 +7932,7 @@ test("style evolution keeps AIGC verification attached even when structured eval
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await writeAigcDetectorEnv(
+    await writeAigcDetectorSettings(
       created.project.projectRoot,
       `http://127.0.0.1:${aigcAddress.port}/detect`,
     )
@@ -8029,12 +8027,7 @@ test("manual style candidate is blocked by high risk AIGC verification", async (
       totalChapters: 12,
       chapterWordTarget: 2500,
     })
-    await fs.writeFile(path.join(created.project.projectRoot, ".env"), [
-      "AIGC_DETECTOR_PROVIDER=generic-json",
-      `AIGC_DETECTOR_URL=http://127.0.0.1:${aigcAddress.port}/detect`,
-      "AIGC_DETECTOR_THRESHOLD=0.8",
-      "",
-    ].join("\n"))
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
 
     await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/init", {
       projectId: created.project.id,
@@ -10288,6 +10281,23 @@ test("studio API saves and returns draft subcall writing settings", async () => 
       bypassAigcGate: true,
       autoAigcRefinement: false,
       draftSubcallRoles: ["dialogue", "narration", "unknown", "dialogue", "assembly"],
+      aigcDetector: {
+        provider: "generic-json",
+        url: "http://127.0.0.1:8765/detect",
+        token: "secret-token",
+        timeoutMs: "45000",
+        threshold: "0.72",
+        requestTextField: "content",
+        headersJson: "{\"x-detector\":\"yes\"}",
+        segmentMaxChars: 640,
+        segmentMinChars: 120,
+        gradioFnIndex: "3",
+        gradioSessionHash: "session-secret",
+        gradioJoinUrl: "/queue/join",
+        gradioDataUrl: "/queue/data",
+        gradioSkipJoin: true,
+        gradioInputsJson: "[\"{{text}}\",\"zh\"]",
+      },
     },
   })
   assert.equal(saveResponse.status, 200)
@@ -10297,4 +10307,36 @@ test("studio API saves and returns draft subcall writing settings", async () => 
   assert.equal(getResponse.payload.settings.bypassAigcGate, true)
   assert.equal(getResponse.payload.settings.autoAigcRefinement, false)
   assert.deepEqual(getResponse.payload.settings.draftSubcallRoles, ["dialogue", "narration", "assembly"])
+  assert.deepEqual(getResponse.payload.settings.aigcDetector, {
+    provider: "generic-json",
+    url: "http://127.0.0.1:8765/detect",
+    tokenConfigured: true,
+    timeoutMs: 45000,
+    threshold: 0.72,
+    requestTextField: "content",
+    headersJson: "{\"x-detector\":\"yes\"}",
+    segmentMaxChars: 640,
+    segmentMinChars: 120,
+    gradioFnIndex: "3",
+    gradioSessionHashConfigured: true,
+    gradioJoinUrl: "/queue/join",
+    gradioDataUrl: "/queue/data",
+    gradioSkipJoin: true,
+    gradioInputsJson: "[\"{{text}}\",\"zh\"]",
+  })
+
+  const keepSecretResponse = await handleNovelStudioApi(tempDir, "POST", "/api/settings/writing", {
+    settings: {
+      aigcDetector: {
+        provider: "generic-json",
+        token: "[configured]",
+        gradioSessionHash: "[configured]",
+      },
+    },
+  })
+  assert.equal(keepSecretResponse.status, 200)
+  const { getAigcDetectorConfig } = await loadCore()
+  const detectorConfig = getAigcDetectorConfig(tempDir)
+  assert.equal(detectorConfig.token, "secret-token")
+  assert.equal(detectorConfig.gradio.sessionHash, "session-secret")
 })

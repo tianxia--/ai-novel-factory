@@ -1,5 +1,7 @@
 import fs from "node:fs"
+import { createRequire } from "node:module"
 import path from "node:path"
+import { withFactoryDb } from "./factory-db"
 
 export type AigcDetectorProvider = "disabled" | "generic-json" | "gradio-queue"
 
@@ -83,8 +85,25 @@ const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_THRESHOLD = 0.8
 const DEFAULT_SEGMENT_MAX_CHARS = 900
 const DEFAULT_SEGMENT_MIN_CHARS = 180
-const PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"] as const
+const requireBuiltin = createRequire(path.join(process.cwd(), "ai-novel-factory-runtime.js"))
 const MANAGED_PROJECTS_SEGMENT = `${path.sep}.ai-novel-projects${path.sep}`
+const AIGC_SETTING_KEYS = {
+  provider: "aigcDetectorProvider",
+  url: "aigcDetectorUrl",
+  token: "aigcDetectorToken",
+  timeoutMs: "aigcDetectorTimeoutMs",
+  threshold: "aigcDetectorThreshold",
+  headersJson: "aigcDetectorHeadersJson",
+  requestTextField: "aigcDetectorRequestTextField",
+  segmentMaxChars: "aigcDetectorSegmentMaxChars",
+  segmentMinChars: "aigcDetectorSegmentMinChars",
+  gradioFnIndex: "aigcDetectorGradioFnIndex",
+  gradioSessionHash: "aigcDetectorGradioSessionHash",
+  gradioJoinUrl: "aigcDetectorGradioJoinUrl",
+  gradioDataUrl: "aigcDetectorGradioDataUrl",
+  gradioSkipJoin: "aigcDetectorGradioSkipJoin",
+  gradioInputsJson: "aigcDetectorGradioInputsJson",
+} as const
 
 export function getAigcDetectorConfigFromEnv(env: Record<string, string | undefined> = process.env): AigcDetectionConfig {
   return {
@@ -115,11 +134,16 @@ export function getAigcDetectorConfig(rootDir?: string): AigcDetectionConfig {
     return getAigcDetectorConfigFromEnv()
   }
   try {
-    const projectEnv = readAigcProjectEnv(rootDir)
-    return getAigcDetectorConfigFromEnv({ ...projectEnv, ...process.env })
+    const settingsEnv = readAigcSettingsEnv(rootDir)
+    return getAigcDetectorConfigFromEnv({ ...process.env, ...settingsEnv })
   } catch {
     return getAigcDetectorConfigFromEnv()
   }
+}
+
+export async function getAigcDetectorConfigFromSettings(rootDir: string): Promise<AigcDetectionConfig> {
+  const settingsEnv = await readAigcSettingsEnvAsync(rootDir)
+  return getAigcDetectorConfigFromEnv({ ...process.env, ...settingsEnv })
 }
 
 export function createAigcDetectorClient(config: AigcDetectionConfig = getAigcDetectorConfigFromEnv()) {
@@ -737,42 +761,51 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function readAigcProjectEnv(rootDir: string): Record<string, string | undefined> {
-  const envPath = getAigcProjectEnvCandidatePaths(rootDir).find((candidate) => fs.existsSync(candidate))
-  if (!envPath) {
+function readAigcSettingsEnv(rootDir: string): Record<string, string | undefined> {
+  const factoryRoot = inferAigcFactoryRoot(rootDir)
+  try {
+    const dbPath = path.join(factoryRoot, ".ai-novel-factory", "factory.sqlite")
+    if (!fs.existsSync(dbPath)) {
+      return {}
+    }
+    const sqlite = requireBuiltin("node:sqlite") as { DatabaseSync: new (path: string) => { prepare: (sql: string) => { all: () => Array<{ key: string; value: string }> }, close: () => void } }
+    const db = new sqlite.DatabaseSync(dbPath)
+    try {
+      const rows = db.prepare("SELECT key, value FROM system_settings").all() as Array<{ key: string; value: string }>
+      return aigcSettingsRowsToEnv(rows)
+    } finally {
+      db.close()
+    }
+  } catch {
     return {}
   }
-  const values: Record<string, string | undefined> = {}
-  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue
-    }
-    const separator = trimmed.indexOf("=")
-    if (separator <= 0) {
-      continue
-    }
-    const key = trimmed.slice(0, separator).trim()
-    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "")
-    values[key] = value
-  }
-  return values
 }
 
-function getAigcProjectEnvCandidatePaths(rootDir: string) {
-  const resolvedRootDir = path.resolve(rootDir)
-  const candidates = [
-    path.join(resolvedRootDir, ".env"),
-    path.join(resolvedRootDir, ...PACKAGE_ENV_PARTS),
-  ]
-  const workspaceRoot = inferAigcWorkspaceRootFromManagedProject(resolvedRootDir)
-  if (workspaceRoot) {
-    candidates.push(
-      path.join(workspaceRoot, ".env"),
-      path.join(workspaceRoot, ...PACKAGE_ENV_PARTS),
-    )
+async function readAigcSettingsEnvAsync(rootDir: string): Promise<Record<string, string | undefined>> {
+  const factoryRoot = inferAigcFactoryRoot(rootDir)
+  return withFactoryDb(factoryRoot, async (db) => aigcSettingsRowsToEnv(db.listSystemSettings())).catch(() => ({}))
+}
+
+function aigcSettingsRowsToEnv(rows: Array<{ key: string; value: string }>): Record<string, string | undefined> {
+  const settings = new Map(rows.map((row) => [row.key, row.value]))
+  const value = (key: string) => settings.get(key) || undefined
+  return {
+    AIGC_DETECTOR_PROVIDER: value(AIGC_SETTING_KEYS.provider),
+    AIGC_DETECTOR_URL: value(AIGC_SETTING_KEYS.url),
+    AIGC_DETECTOR_TOKEN: value(AIGC_SETTING_KEYS.token),
+    AIGC_DETECTOR_TIMEOUT_MS: value(AIGC_SETTING_KEYS.timeoutMs),
+    AIGC_DETECTOR_THRESHOLD: value(AIGC_SETTING_KEYS.threshold),
+    AIGC_DETECTOR_HEADERS_JSON: value(AIGC_SETTING_KEYS.headersJson),
+    AIGC_DETECTOR_REQUEST_TEXT_FIELD: value(AIGC_SETTING_KEYS.requestTextField),
+    AIGC_DETECTOR_SEGMENT_MAX_CHARS: value(AIGC_SETTING_KEYS.segmentMaxChars),
+    AIGC_DETECTOR_SEGMENT_MIN_CHARS: value(AIGC_SETTING_KEYS.segmentMinChars),
+    AIGC_DETECTOR_GRADIO_FN_INDEX: value(AIGC_SETTING_KEYS.gradioFnIndex),
+    AIGC_DETECTOR_GRADIO_SESSION_HASH: value(AIGC_SETTING_KEYS.gradioSessionHash),
+    AIGC_DETECTOR_GRADIO_JOIN_URL: value(AIGC_SETTING_KEYS.gradioJoinUrl),
+    AIGC_DETECTOR_GRADIO_DATA_URL: value(AIGC_SETTING_KEYS.gradioDataUrl),
+    AIGC_DETECTOR_GRADIO_SKIP_JOIN: value(AIGC_SETTING_KEYS.gradioSkipJoin),
+    AIGC_DETECTOR_GRADIO_INPUTS_JSON: value(AIGC_SETTING_KEYS.gradioInputsJson),
   }
-  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))]
 }
 
 function inferAigcWorkspaceRootFromManagedProject(rootDir: string) {
@@ -781,4 +814,9 @@ function inferAigcWorkspaceRootFromManagedProject(rootDir: string) {
     return null
   }
   return rootDir.slice(0, index) || path.parse(rootDir).root
+}
+
+function inferAigcFactoryRoot(rootDir: string) {
+  const resolvedRootDir = path.resolve(rootDir)
+  return inferAigcWorkspaceRootFromManagedProject(resolvedRootDir) || resolvedRootDir
 }

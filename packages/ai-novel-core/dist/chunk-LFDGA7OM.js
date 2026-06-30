@@ -1,12 +1,34 @@
+import {
+  withFactoryDb
+} from "./chunk-ZNVS54L4.js";
+
 // src/aigc-detector.ts
 import fs from "fs";
+import { createRequire } from "module";
 import path from "path";
 var DEFAULT_TIMEOUT_MS = 3e4;
 var DEFAULT_THRESHOLD = 0.8;
 var DEFAULT_SEGMENT_MAX_CHARS = 900;
 var DEFAULT_SEGMENT_MIN_CHARS = 180;
-var PACKAGE_ENV_PARTS = ["packages", "opencode-ai-novel-factory", ".env"];
+var requireBuiltin = createRequire(path.join(process.cwd(), "ai-novel-factory-runtime.js"));
 var MANAGED_PROJECTS_SEGMENT = `${path.sep}.ai-novel-projects${path.sep}`;
+var AIGC_SETTING_KEYS = {
+  provider: "aigcDetectorProvider",
+  url: "aigcDetectorUrl",
+  token: "aigcDetectorToken",
+  timeoutMs: "aigcDetectorTimeoutMs",
+  threshold: "aigcDetectorThreshold",
+  headersJson: "aigcDetectorHeadersJson",
+  requestTextField: "aigcDetectorRequestTextField",
+  segmentMaxChars: "aigcDetectorSegmentMaxChars",
+  segmentMinChars: "aigcDetectorSegmentMinChars",
+  gradioFnIndex: "aigcDetectorGradioFnIndex",
+  gradioSessionHash: "aigcDetectorGradioSessionHash",
+  gradioJoinUrl: "aigcDetectorGradioJoinUrl",
+  gradioDataUrl: "aigcDetectorGradioDataUrl",
+  gradioSkipJoin: "aigcDetectorGradioSkipJoin",
+  gradioInputsJson: "aigcDetectorGradioInputsJson"
+};
 function getAigcDetectorConfigFromEnv(env = process.env) {
   return {
     provider: readProvider(env.AIGC_DETECTOR_PROVIDER),
@@ -35,11 +57,15 @@ function getAigcDetectorConfig(rootDir) {
     return getAigcDetectorConfigFromEnv();
   }
   try {
-    const projectEnv = readAigcProjectEnv(rootDir);
-    return getAigcDetectorConfigFromEnv({ ...projectEnv, ...process.env });
+    const settingsEnv = readAigcSettingsEnv(rootDir);
+    return getAigcDetectorConfigFromEnv({ ...process.env, ...settingsEnv });
   } catch {
     return getAigcDetectorConfigFromEnv();
   }
+}
+async function getAigcDetectorConfigFromSettings(rootDir) {
+  const settingsEnv = await readAigcSettingsEnvAsync(rootDir);
+  return getAigcDetectorConfigFromEnv({ ...process.env, ...settingsEnv });
 }
 function createAigcDetectorClient(config = getAigcDetectorConfigFromEnv()) {
   return {
@@ -568,41 +594,49 @@ function parseJson(value) {
 function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
-function readAigcProjectEnv(rootDir) {
-  const envPath = getAigcProjectEnvCandidatePaths(rootDir).find((candidate) => fs.existsSync(candidate));
-  if (!envPath) {
+function readAigcSettingsEnv(rootDir) {
+  const factoryRoot = inferAigcFactoryRoot(rootDir);
+  try {
+    const dbPath = path.join(factoryRoot, ".ai-novel-factory", "factory.sqlite");
+    if (!fs.existsSync(dbPath)) {
+      return {};
+    }
+    const sqlite = requireBuiltin("node:sqlite");
+    const db = new sqlite.DatabaseSync(dbPath);
+    try {
+      const rows = db.prepare("SELECT key, value FROM system_settings").all();
+      return aigcSettingsRowsToEnv(rows);
+    } finally {
+      db.close();
+    }
+  } catch {
     return {};
   }
-  const values = {};
-  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, "");
-    values[key] = value;
-  }
-  return values;
 }
-function getAigcProjectEnvCandidatePaths(rootDir) {
-  const resolvedRootDir = path.resolve(rootDir);
-  const candidates = [
-    path.join(resolvedRootDir, ".env"),
-    path.join(resolvedRootDir, ...PACKAGE_ENV_PARTS)
-  ];
-  const workspaceRoot = inferAigcWorkspaceRootFromManagedProject(resolvedRootDir);
-  if (workspaceRoot) {
-    candidates.push(
-      path.join(workspaceRoot, ".env"),
-      path.join(workspaceRoot, ...PACKAGE_ENV_PARTS)
-    );
-  }
-  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
+async function readAigcSettingsEnvAsync(rootDir) {
+  const factoryRoot = inferAigcFactoryRoot(rootDir);
+  return withFactoryDb(factoryRoot, async (db) => aigcSettingsRowsToEnv(db.listSystemSettings())).catch(() => ({}));
+}
+function aigcSettingsRowsToEnv(rows) {
+  const settings = new Map(rows.map((row) => [row.key, row.value]));
+  const value = (key) => settings.get(key) || void 0;
+  return {
+    AIGC_DETECTOR_PROVIDER: value(AIGC_SETTING_KEYS.provider),
+    AIGC_DETECTOR_URL: value(AIGC_SETTING_KEYS.url),
+    AIGC_DETECTOR_TOKEN: value(AIGC_SETTING_KEYS.token),
+    AIGC_DETECTOR_TIMEOUT_MS: value(AIGC_SETTING_KEYS.timeoutMs),
+    AIGC_DETECTOR_THRESHOLD: value(AIGC_SETTING_KEYS.threshold),
+    AIGC_DETECTOR_HEADERS_JSON: value(AIGC_SETTING_KEYS.headersJson),
+    AIGC_DETECTOR_REQUEST_TEXT_FIELD: value(AIGC_SETTING_KEYS.requestTextField),
+    AIGC_DETECTOR_SEGMENT_MAX_CHARS: value(AIGC_SETTING_KEYS.segmentMaxChars),
+    AIGC_DETECTOR_SEGMENT_MIN_CHARS: value(AIGC_SETTING_KEYS.segmentMinChars),
+    AIGC_DETECTOR_GRADIO_FN_INDEX: value(AIGC_SETTING_KEYS.gradioFnIndex),
+    AIGC_DETECTOR_GRADIO_SESSION_HASH: value(AIGC_SETTING_KEYS.gradioSessionHash),
+    AIGC_DETECTOR_GRADIO_JOIN_URL: value(AIGC_SETTING_KEYS.gradioJoinUrl),
+    AIGC_DETECTOR_GRADIO_DATA_URL: value(AIGC_SETTING_KEYS.gradioDataUrl),
+    AIGC_DETECTOR_GRADIO_SKIP_JOIN: value(AIGC_SETTING_KEYS.gradioSkipJoin),
+    AIGC_DETECTOR_GRADIO_INPUTS_JSON: value(AIGC_SETTING_KEYS.gradioInputsJson)
+  };
 }
 function inferAigcWorkspaceRootFromManagedProject(rootDir) {
   const index = rootDir.indexOf(MANAGED_PROJECTS_SEGMENT);
@@ -611,10 +645,15 @@ function inferAigcWorkspaceRootFromManagedProject(rootDir) {
   }
   return rootDir.slice(0, index) || path.parse(rootDir).root;
 }
+function inferAigcFactoryRoot(rootDir) {
+  const resolvedRootDir = path.resolve(rootDir);
+  return inferAigcWorkspaceRootFromManagedProject(resolvedRootDir) || resolvedRootDir;
+}
 
 export {
   getAigcDetectorConfigFromEnv,
   getAigcDetectorConfig,
+  getAigcDetectorConfigFromSettings,
   createAigcDetectorClient,
   detectAigcText,
   detectAigcSegments,
