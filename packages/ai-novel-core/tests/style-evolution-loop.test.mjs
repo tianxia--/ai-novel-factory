@@ -48,6 +48,23 @@ function inferFactoryRoot(rootDir) {
   return index >= 0 ? resolved.slice(0, index) || path.parse(resolved).root : resolved
 }
 
+test("style freeze advice parser repairs trailing unclosed array string", async () => {
+  const { parseStyleFreezeAdviceFromText } = await loadCore()
+  const parsed = parseStyleFreezeAdviceFromText(`{
+    "freezeVerdict": "continue",
+    "freezeSummary": "样段已接近冻结，场景压力和人物语气稳定，但仍需压低判题说明。",
+    "blockingReasons": ["仍有“本该有报字”替读污损内容。"],
+    "contractAdjustments": ["污损只写残笔、格位、停顿、改口。"],
+    "forbiddenPatterns": ["“本该有某字”式替读污损。"],
+    "positiveExamples": ["“停笔。”", "“照例留格。”", "“抄手的笔悬在空白上方。],
+    "inheritedRules": ["压力必须由报读、废页、留格推进。"]
+  }`)
+  assert.ok(parsed)
+  assert.equal(parsed.freezeVerdict, "continue")
+  assert.match(parsed.freezeSummary, /判题说明/)
+  assert.ok(parsed.positiveExamples.some((item) => /抄手的笔悬/.test(item)))
+})
+
 async function writeAigcDetectorSettings(rootDir, detectorUrl, options = {}) {
   const { withFactoryDb } = await loadCore()
   await withFactoryDb(inferFactoryRoot(rootDir), async (db) => {

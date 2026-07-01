@@ -7894,19 +7894,71 @@ function extractJsonObject(value) {
   if (start !== -1 && end > start) return trimmed.slice(start, end + 1);
   return "";
 }
+function repairCommonStyleJsonObject(value) {
+  const input = value.trim();
+  let repaired = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    if (inString) {
+      if (escaped) {
+        repaired += char;
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        repaired += char;
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        repaired += char;
+        inString = false;
+        continue;
+      }
+      if ((char === "]" || char === "}") && isLikelyMalformedStringDelimiter(input, index, char)) {
+        repaired += `"${char}`;
+        inString = false;
+        continue;
+      }
+      repaired += char;
+      continue;
+    }
+    repaired += char;
+    if (char === '"') inString = true;
+  }
+  if (inString) repaired += '"';
+  repaired = repaired.replace(/,\s*([}\]])/gu, "$1");
+  return repaired;
+}
+function isLikelyMalformedStringDelimiter(value, index, delimiter) {
+  const next = value.slice(index + 1).match(/\S/u)?.[0] ?? "";
+  if (delimiter === "]") return next === "," || next === "}" || next === "]" || next === "";
+  return next === "," || next === "}" || next === "]" || next === "";
+}
+function parseStyleJsonObject(value) {
+  const jsonText = extractJsonObject(value);
+  if (!jsonText) return null;
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    const repaired = repairCommonStyleJsonObject(jsonText);
+    if (repaired === jsonText) return null;
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      return null;
+    }
+  }
+}
 function parseNumericScore(value, fallback = 0) {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return clampScore(value);
 }
 function parseStyleEvolutionCritiqueFromText(value) {
-  const jsonText = extractJsonObject(value);
-  if (!jsonText) return null;
-  let payload;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    return null;
-  }
+  const payload = parseStyleJsonObject(value);
+  if (!payload) return null;
   const evaluationPayload = payload.evaluation;
   const refinementPayload = payload.refinement;
   if (!evaluationPayload || typeof evaluationPayload !== "object" || !refinementPayload || typeof refinementPayload !== "object") {
@@ -7951,14 +8003,8 @@ function parseStyleEvolutionCritiqueFromText(value) {
   return { evaluation, refinement };
 }
 function parseStyleEvolutionEvaluationFromText(value) {
-  const jsonText = extractJsonObject(value);
-  if (!jsonText) return null;
-  let payload;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    return null;
-  }
+  const payload = parseStyleJsonObject(value);
+  if (!payload) return null;
   const evaluationPayload = payload.evaluation && typeof payload.evaluation === "object" ? payload.evaluation : payload;
   const verdict = evaluationPayload.verdict;
   if (verdict !== "retry" && verdict !== "candidate" && verdict !== "approve") {
@@ -7990,14 +8036,8 @@ function parseStyleEvolutionEvaluationFromText(value) {
   return { evaluation };
 }
 function parseStyleEvolutionRefinementFromText(value) {
-  const jsonText = extractJsonObject(value);
-  if (!jsonText) return null;
-  let payload;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    return null;
-  }
+  const payload = parseStyleJsonObject(value);
+  if (!payload) return null;
   const refinementPayload = payload.refinement && typeof payload.refinement === "object" ? payload.refinement : payload;
   const refinement = {
     source: "llm_critic",
@@ -8012,14 +8052,8 @@ function parseStyleEvolutionRefinementFromText(value) {
   return { refinement };
 }
 function parseStyleFreezeAdviceFromText(value) {
-  const jsonText = extractJsonObject(value);
-  if (!jsonText) return null;
-  let payload;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    return null;
-  }
+  const payload = parseStyleJsonObject(value);
+  if (!payload) return null;
   const freezeSummary = typeof payload.freezeSummary === "string" ? payload.freezeSummary.trim() : "";
   const freezeVerdict = normalizeStyleFreezerVerdict(
     payload.freezeVerdict || payload.verdict || (/还需|继续|暂不|不能|尚未|没有冻结价值|需要重写/u.test(freezeSummary) ? "continue" : /已形成|可以冻结|可冻结|可持续|ready/u.test(freezeSummary) ? "ready" : "continue")
@@ -8043,14 +8077,8 @@ function parseStyleFreezeAdviceFromText(value) {
   };
 }
 function parseStyleContractFromText(value) {
-  const jsonText = extractJsonObject(value);
-  if (!jsonText) return null;
-  let payload;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    return null;
-  }
+  const payload = parseStyleJsonObject(value);
+  if (!payload) return null;
   const contract = {
     voice: typeof payload.voice === "string" ? payload.voice.trim() : "",
     sentenceRhythm: typeof payload.sentenceRhythm === "string" ? payload.sentenceRhythm.trim() : "",

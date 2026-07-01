@@ -1830,20 +1830,75 @@ function extractJsonObject(value: string) {
   return ""
 }
 
+function repairCommonStyleJsonObject(value: string) {
+  const input = value.trim()
+  let repaired = ""
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index]
+    if (inString) {
+      if (escaped) {
+        repaired += char
+        escaped = false
+        continue
+      }
+      if (char === "\\") {
+        repaired += char
+        escaped = true
+        continue
+      }
+      if (char === "\"") {
+        repaired += char
+        inString = false
+        continue
+      }
+      if ((char === "]" || char === "}") && isLikelyMalformedStringDelimiter(input, index, char)) {
+        repaired += `"${char}`
+        inString = false
+        continue
+      }
+      repaired += char
+      continue
+    }
+    repaired += char
+    if (char === "\"") inString = true
+  }
+  if (inString) repaired += "\""
+  repaired = repaired.replace(/,\s*([}\]])/gu, "$1")
+  return repaired
+}
+
+function isLikelyMalformedStringDelimiter(value: string, index: number, delimiter: "]" | "}") {
+  const next = value.slice(index + 1).match(/\S/u)?.[0] ?? ""
+  if (delimiter === "]") return next === "," || next === "}" || next === "]" || next === ""
+  return next === "," || next === "}" || next === "]" || next === ""
+}
+
+function parseStyleJsonObject(value: string): Record<string, unknown> | null {
+  const jsonText = extractJsonObject(value)
+  if (!jsonText) return null
+  try {
+    return JSON.parse(jsonText) as Record<string, unknown>
+  } catch {
+    const repaired = repairCommonStyleJsonObject(jsonText)
+    if (repaired === jsonText) return null
+    try {
+      return JSON.parse(repaired) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+}
+
 function parseNumericScore(value: unknown, fallback = 0) {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback
   return clampScore(value)
 }
 
 export function parseStyleEvolutionCritiqueFromText(value: string): ParsedStyleEvolutionCritique | null {
-  const jsonText = extractJsonObject(value)
-  if (!jsonText) return null
-  let payload: Record<string, unknown>
-  try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const payload = parseStyleJsonObject(value)
+  if (!payload) return null
   const evaluationPayload = payload.evaluation
   const refinementPayload = payload.refinement
   if (!evaluationPayload || typeof evaluationPayload !== "object" || !refinementPayload || typeof refinementPayload !== "object") {
@@ -1889,14 +1944,8 @@ export function parseStyleEvolutionCritiqueFromText(value: string): ParsedStyleE
 }
 
 export function parseStyleEvolutionEvaluationFromText(value: string): ParsedStyleEvolutionEvaluation | null {
-  const jsonText = extractJsonObject(value)
-  if (!jsonText) return null
-  let payload: Record<string, unknown>
-  try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const payload = parseStyleJsonObject(value)
+  if (!payload) return null
   const evaluationPayload = payload.evaluation && typeof payload.evaluation === "object"
     ? payload.evaluation as Record<string, unknown>
     : payload
@@ -1931,14 +1980,8 @@ export function parseStyleEvolutionEvaluationFromText(value: string): ParsedStyl
 }
 
 export function parseStyleEvolutionRefinementFromText(value: string): ParsedStyleEvolutionRefinementOnly | null {
-  const jsonText = extractJsonObject(value)
-  if (!jsonText) return null
-  let payload: Record<string, unknown>
-  try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const payload = parseStyleJsonObject(value)
+  if (!payload) return null
   const refinementPayload = payload.refinement && typeof payload.refinement === "object"
     ? payload.refinement as Record<string, unknown>
     : payload
@@ -1956,14 +1999,8 @@ export function parseStyleEvolutionRefinementFromText(value: string): ParsedStyl
 }
 
 export function parseStyleFreezeAdviceFromText(value: string): ParsedStyleEvolutionFreezeAdvice | null {
-  const jsonText = extractJsonObject(value)
-  if (!jsonText) return null
-  let payload: Record<string, unknown>
-  try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const payload = parseStyleJsonObject(value)
+  if (!payload) return null
   const freezeSummary = typeof payload.freezeSummary === "string" ? payload.freezeSummary.trim() : ""
   const freezeVerdict = normalizeStyleFreezerVerdict(
     payload.freezeVerdict
@@ -1996,14 +2033,8 @@ export function parseStyleFreezeAdviceFromText(value: string): ParsedStyleEvolut
 export function parseStyleContractFromText(
   value: string,
 ): NonNullable<StyleEvolutionContract["styleContract"]> | null {
-  const jsonText = extractJsonObject(value)
-  if (!jsonText) return null
-  let payload: Record<string, unknown>
-  try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const payload = parseStyleJsonObject(value)
+  if (!payload) return null
 
   const contract = {
     voice: typeof payload.voice === "string" ? payload.voice.trim() : "",
