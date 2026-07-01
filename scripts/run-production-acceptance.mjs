@@ -30,6 +30,7 @@ const DEFAULT_TARGET_MIN_WORDS = 100000
 const DEFAULT_TARGET_MAX_WORDS = 300000
 const DEFAULT_CHAPTERS = 40
 const DEFAULT_CHAPTER_WORDS = 3000
+const DEFAULT_STYLE_MAX_REQUESTS = 8
 
 class AcceptanceError extends Error {
   constructor(message, details = {}) {
@@ -55,6 +56,7 @@ function usage() {
     "  --max-total-words <n>          Final acceptance upper bound. Default: 300000.",
     "  --style-prompt <text>          Style Evolution user style prompt.",
     "  --style-iterations <n>         Style loop iterations per request. Default: 3.",
+    "  --style-max-requests <n>       Max Style Evolution API requests before failing. Default: 8.",
     "  --style-candidates <n>         Candidate count per style iteration. Default: 2.",
     "  --aigc-detector-provider <id>   AIGC detector provider: local-heuristic, generic-json, gradio-queue, disabled.",
     "  --aigc-detector-url <url>       AIGC detector endpoint URL.",
@@ -95,6 +97,7 @@ function parseArgs(argv) {
       "Characters must have distinct speech, visible habits, changing relationships, and pressure.",
     ].join(" "),
     styleIterations: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STYLE_ITERATIONS, 3),
+    styleMaxRequests: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STYLE_MAX_REQUESTS, DEFAULT_STYLE_MAX_REQUESTS),
     styleCandidates: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STYLE_CANDIDATES, 2),
     aigcDetector: {
       provider: process.env.AIGC_DETECTOR_PROVIDER || "local-heuristic",
@@ -147,6 +150,8 @@ function parseArgs(argv) {
       options.stylePrompt = next().trim()
     } else if (arg === "--style-iterations") {
       options.styleIterations = readPositiveInt(next(), options.styleIterations)
+    } else if (arg === "--style-max-requests") {
+      options.styleMaxRequests = readPositiveInt(next(), options.styleMaxRequests)
     } else if (arg === "--style-candidates") {
       options.styleCandidates = readPositiveInt(next(), options.styleCandidates)
     } else if (arg === "--aigc-detector-provider") {
@@ -538,13 +543,16 @@ async function ensureStyleGate(api, projectId, options, report) {
 
   log("Running Style Evolution through Studio API.", {
     iterations: options.styleIterations,
+    maxRequests: options.styleMaxRequests,
     candidates: options.styleCandidates,
   })
-  const maxStyleRequests = Math.max(1, options.styleIterations)
+  const maxStyleRequests = Math.max(1, options.styleMaxRequests)
   let generated = null
-  let candidate = null
-  let candidateStatus = null
-  let iterationFeedback = ""
+  let candidate = latestStyleCandidate(stylePayload.styleEvolution)
+  let candidateStatus = styleCandidateFreezeStatus(candidate)
+  let iterationFeedback = candidate && !candidateStatus.ready
+    ? buildStyleIterationFeedback(candidate, candidateStatus)
+    : ""
   for (let attempt = 1; attempt <= maxStyleRequests; attempt += 1) {
     generated = await api("POST", "/api/style-evolution/generate-candidate", {
       projectId,
