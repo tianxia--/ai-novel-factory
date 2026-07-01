@@ -176,6 +176,121 @@ test("style evolution loop prefers structured llm critic output before heuristic
     assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].freezerSource, "llm_critic")
     assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].evaluationSource, "llm_critic")
     assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].refinementSource, "llm_critic")
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].llmFallbackUsed, false)
+    assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].llmFallbackUsed, false)
+    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory[0].llmFallbackUsed, false)
+  } finally {
+    await close(server)
+    if (aigcServer) {
+      await close(aigcServer)
+    }
+    if (previousProvider === undefined) delete process.env.AIGC_DETECTOR_PROVIDER
+    else process.env.AIGC_DETECTOR_PROVIDER = previousProvider
+    if (previousUrl === undefined) delete process.env.AIGC_DETECTOR_URL
+    else process.env.AIGC_DETECTOR_URL = previousUrl
+    if (previousThreshold === undefined) delete process.env.AIGC_DETECTOR_THRESHOLD
+    else process.env.AIGC_DETECTOR_THRESHOLD = previousThreshold
+  }
+})
+
+test("style evolution loop marks llm fallback when refiner and combined critic fail", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-loop-fallback-"))
+  const { createManagedAutonomousProject } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  let responsesHit = 0
+  let aigcServer = null
+  const server = http.createServer(async (request, response) => {
+    const rawBody = await readBody(request)
+    if (request.url === "/responses") {
+      responsesHit += 1
+      JSON.parse(rawBody)
+      if (responsesHit === 1) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({
+          output_text: "雨线挂在门槛外。沈砚把缺页账本推到灯下，纸边齐得发亮。老周的手缩进袖口，没有接。",
+        }))
+        return
+      }
+      if (responsesHit === 2) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({
+          output_text: JSON.stringify({
+            evaluation: {
+              verdict: "approve",
+              summary: "结构化 evaluator 认为当前样段可以进入确认。",
+              scores: {
+                narrativeVoice: 9,
+                sentenceRhythm: 9,
+                dialogueTexture: 9,
+                informationDensity: 9,
+                emotionalTension: 9,
+                readability: 9,
+                requirementAlignment: 9,
+                forbiddenPatternRisk: 0.4,
+                overall: 9,
+              },
+              strengths: ["动作和物件推进稳定。"],
+              deviations: [],
+              forbiddenHits: [],
+              nextFocus: ["保持短对白。"],
+            },
+          }),
+        }))
+        return
+      }
+      response.writeHead(504, { "content-type": "text/plain" })
+      response.end("Gateway Timeout")
+      return
+    }
+    response.writeHead(404).end()
+  })
+
+  const previousProvider = process.env.AIGC_DETECTOR_PROVIDER
+  const previousUrl = process.env.AIGC_DETECTOR_URL
+  const previousThreshold = process.env.AIGC_DETECTOR_THRESHOLD
+
+  try {
+    const address = await listen(server)
+    aigcServer = http.createServer(async (request, response) => {
+      await readBody(request)
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ aiProbability: 0.12, label: "human", confidence: 0.88 }))
+    })
+    const aigcAddress = await listen(aigcServer)
+
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 12,
+      chapterWordTarget: 2500,
+    })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
+
+    const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+      name: "Fallback Loop Model",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiKey: "test-key",
+      modelName: "fallback-loop-model",
+      apiMode: "responses",
+      timeoutMs: 1000,
+    })
+    assert.equal(configResponse.status, 200)
+
+    const generateResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/generate-candidate", {
+      projectId: created.project.id,
+      userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+      loopIterations: 1,
+    }, { projectId: created.project.id })
+
+    assert.equal(generateResponse.status, 200)
+    assert.ok(responsesHit >= 3)
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].llmFallbackUsed, true)
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].freezer.source, "heuristic")
+    assert.ok(generateResponse.payload.loopIteration.candidates[0].fallbackReasons.some((reason) => /split_chain_failed/.test(reason)))
+    assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].llmFallbackUsed, true)
+    assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].freezerSource, "heuristic")
+    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory[0].llmFallbackUsed, true)
   } finally {
     await close(server)
     if (aigcServer) {

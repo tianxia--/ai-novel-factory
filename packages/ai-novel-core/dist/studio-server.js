@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-R3MWCB6C.js";
+} from "./chunk-3RTTVEME.js";
 import "./chunk-UIQAXZB3.js";
 import "./chunk-SDIPDDNZ.js";
 import {
@@ -33,7 +33,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-DE4Q2HRG.js";
+} from "./chunk-5BQCAU2C.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -73,7 +73,7 @@ import {
   requestLlmTextCompletion,
   testProviderConnectivity,
   writeProductionStoryBibleAssets
-} from "./chunk-FZVBH4PD.js";
+} from "./chunk-CJT6CYIS.js";
 import {
   detectAigcSegments,
   detectAigcText,
@@ -128,6 +128,7 @@ function buildStyleFreezerGateRecord(freezeAdvice, fallback) {
   const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (freezeAdvice) {
     return {
+      source: "llm_critic",
       verdict: freezeAdvice.freezeVerdict,
       summary: freezeAdvice.freezeSummary,
       blockingReasons: freezeAdvice.blockingReasons,
@@ -142,6 +143,7 @@ function buildStyleFreezerGateRecord(freezeAdvice, fallback) {
     fallback.evaluation?.verdict !== "approve" ? "Evaluator \u5C1A\u672A\u5224\u5B9A\u5F53\u524D\u6837\u6BB5\u53EF\u76F4\u63A5\u51BB\u7ED3\uFF0C\u5EFA\u8BAE\u7528\u6237\u786E\u8BA4\u524D\u7EE7\u7EED\u5BA1\u9605\u3002" : ""
   ].filter(Boolean);
   return {
+    source: "heuristic",
     verdict: blockingReasons.length ? "continue" : "ready",
     summary: blockingReasons.length ? "\u672C\u8F6E\u7F3A\u5C11 LLM Freezer \u7ED3\u6784\u5316\u653E\u884C\uFF0C\u7EE7\u7EED\u6536\u7D27\u540E\u518D\u8FDB\u5165\u51BB\u7ED3\u786E\u8BA4\u3002" : cautionReasons.length ? `\u672C\u8F6E\u901A\u8FC7 Generation Verification Gate\uFF0C\u53EF\u7531\u7528\u6237\u786E\u8BA4\u662F\u5426\u51BB\u7ED3\uFF1B${cautionReasons.join(" ")}` : "\u672C\u8F6E\u901A\u8FC7\u672C\u5730 Freezer \u515C\u5E95\u68C0\u67E5\uFF0C\u53EF\u4EE5\u8FDB\u5165\u51BB\u7ED3\u786E\u8BA4\u3002",
     blockingReasons: blockingReasons.length ? blockingReasons : cautionReasons,
@@ -660,6 +662,7 @@ async function runStyleEvolutionLoop(options) {
       });
       refinement2 = reinforceRefinementWithAigc(refinement2, aigcSignal);
       let freezeAdvice2 = null;
+      const fallbackReasons = [];
       try {
         const evaluationPrompt = buildStyleEvolutionEvaluationPrompt({
           projectTitle: options.projectTitle,
@@ -681,7 +684,7 @@ async function runStyleEvolutionLoop(options) {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 1400,
+          maxTokens: 900,
           messages: [
             { role: "system", content: evaluationPrompt.system },
             { role: "user", content: evaluationPrompt.user }
@@ -738,7 +741,7 @@ async function runStyleEvolutionLoop(options) {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 1200,
+          maxTokens: 800,
           messages: [
             { role: "system", content: freezePrompt.system },
             { role: "user", content: freezePrompt.user }
@@ -754,6 +757,7 @@ async function runStyleEvolutionLoop(options) {
           };
         }
       } catch (error) {
+        fallbackReasons.push(`split_chain_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 360));
         try {
           const critiquePrompt = buildStyleEvolutionCritiquePrompt({
             projectTitle: options.projectTitle,
@@ -775,7 +779,7 @@ async function runStyleEvolutionLoop(options) {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 2e3,
+            maxTokens: 1e3,
             messages: [
               { role: "system", content: critiquePrompt.system },
               { role: "user", content: critiquePrompt.user }
@@ -785,8 +789,10 @@ async function runStyleEvolutionLoop(options) {
           if (parsedCritique) {
             evaluation2 = mergeStyleEvaluationWithAigc(parsedCritique.evaluation, aigcSignal);
             refinement2 = reinforceRefinementWithAigc(parsedCritique.refinement, aigcSignal);
+            fallbackReasons.push("split_chain_recovered_by_combined_critic");
           }
         } catch (fallbackError) {
+          fallbackReasons.push(`combined_critic_failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`.slice(0, 360));
           console.warn("Style evolution multi-role chain failed; falling back to heuristic evaluator/refiner.", fallbackError);
         }
         console.warn("Style evolution split evaluator/refiner/freezer chain failed; fallback path used.", error);
@@ -796,6 +802,7 @@ async function runStyleEvolutionLoop(options) {
         checkedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
       const freezer2 = buildStyleFreezerGateRecord(freezeAdvice2, { evaluation: evaluation2, verification: verification2 });
+      const llmFallbackUsed = evaluation2.source === "heuristic" || refinement2.source === "heuristic" || freezer2.source === "heuristic" || fallbackReasons.length > 0;
       candidateRuns.push({
         candidateIndex: generatedCandidate.candidateIndex,
         sample: sample2,
@@ -804,7 +811,9 @@ async function runStyleEvolutionLoop(options) {
         freezeAdvice: freezeAdvice2,
         verification: verification2,
         freezer: freezer2,
-        aigcSignal
+        aigcSignal,
+        llmFallbackUsed,
+        fallbackReasons
       });
     }
     candidateRuns.sort((left, right) => {
@@ -847,7 +856,8 @@ async function runStyleEvolutionLoop(options) {
           source: entry.evaluation?.source,
           verificationStatus: entry.verification?.status,
           aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
-          forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0)
+          forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0),
+          llmFallbackUsed: entry.llmFallbackUsed
         })),
         candidates: candidateRuns.map((entry) => ({
           candidateIndex: entry.candidateIndex,
@@ -855,7 +865,9 @@ async function runStyleEvolutionLoop(options) {
           evaluation: entry.evaluation,
           refinement: entry.refinement,
           verification: entry.verification,
-          freezer: entry.freezer
+          freezer: entry.freezer,
+          llmFallbackUsed: entry.llmFallbackUsed,
+          fallbackReasons: entry.fallbackReasons
         })),
         winningReason: "\u672C\u8F6E\u6240\u6709\u5019\u9009\u90FD\u672A\u901A\u8FC7 Generation Verification Gate\uFF0C\u672A\u5199\u5165\u6B63\u5F0F\u5019\u9009\u5386\u53F2\u3002",
         verificationStatus: "blocked",
@@ -881,7 +893,9 @@ async function runStyleEvolutionLoop(options) {
       source: "loop",
       evaluation,
       refinement,
-      freezer
+      freezer,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons
     });
     const persistedLatest = Array.isArray(styleEvolution.contract.evolutionHistory) ? styleEvolution.contract.evolutionHistory.at(-1) : null;
     loopRuntime.iterations.push({
@@ -898,12 +912,13 @@ async function runStyleEvolutionLoop(options) {
         source: entry.evaluation?.source,
         verificationStatus: entry.verification?.status,
         aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
-        forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0)
+        forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0),
+        llmFallbackUsed: entry.llmFallbackUsed
       })),
       winningReason: verification.status === "passed" ? `\u5019\u9009 ${winner.candidateIndex} \u901A\u8FC7 Generation Verification Gate\uFF0C\u5E76\u4EE5 ${Number(evaluation.scores?.overall || 0).toFixed(1)} \u5206\u80DC\u51FA\u3002` : `\u5019\u9009 ${winner.candidateIndex} \u5728\u5F53\u524D\u6279\u6B21\u98CE\u9669\u6700\u4F4E\uFF0C\u9A8C\u8BC1\u72B6\u6001 ${verification.status}\uFF0C\u7EFC\u5408\u8BC4\u5206 ${Number(evaluation.scores?.overall || 0).toFixed(1)}\u3002`,
       evaluationSource: evaluation.source,
       refinementSource: refinement.source,
-      freezerSource: freezeAdvice ? "llm_critic" : void 0,
+      freezerSource: freezer?.source,
       verdict: evaluation.verdict,
       overallScore: Number(evaluation.scores?.overall || 0) || void 0,
       forbiddenHits: evaluation.forbiddenHits,
@@ -913,6 +928,8 @@ async function runStyleEvolutionLoop(options) {
       freezerVerdict: freezer?.verdict,
       freezerSummary: freezer?.summary,
       freezerBlockingReasons: freezer?.blockingReasons,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons,
       aigcRiskScore: verification.score,
       aigcThreshold: verification.threshold,
       aigcHighRiskCount: verification.highRiskCount,
@@ -926,7 +943,9 @@ async function runStyleEvolutionLoop(options) {
         evaluation: entry.evaluation,
         refinement: entry.refinement,
         verification: entry.verification,
-        freezer: entry.freezer
+        freezer: entry.freezer,
+        llmFallbackUsed: entry.llmFallbackUsed,
+        fallbackReasons: entry.fallbackReasons
       })),
       stage: "persisted"
     });
@@ -938,6 +957,9 @@ async function runStyleEvolutionLoop(options) {
       evaluation,
       refinement,
       verification,
+      freezer,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons,
       candidates: candidateRuns.map((entry) => ({
         candidateIndex: entry.candidateIndex,
         persistedVersion: entry.candidateIndex === winner.candidateIndex ? persistedLatest?.version || void 0 : void 0,
@@ -945,7 +967,9 @@ async function runStyleEvolutionLoop(options) {
         evaluation: entry.evaluation,
         refinement: entry.refinement,
         verification: entry.verification,
-        freezer: entry.freezer
+        freezer: entry.freezer,
+        llmFallbackUsed: entry.llmFallbackUsed,
+        fallbackReasons: entry.fallbackReasons
       }))
     });
     const totalRounds = Number(styleEvolution.contract.loop?.currentIteration || styleEvolution.contract.evolutionHistory?.length || 0);
@@ -4492,7 +4516,11 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
             candidates: entry.candidates || [],
             evaluation: entry.evaluation,
             refinement: entry.refinement,
-            verification: entry.verification
+            verification: entry.verification,
+            freezer: entry.freezer,
+            freezerSource: entry.freezer?.source,
+            llmFallbackUsed: entry.llmFallbackUsed,
+            fallbackReasons: entry.fallbackReasons
           }))
         },
         modelRouting: {

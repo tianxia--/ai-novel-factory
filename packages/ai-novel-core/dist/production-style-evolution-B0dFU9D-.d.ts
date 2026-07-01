@@ -1,6 +1,6 @@
-import { A as AutonomousNovelState, a as NovelStage } from './cli-types-dnbh9JaE.cjs';
-import { S as StyleEvolutionContract, e as evaluateStyleEvolutionGate, d as ProductionGateResult } from './production-contracts-nNcsaxwV.cjs';
-import { AigcBatchDetectionResult } from './aigc-detector.cjs';
+import { A as AutonomousNovelState, a as NovelStage } from './cli-types-dnbh9JaE.js';
+import { S as StyleEvolutionContract, e as evaluateStyleEvolutionGate, d as ProductionGateResult } from './production-contracts-C1il9ao8.js';
+import { AigcBatchDetectionResult } from './aigc-detector.js';
 
 type ProjectWorkflowStage = NovelStage | "empty" | "unknown";
 type ProjectProductionStatus = "not_started" | "worldbuilding" | "planning" | "ready_to_draft" | "drafting" | "reviewing" | "replanning" | "blocked" | "complete" | "unknown";
@@ -73,6 +73,8 @@ interface StyleLoopRuntimeIterationRecord {
     evaluationSource?: "heuristic" | "llm_critic";
     refinementSource?: "heuristic" | "llm_critic";
     freezerSource?: "heuristic" | "llm_critic";
+    llmFallbackUsed?: boolean;
+    fallbackReasons?: string[];
     verdict?: "retry" | "candidate" | "approve";
     overallScore?: number;
     forbiddenHits?: string[];
@@ -89,6 +91,7 @@ interface StyleLoopRuntimeIterationRecord {
         verificationStatus?: "pending" | "passed" | "blocked" | "warning";
         aigcHighRiskCount?: number;
         forbiddenHitCount?: number;
+        llmFallbackUsed?: boolean;
     }>;
     candidates?: Array<{
         candidateIndex: number;
@@ -98,6 +101,8 @@ interface StyleLoopRuntimeIterationRecord {
         refinement: StyleEvolutionRefinement;
         verification: StyleGenerationVerification;
         freezer?: NonNullable<StyleEvolutionContract["evolutionHistory"]>[number]["freezer"];
+        llmFallbackUsed?: boolean;
+        fallbackReasons?: string[];
     }>;
     winningReason?: string;
     verificationStatus?: "pending" | "passed" | "blocked" | "warning";
@@ -162,6 +167,8 @@ interface StyleFreezeLedgerEntry {
     freezerVerdict?: "block" | "continue" | "ready";
     freezerSummary?: string;
     freezerBlockingReasons?: string[];
+    llmFallbackUsed?: boolean;
+    fallbackReasons?: string[];
     aigcRiskScore?: number | null;
     aigcThreshold?: number | null;
     aigcHighRiskCount?: number;
@@ -215,6 +222,8 @@ interface StyleEvolutionCandidateInput {
     evaluation?: StyleEvolutionEvaluation;
     refinement?: StyleEvolutionRefinement;
     freezer?: NonNullable<StyleEvolutionContract["evolutionHistory"]>[number]["freezer"];
+    llmFallbackUsed?: boolean;
+    fallbackReasons?: string[];
 }
 interface StyleEvolutionCandidatePromptInput {
     projectTitle?: string;
@@ -445,6 +454,7 @@ declare function appendStyleLoopRunLedger(projectRoot: string, runtime: StyleLoo
             verificationStatus?: "pending" | "passed" | "blocked" | "warning";
             aigcHighRiskCount?: number;
             forbiddenHitCount?: number;
+            llmFallbackUsed?: boolean;
         }[] | undefined;
         winningReason: string | undefined;
         verificationStatus: "pending" | "blocked" | "passed" | "warning" | undefined;
@@ -466,6 +476,7 @@ declare function appendStyleLoopRunLedger(projectRoot: string, runtime: StyleLoo
             evaluationSummary: string;
             verification: StyleGenerationVerification;
             freezer: {
+                source?: "heuristic" | "llm_critic";
                 verdict?: "block" | "continue" | "ready";
                 summary?: string;
                 blockingReasons?: string[];

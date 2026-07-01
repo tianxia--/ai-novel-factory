@@ -5376,6 +5376,8 @@ function buildStyleFreezeLedger(contract) {
       freezerVerdict: entry.freezer?.verdict,
       freezerSummary: entry.freezer?.summary || "",
       freezerBlockingReasons: entry.freezer?.blockingReasons || [],
+      llmFallbackUsed: entry.llmFallbackUsed === true || entry.evaluation?.source === "heuristic" || entry.refinement?.source === "heuristic" || entry.freezer?.source === "heuristic",
+      fallbackReasons: entry.fallbackReasons || [],
       aigcRiskScore: entry.verification?.score ?? null,
       aigcThreshold: entry.verification?.threshold ?? null,
       aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),

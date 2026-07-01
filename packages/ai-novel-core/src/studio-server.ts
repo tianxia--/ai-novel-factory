@@ -132,6 +132,7 @@ function buildStyleFreezerGateRecord(
   const checkedAt = new Date().toISOString()
   if (freezeAdvice) {
     return {
+      source: "llm_critic" as const,
       verdict: freezeAdvice.freezeVerdict,
       summary: freezeAdvice.freezeSummary,
       blockingReasons: freezeAdvice.blockingReasons,
@@ -146,6 +147,7 @@ function buildStyleFreezerGateRecord(
     fallback.evaluation?.verdict !== "approve" ? "Evaluator 尚未判定当前样段可直接冻结，建议用户确认前继续审阅。" : "",
   ].filter(Boolean)
   return {
+    source: "heuristic" as const,
     verdict: blockingReasons.length ? "continue" as const : "ready" as const,
     summary: blockingReasons.length
       ? "本轮缺少 LLM Freezer 结构化放行，继续收紧后再进入冻结确认。"
@@ -792,6 +794,7 @@ async function runStyleEvolutionLoop(options: {
       })
       refinement = reinforceRefinementWithAigc(refinement, aigcSignal)
       let freezeAdvice: ReturnType<typeof parseStyleFreezeAdviceFromText> = null
+      const fallbackReasons: string[] = []
       try {
         const evaluationPrompt = buildStyleEvolutionEvaluationPrompt({
           projectTitle: options.projectTitle,
@@ -813,7 +816,7 @@ async function runStyleEvolutionLoop(options: {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 1400,
+          maxTokens: 900,
           messages: [
             { role: "system", content: evaluationPrompt.system },
             { role: "user", content: evaluationPrompt.user },
@@ -872,7 +875,7 @@ async function runStyleEvolutionLoop(options: {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 1200,
+          maxTokens: 800,
           messages: [
             { role: "system", content: freezePrompt.system },
             { role: "user", content: freezePrompt.user },
@@ -888,6 +891,7 @@ async function runStyleEvolutionLoop(options: {
           }
         }
       } catch (error) {
+        fallbackReasons.push(`split_chain_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 360))
         try {
           const critiquePrompt = buildStyleEvolutionCritiquePrompt({
             projectTitle: options.projectTitle,
@@ -909,7 +913,7 @@ async function runStyleEvolutionLoop(options: {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 2000,
+            maxTokens: 1000,
             messages: [
               { role: "system", content: critiquePrompt.system },
               { role: "user", content: critiquePrompt.user },
@@ -919,8 +923,10 @@ async function runStyleEvolutionLoop(options: {
           if (parsedCritique) {
             evaluation = mergeStyleEvaluationWithAigc(parsedCritique.evaluation, aigcSignal)
             refinement = reinforceRefinementWithAigc(parsedCritique.refinement, aigcSignal)
+            fallbackReasons.push("split_chain_recovered_by_combined_critic")
           }
         } catch (fallbackError) {
+          fallbackReasons.push(`combined_critic_failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`.slice(0, 360))
           console.warn("Style evolution multi-role chain failed; falling back to heuristic evaluator/refiner.", fallbackError)
         }
         console.warn("Style evolution split evaluator/refiner/freezer chain failed; fallback path used.", error)
@@ -930,6 +936,7 @@ async function runStyleEvolutionLoop(options: {
         checkedAt: new Date().toISOString(),
       })
       const freezer = buildStyleFreezerGateRecord(freezeAdvice, { evaluation, verification })
+      const llmFallbackUsed = evaluation.source === "heuristic" || refinement.source === "heuristic" || freezer.source === "heuristic" || fallbackReasons.length > 0
       candidateRuns.push({
         candidateIndex: generatedCandidate.candidateIndex,
         sample,
@@ -939,6 +946,8 @@ async function runStyleEvolutionLoop(options: {
         verification,
         freezer,
         aigcSignal,
+        llmFallbackUsed,
+        fallbackReasons,
       })
     }
 
@@ -983,6 +992,7 @@ async function runStyleEvolutionLoop(options: {
           verificationStatus: entry.verification?.status,
           aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
           forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0),
+          llmFallbackUsed: entry.llmFallbackUsed,
         })),
         candidates: candidateRuns.map((entry) => ({
           candidateIndex: entry.candidateIndex,
@@ -991,6 +1001,8 @@ async function runStyleEvolutionLoop(options: {
           refinement: entry.refinement,
           verification: entry.verification,
           freezer: entry.freezer,
+          llmFallbackUsed: entry.llmFallbackUsed,
+          fallbackReasons: entry.fallbackReasons,
         })),
         winningReason: "本轮所有候选都未通过 Generation Verification Gate，未写入正式候选历史。",
         verificationStatus: "blocked",
@@ -1018,6 +1030,8 @@ async function runStyleEvolutionLoop(options: {
       evaluation,
       refinement,
       freezer,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons,
     })
 
     const persistedLatest = Array.isArray(styleEvolution.contract.evolutionHistory)
@@ -1038,13 +1052,14 @@ async function runStyleEvolutionLoop(options: {
         verificationStatus: entry.verification?.status,
         aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
         forbiddenHitCount: Number(entry.verification?.forbiddenHitCount || 0),
+        llmFallbackUsed: entry.llmFallbackUsed,
       })),
       winningReason: verification.status === "passed"
         ? `候选 ${winner.candidateIndex} 通过 Generation Verification Gate，并以 ${Number(evaluation.scores?.overall || 0).toFixed(1)} 分胜出。`
         : `候选 ${winner.candidateIndex} 在当前批次风险最低，验证状态 ${verification.status}，综合评分 ${Number(evaluation.scores?.overall || 0).toFixed(1)}。`,
       evaluationSource: evaluation.source,
       refinementSource: refinement.source,
-      freezerSource: freezeAdvice ? "llm_critic" : undefined,
+      freezerSource: freezer?.source,
       verdict: evaluation.verdict,
       overallScore: Number(evaluation.scores?.overall || 0) || undefined,
       forbiddenHits: evaluation.forbiddenHits,
@@ -1054,6 +1069,8 @@ async function runStyleEvolutionLoop(options: {
       freezerVerdict: freezer?.verdict,
       freezerSummary: freezer?.summary,
       freezerBlockingReasons: freezer?.blockingReasons,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons,
       aigcRiskScore: verification.score,
       aigcThreshold: verification.threshold,
       aigcHighRiskCount: verification.highRiskCount,
@@ -1068,6 +1085,8 @@ async function runStyleEvolutionLoop(options: {
         refinement: entry.refinement,
         verification: entry.verification,
         freezer: entry.freezer,
+        llmFallbackUsed: entry.llmFallbackUsed,
+        fallbackReasons: entry.fallbackReasons,
       })),
       stage: "persisted",
     })
@@ -1079,6 +1098,9 @@ async function runStyleEvolutionLoop(options: {
       evaluation,
       refinement,
       verification,
+      freezer,
+      llmFallbackUsed: winner.llmFallbackUsed,
+      fallbackReasons: winner.fallbackReasons,
       candidates: candidateRuns.map((entry) => ({
         candidateIndex: entry.candidateIndex,
         persistedVersion: entry.candidateIndex === winner.candidateIndex ? (persistedLatest?.version || undefined) : undefined,
@@ -1087,6 +1109,8 @@ async function runStyleEvolutionLoop(options: {
         refinement: entry.refinement,
         verification: entry.verification,
         freezer: entry.freezer,
+        llmFallbackUsed: entry.llmFallbackUsed,
+        fallbackReasons: entry.fallbackReasons,
       })),
     })
 
@@ -5443,11 +5467,15 @@ export async function handleNovelStudioApi(
           finalConvergence: loopRun.loopRuntime.finalConvergence,
           iterations: loopRun.iterations.map((entry) => ({
             version: entry.version,
-            candidates: entry.candidates || [],
-            evaluation: entry.evaluation,
-            refinement: entry.refinement,
-            verification: entry.verification,
-          })),
+          candidates: entry.candidates || [],
+          evaluation: entry.evaluation,
+          refinement: entry.refinement,
+          verification: entry.verification,
+          freezer: entry.freezer,
+          freezerSource: entry.freezer?.source,
+          llmFallbackUsed: entry.llmFallbackUsed,
+          fallbackReasons: entry.fallbackReasons,
+        })),
         },
         modelRouting: {
           capability: textConfig._capability || "style_evolution",

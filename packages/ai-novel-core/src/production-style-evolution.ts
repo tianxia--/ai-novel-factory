@@ -42,6 +42,8 @@ export interface StyleLoopRuntimeIterationRecord {
   evaluationSource?: "heuristic" | "llm_critic"
   refinementSource?: "heuristic" | "llm_critic"
   freezerSource?: "heuristic" | "llm_critic"
+  llmFallbackUsed?: boolean
+  fallbackReasons?: string[]
   verdict?: "retry" | "candidate" | "approve"
   overallScore?: number
   forbiddenHits?: string[]
@@ -58,6 +60,7 @@ export interface StyleLoopRuntimeIterationRecord {
     verificationStatus?: "pending" | "passed" | "blocked" | "warning"
     aigcHighRiskCount?: number
     forbiddenHitCount?: number
+    llmFallbackUsed?: boolean
   }>
   candidates?: Array<{
     candidateIndex: number
@@ -67,6 +70,8 @@ export interface StyleLoopRuntimeIterationRecord {
     refinement: StyleEvolutionRefinement
     verification: StyleGenerationVerification
     freezer?: NonNullable<StyleEvolutionContract["evolutionHistory"]>[number]["freezer"]
+    llmFallbackUsed?: boolean
+    fallbackReasons?: string[]
   }>
   winningReason?: string
   verificationStatus?: "pending" | "passed" | "blocked" | "warning"
@@ -133,6 +138,8 @@ export interface StyleFreezeLedgerEntry {
   freezerVerdict?: "block" | "continue" | "ready"
   freezerSummary?: string
   freezerBlockingReasons?: string[]
+  llmFallbackUsed?: boolean
+  fallbackReasons?: string[]
   aigcRiskScore?: number | null
   aigcThreshold?: number | null
   aigcHighRiskCount?: number
@@ -190,6 +197,8 @@ export interface StyleEvolutionCandidateInput {
   evaluation?: StyleEvolutionEvaluation
   refinement?: StyleEvolutionRefinement
   freezer?: NonNullable<StyleEvolutionContract["evolutionHistory"]>[number]["freezer"]
+  llmFallbackUsed?: boolean
+  fallbackReasons?: string[]
 }
 
 export interface StyleEvolutionCandidatePromptInput {
@@ -1110,6 +1119,8 @@ function buildStyleFreezeLedger(contract: StyleEvolutionContract): StyleFreezeLe
       freezerVerdict: entry.freezer?.verdict,
       freezerSummary: entry.freezer?.summary || "",
       freezerBlockingReasons: entry.freezer?.blockingReasons || [],
+      llmFallbackUsed: entry.llmFallbackUsed === true || entry.evaluation?.source === "heuristic" || entry.refinement?.source === "heuristic" || entry.freezer?.source === "heuristic",
+      fallbackReasons: entry.fallbackReasons || [],
       aigcRiskScore: entry.verification?.score ?? null,
       aigcThreshold: entry.verification?.threshold ?? null,
       aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
@@ -1624,6 +1635,40 @@ function normalizeText(value: string | undefined) {
   return value?.trim() || ""
 }
 
+function clipStylePromptText(value: unknown, limit: number) {
+  const text = normalizeText(typeof value === "string" ? value : String(value ?? "")).replace(/\s+/gu, " ")
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
+}
+
+function compactStyleEvaluationForPrompt(evaluation: StyleEvolutionEvaluation) {
+  return {
+    verdict: evaluation.verdict,
+    summary: clipStylePromptText(evaluation.summary, 360),
+    scores: evaluation.scores,
+    strengths: (evaluation.strengths || []).slice(0, 3).map((item) => clipStylePromptText(item, 140)),
+    deviations: (evaluation.deviations || []).slice(0, 3).map((item) => clipStylePromptText(item, 140)),
+    forbiddenHits: (evaluation.forbiddenHits || []).slice(0, 4),
+    nextFocus: (evaluation.nextFocus || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    aigc: evaluation.aigc ? {
+      status: evaluation.aigc.status,
+      provider: evaluation.aigc.provider,
+      score: evaluation.aigc.score,
+      threshold: evaluation.aigc.threshold,
+      highRiskCount: evaluation.aigc.highRiskCount,
+      highRiskPreviews: (evaluation.aigc.highRiskPreviews || []).slice(0, 2),
+    } : undefined,
+  }
+}
+
+function compactStyleRefinementForPrompt(refinement: StyleEvolutionRefinement) {
+  return {
+    summary: clipStylePromptText(refinement.summary, 300),
+    promptAdjustments: (refinement.promptAdjustments || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    contractAdjustments: (refinement.contractAdjustments || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    nextPrompt: clipStylePromptText(refinement.nextPrompt, 900),
+  }
+}
+
 function normalizeStringArray(value: string[] | undefined) {
   return Array.isArray(value)
     ? [...new Set(value.map((item) => normalizeText(item)).filter(Boolean))]
@@ -2029,17 +2074,18 @@ export function buildStyleFreezeAdvicePrompt(input: StyleFreezeAdvicePromptInput
       "forbiddenPatterns 要补充本轮最该继续压制的写法禁忌。",
       "positiveExamples 要抽取本轮可复用的正向写法片段。",
       "inheritedRules 要说明若未来冻结，正文应如何强制继承。",
+      "每个数组最多 4 条，每条不超过 60 个中文字符；nextPrompt 不要在本步骤输出。",
     ].join("\n"),
     user: [
       userStylePrompt ? `用户风格要求：\n${userStylePrompt.slice(0, 1200)}` : "",
       seedProtocol.desiredVibes.length ? `目标气质：\n${seedProtocol.desiredVibes.join("\n")}` : "",
       seedProtocol.referenceWorks.length ? `参考作品：\n${seedProtocol.referenceWorks.join("\n")}` : "",
       seedProtocol.seedForbiddenPatterns.length ? `用户明确禁忌：\n${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
-      prompt ? `本轮 prompt：\n${prompt.slice(0, 1200)}` : "",
-      referenceText ? `参考文本：\n${referenceText.slice(0, 1200)}` : "",
-      input.evaluation ? `本轮评估：\n${JSON.stringify(input.evaluation, null, 2)}` : "",
-      input.refinement ? `本轮修订建议：\n${JSON.stringify(input.refinement, null, 2)}` : "",
-      `本轮样段：\n${sample.slice(0, 2400)}`,
+      prompt ? `本轮 prompt 摘要：\n${clipStylePromptText(prompt, 700)}` : "",
+      referenceText ? `参考文本摘要：\n${clipStylePromptText(referenceText, 600)}` : "",
+      input.evaluation ? `本轮评估摘要：\n${JSON.stringify(compactStyleEvaluationForPrompt(input.evaluation), null, 2)}` : "",
+      input.refinement ? `本轮修订摘要：\n${JSON.stringify(compactStyleRefinementForPrompt(input.refinement), null, 2)}` : "",
+      `本轮样段：\n${sample.slice(0, 1600)}`,
       "请返回严格 JSON。",
     ].filter(Boolean).join("\n\n"),
   }
@@ -2079,6 +2125,7 @@ export function buildStyleEvolutionCritiquePrompt(input: {
       "verdict 只能是 retry / candidate / approve。",
       "评分区间统一为 0-10，可以保留一位小数。",
       "要直面偏差，不要客套，不要泛泛而谈。",
+      "所有数组最多 4 条；nextPrompt 控制在 900 字以内。",
     ].join("\n"),
     user: [
       `项目：${projectTitle}`,
@@ -2090,8 +2137,8 @@ export function buildStyleEvolutionCritiquePrompt(input: {
       referenceText ? `参考文本：\n${referenceText.slice(0, 1600)}` : "",
       priorSample ? `上一版样段：\n${priorSample.slice(0, 1200)}` : "",
       iterationFeedback ? `用户本轮反馈：\n${iterationFeedback}` : "",
-      `本轮 prompt：\n${prompt}`,
-      `本轮样段：\n${sample.slice(0, 2400)}`,
+      `本轮 prompt 摘要：\n${clipStylePromptText(prompt, 900)}`,
+      `本轮样段：\n${sample.slice(0, 1600)}`,
       "请返回严格 JSON。",
     ].filter(Boolean).join("\n\n"),
   }
@@ -2140,8 +2187,8 @@ export function buildStyleEvolutionEvaluationPrompt(input: {
       referenceText ? `参考文本：\n${referenceText.slice(0, 1600)}` : "",
       priorSample ? `上一版样段：\n${priorSample.slice(0, 1200)}` : "",
       iterationFeedback ? `用户本轮反馈：\n${iterationFeedback}` : "",
-      `本轮 prompt：\n${prompt}`,
-      `本轮样段：\n${sample.slice(0, 2400)}`,
+      `本轮 prompt 摘要：\n${clipStylePromptText(prompt, 900)}`,
+      `本轮样段：\n${sample.slice(0, 1800)}`,
       "请返回严格 JSON。",
     ].filter(Boolean).join("\n\n"),
   }
@@ -2173,6 +2220,8 @@ export function buildStyleEvolutionRefinementOnlyPrompt(input: {
       "只输出 JSON 对象，不要输出 Markdown、解释或多余文本。",
       "JSON 结构必须为 { refinement: {...} }，也允许直接输出 refinement 对象。",
       "refinement 必须包含：summary, promptAdjustments, contractAdjustments, nextPrompt。",
+      "summary 不超过 160 字；promptAdjustments 和 contractAdjustments 各最多 4 条，每条不超过 60 字。",
+      "nextPrompt 只能保留下一轮最必要的写法指令，必须控制在 900 字以内，不能复制完整评估或完整样段。",
     ].join("\n"),
     user: [
       `项目：${projectTitle}`,
@@ -2182,9 +2231,9 @@ export function buildStyleEvolutionRefinementOnlyPrompt(input: {
       seedProtocol.referenceWorks.length ? `参考作品：\n${seedProtocol.referenceWorks.join("\n")}` : "",
       seedProtocol.seedForbiddenPatterns.length ? `用户明确禁忌：\n${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
       iterationFeedback ? `用户本轮反馈：\n${iterationFeedback}` : "",
-      `本轮 prompt：\n${prompt}`,
-      `本轮样段：\n${sample.slice(0, 1800)}`,
-      `本轮评估：\n${JSON.stringify(input.evaluation, null, 2)}`,
+      `本轮 prompt 摘要：\n${clipStylePromptText(prompt, 800)}`,
+      `本轮样段：\n${sample.slice(0, 1400)}`,
+      `本轮评估摘要：\n${JSON.stringify(compactStyleEvaluationForPrompt(input.evaluation), null, 2)}`,
       "请返回严格 JSON。",
     ].filter(Boolean).join("\n\n"),
   }
@@ -2312,12 +2361,15 @@ export async function appendStyleEvolutionCandidate(
   const retryPolicy = currentContract.retryPolicy || defaultRetryPolicy()
   const freezer = input.freezer
     ? {
+      source: input.freezer.source,
       verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
       summary: normalizeText(input.freezer.summary),
       blockingReasons: normalizeStringArray(input.freezer.blockingReasons),
       checkedAt: input.freezer.checkedAt || createdAt,
     }
     : undefined
+  const fallbackReasons = normalizeStringArray(input.fallbackReasons)
+  const llmFallbackUsed = Boolean(input.llmFallbackUsed || input.evaluation?.source === "heuristic" || input.refinement?.source === "heuristic" || freezer?.source === "heuristic")
   const totalRounds = history.length + 1
   const projectedHistory = history.concat([{
     version,
@@ -2332,6 +2384,8 @@ export async function appendStyleEvolutionCandidate(
     contractTightening: input.refinement?.contractAdjustments || [],
     convergenceNote: input.evaluation?.summary,
     freezer,
+    llmFallbackUsed,
+    fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
       version,
@@ -2365,6 +2419,8 @@ export async function appendStyleEvolutionCandidate(
     contractTightening: input.refinement?.contractAdjustments || [],
     convergenceNote: input.evaluation?.summary,
     freezer,
+    llmFallbackUsed,
+    fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
       version,
@@ -2427,6 +2483,7 @@ export async function approveStyleEvolutionSample(
   }
   const approvalFreezer = input.freezer
     ? {
+      source: input.freezer.source,
       verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
       summary: normalizeText(input.freezer.summary),
       blockingReasons: normalizeStringArray(input.freezer.blockingReasons),

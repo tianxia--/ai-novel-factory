@@ -79,6 +79,7 @@ interface StyleEvolutionContract {
         maxForbiddenHitCount?: number;
     };
     freezer?: {
+        source?: "heuristic" | "llm_critic";
         verdict?: "block" | "continue" | "ready";
         summary?: string;
         blockingReasons?: string[];
@@ -183,11 +184,14 @@ interface StyleEvolutionContract {
         contractTightening?: string[];
         convergenceNote?: string;
         freezer?: {
+            source?: "heuristic" | "llm_critic";
             verdict?: "block" | "continue" | "ready";
             summary?: string;
             blockingReasons?: string[];
             checkedAt?: string;
         };
+        llmFallbackUsed?: boolean;
+        fallbackReasons?: string[];
         verification?: {
             gate?: "Generation Verification Gate";
             status?: "pending" | "passed" | "blocked" | "warning";

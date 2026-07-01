@@ -1,6 +1,6 @@
 import { d as CharacterDossier, A as AutonomousNovelState } from './cli-types-dnbh9JaE.js';
 import { AigcBatchDetectionResult } from './aigc-detector.js';
-import { S as StyleEvolutionContract, W as WritingPlanContract } from './production-contracts-nNcsaxwV.js';
+import { S as StyleEvolutionContract, W as WritingPlanContract } from './production-contracts-C1il9ao8.js';
 
 interface NovelWorkspacePaths {
     workspaceDir: string;

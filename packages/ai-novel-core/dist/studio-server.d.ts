@@ -1,6 +1,6 @@
 import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-tGpa3fau.js';
-import { P as ProductionReadinessSnapshot, a as ProductionGateIssue, b as ProductionReadinessItem, c as ProductionReadinessGroup } from './production-contracts-nNcsaxwV.js';
-import { S as StyleEvolutionSnapshot, a as StyleLoopRuntimeIterationRecord, b as StyleEvolutionEvaluation, c as StyleEvolutionRefinement, d as StyleGenerationVerification, P as ProjectRuntimeState } from './production-style-evolution-DVWDQAUp.js';
+import { P as ProductionReadinessSnapshot, a as ProductionGateIssue, b as ProductionReadinessItem, c as ProductionReadinessGroup } from './production-contracts-C1il9ao8.js';
+import { S as StyleEvolutionSnapshot, a as StyleLoopRuntimeIterationRecord, b as StyleEvolutionEvaluation, c as StyleEvolutionRefinement, d as StyleGenerationVerification, P as ProjectRuntimeState } from './production-style-evolution-B0dFU9D-.js';
 import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-Rvjshu2J.js';
 import { N as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, d as CharacterDossier, e as AssetStatus, T as TaskStatus } from './cli-types-dnbh9JaE.js';
 import { AigcDetectionResult, AigcBatchDetectionResult } from './aigc-detector.js';
@@ -2335,11 +2335,20 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 refinement: StyleEvolutionRefinement;
                 verification: StyleGenerationVerification;
                 freezer: {
+                    source: "llm_critic";
                     verdict: "ready" | "block" | "continue";
                     summary: string;
                     blockingReasons: string[];
                     checkedAt: string;
+                } | {
+                    source: "heuristic";
+                    verdict: "ready" | "continue";
+                    summary: string;
+                    blockingReasons: string[];
+                    checkedAt: string;
                 };
+                llmFallbackUsed: boolean;
+                fallbackReasons: string[];
             }[];
             status: {
                 status?: "idle" | "running" | "awaiting_user" | "stable_candidate" | "ready_for_approval" | "approved";
@@ -2387,15 +2396,40 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                     refinement: StyleEvolutionRefinement;
                     verification: StyleGenerationVerification;
                     freezer: {
+                        source: "llm_critic";
                         verdict: "ready" | "block" | "continue";
                         summary: string;
                         blockingReasons: string[];
                         checkedAt: string;
+                    } | {
+                        source: "heuristic";
+                        verdict: "ready" | "continue";
+                        summary: string;
+                        blockingReasons: string[];
+                        checkedAt: string;
                     };
+                    llmFallbackUsed: boolean;
+                    fallbackReasons: string[];
                 }[];
                 evaluation: StyleEvolutionEvaluation;
                 refinement: StyleEvolutionRefinement;
                 verification: StyleGenerationVerification;
+                freezer: {
+                    source: "llm_critic";
+                    verdict: "ready" | "block" | "continue";
+                    summary: string;
+                    blockingReasons: string[];
+                    checkedAt: string;
+                } | {
+                    source: "heuristic";
+                    verdict: "ready" | "continue";
+                    summary: string;
+                    blockingReasons: string[];
+                    checkedAt: string;
+                };
+                freezerSource: "heuristic" | "llm_critic";
+                llmFallbackUsed: boolean;
+                fallbackReasons: string[];
             }[];
         };
         modelRouting: {
@@ -2542,7 +2576,14 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 nextPrompt?: string;
             } | null;
             freezer: {
+                source: "llm_critic";
                 verdict: "ready" | "block" | "continue";
+                summary: string;
+                blockingReasons: string[];
+                checkedAt: string;
+            } | {
+                source: "heuristic";
+                verdict: "ready" | "continue";
                 summary: string;
                 blockingReasons: string[];
                 checkedAt: string;

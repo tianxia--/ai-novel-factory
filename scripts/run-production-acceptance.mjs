@@ -363,6 +363,40 @@ function detectorReady(settingsPayload) {
   return Boolean(String(detector.url || "").trim())
 }
 
+function collectStyleFallbackSignals(payload) {
+  const signals = []
+  const inspectCandidate = (candidate, label) => {
+    if (!candidate || typeof candidate !== "object") return
+    if (candidate.llmFallbackUsed === true) signals.push(`${label}: llmFallbackUsed`)
+    if (candidate.evaluation?.source === "heuristic") signals.push(`${label}: heuristic evaluation`)
+    if (candidate.refinement?.source === "heuristic") signals.push(`${label}: heuristic refinement`)
+    if (candidate.freezer?.source === "heuristic") signals.push(`${label}: heuristic freezer`)
+    if (Array.isArray(candidate.fallbackReasons)) {
+      for (const reason of candidate.fallbackReasons.filter(Boolean).slice(0, 4)) {
+        signals.push(`${label}: ${String(reason).slice(0, 220)}`)
+      }
+    }
+  }
+  inspectCandidate(payload?.loopIteration, "loopIteration")
+  for (const [index, candidate] of (payload?.loopIteration?.candidates || []).entries()) {
+    inspectCandidate(candidate, `loopIteration.candidates[${index}]`)
+  }
+  for (const [index, iteration] of (payload?.loopRun?.iterations || []).entries()) {
+    inspectCandidate(iteration, `loopRun.iterations[${index}]`)
+    if (iteration.freezerSource === "heuristic") signals.push(`loopRun.iterations[${index}]: heuristic freezerSource`)
+    for (const [candidateIndex, candidate] of (iteration.candidates || []).entries()) {
+      inspectCandidate(candidate, `loopRun.iterations[${index}].candidates[${candidateIndex}]`)
+    }
+  }
+  const history = payload?.styleEvolution?.contract?.evolutionHistory || []
+  const latest = Array.isArray(history) ? history.at(-1) : null
+  inspectCandidate(latest, "styleEvolution.contract.latest")
+  if (payload?.styleEvolution?.contract?.freezer?.source === "heuristic") {
+    signals.push("styleEvolution.contract.freezer: heuristic")
+  }
+  return [...new Set(signals.filter(Boolean))]
+}
+
 async function configureAigcDetector(api, options, report) {
   if (hasExplicitAigcDetectorSettings(options.aigcDetector)) {
     const settings = normalizeAigcDetectorSettings(options.aigcDetector)
@@ -457,6 +491,17 @@ async function ensureStyleGate(api, projectId, options, report) {
     loopIterations: options.styleIterations,
     candidateCount: options.styleCandidates,
   }, projectId)
+  const fallbackSignals = collectStyleFallbackSignals(generated)
+  if (fallbackSignals.length) {
+    throw new AcceptanceError("Style Evolution used heuristic/fallback results; production acceptance requires real LLM evaluator/refiner/freezer output.", {
+      fallbackSignals: fallbackSignals.slice(0, 12),
+      loopRun: generated.loopRun ? {
+        runId: generated.loopRun.runId,
+        stopReason: generated.loopRun.stopReason,
+        completedIterations: generated.loopRun.completedIterations,
+      } : null,
+    })
+  }
   const version = Number(generated.generatedCandidate?.version || 0)
   if (!version) {
     throw new AcceptanceError("Style Evolution did not produce a candidate version.", {

@@ -7256,6 +7256,8 @@ function buildStyleFreezeLedger(contract) {
       freezerVerdict: entry.freezer?.verdict,
       freezerSummary: entry.freezer?.summary || "",
       freezerBlockingReasons: entry.freezer?.blockingReasons || [],
+      llmFallbackUsed: entry.llmFallbackUsed === true || entry.evaluation?.source === "heuristic" || entry.refinement?.source === "heuristic" || entry.freezer?.source === "heuristic",
+      fallbackReasons: entry.fallbackReasons || [],
       aigcRiskScore: entry.verification?.score ?? null,
       aigcThreshold: entry.verification?.threshold ?? null,
       aigcHighRiskCount: Number(entry.verification?.highRiskCount || 0),
@@ -7724,6 +7726,37 @@ async function writeTextIfNeeded(filePath, content, overwrite) {
 function normalizeText(value) {
   return value?.trim() || "";
 }
+function clipStylePromptText(value, limit) {
+  const text = normalizeText(typeof value === "string" ? value : String(value ?? "")).replace(/\s+/gu, " ");
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+function compactStyleEvaluationForPrompt(evaluation) {
+  return {
+    verdict: evaluation.verdict,
+    summary: clipStylePromptText(evaluation.summary, 360),
+    scores: evaluation.scores,
+    strengths: (evaluation.strengths || []).slice(0, 3).map((item) => clipStylePromptText(item, 140)),
+    deviations: (evaluation.deviations || []).slice(0, 3).map((item) => clipStylePromptText(item, 140)),
+    forbiddenHits: (evaluation.forbiddenHits || []).slice(0, 4),
+    nextFocus: (evaluation.nextFocus || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    aigc: evaluation.aigc ? {
+      status: evaluation.aigc.status,
+      provider: evaluation.aigc.provider,
+      score: evaluation.aigc.score,
+      threshold: evaluation.aigc.threshold,
+      highRiskCount: evaluation.aigc.highRiskCount,
+      highRiskPreviews: (evaluation.aigc.highRiskPreviews || []).slice(0, 2)
+    } : void 0
+  };
+}
+function compactStyleRefinementForPrompt(refinement) {
+  return {
+    summary: clipStylePromptText(refinement.summary, 300),
+    promptAdjustments: (refinement.promptAdjustments || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    contractAdjustments: (refinement.contractAdjustments || []).slice(0, 4).map((item) => clipStylePromptText(item, 140)),
+    nextPrompt: clipStylePromptText(refinement.nextPrompt, 900)
+  };
+}
 function normalizeStringArray(value) {
   return Array.isArray(value) ? [...new Set(value.map((item) => normalizeText(item)).filter(Boolean))] : [];
 }
@@ -8090,7 +8123,8 @@ function buildStyleFreezeAdvicePrompt(input) {
       "contractAdjustments \u8981\u8BF4\u660E style contract \u8FD8\u5E94\u5982\u4F55\u6536\u7D27\u3002",
       "forbiddenPatterns \u8981\u8865\u5145\u672C\u8F6E\u6700\u8BE5\u7EE7\u7EED\u538B\u5236\u7684\u5199\u6CD5\u7981\u5FCC\u3002",
       "positiveExamples \u8981\u62BD\u53D6\u672C\u8F6E\u53EF\u590D\u7528\u7684\u6B63\u5411\u5199\u6CD5\u7247\u6BB5\u3002",
-      "inheritedRules \u8981\u8BF4\u660E\u82E5\u672A\u6765\u51BB\u7ED3\uFF0C\u6B63\u6587\u5E94\u5982\u4F55\u5F3A\u5236\u7EE7\u627F\u3002"
+      "inheritedRules \u8981\u8BF4\u660E\u82E5\u672A\u6765\u51BB\u7ED3\uFF0C\u6B63\u6587\u5E94\u5982\u4F55\u5F3A\u5236\u7EE7\u627F\u3002",
+      "\u6BCF\u4E2A\u6570\u7EC4\u6700\u591A 4 \u6761\uFF0C\u6BCF\u6761\u4E0D\u8D85\u8FC7 60 \u4E2A\u4E2D\u6587\u5B57\u7B26\uFF1BnextPrompt \u4E0D\u8981\u5728\u672C\u6B65\u9AA4\u8F93\u51FA\u3002"
     ].join("\n"),
     user: [
       userStylePrompt ? `\u7528\u6237\u98CE\u683C\u8981\u6C42\uFF1A
@@ -8101,16 +8135,16 @@ ${seedProtocol.desiredVibes.join("\n")}` : "",
 ${seedProtocol.referenceWorks.join("\n")}` : "",
       seedProtocol.seedForbiddenPatterns.length ? `\u7528\u6237\u660E\u786E\u7981\u5FCC\uFF1A
 ${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
-      prompt ? `\u672C\u8F6E prompt\uFF1A
-${prompt.slice(0, 1200)}` : "",
-      referenceText ? `\u53C2\u8003\u6587\u672C\uFF1A
-${referenceText.slice(0, 1200)}` : "",
-      input.evaluation ? `\u672C\u8F6E\u8BC4\u4F30\uFF1A
-${JSON.stringify(input.evaluation, null, 2)}` : "",
-      input.refinement ? `\u672C\u8F6E\u4FEE\u8BA2\u5EFA\u8BAE\uFF1A
-${JSON.stringify(input.refinement, null, 2)}` : "",
+      prompt ? `\u672C\u8F6E prompt \u6458\u8981\uFF1A
+${clipStylePromptText(prompt, 700)}` : "",
+      referenceText ? `\u53C2\u8003\u6587\u672C\u6458\u8981\uFF1A
+${clipStylePromptText(referenceText, 600)}` : "",
+      input.evaluation ? `\u672C\u8F6E\u8BC4\u4F30\u6458\u8981\uFF1A
+${JSON.stringify(compactStyleEvaluationForPrompt(input.evaluation), null, 2)}` : "",
+      input.refinement ? `\u672C\u8F6E\u4FEE\u8BA2\u6458\u8981\uFF1A
+${JSON.stringify(compactStyleRefinementForPrompt(input.refinement), null, 2)}` : "",
       `\u672C\u8F6E\u6837\u6BB5\uFF1A
-${sample.slice(0, 2400)}`,
+${sample.slice(0, 1600)}`,
       "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
     ].filter(Boolean).join("\n\n")
   };
@@ -8136,7 +8170,8 @@ function buildStyleEvolutionCritiquePrompt(input) {
       "refinement \u5FC5\u987B\u5305\u542B\uFF1Asummary, promptAdjustments, contractAdjustments, nextPrompt\u3002",
       "verdict \u53EA\u80FD\u662F retry / candidate / approve\u3002",
       "\u8BC4\u5206\u533A\u95F4\u7EDF\u4E00\u4E3A 0-10\uFF0C\u53EF\u4EE5\u4FDD\u7559\u4E00\u4F4D\u5C0F\u6570\u3002",
-      "\u8981\u76F4\u9762\u504F\u5DEE\uFF0C\u4E0D\u8981\u5BA2\u5957\uFF0C\u4E0D\u8981\u6CDB\u6CDB\u800C\u8C08\u3002"
+      "\u8981\u76F4\u9762\u504F\u5DEE\uFF0C\u4E0D\u8981\u5BA2\u5957\uFF0C\u4E0D\u8981\u6CDB\u6CDB\u800C\u8C08\u3002",
+      "\u6240\u6709\u6570\u7EC4\u6700\u591A 4 \u6761\uFF1BnextPrompt \u63A7\u5236\u5728 900 \u5B57\u4EE5\u5185\u3002"
     ].join("\n"),
     user: [
       `\u9879\u76EE\uFF1A${projectTitle}`,
@@ -8155,10 +8190,10 @@ ${referenceText.slice(0, 1600)}` : "",
 ${priorSample.slice(0, 1200)}` : "",
       iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
 ${iterationFeedback}` : "",
-      `\u672C\u8F6E prompt\uFF1A
-${prompt}`,
+      `\u672C\u8F6E prompt \u6458\u8981\uFF1A
+${clipStylePromptText(prompt, 900)}`,
       `\u672C\u8F6E\u6837\u6BB5\uFF1A
-${sample.slice(0, 2400)}`,
+${sample.slice(0, 1600)}`,
       "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
     ].filter(Boolean).join("\n\n")
   };
@@ -8201,10 +8236,10 @@ ${referenceText.slice(0, 1600)}` : "",
 ${priorSample.slice(0, 1200)}` : "",
       iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
 ${iterationFeedback}` : "",
-      `\u672C\u8F6E prompt\uFF1A
-${prompt}`,
+      `\u672C\u8F6E prompt \u6458\u8981\uFF1A
+${clipStylePromptText(prompt, 900)}`,
       `\u672C\u8F6E\u6837\u6BB5\uFF1A
-${sample.slice(0, 2400)}`,
+${sample.slice(0, 1800)}`,
       "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
     ].filter(Boolean).join("\n\n")
   };
@@ -8223,7 +8258,9 @@ function buildStyleEvolutionRefinementOnlyPrompt(input) {
       "\u8BF7\u53EA\u8D1F\u8D23\u6839\u636E\u8BC4\u4F30\u7ED3\u679C\u6539\u5199\u4E0B\u4E00\u8F6E prompt\uFF0C\u5E76\u63D0\u51FA style contract \u6536\u7D27\u5EFA\u8BAE\u3002",
       "\u53EA\u8F93\u51FA JSON \u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown\u3001\u89E3\u91CA\u6216\u591A\u4F59\u6587\u672C\u3002",
       "JSON \u7ED3\u6784\u5FC5\u987B\u4E3A { refinement: {...} }\uFF0C\u4E5F\u5141\u8BB8\u76F4\u63A5\u8F93\u51FA refinement \u5BF9\u8C61\u3002",
-      "refinement \u5FC5\u987B\u5305\u542B\uFF1Asummary, promptAdjustments, contractAdjustments, nextPrompt\u3002"
+      "refinement \u5FC5\u987B\u5305\u542B\uFF1Asummary, promptAdjustments, contractAdjustments, nextPrompt\u3002",
+      "summary \u4E0D\u8D85\u8FC7 160 \u5B57\uFF1BpromptAdjustments \u548C contractAdjustments \u5404\u6700\u591A 4 \u6761\uFF0C\u6BCF\u6761\u4E0D\u8D85\u8FC7 60 \u5B57\u3002",
+      "nextPrompt \u53EA\u80FD\u4FDD\u7559\u4E0B\u4E00\u8F6E\u6700\u5FC5\u8981\u7684\u5199\u6CD5\u6307\u4EE4\uFF0C\u5FC5\u987B\u63A7\u5236\u5728 900 \u5B57\u4EE5\u5185\uFF0C\u4E0D\u80FD\u590D\u5236\u5B8C\u6574\u8BC4\u4F30\u6216\u5B8C\u6574\u6837\u6BB5\u3002"
     ].join("\n"),
     user: [
       `\u9879\u76EE\uFF1A${projectTitle}`,
@@ -8238,12 +8275,12 @@ ${seedProtocol.referenceWorks.join("\n")}` : "",
 ${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
       iterationFeedback ? `\u7528\u6237\u672C\u8F6E\u53CD\u9988\uFF1A
 ${iterationFeedback}` : "",
-      `\u672C\u8F6E prompt\uFF1A
-${prompt}`,
+      `\u672C\u8F6E prompt \u6458\u8981\uFF1A
+${clipStylePromptText(prompt, 800)}`,
       `\u672C\u8F6E\u6837\u6BB5\uFF1A
-${sample.slice(0, 1800)}`,
-      `\u672C\u8F6E\u8BC4\u4F30\uFF1A
-${JSON.stringify(input.evaluation, null, 2)}`,
+${sample.slice(0, 1400)}`,
+      `\u672C\u8F6E\u8BC4\u4F30\u6458\u8981\uFF1A
+${JSON.stringify(compactStyleEvaluationForPrompt(input.evaluation), null, 2)}`,
       "\u8BF7\u8FD4\u56DE\u4E25\u683C JSON\u3002"
     ].filter(Boolean).join("\n\n")
   };
@@ -8374,11 +8411,14 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
   const currentContract = await readOptionalJson(paths.styleContract, {});
   const retryPolicy = currentContract.retryPolicy || defaultRetryPolicy();
   const freezer = input.freezer ? {
+    source: input.freezer.source,
     verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
     summary: normalizeText(input.freezer.summary),
     blockingReasons: normalizeStringArray(input.freezer.blockingReasons),
     checkedAt: input.freezer.checkedAt || createdAt
   } : void 0;
+  const fallbackReasons = normalizeStringArray(input.fallbackReasons);
+  const llmFallbackUsed = Boolean(input.llmFallbackUsed || input.evaluation?.source === "heuristic" || input.refinement?.source === "heuristic" || freezer?.source === "heuristic");
   const totalRounds = history.length + 1;
   const projectedHistory = history.concat([{
     version,
@@ -8393,6 +8433,8 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     contractTightening: input.refinement?.contractAdjustments || [],
     convergenceNote: input.evaluation?.summary,
     freezer,
+    llmFallbackUsed,
+    fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
       version,
@@ -8427,6 +8469,8 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     contractTightening: input.refinement?.contractAdjustments || [],
     convergenceNote: input.evaluation?.summary,
     freezer,
+    llmFallbackUsed,
+    fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
       version,
@@ -8483,6 +8527,7 @@ async function approveStyleEvolutionSample(projectRoot, input) {
     throw new Error("style_candidate_not_verified");
   }
   const approvalFreezer = input.freezer ? {
+    source: input.freezer.source,
     verdict: normalizeStyleFreezerVerdict(input.freezer.verdict),
     summary: normalizeText(input.freezer.summary),
     blockingReasons: normalizeStringArray(input.freezer.blockingReasons),
