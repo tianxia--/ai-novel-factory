@@ -102,9 +102,11 @@ test("freeze preview assets are persisted into approved style contract and chapt
     request.on("end", () => {
       if (request.url === "/responses") {
         llmHits += 1
+        const receivedBody = JSON.parse(rawBody)
+        const instructions = String(receivedBody.instructions || "")
         response.writeHead(200, { "content-type": "application/json" })
         response.end(JSON.stringify({
-          output_text: llmHits === 1
+          output_text: /写法合同提炼器/.test(instructions)
             ? JSON.stringify({
                 voice: "模型提炼：克制冷感、白描推进、以物件和动作压住悬疑。",
                 sentenceRhythm: "短句为主，少量中句承接动作后果。",
@@ -199,6 +201,9 @@ test("freeze preview assets are persisted into approved style contract and chapt
       version: 1,
     }, { projectId: created.project.id })
     assert.equal(acceptedPreviewResponse.status, 200)
+    assert.equal(acceptedPreviewResponse.payload.freezePreview.llmFallbackUsed, false)
+    assert.equal(acceptedPreviewResponse.payload.freezePreview.contractExtractionSource, "llm_critic")
+    assert.equal(acceptedPreviewResponse.payload.freezePreview.freezeAdviceSource, "llm_critic")
     assert.ok(acceptedPreviewResponse.payload.freezePreview.positiveExamples.includes("老周的手缩进袖口，没有接。"))
     assert.ok(acceptedPreviewResponse.payload.freezePreview.inheritedRules.includes("正文必须延续当前冷感白描与短对白规则。"))
 
@@ -208,6 +213,9 @@ test("freeze preview assets are persisted into approved style contract and chapt
       approvedAt: "2026-06-25T00:00:00.000Z",
     }, { projectId: created.project.id })
     assert.equal(approveResponse.status, 200)
+    assert.equal(approveResponse.payload.styleFreezeApproval.llmFallbackUsed, false)
+    assert.equal(approveResponse.payload.styleFreezeApproval.contractExtractionSource, "llm_critic")
+    assert.equal(approveResponse.payload.styleFreezeApproval.freezeAdviceSource, "llm_critic")
 
     const contract = approveResponse.payload.styleEvolution.contract
     assert.match(String(contract.approval?.freezeSummary || ""), /稳定|冻结|整本书/)
@@ -289,6 +297,99 @@ test("approved style context is not ready when generation verification is blocke
   const approvedStyleContext = await loadApprovedWritingStyleContext(created.project.projectRoot)
   assert.equal(approvedStyleContext.status, "missing")
   assert.equal(approvedStyleContext.prompt, "")
+})
+
+test("freeze preview exposes local fallback when LLM contract extraction fails", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-freeze-preview-fallback-"))
+  const {
+    acceptStyleEvolutionCandidate,
+    appendStyleEvolutionCandidate,
+    createManagedAutonomousProject,
+    initializeStyleEvolution,
+  } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const server = http.createServer(async (_request, response) => {
+    response.writeHead(502, { "content-type": "application/json" })
+    response.end(JSON.stringify({ error: "fixture upstream failed" }))
+  })
+
+  try {
+    const address = await listen(server)
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 12,
+      chapterWordTarget: 2500,
+    })
+    await initializeStyleEvolution(created.project.projectRoot, {
+      projectTitle: "雨账",
+      idea: "一名审雨官发现降雨记录被篡改",
+      userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    })
+    await appendStyleEvolutionCandidate(created.project.projectRoot, {
+      prompt: "第一版样段",
+      sample: "雨线挂在门槛外。沈砚把缺页账本推到灯下，纸边齐得发亮。老周的手缩进袖口，没有接。",
+      review: "第一版可以冻结。",
+      evaluation: {
+        source: "llm_critic",
+        verdict: "approve",
+        summary: "v1 通过生成验证。",
+        scores: {
+          narrativeVoice: 9,
+          sentenceRhythm: 8.8,
+          dialogueTexture: 8.8,
+          informationDensity: 8.9,
+          emotionalTension: 8.8,
+          readability: 8.9,
+          requirementAlignment: 9,
+          forbiddenPatternRisk: 0.2,
+          overall: 9,
+        },
+        strengths: ["克制冷感。"],
+        deviations: [],
+        forbiddenHits: [],
+        nextFocus: ["保持动作压迫。"],
+        aigc: {
+          enabled: true,
+          status: "passed",
+          score: 0.12,
+          threshold: 0.8,
+          highRiskCount: 0,
+          reason: "fixture passed",
+          highRiskPreviews: [],
+        },
+      },
+      refinement: createStyleRefinementForTest(),
+      freezer: readyFreezerFixture(),
+    })
+    await acceptStyleEvolutionCandidate(created.project.projectRoot, {
+      version: 1,
+      acceptedAt: "2026-06-25T00:00:00.000Z",
+    })
+    const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+      name: "Failing Freeze Preview Model",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiKey: "test-key",
+      modelName: "freeze-preview-failing-model",
+      apiMode: "responses",
+      timeoutMs: 1000,
+    })
+    assert.equal(configResponse.status, 200)
+
+    const previewResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/freeze-preview", {
+      projectId: created.project.id,
+      version: 1,
+    }, { projectId: created.project.id })
+    assert.equal(previewResponse.status, 200)
+    assert.equal(previewResponse.payload.freezePreview.llmFallbackUsed, true)
+    assert.equal(previewResponse.payload.freezePreview.contractExtractionSource, "local_fallback")
+    assert.equal(previewResponse.payload.freezePreview.freezeAdviceSource, "local_fallback")
+    assert.ok(previewResponse.payload.freezePreview.fallbackReasons.some((reason) => /style_contract_extraction_failed/.test(reason)))
+    assert.ok(previewResponse.payload.freezePreview.fallbackReasons.some((reason) => /style_freeze_advice_failed/.test(reason)))
+  } finally {
+    await close(server)
+  }
 })
 
 test("approved style context keeps approved verification when later candidate is blocked", async () => {

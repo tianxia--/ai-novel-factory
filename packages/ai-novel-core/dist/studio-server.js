@@ -461,6 +461,9 @@ async function buildStyleFreezePreview(input) {
   }
   const promptForExtraction = selected?.prompt || currentStyleEvolution.contract.userStylePrompt || currentStyleEvolution.contract.seedPrompt || "";
   let styleContract = buildLocalFallbackStyleContract(sampleForExtraction, promptForExtraction);
+  let contractExtractionSource = "local_fallback";
+  let freezeAdviceSource = "local_fallback";
+  const fallbackReasons = [];
   let freezeAdvice = null;
   const frozenBasePrompt = normalizeStylePreviewText(input.frozenBasePrompt) || normalizeStylePreviewText(selected?.refinement?.nextPrompt) || currentStyleEvolution.contract.frozenBasePrompt || promptForExtraction;
   const textConfig = await loadStyleEvolutionLlmConfig(input.rootDir);
@@ -489,8 +492,15 @@ async function buildStyleFreezePreview(input) {
           { role: "user", content: extractionPrompt.user }
         ]
       });
-      styleContract = parseStyleContractFromText(rawContract) || styleContract;
+      const parsedContract = parseStyleContractFromText(rawContract);
+      if (parsedContract) {
+        styleContract = parsedContract;
+        contractExtractionSource = "llm_critic";
+      } else {
+        fallbackReasons.push("style_contract_parse_failed");
+      }
     } catch (error) {
+      fallbackReasons.push(`style_contract_extraction_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 360));
       console.warn("Style freeze preview contract extraction failed; falling back to deterministic contract.", error);
     }
     try {
@@ -519,9 +529,17 @@ async function buildStyleFreezePreview(input) {
         ]
       });
       freezeAdvice = parseStyleFreezeAdviceFromText(rawFreezeAdvice);
+      if (freezeAdvice) {
+        freezeAdviceSource = "llm_critic";
+      } else {
+        fallbackReasons.push("style_freeze_advice_parse_failed");
+      }
     } catch (error) {
+      fallbackReasons.push(`style_freeze_advice_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 360));
       console.warn("Style freeze preview advice extraction failed; continuing with local fallback.", error);
     }
+  } else {
+    fallbackReasons.push(textConfig ? "style_freeze_preview_api_key_missing" : "style_freeze_preview_model_config_missing");
   }
   const mergedAntiPatterns = [
     ...Array.isArray(input.antiPatterns) ? input.antiPatterns : [],
@@ -562,6 +580,10 @@ async function buildStyleFreezePreview(input) {
     evaluation: selected?.evaluation || null,
     refinement: selected?.refinement || null,
     freezer,
+    llmFallbackUsed: contractExtractionSource !== "llm_critic" || freezeAdviceSource !== "llm_critic",
+    fallbackReasons: [...new Set(fallbackReasons.filter(Boolean))],
+    contractExtractionSource,
+    freezeAdviceSource,
     contractAdjustments: freezeAdvice?.contractAdjustments || selected?.refinement?.contractAdjustments || [],
     approvalScope: "whole_book"
   };
@@ -4590,6 +4612,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     try {
       const approvedAt = typeof body.approvedAt === "string" ? body.approvedAt : void 0;
       let freezePreview = null;
+      const approvalFallbackReasons = [];
       try {
         freezePreview = await buildStyleFreezePreview({
           projectRoot: context.projectRoot,
@@ -4609,46 +4632,18 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         ].includes(errorMessage)) {
           throw error;
         }
+        approvalFallbackReasons.push(`style_freeze_preview_synthesis_failed: ${errorMessage}`.slice(0, 360));
         console.warn("Style approval freeze preview synthesis failed; approval will continue with available contract data.", error);
       }
-      if (!styleContract) {
-        const currentStyleEvolution = await loadStyleEvolution(context.projectRoot);
-        const history = Array.isArray(currentStyleEvolution.contract.evolutionHistory) ? currentStyleEvolution.contract.evolutionHistory : [];
-        const selected = Number.isFinite(version) ? history.find((entry) => entry.version === version) : null;
-        const sampleForExtraction = (typeof sample === "string" ? sample.trim() : "") || selected?.sample || "";
-        const promptForExtraction = selected?.prompt || currentStyleEvolution.contract.userStylePrompt || currentStyleEvolution.contract.seedPrompt || "";
-        const textConfig = await loadStyleEvolutionLlmConfig(rootDir);
-        const apiKey = textConfig?._dbApiKey || "";
-        if (sampleForExtraction && textConfig && apiKey) {
-          try {
-            const extractionPrompt = buildStyleContractExtractionPrompt({
-              sample: sampleForExtraction,
-              prompt: promptForExtraction,
-              userStylePrompt: currentStyleEvolution.contract.userStylePrompt,
-              referenceText: currentStyleEvolution.contract.referenceText,
-              referenceWorks: currentStyleEvolution.contract.referenceWorks,
-              desiredVibes: currentStyleEvolution.contract.desiredVibes,
-              seedForbiddenPatterns: currentStyleEvolution.contract.seedForbiddenPatterns
-            });
-            const rawContract = await requestLlmTextCompletion({
-              baseUrl: textConfig.provider.baseUrl,
-              apiKey,
-              modelName: textConfig.provider.modelName,
-              apiMode: textConfig.provider.apiMode,
-              timeoutMs: textConfig.provider.timeoutMs,
-              temperature: 0.1,
-              maxTokens: 1600,
-              messages: [
-                { role: "system", content: extractionPrompt.system },
-                { role: "user", content: extractionPrompt.user }
-              ]
-            });
-            styleContract = parseStyleContractFromText(rawContract) || void 0;
-          } catch (error) {
-            console.warn("Style contract extraction failed; falling back to deterministic contract.", error);
-          }
-        }
+      if (!freezePreview && !styleContract) {
+        approvalFallbackReasons.push("style_approval_contract_will_use_core_local_fallback");
       }
+      const styleFreezeApproval = {
+        llmFallbackUsed: freezePreview?.llmFallbackUsed === true || approvalFallbackReasons.length > 0,
+        fallbackReasons: [...new Set([...freezePreview?.fallbackReasons || [], ...approvalFallbackReasons].filter(Boolean))],
+        contractExtractionSource: freezePreview?.contractExtractionSource || (styleContract ? "provided" : "local_fallback"),
+        freezeAdviceSource: freezePreview?.freezeAdviceSource || "local_fallback"
+      };
       const styleEvolution = await approveStyleEvolutionSample(context.projectRoot, {
         version: Number.isFinite(version) ? version : void 0,
         sample,
@@ -4668,6 +4663,8 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           projects: context.projects,
           styleEvolution,
           styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          freezePreview,
+          styleFreezeApproval,
           envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };

@@ -1490,6 +1490,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1533,6 +1534,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1587,6 +1589,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1641,6 +1644,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1684,6 +1688,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1727,6 +1732,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1794,6 +1800,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1837,6 +1844,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1880,6 +1888,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1923,6 +1932,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -1966,6 +1976,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2011,6 +2022,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2101,6 +2113,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2144,6 +2157,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2250,6 +2264,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2457,6 +2472,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         reason?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2588,6 +2604,10 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
                 blockingReasons: string[];
                 checkedAt: string;
             };
+            llmFallbackUsed: boolean;
+            fallbackReasons: string[];
+            contractExtractionSource: "llm_critic" | "local_fallback";
+            freezeAdviceSource: "llm_critic" | "local_fallback";
             contractAdjustments: string[];
             approvalScope: string;
         };
@@ -2613,6 +2633,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         modelRouting?: undefined;
         generatedCandidate?: undefined;
         loopIteration?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2743,6 +2764,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -2832,6 +2854,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -2840,6 +2863,172 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         chapter?: undefined;
         message?: undefined;
         settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        styleEvolution: StyleEvolutionSnapshot;
+        styleEvolutionAssets: {
+            freezePackage: {
+                approvedSample: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+                freezeLedger: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+                loopRuntime: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+                loopRuns: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+            };
+            chapterInheritance: {
+                rulebook: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+                references: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+                antiPatterns: {
+                    path: string;
+                    exists: boolean;
+                    chars: number;
+                    preview: string;
+                };
+            };
+        };
+        freezePreview: {
+            version: number | null;
+            sample: string;
+            frozenBasePrompt: string;
+            freezeSummary: string;
+            styleContract: {
+                voice?: string;
+                sentenceRhythm?: string;
+                dialogueRules?: string[];
+                descriptionRules?: string[];
+                emotionRules?: string[];
+                pacingRules?: string[];
+                povRules?: string[];
+                openingRules?: string[];
+                endingHookRules?: string[];
+                allowedDevices?: string[];
+                forbiddenPatterns?: string[];
+                positiveExamples?: string[];
+                negativeExamples?: string[];
+            };
+            antiPatterns: string[];
+            positiveExamples: string[];
+            inheritedArtifacts: string[];
+            inheritedRules: string[];
+            evaluation: {
+                source?: "heuristic" | "llm_critic";
+                verdict?: "retry" | "candidate" | "approve";
+                summary?: string;
+                scores?: {
+                    narrativeVoice?: number;
+                    sentenceRhythm?: number;
+                    dialogueTexture?: number;
+                    informationDensity?: number;
+                    emotionalTension?: number;
+                    readability?: number;
+                    requirementAlignment?: number;
+                    forbiddenPatternRisk?: number;
+                    overall?: number;
+                };
+                strengths?: string[];
+                deviations?: string[];
+                forbiddenHits?: string[];
+                nextFocus?: string[];
+            } | null;
+            refinement: {
+                source?: "heuristic" | "llm_critic";
+                summary?: string;
+                promptAdjustments?: string[];
+                contractAdjustments?: string[];
+                nextPrompt?: string;
+            } | null;
+            freezer: {
+                source: "llm_critic";
+                verdict: "ready" | "block" | "continue";
+                summary: string;
+                blockingReasons: string[];
+                checkedAt: string;
+            } | {
+                source: "heuristic";
+                verdict: "ready" | "continue";
+                summary: string;
+                blockingReasons: string[];
+                checkedAt: string;
+            };
+            llmFallbackUsed: boolean;
+            fallbackReasons: string[];
+            contractExtractionSource: "llm_critic" | "local_fallback";
+            freezeAdviceSource: "llm_critic" | "local_fallback";
+            contractAdjustments: string[];
+            approvalScope: string;
+        } | null;
+        styleFreezeApproval: {
+            llmFallbackUsed: boolean;
+            fallbackReasons: string[];
+            contractExtractionSource: string;
+            freezeAdviceSource: "llm_critic" | "local_fallback";
+        };
+        envStatus: PublicProjectEnvStatus;
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        state?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        snapshotVersion?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        productionReadiness?: undefined;
         readerStats?: undefined;
         blockedChapters?: undefined;
     };
@@ -2873,6 +3062,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -2917,6 +3107,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
         chapterNumber?: undefined;
@@ -2961,6 +3152,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -3105,6 +3297,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -3233,6 +3426,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -3286,6 +3480,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
         chapterNumber?: undefined;
@@ -3375,6 +3570,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -3420,6 +3616,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -3805,6 +4002,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -3845,6 +4043,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -3889,6 +4088,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -3933,6 +4133,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -4280,6 +4481,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -4409,6 +4611,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -4562,6 +4765,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -4699,6 +4903,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -4844,6 +5049,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -4973,6 +5179,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -5122,6 +5329,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -5255,6 +5463,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -5297,6 +5506,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -5469,6 +5679,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -5624,6 +5835,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -5769,6 +5981,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -5898,6 +6111,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -5939,6 +6153,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -6120,6 +6335,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -6283,6 +6499,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -6434,6 +6651,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -6569,6 +6787,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -6752,6 +6971,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -6919,6 +7139,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -7003,6 +7224,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -7045,6 +7267,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -7176,6 +7399,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -7266,6 +7490,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -7394,6 +7619,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -7483,6 +7709,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
@@ -7532,6 +7759,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
@@ -7675,6 +7903,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;
         path?: undefined;
@@ -7803,6 +8032,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         generatedCandidate?: undefined;
         loopIteration?: undefined;
         freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
         transcript?: undefined;
         notModified?: undefined;
         chapterNumber?: undefined;

@@ -394,7 +394,62 @@ function collectStyleFallbackSignals(payload) {
   if (payload?.styleEvolution?.contract?.freezer?.source === "heuristic") {
     signals.push("styleEvolution.contract.freezer: heuristic")
   }
+  const inspectFallbackObject = (value, label) => {
+    if (!value || typeof value !== "object") return
+    if (value.llmFallbackUsed === true) signals.push(`${label}: llmFallbackUsed`)
+    if (value.contractExtractionSource === "local_fallback") signals.push(`${label}: local contract extraction fallback`)
+    if (value.freezeAdviceSource === "local_fallback") signals.push(`${label}: local freeze advice fallback`)
+    if (Array.isArray(value.fallbackReasons)) {
+      for (const reason of value.fallbackReasons.filter(Boolean).slice(0, 4)) {
+        signals.push(`${label}: ${String(reason).slice(0, 220)}`)
+      }
+    }
+  }
+  inspectFallbackObject(payload?.freezePreview, "freezePreview")
+  inspectFallbackObject(payload?.styleFreezeApproval, "styleFreezeApproval")
   return [...new Set(signals.filter(Boolean))]
+}
+
+function latestStyleCandidate(styleEvolution) {
+  const history = styleEvolution?.contract?.evolutionHistory
+  return Array.isArray(history) ? history.at(-1) : null
+}
+
+function styleCandidateFreezeStatus(candidate) {
+  if (!candidate || typeof candidate !== "object") {
+    return {
+      ready: false,
+      verificationStatus: "missing",
+      freezerVerdict: "missing",
+      reasons: ["Style Evolution did not return a latest candidate."],
+    }
+  }
+  const verificationStatus = candidate.verification?.status || "missing"
+  const freezerVerdict = candidate.freezer?.verdict || "missing"
+  const fallbackSignals = collectStyleFallbackSignals({ styleEvolution: { contract: { evolutionHistory: [candidate] } } })
+  const reasons = [
+    verificationStatus !== "passed" ? `verification=${verificationStatus}` : "",
+    freezerVerdict !== "ready" ? `freezer=${freezerVerdict}` : "",
+    ...((candidate.freezer?.blockingReasons || []).filter(Boolean)),
+    ...((candidate.verification?.reasons || []).filter(Boolean)),
+    ...fallbackSignals,
+  ].filter(Boolean)
+  return {
+    ready: verificationStatus === "passed" && freezerVerdict === "ready" && fallbackSignals.length === 0,
+    verificationStatus,
+    freezerVerdict,
+    reasons: [...new Set(reasons)].slice(0, 8),
+  }
+}
+
+function buildStyleIterationFeedback(candidate, status) {
+  const parts = [
+    "继续进化写法样段，只有 Generation Verification Gate 通过且 Style Contract Freezer verdict=ready 才能冻结。",
+    `上一轮状态：verification=${status.verificationStatus}, freezer=${status.freezerVerdict}。`,
+    status.reasons.length ? `必须修正：${status.reasons.join("；")}` : "",
+    candidate?.refinement?.nextPrompt ? `继承上一轮 Prompt Refiner 的 nextPrompt：${compactText(candidate.refinement.nextPrompt, 700)}` : "",
+  ].filter(Boolean)
+  return parts.join("\n")
 }
 
 async function configureAigcDetector(api, options, report) {
@@ -485,38 +540,75 @@ async function ensureStyleGate(api, projectId, options, report) {
     iterations: options.styleIterations,
     candidates: options.styleCandidates,
   })
-  const generated = await api("POST", "/api/style-evolution/generate-candidate", {
-    projectId,
-    userStylePrompt: options.stylePrompt,
-    loopIterations: options.styleIterations,
-    candidateCount: options.styleCandidates,
-  }, projectId)
-  const fallbackSignals = collectStyleFallbackSignals(generated)
-  if (fallbackSignals.length) {
-    throw new AcceptanceError("Style Evolution used heuristic/fallback results; production acceptance requires real LLM evaluator/refiner/freezer output.", {
-      fallbackSignals: fallbackSignals.slice(0, 12),
-      loopRun: generated.loopRun ? {
-        runId: generated.loopRun.runId,
-        stopReason: generated.loopRun.stopReason,
-        completedIterations: generated.loopRun.completedIterations,
-      } : null,
+  const maxStyleRequests = Math.max(1, options.styleIterations)
+  let generated = null
+  let candidate = null
+  let candidateStatus = null
+  let iterationFeedback = ""
+  for (let attempt = 1; attempt <= maxStyleRequests; attempt += 1) {
+    generated = await api("POST", "/api/style-evolution/generate-candidate", {
+      projectId,
+      userStylePrompt: options.stylePrompt,
+      loopIterations: options.styleIterations,
+      candidateCount: options.styleCandidates,
+      iterationFeedback: iterationFeedback || undefined,
+    }, projectId)
+    const fallbackSignals = collectStyleFallbackSignals(generated)
+    if (fallbackSignals.length) {
+      throw new AcceptanceError("Style Evolution used heuristic/fallback results; production acceptance requires real LLM evaluator/refiner/freezer output.", {
+        fallbackSignals: fallbackSignals.slice(0, 12),
+        attempt,
+        loopRun: generated.loopRun ? {
+          runId: generated.loopRun.runId,
+          stopReason: generated.loopRun.stopReason,
+          completedIterations: generated.loopRun.completedIterations,
+        } : null,
+      })
+    }
+    candidate = latestStyleCandidate(generated.styleEvolution)
+    candidateStatus = styleCandidateFreezeStatus(candidate)
+    const version = Number(candidate?.version || generated.generatedCandidate?.version || 0)
+    report.steps.push({
+      step: "style_candidate_generated",
+      status: candidateStatus.ready ? "ready" : "continue",
+      at: now(),
+      attempt,
+      version,
+      verificationStatus: candidateStatus.verificationStatus,
+      freezerVerdict: candidateStatus.freezerVerdict,
+      reasons: candidateStatus.reasons,
+      modelRouting: generated.modelRouting || null,
     })
+    log("Style candidate iteration completed.", {
+      attempt,
+      version,
+      verification: candidateStatus.verificationStatus,
+      freezer: candidateStatus.freezerVerdict,
+      ready: candidateStatus.ready,
+    })
+    if (candidateStatus.ready) {
+      break
+    }
+    iterationFeedback = buildStyleIterationFeedback(candidate, candidateStatus)
   }
-  const version = Number(generated.generatedCandidate?.version || 0)
+  const version = Number(candidate?.version || generated?.generatedCandidate?.version || 0)
   if (!version) {
     throw new AcceptanceError("Style Evolution did not produce a candidate version.", {
-      generatedCandidate: generated.generatedCandidate || null,
-      loopRun: generated.loopRun || null,
+      generatedCandidate: generated?.generatedCandidate || null,
+      loopRun: generated?.loopRun || null,
     })
   }
-  report.steps.push({
-    step: "style_candidate_generated",
-    status: "completed",
-    at: now(),
-    version,
-    modelRouting: generated.modelRouting || null,
-  })
-  log("Style candidate generated.", { version, model: generated.modelRouting?.modelName })
+  if (!candidateStatus?.ready) {
+    throw new AcceptanceError("Style Evolution did not reach a freezer-ready candidate within the configured attempts.", {
+      version,
+      attempts: maxStyleRequests,
+      verificationStatus: candidateStatus?.verificationStatus || "missing",
+      freezerVerdict: candidateStatus?.freezerVerdict || "missing",
+      reasons: candidateStatus?.reasons || [],
+      loopRun: generated?.loopRun || null,
+    })
+  }
+  log("Style candidate ready for freeze.", { version, model: generated?.modelRouting?.modelName })
 
   if (!options.autoApproveStyle) {
     throw new AcceptanceError("Style candidate generated, but style approval is waiting for explicit user confirmation.", {
@@ -536,6 +628,13 @@ async function ensureStyleGate(api, projectId, options, report) {
     version,
     approvedAt: now(),
   }, projectId)
+  const approvalFallbackSignals = collectStyleFallbackSignals(approved)
+  if (approvalFallbackSignals.length) {
+    throw new AcceptanceError("Style freeze approval used local fallback results; production acceptance requires LLM-derived freeze contract and advice.", {
+      fallbackSignals: approvalFallbackSignals.slice(0, 12),
+      version,
+    })
+  }
   gate = approved.styleEvolution?.gate || null
   if (gate?.canProceed !== true || gate?.status !== "passed") {
     throw new AcceptanceError("Style approval did not pass the Style Contract Freeze Gate.", {
