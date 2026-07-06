@@ -1403,11 +1403,18 @@ async function getStatus(api, projectId) {
   return api("GET", `/api/status?projectId=${encodeURIComponent(projectId)}`, {}, projectId)
 }
 
-async function ensureStyleGate(api, projectId, options, report) {
+async function maybeWriteCheckpoint(checkpoint, phase, details = {}) {
+  if (typeof checkpoint === "function") {
+    await checkpoint(phase, details)
+  }
+}
+
+async function ensureStyleGate(api, projectId, options, report, checkpoint = null) {
   let stylePayload = await api("GET", `/api/style-evolution?projectId=${encodeURIComponent(projectId)}`, {}, projectId)
   let gate = stylePayload.styleEvolution?.gate || null
   if (gate?.canProceed === true && gate?.status === "passed") {
     report.steps.push({ step: "style_gate", status: "passed_existing", at: now() })
+    await maybeWriteCheckpoint(checkpoint, "style_gate_passed_existing")
     log("Style gate already passed.")
     return stylePayload
   }
@@ -1457,6 +1464,13 @@ async function ensureStyleGate(api, projectId, options, report) {
       freezerVerdict: candidateStatus.freezerVerdict,
       reasons: candidateStatus.reasons,
       modelRouting: generated.modelRouting || null,
+    })
+    await maybeWriteCheckpoint(checkpoint, "style_candidate_generated", {
+      attempt,
+      version,
+      ready: candidateStatus.ready,
+      verificationStatus: candidateStatus.verificationStatus,
+      freezerVerdict: candidateStatus.freezerVerdict,
     })
     log("Style candidate iteration completed.", {
       attempt,
@@ -1521,11 +1535,12 @@ async function ensureStyleGate(api, projectId, options, report) {
     })
   }
   report.steps.push({ step: "style_gate", status: "passed", at: now(), version })
+  await maybeWriteCheckpoint(checkpoint, "style_gate_passed", { version })
   log("Style gate passed.", { version })
   return approved
 }
 
-async function advanceUntilPlanningReady(api, projectId, options, report) {
+async function advanceUntilPlanningReady(api, projectId, options, report, checkpoint = null) {
   let status = await getStatus(api, projectId)
   let progress = chapterProgressFromStatus(status)
   const planningReadyStages = new Set(["chapter_task_generation", "drafting", "reviewing", "aigc_refinement", "complete"])
@@ -1536,6 +1551,7 @@ async function advanceUntilPlanningReady(api, projectId, options, report) {
     status = await getStatus(api, projectId)
     progress = chapterProgressFromStatus(status)
     steps += 1
+    await maybeWriteCheckpoint(checkpoint, "planning_progress", { progress, advanceSteps: steps })
   }
 
   if (!planningReadyStages.has(progress.stage)) {
@@ -1547,11 +1563,12 @@ async function advanceUntilPlanningReady(api, projectId, options, report) {
   }
 
   report.steps.push({ step: "planning_ready", status: "completed", at: now(), progress, advanceSteps: steps })
+  await maybeWriteCheckpoint(checkpoint, "planning_ready", { progress, advanceSteps: steps })
   log("Planning reached a drafting-ready stage.", progress)
   return status
 }
 
-async function ensureStoryFoundation(api, projectId, options, report) {
+async function ensureStoryFoundation(api, projectId, options, report, checkpoint = null) {
   let status = await getStatus(api, projectId)
   let readiness = productionReadinessCodes(status)
 
@@ -1562,6 +1579,7 @@ async function ensureStoryFoundation(api, projectId, options, report) {
     status = await getStatus(api, projectId)
     readiness = productionReadinessCodes(status)
     report.steps.push({ step: "story_assets_repair", status: "completed", at: now(), readiness })
+    await maybeWriteCheckpoint(checkpoint, "story_assets_repair", { readiness })
   }
 
   if (!readiness.canProceed && readiness.issueCodes.includes("story_foundation_approval_missing")) {
@@ -1581,6 +1599,7 @@ async function ensureStoryFoundation(api, projectId, options, report) {
     status = await getStatus(api, projectId)
     readiness = productionReadinessCodes(status)
     report.steps.push({ step: "story_foundation_approval", status: "completed", at: now(), readiness })
+    await maybeWriteCheckpoint(checkpoint, "story_foundation_approved", { readiness })
   }
 
   if (!readiness.canProceed || readiness.status !== "passed") {
@@ -1591,11 +1610,12 @@ async function ensureStoryFoundation(api, projectId, options, report) {
   }
 
   report.steps.push({ step: "production_readiness", status: "passed", at: now(), readiness })
+  await maybeWriteCheckpoint(checkpoint, "production_readiness_passed", { readiness })
   log("Production readiness passed.", readiness)
   return status
 }
 
-async function runDraftingToCompletion(api, projectId, options, report) {
+async function runDraftingToCompletion(api, projectId, options, report, checkpoint = null) {
   let status = await getStatus(api, projectId)
   let progress = chapterProgressFromStatus(status)
   let lastComplete = progress.complete
@@ -1615,6 +1635,11 @@ async function runDraftingToCompletion(api, projectId, options, report) {
     }
 
     report.progress.push({ at: now(), step, ...progress })
+    await maybeWriteCheckpoint(checkpoint, "drafting_progress", {
+      advanceStep: step,
+      staleSteps,
+      progress,
+    })
 
     if (progress.blocked > 0) {
       throw new AcceptanceError("Chapter production has blocked chapters.", { progress })
@@ -1636,11 +1661,12 @@ async function runDraftingToCompletion(api, projectId, options, report) {
   }
 
   report.steps.push({ step: "drafting_complete", status: "completed", at: now(), progress })
+  await maybeWriteCheckpoint(checkpoint, "drafting_complete", { progress })
   log("Drafting flow reached complete.", progress)
   return status
 }
 
-async function verifyReader(api, projectId, options, report) {
+async function verifyReader(api, projectId, options, report, checkpoint = null) {
   const snapshot = await api("GET", `/api/reader-snapshot?projectId=${encodeURIComponent(projectId)}`, {}, projectId)
   const stats = snapshot.stats || {}
   const project = snapshot.project || {}
@@ -1715,6 +1741,13 @@ async function verifyReader(api, projectId, options, report) {
     chapterChecks.push({
       chapterNumber,
       title: chapter.title || "",
+      wordCount: Number(chapter.wordCount || 0),
+      publishReady: chapter.publishReadiness?.ready === true,
+    })
+    await maybeWriteCheckpoint(checkpoint, "reader_chapter_checked", {
+      chapterNumber,
+      checkedChapters: chapterChecks.length,
+      totalChapters,
       wordCount: Number(chapter.wordCount || 0),
       publishReady: chapter.publishReadiness?.ready === true,
     })
@@ -1800,6 +1833,11 @@ async function verifyReader(api, projectId, options, report) {
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
   })
+  await maybeWriteCheckpoint(checkpoint, "reader_acceptance_passed", {
+    totalWords,
+    readableChapters,
+    totalChapters,
+  })
   log("Reader acceptance passed.", {
     totalWords,
     readableChapters,
@@ -1814,9 +1852,26 @@ async function verifyReader(api, projectId, options, report) {
   return snapshot
 }
 
-async function writeReport(reportPath, report) {
+export async function writeReport(reportPath, report) {
   await fs.mkdir(path.dirname(reportPath), { recursive: true })
   await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+}
+
+export async function writeAcceptanceCheckpoint(reportPath, report, checkpoint = {}) {
+  const entry = {
+    at: now(),
+    status: report?.status || "running",
+    projectId: checkpoint.projectId || report?.projectId || null,
+    phase: checkpoint.phase || "checkpoint",
+    ...checkpoint,
+  }
+  if (!Array.isArray(report.checkpoints)) {
+    report.checkpoints = []
+  }
+  report.checkpoints.push(entry)
+  report.lastCheckpoint = entry
+  await writeReport(reportPath, report)
+  return entry
 }
 
 async function main() {
@@ -1839,8 +1894,15 @@ async function main() {
     finalCharacterVoiceAudit: null,
     finalForeshadowingAudit: null,
     finalContinuityAudit: null,
+    checkpoints: [],
+    lastCheckpoint: null,
     error: null,
   }
+  const checkpoint = async (phase, details = {}) => writeAcceptanceCheckpoint(options.reportPath, report, {
+    phase,
+    projectId: details.projectId || report.projectId || options.resumeProjectId || null,
+    ...details,
+  })
 
   try {
     assertLongFormTarget(options)
@@ -1859,8 +1921,11 @@ async function main() {
       styleModel: modelInfo.styleConfig?.model_name || null,
       routeCount: modelInfo.routes.length,
     })
+    await checkpoint("llm_config_ready")
     await assertProviderHealth(api, modelInfo, report, options.resumeProjectId || null, options.providerHealthCheck)
+    await checkpoint("provider_health_checked")
     const detectorSettings = await configureAigcDetector(api, options, report)
+    await checkpoint("aigc_detector_ready", { provider: detectorSettings.provider })
 
     log("Acceptance plan is valid.", {
       rootDir: options.rootDir,
@@ -1875,7 +1940,7 @@ async function main() {
     if (options.planOnly) {
       report.status = "plan_ready"
       report.completedAt = now()
-      await writeReport(options.reportPath, report)
+      await checkpoint("plan_ready")
       log("Plan-only acceptance check completed.", { reportPath: options.reportPath })
       return
     }
@@ -1903,43 +1968,44 @@ async function main() {
       projectId = created.projectId
       report.projectId = projectId
       report.steps.push({ step: "project_created", status: "completed", at: now(), projectId })
+      await checkpoint("project_created", { projectId })
     }
 
     if (!projectId) {
       throw new AcceptanceError("Project id is missing after project creation.")
     }
 
-    await ensureStyleGate(api, projectId, options, report)
+    await ensureStyleGate(api, projectId, options, report, checkpoint)
     if (options.stopAfterStyle) {
       report.status = "waiting_after_style"
       report.completedAt = now()
-      await writeReport(options.reportPath, report)
+      await checkpoint("waiting_after_style", { projectId })
       log("Stopped after style gate by request.", { reportPath: options.reportPath, projectId })
       return
     }
 
-    await advanceUntilPlanningReady(api, projectId, options, report)
-    await ensureStoryFoundation(api, projectId, options, report)
+    await advanceUntilPlanningReady(api, projectId, options, report, checkpoint)
+    await ensureStoryFoundation(api, projectId, options, report, checkpoint)
     if (options.stopAfterFoundation) {
       report.status = "waiting_after_foundation"
       report.completedAt = now()
-      await writeReport(options.reportPath, report)
+      await checkpoint("waiting_after_foundation", { projectId })
       log("Stopped after story foundation by request.", { reportPath: options.reportPath, projectId })
       return
     }
 
-    await runDraftingToCompletion(api, projectId, options, report)
-    await verifyReader(api, projectId, options, report)
+    await runDraftingToCompletion(api, projectId, options, report, checkpoint)
+    await verifyReader(api, projectId, options, report, checkpoint)
 
     report.status = "passed"
     report.completedAt = now()
-    await writeReport(options.reportPath, report)
+    await checkpoint("passed", { projectId })
     log("REAL PRODUCTION ACCEPTANCE PASSED.", { projectId, reportPath: options.reportPath })
   } catch (error) {
     report.status = "failed"
     report.completedAt = now()
     report.error = summarizeError(error)
-    await writeReport(options.reportPath, report).catch((writeError) => {
+    await checkpoint("failed", { error: report.error }).catch((writeError) => {
       console.error("Failed to write acceptance report:", writeError)
     })
     console.error(`[${now()}] REAL PRODUCTION ACCEPTANCE FAILED.`)

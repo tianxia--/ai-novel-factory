@@ -1,5 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -239,4 +241,30 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner writes resumable checkpoint reports", async () => {
+  const { writeAcceptanceCheckpoint } = await loadRunner()
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-acceptance-"))
+  const reportPath = path.join(dir, "report.json")
+  const report = {
+    version: 1,
+    status: "running",
+    projectId: "project-123",
+    steps: [{ step: "project_created", status: "completed" }],
+    progress: [{ step: 3, complete: 2, total: 40 }],
+  }
+
+  const checkpoint = await writeAcceptanceCheckpoint(reportPath, report, {
+    phase: "drafting_progress",
+    advanceStep: 3,
+    progress: { complete: 2, total: 40 },
+  })
+  const saved = JSON.parse(await fs.readFile(reportPath, "utf8"))
+
+  assert.equal(checkpoint.phase, "drafting_progress")
+  assert.equal(saved.lastCheckpoint.phase, "drafting_progress")
+  assert.equal(saved.lastCheckpoint.projectId, "project-123")
+  assert.equal(saved.checkpoints.length, 1)
+  assert.deepEqual(saved.checkpoints[0].progress, { complete: 2, total: 40 })
 })
