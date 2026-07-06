@@ -3426,6 +3426,8 @@ test("production writing pipeline blocks low quality chapters after automatic re
     const explicitlyRetried = await retryChapterProduction(created.project.projectRoot, 1, {
       factoryRootDir: tempDir,
       projectId: created.project.id,
+      forceQualityScoreForTest: 5,
+      maxRevisionAttempts: 1,
       runNow: true,
     })
     assert.equal(explicitlyRetried.plan.chapterTasks[0].status, "blocked")
@@ -3581,6 +3583,28 @@ test("quality gate parser ignores non-blocking blocker language when score passe
 
   assert.equal(gate.status, "passed")
   assert.equal(gate.passed, true)
+})
+
+test("quality gate parser prefers summary score over high dimension scores", async () => {
+  const { parseQualityGate } = await loadCore()
+  const gate = parseQualityGate([
+    "# Chapter Quality Report",
+    "",
+    "| Dimension | Score | Notes |",
+    "|---|---:|---|",
+    "| 字数完成度 | 8/10 | 当前估算 2400，目标 2500。 |",
+    "| 情节推进 | 8/10 | 包含冲突、压力或选择。 |",
+    "| 综合评分 | 5/10 | 需要返工。 |",
+    "",
+    "WORD_COUNT_CHECK: 2400/2500",
+    "",
+    "## Required Fixes",
+    "- 需要返工：测试强制质量分低于阈值，不能进入 complete。",
+  ].join("\n"), 1, 1)
+
+  assert.equal(gate.score, 5)
+  assert.equal(gate.status, "blocked")
+  assert.equal(gate.passed, false)
 })
 
 test("autopilot worker status and once modes expose operational state", async () => {
@@ -9830,6 +9854,90 @@ test("character voice gate uses dossier speech markers", async () => {
   const gateResult = evaluateCharacterProfilePresence(genericVoice, contract)
   assert.equal(gateResult.status, "quarantined")
   assert.match(gateResult.reason, /角色差异化不足|角色鲜明度不足|弱核心角色信号/)
+})
+
+test("character voice gate blocks repeated attributed dialogue across speakers", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["的确"],
+        relationshipState: "被宋管事拖入账册风险",
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["拨算盘珠"],
+        speechMarkers: ["老奴知罪"],
+        relationshipState: "欠李延一次隐瞒",
+      }
+    ]
+  }
+
+  const repeatedVoice = [
+    "## Final Body",
+    "李延按住桌角，低声道：「这件事情很复杂，账目不能现在交。」他必须先把缺页压住。",
+    "宋管事拨算盘珠，低声道：「这件事情很复杂，账目不能现在交。」他退到门边替李延挡住脚步。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(repeatedVoice, contract)
+  assert.equal(gateResult.status, "quarantined")
+  assert.match(gateResult.reason, /跨角色对白复用|对白复用|角色差异化不足/)
+})
+
+test("character voice gate accepts distinct dossier-backed speech and habits", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["的确"],
+        skills: ["复核田册"],
+        limitations: ["不能当场交出缺页"],
+        relationshipState: "被宋管事拖入账册风险",
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["拨算盘珠"],
+        speechMarkers: ["老奴知罪"],
+        skills: ["熟悉仓账"],
+        limitations: ["不敢违逆少尹"],
+        relationshipState: "欠李延一次隐瞒",
+      }
+    ]
+  }
+
+  const distinctVoice = [
+    "## Final Body",
+    "李延按住桌角，指腹压着缺页，低声道：「的确，田册少了一页，今晚不能当场交出去。」",
+    "他决定先复核田册，把官印扣在灯下，逼自己承担被问责的风险。",
+    "宋管事拨算盘珠，退到门边，哑声道：「老奴知罪，可少尹的人就在外头。」",
+    "他欠李延一次隐瞒，只能替他挡住脚步，却不敢违逆少尹的传话。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(distinctVoice, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.match(gateResult.reason, /角色差异化通过/)
 })
 
 test("naturalness report flags flattened dialogue voices", async () => {

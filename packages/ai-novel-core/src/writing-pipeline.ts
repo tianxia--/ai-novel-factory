@@ -1569,8 +1569,11 @@ function throwIfPipelineAborted(options: ProductionPipelineOptions) {
 }
 
 export function parseQualityGate(report: string, attempts = 0, maxAttempts = 3): QualityGateResult {
+  const summaryScoreMatches = [...report.matchAll(/(?:^|\n)\s*\|?\s*(?:综合评分|overall\s*score|overall|score)\s*(?:\||[:：])\s*(\d{1,2})(?:\s*\/\s*10)?/giu)]
   const scoreMatches = [...report.matchAll(/(?:综合评分|overall|score)[^\d]{0,12}(\d{1,2})(?:\s*\/\s*10)?/giu)]
-  const score = scoreMatches.length
+  const score = summaryScoreMatches.length
+    ? Number(summaryScoreMatches[summaryScoreMatches.length - 1][1])
+    : scoreMatches.length
     ? Math.max(...scoreMatches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value)))
     : report.includes("needs-manual-review") || report.includes("需要返工")
       ? 5
@@ -1598,11 +1601,10 @@ export function parseQualityGate(report: string, attempts = 0, maxAttempts = 3):
     /not blocked/giu,
   ]
   const blockingScanText = nonBlockingPhrases.reduce((text, pattern) => text.replace(pattern, ""), report)
-  const hasBlockingIssue = !explicitPassMarker && (
-    explicitBlockMarker
-    || /严重问题|必须返工|需要返工|质量不足|低于.*门槛|不能进入\s*complete|manual review|manual-review/u.test(blockingScanText)
+  const hasBlockingIssue = explicitBlockMarker || (!explicitPassMarker && (
+    /严重问题|必须返工|需要返工|质量不足|低于.*门槛|不能进入\s*complete|manual review|manual-review/u.test(blockingScanText)
     || /\bblocked\b/iu.test(blockingScanText)
-  )
+  ))
   const passed = score >= 7 && !hasBlockingIssue && !wordCountBlockingIssue
   const status = passed ? "passed" : attempts >= maxAttempts ? "blocked" : "needs_revision"
 
@@ -4373,7 +4375,75 @@ function extractCharacterEvidenceWindow(body: string, index: number, nameLength:
   const sentenceEnd = rightCandidates.length
     ? Math.min(...rightCandidates)
     : Math.min(body.length, index + nameLength + 48)
-  return body.slice(sentenceStart, sentenceEnd)
+  const pronounTail = body
+    .slice(sentenceEnd, Math.min(body.length, sentenceEnd + 140))
+    .match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人)[^。！？!?；;\n]{4,120}/u)
+  const windowEnd = pronounTail
+    ? Math.min(body.length, sentenceEnd + pronounTail[0].length)
+    : sentenceEnd
+  return body.slice(sentenceStart, windowEnd)
+}
+
+function textContainsOtherCastName(text: string, currentName: string, cast: string[]) {
+  return cast.some((name) => name && name !== currentName && text.includes(name))
+}
+
+function collectRegexGroupMatches(body: string, pattern: RegExp, groupIndex = 1) {
+  const matches: string[] = []
+  for (const match of body.matchAll(pattern)) {
+    const value = match[groupIndex]
+    if (value) {
+      matches.push(value.trim())
+    }
+  }
+  return matches
+}
+
+function extractAttributedCharacterDialogues(body: string, name: string, cast: string[]) {
+  const escapedName = escapeRegExpLiteral(name)
+  const speechVerb = "(?:说|问|道|喊|低声|冷笑|答|叹|唤|喝|回|提醒|催促|开口|接话)"
+  const dialogues = [
+    ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^。！？!?；;\\n「“]{0,50}${speechVerb}[^「“\\n]{0,24}[「“]([^」”]{2,120})[」”]`, "gu")),
+    ...collectRegexGroupMatches(body, new RegExp(`[「“]([^」”]{2,120})[」”][^。！？!?；;\\n]{0,45}${escapedName}[^。！？!?；;\\n]{0,30}${speechVerb}`, "gu")),
+    ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^。！？!?；;\\n]{0,50}${speechVerb}[^：:\\n]{0,20}[：:]\\s*[「“]?([^」”。！？!?；;\\n]{2,80})[」”]?`, "gu")),
+  ]
+
+  const immediateQuotePattern = new RegExp(`${escapedName}([^「“\\n]{0,100})[。！？!?；;]\\s*[「“]([^」”]{2,120})[」”]`, "gu")
+  for (const match of body.matchAll(immediateQuotePattern)) {
+    const bridge = match[1] || ""
+    const quote = match[2] || ""
+    if (quote && !textContainsOtherCastName(bridge, name, cast)) {
+      dialogues.push(quote.trim())
+    }
+  }
+
+  return uniqueStrings(dialogues.filter((dialogue) => dialogue.length >= 2)).slice(0, 12)
+}
+
+function normalizeDialogueForVoiceCompare(dialogue: string) {
+  return dialogue
+    .replace(/[“”「」『』"'`，。！？!?；;：:\s、,.]/gu, "")
+    .replace(/^(我|你|他|她|咱们|我们|你们|他们|她们)/u, "")
+    .trim()
+}
+
+function findRepeatedDialogueAcrossCharacters(scored: Array<{ name: string; dialogues: string[] }>) {
+  const byDialogue = new Map<string, { sample: string; speakers: Set<string> }>()
+  for (const entry of scored) {
+    for (const dialogue of entry.dialogues || []) {
+      const normalized = normalizeDialogueForVoiceCompare(dialogue)
+      if (normalized.length < 8) continue
+      const current = byDialogue.get(normalized) || { sample: dialogue, speakers: new Set<string>() }
+      current.speakers.add(entry.name)
+      byDialogue.set(normalized, current)
+    }
+  }
+  return Array.from(byDialogue.values())
+    .filter((entry) => entry.speakers.size >= 2)
+    .map((entry) => ({
+      sample: entry.sample,
+      speakers: Array.from(entry.speakers),
+    }))
 }
 
 function evaluateCharacterVoiceDifferentiation(draft: string, contract: CharacterProfileContract) {
@@ -4394,6 +4464,11 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     "单章字数",
     "成语",
     "章以后",
+    "主角",
+    "配角",
+    "对抗力量",
+    "关键关系对象",
+    "服务首章事件的关系角色",
     // 常见时间词，避免被误识别为角色名
     "时候",
     "这时",
@@ -4474,19 +4549,12 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
 
     const windows = localWindows.join("\n")
 
-    const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
+    const dialogues = extractAttributedCharacterDialogues(body, name, cast)
+    const dialogueText = dialogues.join("\n")
+    const hasDialogue = dialogues.length > 0 || /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
     const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
     const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows)
     const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows)
-
-    const dialogues: string[] = []
-    const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^。！？!?；;\\n]*?[说问道喊笑叹声道][^」”]*?[「“]([^」”]+?)[」”]`,"gu")
-    for (const match of body.matchAll(dialoguePattern)) {
-      if (match[1]) {
-        dialogues.push(match[1])
-      }
-    }
-    const dialogueText = dialogues.join("\n")
 
     const dossier: CharacterDossier | undefined = (dossiers as CharacterDossier[]).find((d: CharacterDossier) => d.canonicalName === name || d.aliases?.includes(name))
 
@@ -4501,13 +4569,17 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     let matchedSpeech: string[] = []
     let matchedRelations: string[] = []
     let matchedSkills: string[] = []
+    let explicitDossierFieldCount = 0
+    let dossierEvidenceCount = 0
 
     if (dossier) {
       const habitKeywords = extractKeywords(dossier.behaviorHabits || [])
+      if (habitKeywords.length) explicitDossierFieldCount += 1
       matchedHabits = habitKeywords.filter(k => windows.includes(k))
       hasHabitEvidence = matchedHabits.length > 0 || (habitKeywords.length === 0 && hasGeneralHabit)
 
       const speechKeywords = extractKeywords(dossier.speechMarkers || [])
+      if (speechKeywords.length) explicitDossierFieldCount += 1
       matchedSpeech = speechKeywords.filter(k => dialogueText.includes(k) || windows.includes(k))
       hasSpeechEvidence = matchedSpeech.length > 0 || (speechKeywords.length === 0 && hasDialogue)
 
@@ -4516,6 +4588,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
         ...(dossier.relationshipEdges || []).map((e: { label: string; pressure: string }) => `${e.label} ${e.pressure}`)
       ]
       const relationKeywords = extractKeywords(relations)
+      if (relationKeywords.length) explicitDossierFieldCount += 1
       matchedRelations = relationKeywords.filter(k => windows.includes(k))
       hasRelationEvidence = matchedRelations.length > 0
 
@@ -4525,10 +4598,17 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
         dossier.appearanceAndBody || ""
       ]
       const skillKeywords = extractKeywords(skillsAndLimits)
+      if (skillKeywords.length) explicitDossierFieldCount += 1
       matchedSkills = skillKeywords.filter(k => windows.includes(k))
       hasSkillLimitationEvidence = matchedSkills.length > 0
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence
+      dossierEvidenceCount = [
+        matchedHabits.length > 0,
+        matchedSpeech.length > 0,
+        matchedRelations.length > 0,
+        matchedSkills.length > 0,
+      ].filter(Boolean).length
     } else {
       hasHabitEvidence = hasGeneralHabit
       hasSpeechEvidence = hasDialogue
@@ -4571,6 +4651,9 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       hasSkillLimitationEvidence,
       hasGoalPressureEvidence,
       hasActiveStanceEvidence,
+      dialogues,
+      explicitDossierFieldCount,
+      dossierEvidenceCount,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
@@ -4592,6 +4675,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
   }
 
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2)
+  const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles)
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length
   const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length
   const relationCarriers = coreRoles.filter((entry) => entry.hasRelationEvidence).length
@@ -4609,12 +4693,17 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
   if (weak.length) {
     missing.push(`弱核心角色信号（缺少目标/选择/关系压力）：${weak.map((entry) => entry.name).join("、")}`)
   }
+  if (repeatedDialogues.length) {
+    const first = repeatedDialogues[0]
+    missing.push(`跨角色对白复用：${first.speakers.join("、")} 都说出近似句「${first.sample.slice(0, 28)}...」`)
+  }
 
   const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1)
     && (quotedDialogueCount < 2 || coreRoles.filter(s => s.dramaticScore >= 2).length < 2)
 
   const totalWeakProportion = weak.length / coreRoles.length
   const isFlattenedDialogue = clearlyFlattened
+    || repeatedDialogues.length > 0
     || (weak.length > 0 && (totalWeakProportion >= 0.5 || (quotedDialogueCount >= 1 && coreRoles.length <= 2)))
 
   if (isFlattenedDialogue) {
@@ -4625,12 +4714,16 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       if (!entry.hasActiveStanceEvidence) missingDims.push("推动局势的动作选择")
       if (!entry.hasRelationEvidence) missingDims.push("与其他角色的信任/敌对/债务关系")
       if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("自然对白或可见行为呈现")
+      if (entry.explicitDossierFieldCount >= 2 && entry.dossierEvidenceCount === 0) missingDims.push("角色档案专属习惯/口吻/能力证据")
       if (missingDims.length === 0) missingDims.push("表达方式过于同质化，缺少具体场景分歧")
       return `${entry.name}(缺少: ${missingDims.join("、")})`
     }).join("; ")
+    const repeatedReason = repeatedDialogues.length
+      ? ` 跨角色对白复用：${repeatedDialogues[0].speakers.join("、")} 都说出近似句「${repeatedDialogues[0].sample.slice(0, 28)}...」。`
+      : ""
     return {
       status: "quarantined" as const,
-      reason: `角色差异化不足：核心出场人物中 ${flaggedRoles.map(w => w.name).join("、")} 缺少目标、选择或关系压力，被概括为同质化模板对白。具体细节: ${weakDetails}`,
+      reason: `角色差异化不足：核心出场人物中 ${flaggedRoles.map(w => w.name).join("、")} 缺少目标、选择或关系压力，被概括为同质化模板对白。${repeatedReason}具体细节: ${weakDetails}`,
       observedCast: cast,
       missing,
     }
@@ -8858,6 +8951,9 @@ async function runQualityGateWithRevisions(
   approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
 ) {
   const maxAttempts = options.maxRevisionAttempts !== undefined ? options.maxRevisionAttempts : 3
+  const forcedQualityScoreForTest = process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number"
+    ? Math.max(0, Math.min(10, Math.round(options.forceQualityScoreForTest)))
+    : undefined
   let draft = initialDraft
   let report = ""
   let gate: QualityGateResult = {
@@ -8871,13 +8967,28 @@ async function runQualityGateWithRevisions(
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options)
     report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers, approvedStyleContext)
-    if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
-      report = report.replace(/综合评分 \| \d+\/10/u, `综合评分 | ${options.forceQualityScoreForTest}/10`)
-      if (options.forceQualityScoreForTest < 7 && !report.includes("需要返工")) {
-        report = `${report}\n- 需要返工：测试强制质量分低于阈值。`
+    if (typeof forcedQualityScoreForTest === "number") {
+      const forcedSummary = `| 综合评分 | ${forcedQualityScoreForTest}/10 | ${forcedQualityScoreForTest >= 7 ? "可进入润色。" : "需要返工。"} |`
+      report = /\|\s*综合评分\s*\|\s*\d+\/10\s*\|[^|\n]*\|/u.test(report)
+        ? report.replace(/\|\s*综合评分\s*\|\s*\d+\/10\s*\|[^|\n]*\|/u, forcedSummary)
+        : `${report.trimEnd()}\n${forcedSummary}`
+      if (forcedQualityScoreForTest < 7) {
+        const forcedBlocker = "QUALITY_GATE: blocked\n- 需要返工：测试强制质量分低于阈值，不能进入 complete。"
+        if (!report.includes("测试强制质量分低于阈值")) {
+          report = `${report.trimEnd()}\n${forcedBlocker}`
+        }
       }
     }
     gate = parseQualityGate(report, attempt, maxAttempts)
+    if (typeof forcedQualityScoreForTest === "number" && forcedQualityScoreForTest < 7 && attempt >= maxAttempts) {
+      gate = {
+        ...gate,
+        passed: false,
+        score: forcedQualityScoreForTest,
+        status: "blocked",
+        reason: `综合评分 ${forcedQualityScoreForTest}/10，低于通过阈值。`,
+      }
+    }
 
     if (gate.passed || attempt >= maxAttempts) {
       return { draft, report, gate }

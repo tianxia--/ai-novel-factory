@@ -6761,8 +6761,9 @@ function throwIfPipelineAborted(options) {
   throwIfStopped(options.signal);
 }
 function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
+  const summaryScoreMatches = [...report.matchAll(/(?:^|\n)\s*\|?\s*(?:综合评分|overall\s*score|overall|score)\s*(?:\||[:：])\s*(\d{1,2})(?:\s*\/\s*10)?/giu)];
   const scoreMatches = [...report.matchAll(/(?:综合评分|overall|score)[^\d]{0,12}(\d{1,2})(?:\s*\/\s*10)?/giu)];
-  const score = scoreMatches.length ? Math.max(...scoreMatches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value))) : report.includes("needs-manual-review") || report.includes("\u9700\u8981\u8FD4\u5DE5") ? 5 : 8;
+  const score = summaryScoreMatches.length ? Number(summaryScoreMatches[summaryScoreMatches.length - 1][1]) : scoreMatches.length ? Math.max(...scoreMatches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value))) : report.includes("needs-manual-review") || report.includes("\u9700\u8981\u8FD4\u5DE5") ? 5 : 8;
   const wordMatch = report.match(/WORD_COUNT_CHECK:\s*(\d+)\s*\/\s*(\d+)/u);
   const countedWords = wordMatch ? Number(wordMatch[1]) : void 0;
   const targetWords = wordMatch ? Number(wordMatch[2]) : void 0;
@@ -6781,7 +6782,7 @@ function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
     /not blocked/giu
   ];
   const blockingScanText = nonBlockingPhrases.reduce((text, pattern) => text.replace(pattern, ""), report);
-  const hasBlockingIssue = !explicitPassMarker && (explicitBlockMarker || /严重问题|必须返工|需要返工|质量不足|低于.*门槛|不能进入\s*complete|manual review|manual-review/u.test(blockingScanText) || /\bblocked\b/iu.test(blockingScanText));
+  const hasBlockingIssue = explicitBlockMarker || !explicitPassMarker && (/严重问题|必须返工|需要返工|质量不足|低于.*门槛|不能进入\s*complete|manual review|manual-review/u.test(blockingScanText) || /\bblocked\b/iu.test(blockingScanText));
   const passed = score >= 7 && !hasBlockingIssue && !wordCountBlockingIssue;
   const status = passed ? "passed" : attempts >= maxAttempts ? "blocked" : "needs_revision";
   return {
@@ -9006,7 +9007,59 @@ function extractCharacterEvidenceWindow(body, index, nameLength) {
   const rightCandidates = ["\n", "\u3002", "\uFF01", "\uFF1F", "\uFF1B", ";"].map((delimiter) => body.indexOf(delimiter, index + nameLength)).filter((position) => position >= 0);
   const sentenceStart = leftBoundary >= 0 ? leftBoundary + 1 : Math.max(0, index - 24);
   const sentenceEnd = rightCandidates.length ? Math.min(...rightCandidates) : Math.min(body.length, index + nameLength + 48);
-  return body.slice(sentenceStart, sentenceEnd);
+  const pronounTail = body.slice(sentenceEnd, Math.min(body.length, sentenceEnd + 140)).match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人)[^。！？!?；;\n]{4,120}/u);
+  const windowEnd = pronounTail ? Math.min(body.length, sentenceEnd + pronounTail[0].length) : sentenceEnd;
+  return body.slice(sentenceStart, windowEnd);
+}
+function textContainsOtherCastName(text, currentName, cast) {
+  return cast.some((name) => name && name !== currentName && text.includes(name));
+}
+function collectRegexGroupMatches(body, pattern, groupIndex = 1) {
+  const matches = [];
+  for (const match of body.matchAll(pattern)) {
+    const value = match[groupIndex];
+    if (value) {
+      matches.push(value.trim());
+    }
+  }
+  return matches;
+}
+function extractAttributedCharacterDialogues(body, name, cast) {
+  const escapedName = escapeRegExpLiteral(name);
+  const speechVerb = "(?:\u8BF4|\u95EE|\u9053|\u558A|\u4F4E\u58F0|\u51B7\u7B11|\u7B54|\u53F9|\u5524|\u559D|\u56DE|\u63D0\u9192|\u50AC\u4FC3|\u5F00\u53E3|\u63A5\u8BDD)";
+  const dialogues = [
+    ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,50}${speechVerb}[^\u300C\u201C\\n]{0,24}[\u300C\u201C]([^\u300D\u201D]{2,120})[\u300D\u201D]`, "gu")),
+    ...collectRegexGroupMatches(body, new RegExp(`[\u300C\u201C]([^\u300D\u201D]{2,120})[\u300D\u201D][^\u3002\uFF01\uFF1F!?\uFF1B;\\n]{0,45}${escapedName}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]{0,30}${speechVerb}`, "gu")),
+    ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]{0,50}${speechVerb}[^\uFF1A:\\n]{0,20}[\uFF1A:]\\s*[\u300C\u201C]?([^\u300D\u201D\u3002\uFF01\uFF1F!?\uFF1B;\\n]{2,80})[\u300D\u201D]?`, "gu"))
+  ];
+  const immediateQuotePattern = new RegExp(`${escapedName}([^\u300C\u201C\\n]{0,100})[\u3002\uFF01\uFF1F!?\uFF1B;]\\s*[\u300C\u201C]([^\u300D\u201D]{2,120})[\u300D\u201D]`, "gu");
+  for (const match of body.matchAll(immediateQuotePattern)) {
+    const bridge = match[1] || "";
+    const quote = match[2] || "";
+    if (quote && !textContainsOtherCastName(bridge, name, cast)) {
+      dialogues.push(quote.trim());
+    }
+  }
+  return uniqueStrings(dialogues.filter((dialogue) => dialogue.length >= 2)).slice(0, 12);
+}
+function normalizeDialogueForVoiceCompare(dialogue) {
+  return dialogue.replace(/[“”「」『』"'`，。！？!?；;：:\s、,.]/gu, "").replace(/^(我|你|他|她|咱们|我们|你们|他们|她们)/u, "").trim();
+}
+function findRepeatedDialogueAcrossCharacters(scored) {
+  const byDialogue = /* @__PURE__ */ new Map();
+  for (const entry of scored) {
+    for (const dialogue of entry.dialogues || []) {
+      const normalized = normalizeDialogueForVoiceCompare(dialogue);
+      if (normalized.length < 8) continue;
+      const current = byDialogue.get(normalized) || { sample: dialogue, speakers: /* @__PURE__ */ new Set() };
+      current.speakers.add(entry.name);
+      byDialogue.set(normalized, current);
+    }
+  }
+  return Array.from(byDialogue.values()).filter((entry) => entry.speakers.size >= 2).map((entry) => ({
+    sample: entry.sample,
+    speakers: Array.from(entry.speakers)
+  }));
 }
 function evaluateCharacterVoiceDifferentiation(draft, contract) {
   const body = extractNarrativeBody(draft);
@@ -9026,6 +9079,11 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     "\u5355\u7AE0\u5B57\u6570",
     "\u6210\u8BED",
     "\u7AE0\u4EE5\u540E",
+    "\u4E3B\u89D2",
+    "\u914D\u89D2",
+    "\u5BF9\u6297\u529B\u91CF",
+    "\u5173\u952E\u5173\u7CFB\u5BF9\u8C61",
+    "\u670D\u52A1\u9996\u7AE0\u4E8B\u4EF6\u7684\u5173\u7CFB\u89D2\u8272",
     // 常见时间词，避免被误识别为角色名
     "\u65F6\u5019",
     "\u8FD9\u65F6",
@@ -9094,18 +9152,12 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       }
     }
     const windows = localWindows.join("\n");
-    const hasDialogue = /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
+    const dialogues = extractAttributedCharacterDialogues(body, name, cast);
+    const dialogueText = dialogues.join("\n");
+    const hasDialogue = dialogues.length > 0 || /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
     const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
     const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows);
     const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows);
-    const dialogues = [];
-    const dialoguePattern = new RegExp(`(?:${escapeRegExpLiteral(name)})[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]*?[\u8BF4\u95EE\u9053\u558A\u7B11\u53F9\u58F0\u9053][^\u300D\u201D]*?[\u300C\u201C]([^\u300D\u201D]+?)[\u300D\u201D]`, "gu");
-    for (const match2 of body.matchAll(dialoguePattern)) {
-      if (match2[1]) {
-        dialogues.push(match2[1]);
-      }
-    }
-    const dialogueText = dialogues.join("\n");
     const dossier = dossiers.find((d) => d.canonicalName === name || d.aliases?.includes(name));
     let hasHabitEvidence = false;
     let hasSpeechEvidence = false;
@@ -9117,11 +9169,15 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     let matchedSpeech = [];
     let matchedRelations = [];
     let matchedSkills = [];
+    let explicitDossierFieldCount = 0;
+    let dossierEvidenceCount = 0;
     if (dossier) {
       const habitKeywords = extractKeywords(dossier.behaviorHabits || []);
+      if (habitKeywords.length) explicitDossierFieldCount += 1;
       matchedHabits = habitKeywords.filter((k) => windows.includes(k));
       hasHabitEvidence = matchedHabits.length > 0 || habitKeywords.length === 0 && hasGeneralHabit;
       const speechKeywords = extractKeywords(dossier.speechMarkers || []);
+      if (speechKeywords.length) explicitDossierFieldCount += 1;
       matchedSpeech = speechKeywords.filter((k) => dialogueText.includes(k) || windows.includes(k));
       hasSpeechEvidence = matchedSpeech.length > 0 || speechKeywords.length === 0 && hasDialogue;
       const relations = [
@@ -9129,6 +9185,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
         ...(dossier.relationshipEdges || []).map((e) => `${e.label} ${e.pressure}`)
       ];
       const relationKeywords = extractKeywords(relations);
+      if (relationKeywords.length) explicitDossierFieldCount += 1;
       matchedRelations = relationKeywords.filter((k) => windows.includes(k));
       hasRelationEvidence = matchedRelations.length > 0;
       const skillsAndLimits = [
@@ -9137,10 +9194,17 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
         dossier.appearanceAndBody || ""
       ];
       const skillKeywords = extractKeywords(skillsAndLimits);
+      if (skillKeywords.length) explicitDossierFieldCount += 1;
       matchedSkills = skillKeywords.filter((k) => windows.includes(k));
       hasSkillLimitationEvidence = matchedSkills.length > 0;
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence;
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence;
+      dossierEvidenceCount = [
+        matchedHabits.length > 0,
+        matchedSpeech.length > 0,
+        matchedRelations.length > 0,
+        matchedSkills.length > 0
+      ].filter(Boolean).length;
     } else {
       hasHabitEvidence = hasGeneralHabit;
       hasSpeechEvidence = hasDialogue;
@@ -9177,6 +9241,9 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       hasSkillLimitationEvidence,
       hasGoalPressureEvidence,
       hasActiveStanceEvidence,
+      dialogues,
+      explicitDossierFieldCount,
+      dossierEvidenceCount,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
@@ -9194,6 +9261,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     };
   }
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2);
+  const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles);
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length;
   const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length;
   const relationCarriers = coreRoles.filter((entry) => entry.hasRelationEvidence).length;
@@ -9210,9 +9278,13 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
   if (weak.length) {
     missing.push(`\u5F31\u6838\u5FC3\u89D2\u8272\u4FE1\u53F7\uFF08\u7F3A\u5C11\u76EE\u6807/\u9009\u62E9/\u5173\u7CFB\u538B\u529B\uFF09\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`);
   }
+  if (repeatedDialogues.length) {
+    const first = repeatedDialogues[0];
+    missing.push(`\u8DE8\u89D2\u8272\u5BF9\u767D\u590D\u7528\uFF1A${first.speakers.join("\u3001")} \u90FD\u8BF4\u51FA\u8FD1\u4F3C\u53E5\u300C${first.sample.slice(0, 28)}...\u300D`);
+  }
   const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || coreRoles.filter((s) => s.dramaticScore >= 2).length < 2);
   const totalWeakProportion = weak.length / coreRoles.length;
-  const isFlattenedDialogue = clearlyFlattened || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
+  const isFlattenedDialogue = clearlyFlattened || repeatedDialogues.length > 0 || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
   if (isFlattenedDialogue) {
     const flaggedRoles = weak.length ? weak : coreRoles;
     const weakDetails = flaggedRoles.map((entry) => {
@@ -9221,12 +9293,14 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       if (!entry.hasActiveStanceEvidence) missingDims.push("\u63A8\u52A8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9");
       if (!entry.hasRelationEvidence) missingDims.push("\u4E0E\u5176\u4ED6\u89D2\u8272\u7684\u4FE1\u4EFB/\u654C\u5BF9/\u503A\u52A1\u5173\u7CFB");
       if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("\u81EA\u7136\u5BF9\u767D\u6216\u53EF\u89C1\u884C\u4E3A\u5448\u73B0");
+      if (entry.explicitDossierFieldCount >= 2 && entry.dossierEvidenceCount === 0) missingDims.push("\u89D2\u8272\u6863\u6848\u4E13\u5C5E\u4E60\u60EF/\u53E3\u543B/\u80FD\u529B\u8BC1\u636E");
       if (missingDims.length === 0) missingDims.push("\u8868\u8FBE\u65B9\u5F0F\u8FC7\u4E8E\u540C\u8D28\u5316\uFF0C\u7F3A\u5C11\u5177\u4F53\u573A\u666F\u5206\u6B67");
       return `${entry.name}(\u7F3A\u5C11: ${missingDims.join("\u3001")})`;
     }).join("; ");
+    const repeatedReason = repeatedDialogues.length ? ` \u8DE8\u89D2\u8272\u5BF9\u767D\u590D\u7528\uFF1A${repeatedDialogues[0].speakers.join("\u3001")} \u90FD\u8BF4\u51FA\u8FD1\u4F3C\u53E5\u300C${repeatedDialogues[0].sample.slice(0, 28)}...\u300D\u3002` : "";
     return {
       status: "quarantined",
-      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A\u6838\u5FC3\u51FA\u573A\u4EBA\u7269\u4E2D ${flaggedRoles.map((w) => w.name).join("\u3001")} \u7F3A\u5C11\u76EE\u6807\u3001\u9009\u62E9\u6216\u5173\u7CFB\u538B\u529B\uFF0C\u88AB\u6982\u62EC\u4E3A\u540C\u8D28\u5316\u6A21\u677F\u5BF9\u767D\u3002\u5177\u4F53\u7EC6\u8282: ${weakDetails}`,
+      reason: `\u89D2\u8272\u5DEE\u5F02\u5316\u4E0D\u8DB3\uFF1A\u6838\u5FC3\u51FA\u573A\u4EBA\u7269\u4E2D ${flaggedRoles.map((w) => w.name).join("\u3001")} \u7F3A\u5C11\u76EE\u6807\u3001\u9009\u62E9\u6216\u5173\u7CFB\u538B\u529B\uFF0C\u88AB\u6982\u62EC\u4E3A\u540C\u8D28\u5316\u6A21\u677F\u5BF9\u767D\u3002${repeatedReason}\u5177\u4F53\u7EC6\u8282: ${weakDetails}`,
       observedCast: cast,
       missing
     };
@@ -12834,6 +12908,7 @@ ${prunedContext.previousDraftFragment}` : "",
 }
 async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   const maxAttempts = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
+  const forcedQualityScoreForTest = process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number" ? Math.max(0, Math.min(10, Math.round(options.forceQualityScoreForTest))) : void 0;
   let draft = initialDraft;
   let report = "";
   let gate = {
@@ -12846,14 +12921,28 @@ async function runQualityGateWithRevisions(state, task, initialDraft, blueprint,
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
     throwIfPipelineAborted(options);
     report = await createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract, characterDossiers, approvedStyleContext);
-    if (process.env.AI_NOVEL_TEST_MODE === "1" && typeof options.forceQualityScoreForTest === "number") {
-      report = report.replace(/综合评分 \| \d+\/10/u, `\u7EFC\u5408\u8BC4\u5206 | ${options.forceQualityScoreForTest}/10`);
-      if (options.forceQualityScoreForTest < 7 && !report.includes("\u9700\u8981\u8FD4\u5DE5")) {
-        report = `${report}
-- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6D4B\u8BD5\u5F3A\u5236\u8D28\u91CF\u5206\u4F4E\u4E8E\u9608\u503C\u3002`;
+    if (typeof forcedQualityScoreForTest === "number") {
+      const forcedSummary = `| \u7EFC\u5408\u8BC4\u5206 | ${forcedQualityScoreForTest}/10 | ${forcedQualityScoreForTest >= 7 ? "\u53EF\u8FDB\u5165\u6DA6\u8272\u3002" : "\u9700\u8981\u8FD4\u5DE5\u3002"} |`;
+      report = /\|\s*综合评分\s*\|\s*\d+\/10\s*\|[^|\n]*\|/u.test(report) ? report.replace(/\|\s*综合评分\s*\|\s*\d+\/10\s*\|[^|\n]*\|/u, forcedSummary) : `${report.trimEnd()}
+${forcedSummary}`;
+      if (forcedQualityScoreForTest < 7) {
+        const forcedBlocker = "QUALITY_GATE: blocked\n- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6D4B\u8BD5\u5F3A\u5236\u8D28\u91CF\u5206\u4F4E\u4E8E\u9608\u503C\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002";
+        if (!report.includes("\u6D4B\u8BD5\u5F3A\u5236\u8D28\u91CF\u5206\u4F4E\u4E8E\u9608\u503C")) {
+          report = `${report.trimEnd()}
+${forcedBlocker}`;
+        }
       }
     }
     gate = parseQualityGate(report, attempt, maxAttempts);
+    if (typeof forcedQualityScoreForTest === "number" && forcedQualityScoreForTest < 7 && attempt >= maxAttempts) {
+      gate = {
+        ...gate,
+        passed: false,
+        score: forcedQualityScoreForTest,
+        status: "blocked",
+        reason: `\u7EFC\u5408\u8BC4\u5206 ${forcedQualityScoreForTest}/10\uFF0C\u4F4E\u4E8E\u901A\u8FC7\u9608\u503C\u3002`
+      };
+    }
     if (gate.passed || attempt >= maxAttempts) {
       return { draft, report, gate };
     }
