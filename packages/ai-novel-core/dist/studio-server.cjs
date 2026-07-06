@@ -9951,6 +9951,21 @@ function compactPreviousSegmentTail(text, maxChars = 800) {
   const compacted = selected.join("\n\n");
   return compacted.length > maxChars ? compacted.slice(-maxChars).trim() : compacted;
 }
+function compactAssemblyReferenceBody(text, maxChars = 900) {
+  const paragraphs = text.split(/\n{2,}/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const selected = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const paragraph of paragraphs) {
+    const fingerprint = normalizeTailParagraph(paragraph);
+    if (!fingerprint || seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    selected.push(paragraph);
+  }
+  const compacted = selected.join("\n\n") || text.trim();
+  return clipPromptSection(compacted, maxChars);
+}
 function sceneTypeForChapter(state, chapterNumber) {
   const genre = inferGenreProfile(state);
   const sequence = genre.vocabularyScenes;
@@ -14133,7 +14148,7 @@ ${input.previousSegmentTail}` : "",
       materialBlock("continuity", input.materials.continuity),
       "",
       input.fallbackBody ? `## Existing Author Segment For Reference
-${clipPromptSection(input.fallbackBody, 1400)}` : "",
+${compactAssemblyReferenceBody(input.fallbackBody)}` : "",
       "",
       "\u8F93\u51FA\u8981\u6C42\uFF1A\u53EA\u8FD4\u56DE\u8FDE\u7EED\u5C0F\u8BF4\u6B63\u6587\uFF1B\u52A8\u4F5C\u3001\u5BF9\u767D\u3001\u65C1\u767D\u5FC5\u987B\u4EA4\u9519\uFF1B\u4E0D\u5F97\u63D0\u524D\u5199\u540E\u7EED\u7247\u6BB5\uFF1B\u4E0D\u5F97\u6CC4\u9732 continuity \u7981\u5199\u4E8B\u5B9E\u3002"
     ].filter(Boolean).join("\n"),

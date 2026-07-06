@@ -2329,6 +2329,27 @@ export function compactPreviousSegmentTail(text: string, maxChars = 800): string
   return compacted.length > maxChars ? compacted.slice(-maxChars).trim() : compacted
 }
 
+function compactAssemblyReferenceBody(text: string, maxChars = 900): string {
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+  const selected: string[] = []
+  const seen = new Set<string>()
+
+  for (const paragraph of paragraphs) {
+    const fingerprint = normalizeTailParagraph(paragraph)
+    if (!fingerprint || seen.has(fingerprint)) {
+      continue
+    }
+    seen.add(fingerprint)
+    selected.push(paragraph)
+  }
+
+  const compacted = selected.join("\n\n") || text.trim()
+  return clipPromptSection(compacted, maxChars)
+}
+
 function sceneTypeForChapter(state: AutonomousNovelState, chapterNumber: number) {
   const genre = inferGenreProfile(state)
   const sequence = genre.vocabularyScenes
@@ -7325,7 +7346,7 @@ async function generateDraftSegmentAssemblyMaterial(input: {
       "",
       materialBlock("continuity", input.materials.continuity),
       "",
-      input.fallbackBody ? `## Existing Author Segment For Reference\n${clipPromptSection(input.fallbackBody, 1400)}` : "",
+      input.fallbackBody ? `## Existing Author Segment For Reference\n${compactAssemblyReferenceBody(input.fallbackBody)}` : "",
       "",
       "输出要求：只返回连续小说正文；动作、对白、旁白必须交错；不得提前写后续片段；不得泄露 continuity 禁写事实。",
     ].filter(Boolean).join("\n"),

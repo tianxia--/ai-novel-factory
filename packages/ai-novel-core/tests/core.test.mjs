@@ -8787,6 +8787,11 @@ test("chapter drafting can route selected segment materials through optional LLM
     assert.ok(receivedBodies.some((body) => /Character Action|人物行动素材/u.test(JSON.stringify(body))))
     assert.ok(receivedBodies.some((body) => /Continuity|连续性检查素材/u.test(JSON.stringify(body))))
     assert.ok(receivedBodies.some((body) => /Assembly|组装当前片段候选正文/u.test(JSON.stringify(body))))
+    const assemblyRequest = receivedBodies.find((body) => /请根据分项素材组装当前片段候选正文/u.test(JSON.stringify(body)))
+    assert.ok(assemblyRequest)
+    const assemblyRequestText = JSON.stringify(assemblyRequest)
+    assert.equal((assemblyRequestText.match(/雨声压住账房的窗纸/g) || []).length, 1)
+    assert.equal((assemblyRequestText.match(/老周站在门槛外/g) || []).length, 1)
   } finally {
     await new Promise((resolve) => server.close(resolve))
     if (previousTestMode === undefined) {

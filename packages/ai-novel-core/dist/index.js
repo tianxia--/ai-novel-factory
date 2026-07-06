@@ -4,7 +4,7 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-EFBF4KLY.js";
+} from "./chunk-3XAASV7U.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage
@@ -14,7 +14,7 @@ import {
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-NP5F4MJ4.js";
+} from "./chunk-DMYO336L.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -58,7 +58,7 @@ import {
   upsertDiscussionInSuperGraph,
   upsertProjectEnvValues,
   validateSuperGraph
-} from "./chunk-O5DQXMDR.js";
+} from "./chunk-XMLYFC7I.js";
 import {
   ProductionReadinessBlockedError,
   acceptStyleEvolutionCandidate,
@@ -144,7 +144,7 @@ import {
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-6L3LYHIE.js";
+} from "./chunk-CFHRAWEW.js";
 import {
   createAigcDetectorClient,
   detectAigcSegments,
