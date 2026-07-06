@@ -32,7 +32,7 @@ const DEFAULT_CHAPTERS = 40
 const DEFAULT_CHAPTER_WORDS = 3000
 const DEFAULT_STYLE_MAX_REQUESTS = 8
 
-class AcceptanceError extends Error {
+export class AcceptanceError extends Error {
   constructor(message, details = {}) {
     super(message)
     this.name = "AcceptanceError"
@@ -452,6 +452,257 @@ function detectorReady(settingsPayload) {
   if (detector.provider === "disabled") return false
   if (detector.provider === "local-heuristic") return true
   return Boolean(String(detector.url || "").trim())
+}
+
+function getObjectPath(value, pathExpression) {
+  return String(pathExpression || "")
+    .split(".")
+    .filter(Boolean)
+    .reduce((current, key) => current && typeof current === "object" ? current[key] : undefined, value)
+}
+
+function isFilledAcceptanceValue(value) {
+  if (Array.isArray(value)) return value.length > 0
+  if (value && typeof value === "object") return Object.keys(value).length > 0
+  return String(value || "").trim().length > 0
+}
+
+function countArrayValue(value) {
+  return Array.isArray(value) ? value.length : 0
+}
+
+function acceptanceJsonSize(value) {
+  try {
+    return JSON.stringify(value || {}).length
+  } catch {
+    return 0
+  }
+}
+
+function normalizeAuditText(value) {
+  return String(value || "")
+    .replace(/[“”「」『』"'`，。！？!?；;：:\s、,.]/gu, "")
+    .trim()
+}
+
+function splitBodyParagraphs(body) {
+  return String(body || "")
+    .split(/\n{2,}/u)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function countMatches(text, pattern) {
+  return (String(text || "").match(pattern) || []).length
+}
+
+function extractKnownCastNames(snapshot) {
+  const dossiers = Array.isArray(snapshot?.characters?.dossiers) ? snapshot.characters.dossiers : []
+  const names = []
+  for (const dossier of dossiers) {
+    const canonicalName = String(dossier?.canonicalName || dossier?.name || "").trim()
+    if (canonicalName) names.push(canonicalName)
+    for (const alias of Array.isArray(dossier?.aliases) ? dossier.aliases : []) {
+      const value = String(alias || "").trim()
+      if (value) names.push(value)
+    }
+  }
+  const relationshipGraph = snapshot?.characters?.relationshipGraph
+  const graphCharacters = Array.isArray(relationshipGraph?.characters) ? relationshipGraph.characters : []
+  for (const character of graphCharacters) {
+    const name = String(character?.name || character?.canonicalName || "").trim()
+    if (name) names.push(name)
+  }
+  return [...new Set(names.filter((name) => name.length >= 2 && !/^(主角|配角|对抗力量|关键关系对象)$/u.test(name)))]
+}
+
+export function auditStoryFoundationForAcceptance(snapshot, options = {}) {
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || 0)
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const issues = []
+  const assetChecks = [
+    ["contract", ["genre.readerPromise", "plot.causalModel", "plot.chapters", "characters.requiredDossierFields", "foreshadowing.ledgerRules", "volumes"]],
+    ["worldMatrix", ["rules", "continuityAnchors"]],
+    ["plotArchitecture", ["chapters", "timeline", "escalationRules"]],
+    ["storyBible", ["readerPromise", "nonNegotiableContracts", "characterStateDeltas"]],
+    ["volumeStrategy", ["volumes", "contractRules"]],
+    ["foreshadowingLedger", ["rules", "entries"]],
+    ["characterDynamics", ["relationshipEntries", "chapterStateDeltas", "relationshipRules"]],
+    ["writingPlan", ["chapters", "totalChapters", "writingMode"]],
+  ]
+  const assets = assetChecks.map(([key, requiredPaths]) => {
+    const value = foundation[key]
+    const size = acceptanceJsonSize(value)
+    if (!value || typeof value !== "object" || size < 40) {
+      issues.push(`story foundation asset missing or too thin: ${key}`)
+    }
+    for (const requiredPath of requiredPaths) {
+      if (!isFilledAcceptanceValue(getObjectPath(value, requiredPath))) {
+        issues.push(`story foundation asset ${key} missing ${requiredPath}`)
+      }
+    }
+    return { key, size }
+  })
+
+  const contract = foundation.contract || {}
+  const plotChapters = getObjectPath(contract, "plot.chapters")
+  const stateDeltas = getObjectPath(contract, "characters.stateDeltas")
+    || getObjectPath(foundation.characterDynamics, "chapterStateDeltas")
+  const relationshipEntries = getObjectPath(contract, "characters.relationshipEntries")
+    || getObjectPath(foundation.characterDynamics, "relationshipEntries")
+  const foreshadowingEntries = getObjectPath(foundation.foreshadowingLedger, "entries")
+    || getObjectPath(contract, "foreshadowing.entries")
+  const volumeContracts = getObjectPath(contract, "volumes") || getObjectPath(foundation.volumeStrategy, "volumes")
+  const expectedForeshadowing = totalChapters > 0 ? Math.max(3, Math.ceil(totalChapters / 4)) : 3
+
+  if (totalChapters > 0 && countArrayValue(plotChapters) < totalChapters) {
+    issues.push(`plot chapter contract count ${countArrayValue(plotChapters)} is below total chapters ${totalChapters}`)
+  }
+  if (totalChapters > 0 && countArrayValue(stateDeltas) < totalChapters) {
+    issues.push(`character state delta count ${countArrayValue(stateDeltas)} is below total chapters ${totalChapters}`)
+  }
+  if (countArrayValue(relationshipEntries) < 1) {
+    issues.push("character relationship entries are missing")
+  }
+  if (countArrayValue(foreshadowingEntries) < expectedForeshadowing) {
+    issues.push(`foreshadowing entries ${countArrayValue(foreshadowingEntries)} below required ${expectedForeshadowing}`)
+  }
+  if (countArrayValue(volumeContracts) < 1) {
+    issues.push("volume strategy is missing")
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    assets,
+    counts: {
+      totalChapters,
+      plotChapters: countArrayValue(plotChapters),
+      characterStateDeltas: countArrayValue(stateDeltas),
+      relationshipEntries: countArrayValue(relationshipEntries),
+      foreshadowingEntries: countArrayValue(foreshadowingEntries),
+      volumes: countArrayValue(volumeContracts),
+    },
+  }
+}
+
+export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const project = snapshot?.project || {}
+  const targetWords = Number(options.chapterWords || project.chapterWordTarget || 0)
+  const knownCast = extractKnownCastNames(snapshot)
+  const issues = []
+  const chapterAudits = []
+  const repeatedDialogues = new Map()
+  let totalDialogue = 0
+  let totalActionSignals = 0
+  let totalSensorySignals = 0
+  let totalObjectSignals = 0
+  let hookReadyChapters = 0
+  const mentionedCast = new Set()
+
+  for (const chapter of chapters) {
+    const body = String(chapter?.body || "")
+    const wordCount = Number(chapter?.wordCount || 0)
+    const paragraphs = splitBodyParagraphs(body)
+    const paragraphCounts = new Map()
+    for (const paragraph of paragraphs) {
+      const normalized = normalizeAuditText(paragraph)
+      if (normalized.length < 28) continue
+      paragraphCounts.set(normalized, (paragraphCounts.get(normalized) || 0) + 1)
+    }
+    const repeatedParagraphs = Array.from(paragraphCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([sample, count]) => ({ sample: sample.slice(0, 80), count }))
+    const dialogues = body.match(/[「“][^」”]{2,160}[」”]/gu) || []
+    for (const dialogue of dialogues) {
+      const normalized = normalizeAuditText(dialogue)
+      if (normalized.length >= 8) {
+        repeatedDialogues.set(normalized, (repeatedDialogues.get(normalized) || 0) + 1)
+      }
+    }
+    const actionSignals = countMatches(body, /走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默|合上|推开|退|挡/gu)
+    const sensorySignals = countMatches(body, /雨|风|声|灯|冷|热|湿|血|灰|墨|纸|门|窗|脚步|气味|疼|汗|光|影/gu)
+    const objectSignals = countMatches(body, /账|册|信|印|刀|门|灯|纸|袖|钥|血|雨|窗|碑|牌|盒|卷|碗|杯|伞|鞋|衣|墨|火/gu)
+    const pressureSignals = countMatches(body, /必须|不能|决定|选择|代价|风险|欠|债|怕|查清|追问|交出|保住|隐瞒|裂缝|怀疑|逼|拦|失去|暴露/gu)
+    const tail = body.slice(-700)
+    const hasHook = /[？?]|谁|却|忽然|门外|脚步|信|账|印|刀|血|名字|下一|明日|只剩|没有答|裂缝|代价|风险|线索|仍/u.test(tail)
+    const castMentions = knownCast.filter((name) => body.includes(name))
+    for (const name of castMentions) mentionedCast.add(name)
+
+    totalDialogue += dialogues.length
+    totalActionSignals += actionSignals
+    totalSensorySignals += sensorySignals
+    totalObjectSignals += objectSignals
+    if (hasHook) hookReadyChapters += 1
+
+    const chapterIssues = []
+    if (!body.trim()) chapterIssues.push("empty body")
+    if (targetWords > 0 && wordCount < Math.floor(targetWords * 0.8)) {
+      chapterIssues.push(`word count ${wordCount} below 80% of target ${targetWords}`)
+    }
+    if (repeatedParagraphs.length > 0) chapterIssues.push("repeated paragraph loop")
+    if (actionSignals < 8) chapterIssues.push(`weak action signal count ${actionSignals}`)
+    if (sensorySignals < 4) chapterIssues.push(`weak sensory/object scene grounding ${sensorySignals}`)
+    if (objectSignals < 4) chapterIssues.push(`weak concrete object grounding ${objectSignals}`)
+    if (pressureSignals < 3) chapterIssues.push(`weak relationship/choice pressure ${pressureSignals}`)
+    if (!hasHook) chapterIssues.push("missing chapter tail hook")
+    if (castMentions.length === 0 && knownCast.length > 0) chapterIssues.push("no known cast mention")
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      wordCount,
+      dialogueCount: dialogues.length,
+      actionSignals,
+      sensorySignals,
+      objectSignals,
+      pressureSignals,
+      hookReady: hasHook,
+      castMentions,
+      repeatedParagraphs: repeatedParagraphs.slice(0, 3),
+      issues: chapterIssues,
+    })
+  }
+
+  const repeatedDialogueSamples = Array.from(repeatedDialogues.entries())
+    .filter(([, count]) => count >= 3)
+    .map(([sample, count]) => ({ sample: sample.slice(0, 80), count }))
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const requiredDialogue = Math.max(3, Math.ceil((totalChapters || chapters.length) * 1.5))
+  if (chapters.length === 0) issues.push("no readable chapters available for narrative audit")
+  if (totalDialogue < requiredDialogue) issues.push(`dialogue count ${totalDialogue} below required ${requiredDialogue}`)
+  if (knownCast.length >= 2 && mentionedCast.size < 2) {
+    issues.push(`known cast coverage ${mentionedCast.size}/${knownCast.length} is too low`)
+  }
+  if (repeatedDialogueSamples.length > 0) {
+    issues.push(`repeated dialogue samples detected: ${repeatedDialogueSamples[0].sample}`)
+  }
+  const hookRatio = chapters.length ? hookReadyChapters / chapters.length : 0
+  if (chapters.length >= 3 && hookRatio < 0.8) {
+    issues.push(`chapter hook coverage ${(hookRatio * 100).toFixed(1)}% below 80%`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters: chapters.length,
+      totalDialogue,
+      requiredDialogue,
+      knownCast: knownCast.length,
+      mentionedCast: mentionedCast.size,
+      hookReadyChapters,
+      totalActionSignals,
+      totalSensorySignals,
+      totalObjectSignals,
+    },
+    repeatedDialogueSamples: repeatedDialogueSamples.slice(0, 5),
+    chapters: chapterAudits,
+  }
 }
 
 function collectStyleFallbackSignals(payload) {
@@ -900,6 +1151,7 @@ async function verifyReader(api, projectId, options, report) {
     /Generation Verification Gate/iu,
   ]
   const chapterChecks = []
+  const chapterBodies = []
   for (let chapterNumber = 1; chapterNumber <= totalChapters; chapterNumber += 1) {
     const chapterPayload = await api(
       "GET",
@@ -919,11 +1171,38 @@ async function verifyReader(api, projectId, options, report) {
         leaked,
       })
     }
+    chapterBodies.push({
+      chapterNumber,
+      title: chapter.title || "",
+      wordCount: Number(chapter.wordCount || 0),
+      body,
+      publishReadiness: chapter.publishReadiness || null,
+    })
     chapterChecks.push({
       chapterNumber,
       title: chapter.title || "",
       wordCount: Number(chapter.wordCount || 0),
       publishReady: chapter.publishReadiness?.ready === true,
+    })
+  }
+
+  const auditSnapshot = {
+    ...snapshot,
+    chapters: chapterBodies,
+  }
+  const storyFoundationAudit = auditStoryFoundationForAcceptance(auditSnapshot, options)
+  if (!storyFoundationAudit.passed) {
+    throw new AcceptanceError("Story foundation acceptance audit failed.", {
+      issues: storyFoundationAudit.issues.slice(0, 20),
+      counts: storyFoundationAudit.counts,
+    })
+  }
+  const narrativeAudit = auditNarrativeQualityForAcceptance(auditSnapshot, options)
+  if (!narrativeAudit.passed) {
+    throw new AcceptanceError("Narrative quality acceptance audit failed.", {
+      issues: narrativeAudit.issues.slice(0, 30),
+      summary: narrativeAudit.summary,
+      repeatedDialogueSamples: narrativeAudit.repeatedDialogueSamples,
     })
   }
 
@@ -935,8 +1214,24 @@ async function verifyReader(api, projectId, options, report) {
     totalChapters,
     chapterChecks,
   }
-  report.steps.push({ step: "reader_acceptance", status: "passed", at: now(), totalWords, readableChapters })
-  log("Reader acceptance passed.", { totalWords, readableChapters, totalChapters })
+  report.finalStoryFoundationAudit = storyFoundationAudit
+  report.finalNarrativeAudit = narrativeAudit
+  report.steps.push({
+    step: "reader_acceptance",
+    status: "passed",
+    at: now(),
+    totalWords,
+    readableChapters,
+    storyFoundation: storyFoundationAudit.counts,
+    narrative: narrativeAudit.summary,
+  })
+  log("Reader acceptance passed.", {
+    totalWords,
+    readableChapters,
+    totalChapters,
+    storyFoundation: storyFoundationAudit.counts,
+    narrative: narrativeAudit.summary,
+  })
   return snapshot
 }
 
@@ -959,6 +1254,8 @@ async function main() {
     steps: [],
     progress: [],
     finalReader: null,
+    finalStoryFoundationAudit: null,
+    finalNarrativeAudit: null,
     error: null,
   }
 
@@ -1069,4 +1366,7 @@ async function main() {
   }
 }
 
-await main()
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : ""
+if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
+  await main()
+}
