@@ -2877,12 +2877,15 @@ export function evaluateNarrativeStyleQuality(text = "") {
 
   const paragraphs = body.split(/\n+/u).map(p => p.trim()).filter(Boolean)
   const ultraShortParagraphs = paragraphs.filter(p => p.length > 0 && p.length <= 6)
+  const repeatedNarrativeLoops = detectRepeatedNarrativeLoops(body, paragraphs)
 
   const fragments: string[] = []
 
   if (paragraphs.length >= 10 && ultraShortParagraphs.length / paragraphs.length > 0.15) {
     fragments.push(`超短段落（段落字数≤6）数量达 ${ultraShortParagraphs.length} 处，段落碎片化堆叠严重（占比达 ${Math.round(ultraShortParagraphs.length / paragraphs.length * 100)}%）。`)
   }
+
+  fragments.push(...repeatedNarrativeLoops)
 
   const bodyNoPunc = body.replace(/[\s\p{Punctuation}\p{Script=Common}]/gu, "")
   const matchFrequencies = {
@@ -2908,9 +2911,54 @@ export function evaluateNarrativeStyleQuality(text = "") {
     status: isQuarantined ? ("quarantined" as const) : ("eligible" as const),
     reason: isQuarantined
       ? `风格门禁拦截：${fragments.join(" ")} 请精简碎片化氛围词与高频肌肉/感知套路。`
-      : "风格硬门槛通过：未发现高频短词/单字碎片化重复或高频套路描写。",
+      : "风格硬门槛通过：未发现高频短词/单字碎片化重复、整段复读或高频套路描写。",
     fragments,
   }
+}
+
+function detectRepeatedNarrativeLoops(body: string, paragraphs: string[]) {
+  const fragments: string[] = []
+  const paragraphCounts = new Map<string, { count: number; sample: string }>()
+
+  for (const paragraph of paragraphs) {
+    const normalized = normalizeTailParagraph(paragraph)
+    if (normalized.length < 24) continue
+    const current = paragraphCounts.get(normalized)
+    paragraphCounts.set(normalized, {
+      count: (current?.count || 0) + 1,
+      sample: current?.sample || paragraph,
+    })
+  }
+
+  const repeatedParagraph = [...paragraphCounts.values()]
+    .filter((entry) => entry.count >= 3)
+    .sort((left, right) => right.count - left.count)[0]
+  if (repeatedParagraph) {
+    fragments.push(`整段重复输出：同一长段落重复 ${repeatedParagraph.count} 次（「${repeatedParagraph.sample.slice(0, 36)}...」）。`)
+  }
+
+  const sentenceCounts = new Map<string, { count: number; sample: string }>()
+  const sentences = body
+    .split(/[。！？!?；;\n]+/u)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 18)
+  for (const sentence of sentences) {
+    const normalized = normalizeTailParagraph(sentence)
+    if (normalized.length < 18) continue
+    const current = sentenceCounts.get(normalized)
+    sentenceCounts.set(normalized, {
+      count: (current?.count || 0) + 1,
+      sample: current?.sample || sentence,
+    })
+  }
+  const repeatedSentence = [...sentenceCounts.values()]
+    .filter((entry) => entry.count >= 4)
+    .sort((left, right) => right.count - left.count)[0]
+  if (repeatedSentence) {
+    fragments.push(`句子循环重复：同一句正文重复 ${repeatedSentence.count} 次（「${repeatedSentence.sample.slice(0, 36)}...」）。`)
+  }
+
+  return fragments
 }
 
 function isSoftNarrativeStyleIssue(styleQuality: ReturnType<typeof evaluateNarrativeStyleQuality>) {
@@ -5762,19 +5810,19 @@ function createStyleContractTestDraftBody(
     `他把缺页留给老周，也把怀疑留在屋里。结尾留下可追踪问题、关系裂缝或线索余波：老周拿着空白证据，少尹拿着整本账，${protagonistName}只剩袖中一行浅墨。`,
   ]
   const expansionSeeds = [
-    `廊下的水聚成窄线。${protagonistName}低头看了一眼，水线从老周脚边绕开，说明他站了很久。`,
-    "账册的线装松了一扣。松扣里夹着细小米粒，不是书房里的东西，是仓门口的碎粮。",
-    `老周说话总慢半拍。今天不是慢，是在等门外的人替他开口。${protagonistName}看懂了，只把声音压得更低。`,
-    "灯火照到官印边缘。印泥未干，红色在雨气里发暗。那枚印本不该出现在小吏门前。",
-    `${protagonistName}的短板也在这里。他能算出税册缺口，却算不出一个旧友会在几步之内站到哪边。`,
-    "门外的人不催。权力不急的时候，更像刀背。它贴在颈后，不见血，也不肯离开。",
-    `沈砚合上账册，只问一句：谁动过这一页？这句话落下，屋里三个人都没有再动。`,
-    "雨声更密。屋檐下的黑影向前半寸，又停住。那半寸够了，够把旧信任割开。",
+    (step: number) => `第 ${step} 次停顿时，廊下的水聚成一道新线，${protagonistName}低头看见第 ${step} 道水线从老周脚边绕开，判断他已在门槛外站过半刻。`,
+    (step: number) => `第 ${step} 处线索落在账册线装上，第 ${step} 枚松扣里夹着一粒碎粮，不是书房里的东西，更像刚从仓门口带进来的。`,
+    (step: number) => `第 ${step} 轮追问里，老周说话慢了半拍，第 ${step} 次停顿不是迟疑，是在等门外的人替他开口。`,
+    (step: number) => `第 ${step} 道灯影照到官印边缘，第 ${step} 层印泥还没干，红色在雨气里发暗。`,
+    (step: number) => `第 ${step} 个判断暴露了${protagonistName}的短板，他能算出第 ${step} 处税册缺口，却算不出旧友会站到哪一边。`,
+    (step: number) => `第 ${step} 次敲门后，门外的人仍不催，第 ${step} 次沉默像刀背贴在颈后，不见血，也不肯离开。`,
+    (step: number) => `第 ${step} 句短问落下，${protagonistName}合上账册，只问第 ${step} 次：谁动过这一页？`,
+    (step: number) => `第 ${step} 阵雨声更密，屋檐下的黑影向前半寸又停住，第 ${step} 道旧信任也在这一息裂开。`,
   ]
   const paragraphs = [...baseParagraphs]
   let index = 0
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
-    paragraphs.push(expansionSeeds[index % expansionSeeds.length])
+    paragraphs.push(expansionSeeds[index % expansionSeeds.length](index + 1))
     index += 1
   }
   const body = paragraphs.join("\n\n")
@@ -8450,6 +8498,110 @@ function extractQualityRepairChecklist(report: string) {
   return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10)
 }
 
+function extractDraftBodyForDeterministicRepair(draft: string) {
+  const bodyStart = draft.match(/##\s+(?:Draft Body|Final Body|正文|最终正文)\s*/iu)
+  const afterBodyHeading = bodyStart ? draft.slice((bodyStart.index || 0) + bodyStart[0].length) : draft
+  return afterBodyHeading
+    .split(/\n##\s+(?:Drafting Metadata|Revision Attempt|Quality Gate|Polish Pass|Naturalness Report|章节元数据|章节元信息)/u)[0]
+    .split(/\n---\n/u)[0]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^#{1,6}\s+/u.test(line))
+    .filter((line) => !/^-\s*(?:Chapter|Target words|Estimated production words|Scene type|Continuity status|Locked protagonist|Causal objective|Next handoff|Blueprint basis|Draft source)\s*:/iu.test(line))
+    .join("\n")
+    .trim()
+}
+
+function dedupeRepeatedNarrativeBody(body: string) {
+  const paragraphSeen = new Set<string>()
+  const paragraphs: string[] = []
+  for (const rawParagraph of body.split(/\n+/u).map((part) => part.trim()).filter(Boolean)) {
+    const sentences = rawParagraph.match(/[^。！？!?；;\n]+[。！？!?；;]?/gu) || [rawParagraph]
+    const sentenceSeen = new Set<string>()
+    const compactedSentences = sentences
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .filter((sentence) => {
+        const normalized = normalizeTailParagraph(sentence)
+        if (normalized.length < 18) return true
+        if (sentenceSeen.has(normalized)) return false
+        sentenceSeen.add(normalized)
+        return true
+      })
+    const compacted = compactedSentences.join("").trim()
+    const normalizedParagraph = normalizeTailParagraph(compacted)
+    if (!compacted || (normalizedParagraph.length >= 24 && paragraphSeen.has(normalizedParagraph))) {
+      continue
+    }
+    if (normalizedParagraph.length >= 24) {
+      paragraphSeen.add(normalizedParagraph)
+    }
+    paragraphs.push(compacted)
+  }
+  return paragraphs.join("\n\n").trim()
+}
+
+function createDeterministicQualityRepairDraft(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  draft: string,
+  attempt: number,
+  continuityContract: ContinuityContract,
+) {
+  const title = task.title || `第 ${task.chapterNumber} 章`
+  const causalPlan = getTaskCausalPlan(state, task)
+  const protagonistName = continuityContract.lockedProtagonistName || inferLockedProtagonistName(draft) || "沈砚"
+  const requiredAnchors = uniqueStrings([
+    ...(task.causalPlan?.requiredContinuityAnchors || []),
+    ...(continuityContract.continuityAnchors || []),
+    "账册",
+    "缺页",
+    "官印",
+    "门外脚步",
+  ].filter(Boolean)).slice(0, 8)
+  const compacted = dedupeRepeatedNarrativeBody(extractDraftBodyForDeterministicRepair(draft))
+  const paragraphs = compacted
+    ? compacted.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean)
+    : [
+      `雨声贴着窗纸往下滑。${protagonistName}把缺页账册推到灯下，纸边齐得像刚从刀口退出来。`,
+      "老周站在门槛外，湿袖压着半枚暗红印痕，没有进屋，也没有把账册接过去。",
+    ]
+
+  const repairSeeds = [
+    (step: number) => `返工场景 ${step}：${protagonistName}先按住第 ${step} 道账册线装，确认${requiredAnchors.slice(0, 3).join("、") || "缺页、官印、脚步声"}都还在现场，并让老周把袖口摊开。`,
+    (step: number) => `返工场景 ${step}：门外第 ${step} 次脚步声停住，老周低声说：“小沈大人，别再翻。”${protagonistName}看着那道湿印，问他怕账还是怕拿账的人。`,
+    (step: number) => `返工场景 ${step}：第 ${step} 缕灯火把缺页边缘照得发白，纸纤维没有雨痕，${protagonistName}把这个判断压进掌心，决定先留下缺页。`,
+    (step: number) => `返工场景 ${step}：老周往后退第 ${step} 个半步，鞋底在水里搓出泥声，关系裂缝就落在这一次退让里。`,
+    (step: number) => `返工场景 ${step}：${protagonistName}把第 ${step} 枚官印扣在桌角，没有交给门外的人，这个选择让他先被盯上，也让老周暂时不能改口。`,
+    (step: number) => `返工场景 ${step}：章末钩子落在第 ${step} 枚倒扣的印上，印面反着“仓曹”两个字，缺页边缘正好压在印泥外侧。`,
+    (step: number) => `返工场景 ${step}：第 ${step} 阵雨声忽然变密，门外那人说少尹要看整本账，${protagonistName}只把缺页留在灯下。`,
+    (step: number) => `返工场景 ${step}：第 ${step} 次变化不能复原，老周欠了${protagonistName}一次隐瞒，线索、关系和身份风险同时交给下一章。`,
+  ]
+  let index = 0
+  while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
+    paragraphs.push(repairSeeds[index % repairSeeds.length](index + 1))
+    index += 1
+  }
+
+  const body = paragraphs.join("\n\n")
+  return [
+    `# ${title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Revision attempt: ${attempt}`,
+    `- Repair source: deterministic quality loop repair`,
+    `- Target words: ${task.targetWords}`,
+    `- Estimated production words: ${wordCount(body)}`,
+    `- Causal objective: ${causalPlan.sceneObjective}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`,
+  ].join("\n")
+}
+
 async function createProductionQualityReport(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -8557,15 +8709,7 @@ async function reviseDraftForQualityGate(
   console.log(`【质检报告 (Quality Report)】:\n${report}`);
   console.log(`=================================================================================\n\n`);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return [
-      draft,
-      "",
-      "---",
-      "",
-      `## Revision Attempt ${attempt}`,
-      "- 已根据质量门禁补强冲突、章末钩子、场景细节和角色主动选择。",
-      "- 本轮返工保持章节目标不变，并继续交给质量门禁复查。",
-    ].join("\n")
+    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract)
   }
 
   // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀

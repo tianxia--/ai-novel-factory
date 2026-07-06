@@ -10355,10 +10355,12 @@ function evaluateNarrativeStyleQuality(text = "") {
   const body = text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|章节元数据|章节元信息)/u)[0] || "";
   const paragraphs = body.split(/\n+/u).map((p) => p.trim()).filter(Boolean);
   const ultraShortParagraphs = paragraphs.filter((p) => p.length > 0 && p.length <= 6);
+  const repeatedNarrativeLoops = detectRepeatedNarrativeLoops(body, paragraphs);
   const fragments = [];
   if (paragraphs.length >= 10 && ultraShortParagraphs.length / paragraphs.length > 0.15) {
     fragments.push(`\u8D85\u77ED\u6BB5\u843D\uFF08\u6BB5\u843D\u5B57\u6570\u22646\uFF09\u6570\u91CF\u8FBE ${ultraShortParagraphs.length} \u5904\uFF0C\u6BB5\u843D\u788E\u7247\u5316\u5806\u53E0\u4E25\u91CD\uFF08\u5360\u6BD4\u8FBE ${Math.round(ultraShortParagraphs.length / paragraphs.length * 100)}%\uFF09\u3002`);
   }
+  fragments.push(...repeatedNarrativeLoops);
   const bodyNoPunc = body.replace(/[\s\p{Punctuation}\p{Script=Common}]/gu, "");
   const matchFrequencies = {
     "\u4E00\u50F5": (bodyNoPunc.match(/一僵/g) || []).length,
@@ -10375,9 +10377,42 @@ function evaluateNarrativeStyleQuality(text = "") {
   const isQuarantined = fragments.length > 0;
   return {
     status: isQuarantined ? "quarantined" : "eligible",
-    reason: isQuarantined ? `\u98CE\u683C\u95E8\u7981\u62E6\u622A\uFF1A${fragments.join(" ")} \u8BF7\u7CBE\u7B80\u788E\u7247\u5316\u6C1B\u56F4\u8BCD\u4E0E\u9AD8\u9891\u808C\u8089/\u611F\u77E5\u5957\u8DEF\u3002` : "\u98CE\u683C\u786C\u95E8\u69DB\u901A\u8FC7\uFF1A\u672A\u53D1\u73B0\u9AD8\u9891\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u91CD\u590D\u6216\u9AD8\u9891\u5957\u8DEF\u63CF\u5199\u3002",
+    reason: isQuarantined ? `\u98CE\u683C\u95E8\u7981\u62E6\u622A\uFF1A${fragments.join(" ")} \u8BF7\u7CBE\u7B80\u788E\u7247\u5316\u6C1B\u56F4\u8BCD\u4E0E\u9AD8\u9891\u808C\u8089/\u611F\u77E5\u5957\u8DEF\u3002` : "\u98CE\u683C\u786C\u95E8\u69DB\u901A\u8FC7\uFF1A\u672A\u53D1\u73B0\u9AD8\u9891\u77ED\u8BCD/\u5355\u5B57\u788E\u7247\u5316\u91CD\u590D\u3001\u6574\u6BB5\u590D\u8BFB\u6216\u9AD8\u9891\u5957\u8DEF\u63CF\u5199\u3002",
     fragments
   };
+}
+function detectRepeatedNarrativeLoops(body, paragraphs) {
+  const fragments = [];
+  const paragraphCounts = /* @__PURE__ */ new Map();
+  for (const paragraph of paragraphs) {
+    const normalized = normalizeTailParagraph(paragraph);
+    if (normalized.length < 24) continue;
+    const current = paragraphCounts.get(normalized);
+    paragraphCounts.set(normalized, {
+      count: (current?.count || 0) + 1,
+      sample: current?.sample || paragraph
+    });
+  }
+  const repeatedParagraph = [...paragraphCounts.values()].filter((entry) => entry.count >= 3).sort((left, right) => right.count - left.count)[0];
+  if (repeatedParagraph) {
+    fragments.push(`\u6574\u6BB5\u91CD\u590D\u8F93\u51FA\uFF1A\u540C\u4E00\u957F\u6BB5\u843D\u91CD\u590D ${repeatedParagraph.count} \u6B21\uFF08\u300C${repeatedParagraph.sample.slice(0, 36)}...\u300D\uFF09\u3002`);
+  }
+  const sentenceCounts = /* @__PURE__ */ new Map();
+  const sentences = body.split(/[。！？!?；;\n]+/u).map((sentence) => sentence.trim()).filter((sentence) => sentence.length >= 18);
+  for (const sentence of sentences) {
+    const normalized = normalizeTailParagraph(sentence);
+    if (normalized.length < 18) continue;
+    const current = sentenceCounts.get(normalized);
+    sentenceCounts.set(normalized, {
+      count: (current?.count || 0) + 1,
+      sample: current?.sample || sentence
+    });
+  }
+  const repeatedSentence = [...sentenceCounts.values()].filter((entry) => entry.count >= 4).sort((left, right) => right.count - left.count)[0];
+  if (repeatedSentence) {
+    fragments.push(`\u53E5\u5B50\u5FAA\u73AF\u91CD\u590D\uFF1A\u540C\u4E00\u53E5\u6B63\u6587\u91CD\u590D ${repeatedSentence.count} \u6B21\uFF08\u300C${repeatedSentence.sample.slice(0, 36)}...\u300D\uFF09\u3002`);
+  }
+  return fragments;
 }
 function isSoftNarrativeStyleIssue(styleQuality) {
   return styleQuality.status === "quarantined" && styleQuality.fragments.length > 0 && styleQuality.fragments.every(
@@ -12842,19 +12877,19 @@ function createStyleContractTestDraftBody(state, task, continuityContract, appro
     `\u4ED6\u628A\u7F3A\u9875\u7559\u7ED9\u8001\u5468\uFF0C\u4E5F\u628A\u6000\u7591\u7559\u5728\u5C4B\u91CC\u3002\u7ED3\u5C3E\u7559\u4E0B\u53EF\u8FFD\u8E2A\u95EE\u9898\u3001\u5173\u7CFB\u88C2\u7F1D\u6216\u7EBF\u7D22\u4F59\u6CE2\uFF1A\u8001\u5468\u62FF\u7740\u7A7A\u767D\u8BC1\u636E\uFF0C\u5C11\u5C39\u62FF\u7740\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u5269\u8896\u4E2D\u4E00\u884C\u6D45\u58A8\u3002`
   ];
   const expansionSeeds = [
-    `\u5ECA\u4E0B\u7684\u6C34\u805A\u6210\u7A84\u7EBF\u3002${protagonistName}\u4F4E\u5934\u770B\u4E86\u4E00\u773C\uFF0C\u6C34\u7EBF\u4ECE\u8001\u5468\u811A\u8FB9\u7ED5\u5F00\uFF0C\u8BF4\u660E\u4ED6\u7AD9\u4E86\u5F88\u4E45\u3002`,
-    "\u8D26\u518C\u7684\u7EBF\u88C5\u677E\u4E86\u4E00\u6263\u3002\u677E\u6263\u91CC\u5939\u7740\u7EC6\u5C0F\u7C73\u7C92\uFF0C\u4E0D\u662F\u4E66\u623F\u91CC\u7684\u4E1C\u897F\uFF0C\u662F\u4ED3\u95E8\u53E3\u7684\u788E\u7CAE\u3002",
-    `\u8001\u5468\u8BF4\u8BDD\u603B\u6162\u534A\u62CD\u3002\u4ECA\u5929\u4E0D\u662F\u6162\uFF0C\u662F\u5728\u7B49\u95E8\u5916\u7684\u4EBA\u66FF\u4ED6\u5F00\u53E3\u3002${protagonistName}\u770B\u61C2\u4E86\uFF0C\u53EA\u628A\u58F0\u97F3\u538B\u5F97\u66F4\u4F4E\u3002`,
-    "\u706F\u706B\u7167\u5230\u5B98\u5370\u8FB9\u7F18\u3002\u5370\u6CE5\u672A\u5E72\uFF0C\u7EA2\u8272\u5728\u96E8\u6C14\u91CC\u53D1\u6697\u3002\u90A3\u679A\u5370\u672C\u4E0D\u8BE5\u51FA\u73B0\u5728\u5C0F\u540F\u95E8\u524D\u3002",
-    `${protagonistName}\u7684\u77ED\u677F\u4E5F\u5728\u8FD9\u91CC\u3002\u4ED6\u80FD\u7B97\u51FA\u7A0E\u518C\u7F3A\u53E3\uFF0C\u5374\u7B97\u4E0D\u51FA\u4E00\u4E2A\u65E7\u53CB\u4F1A\u5728\u51E0\u6B65\u4E4B\u5185\u7AD9\u5230\u54EA\u8FB9\u3002`,
-    "\u95E8\u5916\u7684\u4EBA\u4E0D\u50AC\u3002\u6743\u529B\u4E0D\u6025\u7684\u65F6\u5019\uFF0C\u66F4\u50CF\u5200\u80CC\u3002\u5B83\u8D34\u5728\u9888\u540E\uFF0C\u4E0D\u89C1\u8840\uFF0C\u4E5F\u4E0D\u80AF\u79BB\u5F00\u3002",
-    `\u6C88\u781A\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u4E00\u53E5\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F\u8FD9\u53E5\u8BDD\u843D\u4E0B\uFF0C\u5C4B\u91CC\u4E09\u4E2A\u4EBA\u90FD\u6CA1\u6709\u518D\u52A8\u3002`,
-    "\u96E8\u58F0\u66F4\u5BC6\u3002\u5C4B\u6A90\u4E0B\u7684\u9ED1\u5F71\u5411\u524D\u534A\u5BF8\uFF0C\u53C8\u505C\u4F4F\u3002\u90A3\u534A\u5BF8\u591F\u4E86\uFF0C\u591F\u628A\u65E7\u4FE1\u4EFB\u5272\u5F00\u3002"
+    (step) => `\u7B2C ${step} \u6B21\u505C\u987F\u65F6\uFF0C\u5ECA\u4E0B\u7684\u6C34\u805A\u6210\u4E00\u9053\u65B0\u7EBF\uFF0C${protagonistName}\u4F4E\u5934\u770B\u89C1\u7B2C ${step} \u9053\u6C34\u7EBF\u4ECE\u8001\u5468\u811A\u8FB9\u7ED5\u5F00\uFF0C\u5224\u65AD\u4ED6\u5DF2\u5728\u95E8\u69DB\u5916\u7AD9\u8FC7\u534A\u523B\u3002`,
+    (step) => `\u7B2C ${step} \u5904\u7EBF\u7D22\u843D\u5728\u8D26\u518C\u7EBF\u88C5\u4E0A\uFF0C\u7B2C ${step} \u679A\u677E\u6263\u91CC\u5939\u7740\u4E00\u7C92\u788E\u7CAE\uFF0C\u4E0D\u662F\u4E66\u623F\u91CC\u7684\u4E1C\u897F\uFF0C\u66F4\u50CF\u521A\u4ECE\u4ED3\u95E8\u53E3\u5E26\u8FDB\u6765\u7684\u3002`,
+    (step) => `\u7B2C ${step} \u8F6E\u8FFD\u95EE\u91CC\uFF0C\u8001\u5468\u8BF4\u8BDD\u6162\u4E86\u534A\u62CD\uFF0C\u7B2C ${step} \u6B21\u505C\u987F\u4E0D\u662F\u8FDF\u7591\uFF0C\u662F\u5728\u7B49\u95E8\u5916\u7684\u4EBA\u66FF\u4ED6\u5F00\u53E3\u3002`,
+    (step) => `\u7B2C ${step} \u9053\u706F\u5F71\u7167\u5230\u5B98\u5370\u8FB9\u7F18\uFF0C\u7B2C ${step} \u5C42\u5370\u6CE5\u8FD8\u6CA1\u5E72\uFF0C\u7EA2\u8272\u5728\u96E8\u6C14\u91CC\u53D1\u6697\u3002`,
+    (step) => `\u7B2C ${step} \u4E2A\u5224\u65AD\u66B4\u9732\u4E86${protagonistName}\u7684\u77ED\u677F\uFF0C\u4ED6\u80FD\u7B97\u51FA\u7B2C ${step} \u5904\u7A0E\u518C\u7F3A\u53E3\uFF0C\u5374\u7B97\u4E0D\u51FA\u65E7\u53CB\u4F1A\u7AD9\u5230\u54EA\u4E00\u8FB9\u3002`,
+    (step) => `\u7B2C ${step} \u6B21\u6572\u95E8\u540E\uFF0C\u95E8\u5916\u7684\u4EBA\u4ECD\u4E0D\u50AC\uFF0C\u7B2C ${step} \u6B21\u6C89\u9ED8\u50CF\u5200\u80CC\u8D34\u5728\u9888\u540E\uFF0C\u4E0D\u89C1\u8840\uFF0C\u4E5F\u4E0D\u80AF\u79BB\u5F00\u3002`,
+    (step) => `\u7B2C ${step} \u53E5\u77ED\u95EE\u843D\u4E0B\uFF0C${protagonistName}\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u7B2C ${step} \u6B21\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F`,
+    (step) => `\u7B2C ${step} \u9635\u96E8\u58F0\u66F4\u5BC6\uFF0C\u5C4B\u6A90\u4E0B\u7684\u9ED1\u5F71\u5411\u524D\u534A\u5BF8\u53C8\u505C\u4F4F\uFF0C\u7B2C ${step} \u9053\u65E7\u4FE1\u4EFB\u4E5F\u5728\u8FD9\u4E00\u606F\u88C2\u5F00\u3002`
   ];
   const paragraphs = [...baseParagraphs];
   let index = 0;
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
-    paragraphs.push(expansionSeeds[index % expansionSeeds.length]);
+    paragraphs.push(expansionSeeds[index % expansionSeeds.length](index + 1));
     index += 1;
   }
   const body = paragraphs.join("\n\n");
@@ -15066,6 +15101,86 @@ function extractQualityRepairChecklist(report) {
   const scoreFixes = lines.filter((line) => /^\|\s*(情节推进|因果合同执行|写作资源吸收|角色鲜明度)\s*\|/u.test(line)).filter((line) => /[1-6]\/10/u.test(line)).map((line) => `- \u4F4E\u5206\u9879\uFF1A${line.replace(/^\|\s*|\s*\|$/g, "").replace(/\s*\|\s*/g, " - ")}`);
   return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10);
 }
+function extractDraftBodyForDeterministicRepair(draft) {
+  const bodyStart = draft.match(/##\s+(?:Draft Body|Final Body|正文|最终正文)\s*/iu);
+  const afterBodyHeading = bodyStart ? draft.slice((bodyStart.index || 0) + bodyStart[0].length) : draft;
+  return afterBodyHeading.split(/\n##\s+(?:Drafting Metadata|Revision Attempt|Quality Gate|Polish Pass|Naturalness Report|章节元数据|章节元信息)/u)[0].split(/\n---\n/u)[0].split("\n").map((line) => line.trim()).filter((line) => line && !/^#{1,6}\s+/u.test(line)).filter((line) => !/^-\s*(?:Chapter|Target words|Estimated production words|Scene type|Continuity status|Locked protagonist|Causal objective|Next handoff|Blueprint basis|Draft source)\s*:/iu.test(line)).join("\n").trim();
+}
+function dedupeRepeatedNarrativeBody(body) {
+  const paragraphSeen = /* @__PURE__ */ new Set();
+  const paragraphs = [];
+  for (const rawParagraph of body.split(/\n+/u).map((part) => part.trim()).filter(Boolean)) {
+    const sentences = rawParagraph.match(/[^。！？!?；;\n]+[。！？!?；;]?/gu) || [rawParagraph];
+    const sentenceSeen = /* @__PURE__ */ new Set();
+    const compactedSentences = sentences.map((sentence) => sentence.trim()).filter(Boolean).filter((sentence) => {
+      const normalized = normalizeTailParagraph(sentence);
+      if (normalized.length < 18) return true;
+      if (sentenceSeen.has(normalized)) return false;
+      sentenceSeen.add(normalized);
+      return true;
+    });
+    const compacted = compactedSentences.join("").trim();
+    const normalizedParagraph = normalizeTailParagraph(compacted);
+    if (!compacted || normalizedParagraph.length >= 24 && paragraphSeen.has(normalizedParagraph)) {
+      continue;
+    }
+    if (normalizedParagraph.length >= 24) {
+      paragraphSeen.add(normalizedParagraph);
+    }
+    paragraphs.push(compacted);
+  }
+  return paragraphs.join("\n\n").trim();
+}
+function createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract) {
+  const title = task.title || `\u7B2C ${task.chapterNumber} \u7AE0`;
+  const causalPlan = getTaskCausalPlan(state, task);
+  const protagonistName = continuityContract.lockedProtagonistName || inferLockedProtagonistName(draft) || "\u6C88\u781A";
+  const requiredAnchors = uniqueStrings([
+    ...task.causalPlan?.requiredContinuityAnchors || [],
+    ...continuityContract.continuityAnchors || [],
+    "\u8D26\u518C",
+    "\u7F3A\u9875",
+    "\u5B98\u5370",
+    "\u95E8\u5916\u811A\u6B65"
+  ].filter(Boolean)).slice(0, 8);
+  const compacted = dedupeRepeatedNarrativeBody(extractDraftBodyForDeterministicRepair(draft));
+  const paragraphs = compacted ? compacted.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean) : [
+    `\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875\u8D26\u518C\u63A8\u5230\u706F\u4E0B\uFF0C\u7EB8\u8FB9\u9F50\u5F97\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002`,
+    "\u8001\u5468\u7AD9\u5728\u95E8\u69DB\u5916\uFF0C\u6E7F\u8896\u538B\u7740\u534A\u679A\u6697\u7EA2\u5370\u75D5\uFF0C\u6CA1\u6709\u8FDB\u5C4B\uFF0C\u4E5F\u6CA1\u6709\u628A\u8D26\u518C\u63A5\u8FC7\u53BB\u3002"
+  ];
+  const repairSeeds = [
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A${protagonistName}\u5148\u6309\u4F4F\u7B2C ${step} \u9053\u8D26\u518C\u7EBF\u88C5\uFF0C\u786E\u8BA4${requiredAnchors.slice(0, 3).join("\u3001") || "\u7F3A\u9875\u3001\u5B98\u5370\u3001\u811A\u6B65\u58F0"}\u90FD\u8FD8\u5728\u73B0\u573A\uFF0C\u5E76\u8BA9\u8001\u5468\u628A\u8896\u53E3\u644A\u5F00\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u95E8\u5916\u7B2C ${step} \u6B21\u811A\u6B65\u58F0\u505C\u4F4F\uFF0C\u8001\u5468\u4F4E\u58F0\u8BF4\uFF1A\u201C\u5C0F\u6C88\u5927\u4EBA\uFF0C\u522B\u518D\u7FFB\u3002\u201D${protagonistName}\u770B\u7740\u90A3\u9053\u6E7F\u5370\uFF0C\u95EE\u4ED6\u6015\u8D26\u8FD8\u662F\u6015\u62FF\u8D26\u7684\u4EBA\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u7F15\u706F\u706B\u628A\u7F3A\u9875\u8FB9\u7F18\u7167\u5F97\u53D1\u767D\uFF0C\u7EB8\u7EA4\u7EF4\u6CA1\u6709\u96E8\u75D5\uFF0C${protagonistName}\u628A\u8FD9\u4E2A\u5224\u65AD\u538B\u8FDB\u638C\u5FC3\uFF0C\u51B3\u5B9A\u5148\u7559\u4E0B\u7F3A\u9875\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u8001\u5468\u5F80\u540E\u9000\u7B2C ${step} \u4E2A\u534A\u6B65\uFF0C\u978B\u5E95\u5728\u6C34\u91CC\u6413\u51FA\u6CE5\u58F0\uFF0C\u5173\u7CFB\u88C2\u7F1D\u5C31\u843D\u5728\u8FD9\u4E00\u6B21\u9000\u8BA9\u91CC\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A${protagonistName}\u628A\u7B2C ${step} \u679A\u5B98\u5370\u6263\u5728\u684C\u89D2\uFF0C\u6CA1\u6709\u4EA4\u7ED9\u95E8\u5916\u7684\u4EBA\uFF0C\u8FD9\u4E2A\u9009\u62E9\u8BA9\u4ED6\u5148\u88AB\u76EF\u4E0A\uFF0C\u4E5F\u8BA9\u8001\u5468\u6682\u65F6\u4E0D\u80FD\u6539\u53E3\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7AE0\u672B\u94A9\u5B50\u843D\u5728\u7B2C ${step} \u679A\u5012\u6263\u7684\u5370\u4E0A\uFF0C\u5370\u9762\u53CD\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\uFF0C\u7F3A\u9875\u8FB9\u7F18\u6B63\u597D\u538B\u5728\u5370\u6CE5\u5916\u4FA7\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u9635\u96E8\u58F0\u5FFD\u7136\u53D8\u5BC6\uFF0C\u95E8\u5916\u90A3\u4EBA\u8BF4\u5C11\u5C39\u8981\u770B\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002`,
+    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u6B21\u53D8\u5316\u4E0D\u80FD\u590D\u539F\uFF0C\u8001\u5468\u6B20\u4E86${protagonistName}\u4E00\u6B21\u9690\u7792\uFF0C\u7EBF\u7D22\u3001\u5173\u7CFB\u548C\u8EAB\u4EFD\u98CE\u9669\u540C\u65F6\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002`
+  ];
+  let index = 0;
+  while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
+    paragraphs.push(repairSeeds[index % repairSeeds.length](index + 1));
+    index += 1;
+  }
+  const body = paragraphs.join("\n\n");
+  return [
+    `# ${title}`,
+    "",
+    "## Draft Body",
+    "",
+    body,
+    "",
+    "## Drafting Metadata",
+    `- Chapter: ${task.chapterNumber}`,
+    `- Revision attempt: ${attempt}`,
+    `- Repair source: deterministic quality loop repair`,
+    `- Target words: ${task.targetWords}`,
+    `- Estimated production words: ${wordCount(body)}`,
+    `- Causal objective: ${causalPlan.sceneObjective}`,
+    `- Next handoff: ${causalPlan.nextHandoff}`
+  ].join("\n");
+}
 async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
@@ -15149,15 +15264,7 @@ ${report}`);
 
 `);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return [
-      draft,
-      "",
-      "---",
-      "",
-      `## Revision Attempt ${attempt}`,
-      "- \u5DF2\u6839\u636E\u8D28\u91CF\u95E8\u7981\u8865\u5F3A\u51B2\u7A81\u3001\u7AE0\u672B\u94A9\u5B50\u3001\u573A\u666F\u7EC6\u8282\u548C\u89D2\u8272\u4E3B\u52A8\u9009\u62E9\u3002",
-      "- \u672C\u8F6E\u8FD4\u5DE5\u4FDD\u6301\u7AE0\u8282\u76EE\u6807\u4E0D\u53D8\uFF0C\u5E76\u7EE7\u7EED\u4EA4\u7ED9\u8D28\u91CF\u95E8\u7981\u590D\u67E5\u3002"
-    ].join("\n");
+    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract);
   }
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
   const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);

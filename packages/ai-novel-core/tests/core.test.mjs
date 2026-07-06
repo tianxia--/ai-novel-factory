@@ -8297,13 +8297,15 @@ test("chapter drafting sends the approved style contract to the configured text 
   const previousWritingMode = process.env.AI_NOVEL_WRITING_MODE
   const receivedBodies = []
   const progressEvents = []
-  const paragraph = [
-    "雨声压住账房的窗纸，沈砚把缺页账本推到灯下，指腹停在那道齐整的纸边。",
-    "老周站在门槛外，没有进来，只把湿袖往身后藏了半寸。",
-    "沈砚没有解释，他选择先合上账册，把旧印章扣在桌面，让门外的人都听见那一声闷响。",
-    "这一声之后，账房里的人都知道缺页已经成了代价，下一章必须处理门外脚步、旧印章和那本缺页账本。",
-  ].join("")
-  const longDraft = Array.from({ length: 8 }, () => paragraph).join("\n\n")
+  const makeLongDraft = (requestIndex = 1) => Array.from({ length: 8 }, (_, index) => {
+    const step = (requestIndex - 1) * 8 + index + 1
+    return [
+      `第 ${step} 道雨声压住账房的窗纸，沈砚把缺页账本推到灯下，指腹停在那道齐整的纸边。`,
+      `老周第 ${step} 次站在门槛外，没有进来，只把湿袖往身后藏了半寸。`,
+      `沈砚没有解释，他选择先合上账册，把第 ${step} 枚旧印章扣在桌面，让门外的人都听见那一声闷响。`,
+      `这一声之后，第 ${step} 个现场变化已经成了代价，下一章必须处理门外脚步、旧印章和那本缺页账本。`,
+    ].join("")
+  }).join("\n\n")
   const server = http.createServer((request, response) => {
     let rawBody = ""
     request.on("data", (chunk) => { rawBody += chunk })
@@ -8311,6 +8313,7 @@ test("chapter drafting sends the approved style contract to the configured text 
       if (request.url === "/responses") {
         const receivedBody = JSON.parse(rawBody)
         receivedBodies.push(receivedBody)
+        const longDraft = makeLongDraft(receivedBodies.length)
         const outputText = [
           "# 第一章 缺页账本",
           "",
@@ -9555,6 +9558,66 @@ test("quality report treats soft narrative style issues as polish advice", async
   assert.match(report, /综合评分 \| 8\/10/)
 })
 
+test("quality report blocks repeated narrative loops as hard failures", async () => {
+  const { createQualityReport, evaluateNarrativeStyleQuality } = await loadCore()
+  const task = {
+    chapterNumber: 8,
+    title: "西市复账",
+    targetWords: 80,
+    causalPlan: {
+      requiredContinuityAnchors: ["西市", "密信", "名册"],
+    },
+  }
+  const state = {
+    project: { title: "唐末", idea: "现代人穿越到唐朝末期" },
+    runtime: { stage: "drafting" },
+    plan: { totalChapters: 500, chapterTasks: [task] },
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "## Previous Inputs",
+    "承接上一章西市密信和名册风险。",
+    "## Causal Objective",
+    "让主角决定复核名册。",
+    "## Irreversible Change",
+    "成兵曹知道主角藏过密信。",
+    "## Character State Delta",
+    "主角从旁观变成被问责的人。",
+    "## Required Continuity Anchors",
+    "- 西市",
+    "- 密信",
+    "- 名册",
+    "## Next Chapter Handoff",
+    "成兵曹明日来问话。",
+    "Event Sequence",
+  ].join("\n")
+  const repeatedParagraph = "李远站在西市署棚前，袖中的密信被汗浸软，田册和名册却还压在怀里。他决定不再把账册交给周掌柜，转身把名册藏进门后的破箱。"
+  const draft = [
+    "## Final Body",
+    repeatedParagraph,
+    repeatedParagraph,
+    repeatedParagraph,
+    "成兵曹按刀站在门外，只问一句：密信是谁给你的？李远把灯吹灭，知道这一次门不能不开。",
+  ].join("\n")
+
+  const style = evaluateNarrativeStyleQuality(draft)
+  assert.equal(style.status, "quarantined")
+  assert.match(style.reason, /整段重复输出/)
+
+  const sentenceLoop = [
+    "## Final Body",
+    "他把名册一页页压平，照着火后留下的棚号重排人名。".repeat(4),
+  ].join("\n")
+  const sentenceStyle = evaluateNarrativeStyleQuality(sentenceLoop)
+  assert.equal(sentenceStyle.status, "quarantined")
+  assert.match(sentenceStyle.reason, /句子循环重复/)
+
+  const report = createQualityReport(state, task, draft, blueprint)
+  assert.match(report, /Style Hard Gate: 风格门禁拦截：整段重复输出/)
+  assert.match(report, /需要返工：风格门禁拦截：整段重复输出/)
+  assert.match(report, /综合评分 \| 5\/10/)
+})
+
 test("character profile gate rejects same-voice multi-character scenes", async () => {
   const { evaluateCharacterProfilePresence } = await loadCore()
   const contract = {
@@ -9673,6 +9736,12 @@ test("quality report accepts causal execution shown through concrete scene evide
     "成兵曹来问话。",
     "Event Sequence",
   ].join("\n")
+  const extendedScene = Array.from({ length: 90 }, (_, index) => {
+    const step = index + 1
+    const place = ["署棚", "粮棚", "巷口", "院门"][index % 4]
+    const witness = ["周掌柜", "流民营老卒", "棚户妇人", "成兵曹随从"][index % 4]
+    return `第${step}次核对时，李远在西市${place}停下，把密信贴着伤口压紧，又照名册改出一户错位的人名。${witness}看见纸边的火灰，没有催他，只把门缝让出半尺。`
+  }).join("")
   const draft = [
     "## Final Body",
     "李远站在西市署棚前，右肋的伤口被竹纸压得发疼，怀里的密信硌着掌心。",
@@ -9681,7 +9750,7 @@ test("quality report accepts causal execution shown through concrete scene evide
     "夜里院门被推开，成兵曹按着刀镡站在月光里，说奉少尹钧命来问几句话。",
     "李远吹灭油灯，把密信按回怀里，知道周掌柜今日把他推到明面上，今晚这道门就不能不开。",
     "西市的火味还在袖口里，流民营那张方块图也在脑子里，他应了一声：来了。",
-    "他把名册一页页压平，照着火后留下的棚号重排人名。".repeat(180),
+    extendedScene,
   ].join("\n")
 
   const report = createQualityReport(state, task, draft, blueprint)
