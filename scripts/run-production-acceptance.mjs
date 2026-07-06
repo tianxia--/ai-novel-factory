@@ -676,6 +676,167 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
   }
 }
 
+function extractRelationshipEntriesForAcceptance(snapshot) {
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const contract = foundation.contract || {}
+  const graph = snapshot?.characters?.relationshipGraph || {}
+  const sources = [
+    getObjectPath(foundation.characterDynamics, "relationshipEntries"),
+    getObjectPath(contract, "characters.relationshipEntries"),
+    graph.edges,
+    graph.relationships,
+  ].filter(Array.isArray)
+  return sources.flat()
+}
+
+function normalizeRelationshipEntryForAcceptance(entry, knownCast, index) {
+  const from = String(entry?.from || entry?.source || entry?.sourceName || entry?.characterA || entry?.character1 || "").trim()
+  const to = String(entry?.to || entry?.target || entry?.targetName || entry?.characterB || entry?.character2 || "").trim()
+  let left = from
+  let right = to
+  if (!left || !right) {
+    const text = collectAcceptanceStrings(entry).join("\n")
+    const matched = knownCast.filter((name) => text.includes(name))
+    left = left || matched[0] || ""
+    right = right || matched.find((name) => name !== left) || ""
+  }
+  const rawTerms = extractExecutionTerms(entry)
+  const pressureTerms = rawTerms.filter((term) => term !== left && term !== right)
+  return {
+    id: String(entry?.id || `${left || "relationship"}-${right || index + 1}`),
+    from: left,
+    to: right,
+    pressureTerms,
+    raw: entry,
+  }
+}
+
+function relationshipPressureSignalCount(text) {
+  return countMatches(
+    text,
+    /信任|债|欠|隐瞒|背叛|怀疑|逼|拦|交出|保住|裂|选择|代价|风险|同盟|敌|亲近|疏离|承诺|秘密|救|放弃|不肯|答应|拒绝|牵连|威胁|保护|利用|亏欠|试探|让步|撕破|翻脸/gu,
+  )
+}
+
+export function auditRelationshipArcForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const knownCast = extractKnownCastNames(snapshot)
+  const rawEntries = extractRelationshipEntriesForAcceptance(snapshot)
+    .map((entry, index) => normalizeRelationshipEntryForAcceptance(entry, knownCast, index))
+    .filter((entry) => entry.from && entry.to && entry.from !== entry.to)
+  const byPair = new Map()
+  for (const entry of rawEntries) {
+    const key = `${entry.from}->${entry.to}`
+    const existing = byPair.get(key)
+    if (existing) {
+      existing.pressureTerms = [...new Set([...existing.pressureTerms, ...entry.pressureTerms])]
+    } else {
+      byPair.set(key, { ...entry, pressureTerms: [...entry.pressureTerms] })
+    }
+  }
+  const entries = Array.from(byPair.values())
+  const issues = []
+  const relationshipAudits = []
+  const chaptersWithRelationshipPressure = new Set()
+  let activeRelationships = 0
+  let evolvingRelationships = 0
+
+  if (entries.length === 0) {
+    issues.push("no relationship entries available for relationship arc audit")
+  }
+
+  for (const entry of entries) {
+    const chapterEvidence = []
+    let evidenceChapters = 0
+    let pressureChapters = 0
+    let stateChangeChapters = 0
+    for (const chapter of chapters) {
+      const body = String(chapter?.body || "")
+      const hasBothCharacters = body.includes(entry.from) && body.includes(entry.to)
+      const matchedPressureTerms = entry.pressureTerms.filter((term) => body.includes(term)).slice(0, 8)
+      const pressureSignals = relationshipPressureSignalCount(body)
+      const pressureVisible = hasBothCharacters && (pressureSignals > 0 || matchedPressureTerms.length > 0)
+      const stateChangeVisible = hasBothCharacters && relationshipPressureSignalCount(body) >= 2
+      if (hasBothCharacters) evidenceChapters += 1
+      if (pressureVisible) {
+        pressureChapters += 1
+        chaptersWithRelationshipPressure.add(Number(chapter?.chapterNumber || 0))
+      }
+      if (stateChangeVisible) stateChangeChapters += 1
+      chapterEvidence.push({
+        chapterNumber: Number(chapter?.chapterNumber || 0),
+        hasBothCharacters,
+        pressureVisible,
+        stateChangeVisible,
+        pressureSignals,
+        matchedPressureTerms,
+      })
+    }
+    const requiredPairChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.4) : Math.min(1, chapters.length)
+    const requiredChangeChapters = chapters.length >= 3 ? 2 : Math.min(1, chapters.length)
+    const active = pressureChapters >= requiredPairChapters
+    const evolving = stateChangeChapters >= requiredChangeChapters
+    if (active) activeRelationships += 1
+    if (evolving) evolvingRelationships += 1
+
+    const relationshipIssues = []
+    if (evidenceChapters < requiredPairChapters) {
+      relationshipIssues.push(`co-presence chapters ${evidenceChapters}/${requiredPairChapters}`)
+    }
+    if (!active) {
+      relationshipIssues.push(`pressure chapters ${pressureChapters}/${requiredPairChapters}`)
+    }
+    if (!evolving) {
+      relationshipIssues.push(`state-change chapters ${stateChangeChapters}/${requiredChangeChapters}`)
+    }
+    if (relationshipIssues.length) {
+      issues.push(`${entry.from}->${entry.to}: ${relationshipIssues.join("; ")}`)
+    }
+    relationshipAudits.push({
+      id: entry.id,
+      from: entry.from,
+      to: entry.to,
+      pressureTerms: entry.pressureTerms.slice(0, 12),
+      evidenceChapters,
+      pressureChapters,
+      stateChangeChapters,
+      requiredPairChapters,
+      requiredChangeChapters,
+      active,
+      evolving,
+      chapters: chapterEvidence,
+      issues: relationshipIssues,
+    })
+  }
+
+  const requiredRelationships = entries.length >= 2 ? 2 : entries.length
+  const requiredCoverage = chapters.length >= 3 ? Math.ceil(chapters.length * 0.6) : chapters.length
+  if (activeRelationships < requiredRelationships) {
+    issues.push(`active relationship arcs ${activeRelationships}/${entries.length} below required ${requiredRelationships}`)
+  }
+  if (evolvingRelationships < requiredRelationships) {
+    issues.push(`evolving relationship arcs ${evolvingRelationships}/${entries.length} below required ${requiredRelationships}`)
+  }
+  if (chapters.length > 0 && chaptersWithRelationshipPressure.size < requiredCoverage) {
+    issues.push(`chapter relationship pressure coverage ${chaptersWithRelationshipPressure.size}/${chapters.length} below required ${requiredCoverage}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters: chapters.length,
+      relationshipEntries: entries.length,
+      activeRelationships,
+      evolvingRelationships,
+      requiredRelationships,
+      chaptersWithRelationshipPressure: chaptersWithRelationshipPressure.size,
+      requiredCoverage,
+    },
+    relationships: relationshipAudits,
+  }
+}
+
 function extractForeshadowingEntries(snapshot) {
   const foundation = snapshot?.lore?.storyFoundation || {}
   const contract = foundation.contract || {}
@@ -1961,6 +2122,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       characters: characterVoiceAudit.characters.slice(0, 8),
     })
   }
+  const relationshipArcAudit = auditRelationshipArcForAcceptance(auditSnapshot, options)
+  if (!relationshipArcAudit.passed) {
+    throw new AcceptanceError("Relationship arc acceptance audit failed.", {
+      issues: relationshipArcAudit.issues.slice(0, 30),
+      summary: relationshipArcAudit.summary,
+      relationships: relationshipArcAudit.relationships.slice(0, 8),
+    })
+  }
   const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(auditSnapshot, options)
   if (!foreshadowingAudit.passed) {
     throw new AcceptanceError("Foreshadowing payoff acceptance audit failed.", {
@@ -1991,6 +2160,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
+  report.finalRelationshipArcAudit = relationshipArcAudit
   report.finalForeshadowingAudit = foreshadowingAudit
   report.finalContinuityAudit = continuityAudit
   report.steps.push({
@@ -2004,6 +2174,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
   })
@@ -2021,6 +2192,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
   })
@@ -2068,6 +2240,7 @@ async function main() {
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
     finalCharacterVoiceAudit: null,
+    finalRelationshipArcAudit: null,
     finalForeshadowingAudit: null,
     finalContinuityAudit: null,
     checkpoints: [],

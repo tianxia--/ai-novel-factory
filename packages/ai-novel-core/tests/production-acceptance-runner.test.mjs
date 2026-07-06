@@ -101,6 +101,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
     auditCharacterVoiceForAcceptance,
+    auditRelationshipArcForAcceptance,
     auditForeshadowingPayoffForAcceptance,
     auditContinuityForAcceptance,
   } = await loadRunner()
@@ -131,6 +132,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(characterVoiceAudit.passed, true)
   assert.equal(characterVoiceAudit.summary.voicedCharacters >= 2, true)
   assert.equal(characterVoiceAudit.summary.activeCharacters >= 3, true)
+
+  const relationshipArcAudit = auditRelationshipArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(relationshipArcAudit.passed, true)
+  assert.equal(relationshipArcAudit.summary.activeRelationships, 2)
+  assert.equal(relationshipArcAudit.summary.evolvingRelationships, 2)
 
   const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(foreshadowingAudit.passed, true)
@@ -293,6 +299,23 @@ test("production acceptance runner rejects same-voice character dialogue", async
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, false)
   assert.match(characterVoiceAudit.issues.join("\n"), /same dialogue used across speakers|template dialogue ratio/)
+})
+
+test("production acceptance runner rejects missing relationship arc pressure", async () => {
+  const { auditRelationshipArcForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "雨声贴着窗纸往下滑。沈砚把缺页账本推到灯下，指腹按住纸边，又把旧印扣在桌角。",
+      "他决定先留下缺页，不把证据交出去。灯火压低，墨味从账册线里泛出来。",
+      "他听见雨打在门槛上，冷意从掌心爬上来。这个选择把风险留在屋里。",
+      "他把印章推回灯下，章末只剩那道脚步声，谁会先来拿走缺页？",
+    ].join("\n\n")
+  }
+
+  const relationshipArcAudit = auditRelationshipArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(relationshipArcAudit.passed, false)
+  assert.match(relationshipArcAudit.issues.join("\n"), /active relationship arcs|relationship pressure coverage|co-presence/)
 })
 
 test("production acceptance runner rejects foreshadowing that never reaches the prose", async () => {
