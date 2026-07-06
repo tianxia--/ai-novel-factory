@@ -3942,6 +3942,64 @@ test("provider test uses routed responses mode when request omits api mode", asy
   }
 })
 
+test("provider test keeps generation fallback error when models endpoint is unsupported", async () => {
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-provider-test-fallback-error-"))
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  const server = http.createServer((request, response) => {
+    request.on("data", () => {})
+    request.on("end", () => {
+      if (request.url === "/models") {
+        response.writeHead(404, { "content-type": "text/plain" })
+        response.end("Not Found")
+        return
+      }
+      if (request.url === "/responses") {
+        response.writeHead(401, { "content-type": "text/plain" })
+        response.end("Invalid API key:test-tail")
+        return
+      }
+      response.writeHead(404).end()
+    })
+  })
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.listen(0, "127.0.0.1", resolve)
+      server.once("error", reject)
+    })
+    const address = server.address()
+    assert.ok(address && typeof address === "object")
+    delete process.env.AI_NOVEL_TEST_MODE
+
+    const saveResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+      name: "Responses Key Failure",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiKey: "test-key",
+      modelName: "test-model",
+      apiMode: "responses",
+      timeoutMs: 1000,
+    })
+    assert.equal(saveResponse.status, 200)
+
+    const testResponse = await handleNovelStudioApi(tempDir, "POST", "/api/provider-test", {})
+
+    assert.equal(testResponse.status, 200)
+    assert.equal(testResponse.payload.result.ok, false)
+    assert.match(testResponse.payload.result.message, /status 404/)
+    assert.match(testResponse.payload.result.message, /generation fallback failed/)
+    assert.match(testResponse.payload.result.message, /status 401/)
+    assert.match(testResponse.payload.result.message, /Invalid API key/)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
 test("chat stream continue routes to autopilot instead of discussion", async () => {
   const { handleNovelStudioApi } = await loadStudioServer()
   const { createManagedAutonomousProject, withFactoryDb } = await loadCore()

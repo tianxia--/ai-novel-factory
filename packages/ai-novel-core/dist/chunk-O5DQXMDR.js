@@ -14,7 +14,7 @@ import {
   writeProductionMasterOutline,
   writeProductionStoryBibleAssets,
   writeProductionWritingResourceArtifacts
-} from "./chunk-BF7UOCI6.js";
+} from "./chunk-6L3LYHIE.js";
 import {
   detectAigcSegments,
   getAigcDetectorConfig

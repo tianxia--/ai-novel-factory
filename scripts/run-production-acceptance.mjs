@@ -66,6 +66,7 @@ function usage() {
     "  --auto-approve-style           Explicitly approve the generated style candidate.",
     "  --auto-approve-foundation      Explicitly approve story foundation after planning.",
     "  --no-story-repair              Do not call story asset repair if planning assets are weak.",
+    "  --skip-provider-health-check   Skip the lightweight real LLM connectivity check.",
     "  --plan-only                    Only validate config and print the intended flow.",
     "  --stop-after-style             Stop after Style Evolution gate.",
     "  --stop-after-foundation        Stop after story foundation readiness.",
@@ -109,6 +110,7 @@ function parseArgs(argv) {
     autoApproveStyle: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_STYLE),
     autoApproveFoundation: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_FOUNDATION),
     autoRepairStoryAssets: true,
+    providerHealthCheck: !readBoolean(process.env.AI_NOVEL_ACCEPTANCE_SKIP_PROVIDER_HEALTH_CHECK),
     planOnly: false,
     stopAfterStyle: false,
     stopAfterFoundation: false,
@@ -170,6 +172,8 @@ function parseArgs(argv) {
       options.autoApproveFoundation = true
     } else if (arg === "--no-story-repair") {
       options.autoRepairStoryAssets = false
+    } else if (arg === "--skip-provider-health-check") {
+      options.providerHealthCheck = false
     } else if (arg === "--plan-only") {
       options.planOnly = true
     } else if (arg === "--stop-after-style") {
@@ -332,6 +336,88 @@ function assertModelConfigReady(modelInfo) {
   if (!modelInfo.styleConfig) {
     throw new AcceptanceError("No usable Style Evolution LLM route found.", {
       configuredCount: modelInfo.configured.length,
+    })
+  }
+}
+
+function buildProviderHealthTargets(modelInfo) {
+  const byId = new Map()
+  const add = (capability, config) => {
+    if (!config?.id) {
+      return
+    }
+    const id = String(config.id)
+    const existing = byId.get(id)
+    if (existing) {
+      existing.capabilities.push(capability)
+      return
+    }
+    byId.set(id, {
+      capabilities: [capability],
+      config,
+    })
+  }
+  add("text", modelInfo.active)
+  add("style_evolution", modelInfo.styleConfig)
+  return Array.from(byId.values())
+}
+
+async function assertProviderHealth(api, modelInfo, report, projectId, enabled) {
+  const targets = buildProviderHealthTargets(modelInfo)
+  if (!enabled) {
+    report.steps.push({
+      step: "provider_health",
+      status: "skipped",
+      at: now(),
+      targetCount: targets.length,
+    })
+    log("Provider health check skipped by flag.", { targetCount: targets.length })
+    return
+  }
+
+  for (const target of targets) {
+    const config = target.config
+    const capability = target.capabilities.join("/")
+    const payload = {
+      id: config.id,
+      projectId: projectId || undefined,
+      LLM_BASE_URL: config.base_url,
+      LLM_MODEL_ID: config.model_name,
+      LLM_API_MODE: config.api_mode,
+      LLM_API_KEY: "[configured]",
+    }
+    const response = await api("POST", "/api/provider-test", payload, projectId || undefined)
+    const result = response.result || {}
+    const step = {
+      step: "provider_health",
+      status: result.ok ? "passed" : "blocked",
+      at: now(),
+      capability,
+      configId: config.id,
+      name: config.name,
+      baseUrl: result.baseUrl || config.base_url,
+      modelName: result.modelName || config.model_name,
+      apiMode: result.apiMode || config.api_mode,
+      message: result.message || "",
+    }
+    report.steps.push(step)
+    if (!result.ok) {
+      throw new AcceptanceError("LLM provider health check failed before production acceptance.", {
+        capability,
+        configId: config.id,
+        name: config.name,
+        baseUrl: step.baseUrl,
+        modelName: step.modelName,
+        apiMode: step.apiMode,
+        message: step.message,
+        nextAction: "Open model settings, update the saved API key or route, then rerun this acceptance command.",
+      })
+    }
+    log("Provider health check passed.", {
+      capability,
+      name: config.name,
+      modelName: step.modelName,
+      apiMode: step.apiMode,
     })
   }
 }
@@ -893,6 +979,7 @@ async function main() {
       styleModel: modelInfo.styleConfig?.model_name || null,
       routeCount: modelInfo.routes.length,
     })
+    await assertProviderHealth(api, modelInfo, report, options.resumeProjectId || null, options.providerHealthCheck)
     const detectorSettings = await configureAigcDetector(api, options, report)
 
     log("Acceptance plan is valid.", {

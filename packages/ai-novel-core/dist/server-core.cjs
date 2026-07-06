@@ -3616,6 +3616,7 @@ async function testProviderConnectivity(overrides = {}, rootDir = process.cwd())
       })
     );
     if (!response.ok) {
+      let fallbackErrorMessage = "";
       try {
         const content = await requestLlmTextCompletion({
           baseUrl,
@@ -3637,6 +3638,7 @@ async function testProviderConnectivity(overrides = {}, rootDir = process.cwd())
           };
         }
       } catch (chatErr) {
+        fallbackErrorMessage = chatErr instanceof Error ? chatErr.message : String(chatErr);
       }
       return {
         ok: false,
@@ -3644,7 +3646,7 @@ async function testProviderConnectivity(overrides = {}, rootDir = process.cwd())
         baseUrl,
         modelName,
         apiMode,
-        message: `Provider test failed with status ${response.status}.`
+        message: fallbackErrorMessage ? `Provider test failed with status ${response.status}; generation fallback failed: ${fallbackErrorMessage}` : `Provider test failed with status ${response.status}.`
       };
     }
     const payload = await response.json();

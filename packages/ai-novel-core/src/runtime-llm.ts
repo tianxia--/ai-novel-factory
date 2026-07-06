@@ -668,6 +668,7 @@ export async function testProviderConnectivity(
     )
 
     if (!response.ok) {
+      let fallbackErrorMessage = ""
       // If /models fails (e.g. 404/405/403), fallback to a lightweight generation call.
       try {
         const content = await requestLlmTextCompletion({
@@ -690,7 +691,7 @@ export async function testProviderConnectivity(
           }
         }
       } catch (chatErr) {
-        // Ignore fallback errors and bubble up the primary failure
+        fallbackErrorMessage = chatErr instanceof Error ? chatErr.message : String(chatErr)
       }
 
       return {
@@ -699,7 +700,9 @@ export async function testProviderConnectivity(
         baseUrl,
         modelName,
         apiMode,
-        message: `Provider test failed with status ${response.status}.`,
+        message: fallbackErrorMessage
+          ? `Provider test failed with status ${response.status}; generation fallback failed: ${fallbackErrorMessage}`
+          : `Provider test failed with status ${response.status}.`,
       }
     }
 
