@@ -1107,6 +1107,138 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
   }
 }
 
+function splitAuditSentences(body) {
+  return String(body || "")
+    .split(/(?<=[。！？!?])|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function averageValue(values) {
+  if (!values.length) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function countDryInstructionSignals(body) {
+  return countMatches(
+    body,
+    /本章|章节|读者|故事|情节|剧情|主线|伏笔|推进|塑造|设定|世界观|写作|文本|爽点|钩子|蓝图|生产|目标清晰|关系变化|人物关系|旁白保持|每段都必须|补充场景|不机械堆词|创作意图/gu,
+  )
+}
+
+function countGenericSummarySignals(body) {
+  return countMatches(
+    body,
+    /非常严重|更加复杂|更加危险|情况很复杂|未来.*危险|命运安排|内心深处|无法言说|说不清|发生了变化|变得复杂|感到震惊|陷入沉思|充满疑惑|一切都不简单/gu,
+  )
+}
+
+export function auditProseTextureForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const issues = []
+  const chapterAudits = []
+  let dryInstructionSignals = 0
+  let genericSummarySignals = 0
+  let sceneRichChapters = 0
+  let variedRhythmChapters = 0
+
+  for (const chapter of chapters) {
+    const body = String(chapter?.body || "")
+    const paragraphs = splitBodyParagraphs(body)
+    const sentences = splitAuditSentences(body)
+    const sentenceLengths = sentences.map((sentence) => normalizeAuditText(sentence).length).filter((length) => length > 0)
+    const averageSentenceLength = averageValue(sentenceLengths)
+    const shortSentenceRatio = sentenceLengths.length
+      ? sentenceLengths.filter((length) => length <= 3).length / sentenceLengths.length
+      : 0
+    const longSentenceRatio = sentenceLengths.length
+      ? sentenceLengths.filter((length) => length >= 90).length / sentenceLengths.length
+      : 0
+    const uniqueSentenceLengthCount = new Set(sentenceLengths.map((length) => Math.round(length / 5) * 5)).size
+    const drySignals = countDryInstructionSignals(body)
+    const genericSignals = countGenericSummarySignals(body)
+    const actionSignals = countMatches(body, /走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默|合上|推开|退|挡|攥|盯|避开|吹|夹|藏住/gu)
+    const sensorySignals = countMatches(body, /雨|风|声|灯|冷|热|湿|血|灰|墨|纸|门|窗|脚步|气味|疼|汗|光|影|呼吸|触感|指腹|掌心|袖口/gu)
+    const concreteObjectSignals = countMatches(body, /账本|账册|缺页|信纸|印章|官印|钥匙|地图|脚步|旧账|证据|线索|门槛|窗纸|灯火|袖口|鞋尖|纸边|墨味/gu)
+    const concreteDensity = body.length
+      ? (actionSignals + sensorySignals + concreteObjectSignals) / Math.max(1, body.length / 500)
+      : 0
+    const dryDensity = body.length
+      ? (drySignals + genericSignals) / Math.max(1, body.length / 500)
+      : 0
+    const sceneRich = concreteDensity >= 8 && sensorySignals >= 4 && concreteObjectSignals >= 3
+    const variedRhythm = sentenceLengths.length >= 4
+      && uniqueSentenceLengthCount >= 3
+      && averageSentenceLength >= 8
+      && shortSentenceRatio <= 0.35
+      && longSentenceRatio <= 0.45
+    if (sceneRich) sceneRichChapters += 1
+    if (variedRhythm) variedRhythmChapters += 1
+    dryInstructionSignals += drySignals
+    genericSummarySignals += genericSignals
+
+    const chapterIssues = []
+    if (paragraphs.length < 3) chapterIssues.push(`too few prose paragraphs ${paragraphs.length}`)
+    if (!sceneRich) chapterIssues.push(`thin scene texture density ${concreteDensity.toFixed(1)}`)
+    if (!variedRhythm) chapterIssues.push("stiff sentence rhythm")
+    if (dryDensity > 5) chapterIssues.push(`dry outline/instruction density ${dryDensity.toFixed(1)}`)
+    if (genericSignals >= 3) chapterIssues.push(`generic summary phrasing ${genericSignals}`)
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      paragraphCount: paragraphs.length,
+      sentenceCount: sentences.length,
+      averageSentenceLength,
+      shortSentenceRatio,
+      longSentenceRatio,
+      uniqueSentenceLengthCount,
+      actionSignals,
+      sensorySignals,
+      concreteObjectSignals,
+      concreteDensity,
+      drySignals,
+      genericSignals,
+      dryDensity,
+      sceneRich,
+      variedRhythm,
+      issues: chapterIssues,
+    })
+  }
+
+  const totalChapters = chapters.length
+  const requiredTextureChapters = totalChapters >= 3 ? Math.ceil(totalChapters * 0.8) : totalChapters
+  if (totalChapters === 0) issues.push("no readable chapters available for prose texture audit")
+  if (sceneRichChapters < requiredTextureChapters) {
+    issues.push(`scene-rich chapter coverage ${sceneRichChapters}/${totalChapters} below required ${requiredTextureChapters}`)
+  }
+  if (variedRhythmChapters < requiredTextureChapters) {
+    issues.push(`varied rhythm chapter coverage ${variedRhythmChapters}/${totalChapters} below required ${requiredTextureChapters}`)
+  }
+  if (dryInstructionSignals > Math.max(6, totalChapters * 3)) {
+    issues.push(`dry outline/instruction signals ${dryInstructionSignals} exceed allowed ${Math.max(6, totalChapters * 3)}`)
+  }
+  if (genericSummarySignals > Math.max(4, totalChapters * 2)) {
+    issues.push(`generic summary signals ${genericSummarySignals} exceed allowed ${Math.max(4, totalChapters * 2)}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      sceneRichChapters,
+      variedRhythmChapters,
+      requiredTextureChapters,
+      dryInstructionSignals,
+      genericSummarySignals,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function collectStyleFallbackSignals(payload) {
   const signals = []
   const inspectCandidate = (candidate, label) => {
@@ -1607,6 +1739,14 @@ async function verifyReader(api, projectId, options, report) {
       repeatedDialogueSamples: narrativeAudit.repeatedDialogueSamples,
     })
   }
+  const proseTextureAudit = auditProseTextureForAcceptance(auditSnapshot, options)
+  if (!proseTextureAudit.passed) {
+    throw new AcceptanceError("Prose texture acceptance audit failed.", {
+      issues: proseTextureAudit.issues.slice(0, 30),
+      summary: proseTextureAudit.summary,
+      chapters: proseTextureAudit.chapters.slice(0, 8),
+    })
+  }
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(auditSnapshot, options)
   if (!characterVoiceAudit.passed) {
     throw new AcceptanceError("Character voice acceptance audit failed.", {
@@ -1643,6 +1783,7 @@ async function verifyReader(api, projectId, options, report) {
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalNarrativeAudit = narrativeAudit
+  report.finalProseTextureAudit = proseTextureAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
   report.finalForeshadowingAudit = foreshadowingAudit
   report.finalContinuityAudit = continuityAudit
@@ -1654,6 +1795,7 @@ async function verifyReader(api, projectId, options, report) {
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
@@ -1664,6 +1806,7 @@ async function verifyReader(api, projectId, options, report) {
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
@@ -1692,6 +1835,7 @@ async function main() {
     finalReader: null,
     finalStoryFoundationAudit: null,
     finalNarrativeAudit: null,
+    finalProseTextureAudit: null,
     finalCharacterVoiceAudit: null,
     finalForeshadowingAudit: null,
     finalContinuityAudit: null,

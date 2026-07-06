@@ -96,6 +96,7 @@ test("production acceptance runner audits story foundation and narrative quality
   const {
     auditStoryFoundationForAcceptance,
     auditNarrativeQualityForAcceptance,
+    auditProseTextureForAcceptance,
     auditCharacterVoiceForAcceptance,
     auditForeshadowingPayoffForAcceptance,
     auditContinuityForAcceptance,
@@ -112,6 +113,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(narrativeAudit.summary.totalChapters, 4)
   assert.ok(narrativeAudit.summary.totalDialogue >= narrativeAudit.summary.requiredDialogue)
   assert.equal(narrativeAudit.summary.mentionedCast >= 2, true)
+
+  const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(proseTextureAudit.passed, true)
+  assert.equal(proseTextureAudit.summary.sceneRichChapters, 4)
+  assert.equal(proseTextureAudit.summary.variedRhythmChapters, 4)
 
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, true)
@@ -216,4 +222,21 @@ test("production acceptance runner rejects foreshadowing that never reaches the 
   const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(foreshadowingAudit.passed, false)
   assert.match(foreshadowingAudit.issues.join("\n"), /seed evidence|advance\/payoff evidence|payoff/)
+})
+
+test("production acceptance runner rejects dry outline-like prose", async () => {
+  const { auditProseTextureForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "本章主要推进主线和人物关系，故事情节在这里发生重要变化，伏笔也会得到强化。",
+      "角色非常紧张，情况很复杂，未来会更加危险，读者会意识到世界观设定并不简单。",
+      "剧情继续发展，主角的选择带来关系变化，但文本保持概括说明，没有具体动作和场景。",
+      "补充场景需要突出爽点和钩子，每段都必须推进主线，不能偏离写作目标。",
+    ].join("\n\n")
+  }
+
+  const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(proseTextureAudit.passed, false)
+  assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
 })
