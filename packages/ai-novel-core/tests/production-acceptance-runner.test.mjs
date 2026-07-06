@@ -39,9 +39,15 @@ function richSnapshot() {
     delta: "信任、债务或身份风险发生变化。",
   }))
   const foreshadowingEntries = chapters.map((chapter) => ({
+    id: `foreshadowing-${chapter.chapterNumber}`,
+    sourceChapter: chapter.chapterNumber,
     chapterNumber: chapter.chapterNumber,
-    status: "seeded",
-    payoff: "后续章节推进或回收。",
+    status: "planned",
+    operation: "埋设并推进缺页账册、旧印章和门外脚步的关联。",
+    expectedAdvance: "后续章节让缺页账册、印章和脚步声持续改变人物选择。",
+    payoffMode: chapter.chapterNumber >= totalChapters - 1 ? "late_payoff" : "advance_or_reframe",
+    linkedAnchors: ["缺页账册", "印章", "脚步"],
+    payoff: "后续章节推进或回收缺页账册、印章和脚步声。",
   }))
   const relationshipEntries = [
     { from: "沈砚", to: "老周", pressure: "债务与隐瞒" },
@@ -91,6 +97,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditStoryFoundationForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditCharacterVoiceForAcceptance,
+    auditForeshadowingPayoffForAcceptance,
     auditContinuityForAcceptance,
   } = await loadRunner()
   const snapshot = richSnapshot()
@@ -110,6 +117,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(characterVoiceAudit.passed, true)
   assert.equal(characterVoiceAudit.summary.voicedCharacters >= 2, true)
   assert.equal(characterVoiceAudit.summary.activeCharacters >= 3, true)
+
+  const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(foreshadowingAudit.passed, true)
+  assert.equal(foreshadowingAudit.summary.seededEntries >= 3, true)
+  assert.equal(foreshadowingAudit.summary.advancedEntries >= 2, true)
 
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, true)
@@ -169,4 +181,39 @@ test("production acceptance runner rejects same-voice character dialogue", async
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, false)
   assert.match(characterVoiceAudit.issues.join("\n"), /same dialogue used across speakers|template dialogue ratio/)
+})
+
+test("production acceptance runner rejects foreshadowing that never reaches the prose", async () => {
+  const { auditForeshadowingPayoffForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.lore.storyFoundation.foreshadowingLedger.entries = [
+    {
+      id: "hidden-glass-1",
+      sourceChapter: 1,
+      operation: "埋设蓝色玻璃与南方盐价的秘密关系。",
+      expectedAdvance: "第三章回收蓝色玻璃和南方盐价。",
+      payoffMode: "late_payoff",
+      linkedAnchors: ["蓝色玻璃", "南方盐价"],
+    },
+    {
+      id: "hidden-glass-2",
+      sourceChapter: 2,
+      operation: "继续推进蓝色玻璃。",
+      expectedAdvance: "第四章让蓝色玻璃改变真相。",
+      payoffMode: "final_payoff",
+      linkedAnchors: ["蓝色玻璃"],
+    },
+    {
+      id: "hidden-glass-3",
+      sourceChapter: 3,
+      operation: "回收南方盐价。",
+      expectedAdvance: "最终揭示南方盐价。",
+      payoffMode: "final_payoff",
+      linkedAnchors: ["南方盐价"],
+    },
+  ]
+
+  const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(foreshadowingAudit.passed, false)
+  assert.match(foreshadowingAudit.issues.join("\n"), /seed evidence|advance\/payoff evidence|payoff/)
 })

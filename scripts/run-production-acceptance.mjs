@@ -673,6 +673,138 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
   }
 }
 
+function extractForeshadowingEntries(snapshot) {
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const contract = foundation.contract || {}
+  const primary = getObjectPath(foundation.foreshadowingLedger, "entries")
+  const fallback = getObjectPath(contract, "foreshadowing.entries")
+  return Array.isArray(primary) ? primary : Array.isArray(fallback) ? fallback : []
+}
+
+function splitLedgerWords(value) {
+  return String(value || "")
+    .split(/[^\p{Script=Han}A-Za-z0-9]+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2 && !/^(chapter|source|status|planned|active|payoff|advance|final|late)$/iu.test(part))
+}
+
+function extractForeshadowingAnchorTerms(entry) {
+  const anchors = []
+  const add = (value) => {
+    const text = String(value || "").trim()
+    if (text.length >= 2) anchors.push(text)
+  }
+  for (const value of Array.isArray(entry?.linkedAnchors) ? entry.linkedAnchors : []) add(value)
+  for (const value of Array.isArray(entry?.anchors) ? entry.anchors : []) add(value)
+  for (const key of ["operation", "expectedAdvance", "expectedTouchpoint", "payoff", "sourceTitle", "title"]) {
+    for (const word of splitLedgerWords(entry?.[key])) add(word)
+  }
+  return [...new Set(anchors)]
+    .filter((term) => !/^(伏笔|线索|推进|回收|后续|章节|本章|下一章|上一章|关系|状态|主线|角色|选择|代价)$/u.test(term))
+    .slice(0, 12)
+}
+
+function chapterBodyByNumber(chapters) {
+  const byNumber = new Map()
+  for (const chapter of chapters) {
+    byNumber.set(Number(chapter?.chapterNumber || 0), String(chapter?.body || ""))
+  }
+  return byNumber
+}
+
+function containsAnyTerm(text, terms) {
+  const source = String(text || "")
+  return terms.some((term) => source.includes(String(term || "")))
+}
+
+function laterChapterText(chapters, sourceChapter) {
+  return chapters
+    .filter((chapter) => Number(chapter?.chapterNumber || 0) > sourceChapter)
+    .map((chapter) => String(chapter?.body || ""))
+    .join("\n\n")
+}
+
+export function auditForeshadowingPayoffForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const entries = extractForeshadowingEntries(snapshot)
+  const expectedEntries = totalChapters > 0 ? Math.max(3, Math.ceil(totalChapters / 4)) : 3
+  const requiredEntries = Math.min(entries.length, expectedEntries)
+  const issues = []
+  const byChapter = chapterBodyByNumber(chapters)
+  const entryAudits = []
+  let seededEntries = 0
+  let advancedEntries = 0
+  let payoffEntries = 0
+  let concreteEntries = 0
+
+  if (entries.length < expectedEntries) {
+    issues.push(`foreshadowing ledger entries ${entries.length} below required ${expectedEntries}`)
+  }
+
+  for (const [index, entry] of entries.entries()) {
+    const sourceChapter = Number(entry?.sourceChapter || entry?.chapterNumber || index + 1)
+    const payoffMode = String(entry?.payoffMode || entry?.status || "").trim()
+    const anchors = extractForeshadowingAnchorTerms(entry)
+    const sourceBody = byChapter.get(sourceChapter) || ""
+    const laterBody = laterChapterText(chapters, sourceChapter)
+    const seeded = anchors.length > 0 && containsAnyTerm(sourceBody, anchors)
+    const advanced = anchors.length > 0 && containsAnyTerm(laterBody, anchors)
+    const payoffLike = /payoff|回收|兑现|resolved|closed|final|late/iu.test([
+      payoffMode,
+      entry?.operation,
+      entry?.payoff,
+      entry?.expectedAdvance,
+      entry?.expectedTouchpoint,
+    ].map((part) => String(part || "")).join(" "))
+    if (anchors.length > 0) concreteEntries += 1
+    if (seeded) seededEntries += 1
+    if (advanced) advancedEntries += 1
+    if (payoffLike && advanced) payoffEntries += 1
+    entryAudits.push({
+      id: entry?.id || `entry-${index + 1}`,
+      sourceChapter,
+      payoffMode,
+      anchors: anchors.slice(0, 8),
+      seeded,
+      advanced,
+      payoffLike,
+    })
+  }
+
+  const requiredSeeded = requiredEntries
+  const requiredAdvanced = requiredEntries >= 3 ? Math.ceil(requiredEntries * 0.6) : requiredEntries
+  if (requiredEntries > 0 && concreteEntries < requiredEntries) {
+    issues.push(`foreshadowing concrete anchor coverage ${concreteEntries}/${entries.length} below required ${requiredEntries}`)
+  }
+  if (requiredEntries > 0 && seededEntries < requiredSeeded) {
+    issues.push(`foreshadowing seed evidence ${seededEntries}/${entries.length} below required ${requiredSeeded}`)
+  }
+  if (requiredEntries > 0 && totalChapters >= 3 && advancedEntries < requiredAdvanced) {
+    issues.push(`foreshadowing advance/payoff evidence ${advancedEntries}/${entries.length} below required ${requiredAdvanced}`)
+  }
+  if (totalChapters >= 3 && !entryAudits.some((entry) => entry.payoffLike && entry.advanced)) {
+    issues.push("no foreshadowing entry shows payoff or late-stage advance evidence in chapter text")
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      entries: entries.length,
+      expectedEntries,
+      concreteEntries,
+      seededEntries,
+      advancedEntries,
+      payoffEntries,
+      requiredAdvanced,
+    },
+    entries: entryAudits,
+  }
+}
+
 const CONTINUITY_CONCRETE_TERMS = [
   "账本", "账册", "缺页", "信纸", "印章", "官印", "钥匙", "地图", "脚步", "旧账", "证据", "线索",
   "伤口", "债务", "尸体", "药瓶", "木盒", "书卷", "铜镜", "玉佩", "戒指", "铃铛", "符纸", "阵图",
@@ -1484,6 +1616,14 @@ async function verifyReader(api, projectId, options, report) {
       characters: characterVoiceAudit.characters.slice(0, 8),
     })
   }
+  const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(auditSnapshot, options)
+  if (!foreshadowingAudit.passed) {
+    throw new AcceptanceError("Foreshadowing payoff acceptance audit failed.", {
+      issues: foreshadowingAudit.issues.slice(0, 30),
+      summary: foreshadowingAudit.summary,
+      entries: foreshadowingAudit.entries.slice(0, 12),
+    })
+  }
   const continuityAudit = auditContinuityForAcceptance(auditSnapshot, options)
   if (!continuityAudit.passed) {
     throw new AcceptanceError("Cross-chapter continuity acceptance audit failed.", {
@@ -1504,6 +1644,7 @@ async function verifyReader(api, projectId, options, report) {
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
+  report.finalForeshadowingAudit = foreshadowingAudit
   report.finalContinuityAudit = continuityAudit
   report.steps.push({
     step: "reader_acceptance",
@@ -1514,6 +1655,7 @@ async function verifyReader(api, projectId, options, report) {
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
   })
   log("Reader acceptance passed.", {
@@ -1523,6 +1665,7 @@ async function verifyReader(api, projectId, options, report) {
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
   })
   return snapshot
@@ -1550,6 +1693,7 @@ async function main() {
     finalStoryFoundationAudit: null,
     finalNarrativeAudit: null,
     finalCharacterVoiceAudit: null,
+    finalForeshadowingAudit: null,
     finalContinuityAudit: null,
     error: null,
   }
