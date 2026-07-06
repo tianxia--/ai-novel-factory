@@ -303,7 +303,7 @@ function createApi(rootDir, handleNovelStudioApi, report) {
   }
 }
 
-function findConfiguredLlm(configPayload) {
+export function findConfiguredLlm(configPayload) {
   const configs = Array.isArray(configPayload.configs) ? configPayload.configs : []
   const routes = Array.isArray(configPayload.routes) ? configPayload.routes : []
   const configured = configs.filter((config) =>
@@ -315,21 +315,24 @@ function findConfiguredLlm(configPayload) {
   const active = configured.find((config) => Number(config.is_active || 0) === 1) || configured[0] || null
   const textRoute = routes.find((route) => route.capability === "text")
   const styleRoute = routes.find((route) => route.capability === "style_evolution")
+  const textConfig = configured.find((config) => String(config.id) === String(textRoute?.config_id))
+    || active
   const styleConfig = configured.find((config) => String(config.id) === String(styleRoute?.config_id))
-    || configured.find((config) => String(config.id) === String(textRoute?.config_id))
+    || textConfig
     || active
   return {
     configs,
     routes,
     configured,
     active,
+    textConfig,
     styleConfig,
   }
 }
 
 function assertModelConfigReady(modelInfo) {
-  if (!modelInfo.active) {
-    throw new AcceptanceError("No usable LLM config found. Add a model in the app settings before running real acceptance.", {
+  if (!modelInfo.textConfig) {
+    throw new AcceptanceError("No usable text LLM route found. Add a model in the app settings before running real acceptance.", {
       configuredCount: modelInfo.configured.length,
     })
   }
@@ -340,7 +343,7 @@ function assertModelConfigReady(modelInfo) {
   }
 }
 
-function buildProviderHealthTargets(modelInfo) {
+export function buildProviderHealthTargets(modelInfo) {
   const byId = new Map()
   const add = (capability, config) => {
     if (!config?.id) {
@@ -357,7 +360,7 @@ function buildProviderHealthTargets(modelInfo) {
       config,
     })
   }
-  add("text", modelInfo.active)
+  add("text", modelInfo.textConfig)
   add("style_evolution", modelInfo.styleConfig)
   return Array.from(byId.values())
 }
@@ -1918,6 +1921,7 @@ async function main() {
       status: "passed",
       at: now(),
       activeModel: modelInfo.active?.model_name || null,
+      textModel: modelInfo.textConfig?.model_name || null,
       styleModel: modelInfo.styleConfig?.model_name || null,
       routeCount: modelInfo.routes.length,
     })
@@ -1931,6 +1935,7 @@ async function main() {
       rootDir: options.rootDir,
       targetWords: options.chapters * options.chapterWords,
       activeModel: modelInfo.active?.model_name,
+      textModel: modelInfo.textConfig?.model_name,
       styleModel: modelInfo.styleConfig?.model_name,
       aigcDetectorProvider: detectorSettings.provider,
       autoApproveStyle: options.autoApproveStyle,

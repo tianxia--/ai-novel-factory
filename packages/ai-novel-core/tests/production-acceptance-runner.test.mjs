@@ -136,6 +136,83 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(continuityAudit.summary.bridgedPairs, 3)
 })
 
+test("production acceptance runner resolves provider health targets from capability routes", async () => {
+  const { findConfiguredLlm, buildProviderHealthTargets } = await loadRunner()
+  const configs = [
+    {
+      id: "active-config",
+      name: "Active fallback",
+      api_key_configured: true,
+      base_url: "https://relay.example/active",
+      model_name: "active-model",
+      api_mode: "chat",
+      is_active: 1,
+    },
+    {
+      id: "text-config",
+      name: "Text route",
+      api_key_configured: true,
+      base_url: "https://relay.example/text",
+      model_name: "text-model",
+      api_mode: "responses",
+      is_active: 0,
+    },
+    {
+      id: "style-config",
+      name: "Style route",
+      api_key_configured: true,
+      base_url: "https://relay.example/style",
+      model_name: "style-model",
+      api_mode: "responses",
+      is_active: 0,
+    },
+  ]
+  const routes = [
+    { capability: "text", config_id: "text-config" },
+    { capability: "style_evolution", config_id: "style-config" },
+  ]
+
+  const modelInfo = findConfiguredLlm({ configs, routes })
+  const targets = buildProviderHealthTargets(modelInfo)
+
+  assert.equal(modelInfo.active.id, "active-config")
+  assert.equal(modelInfo.textConfig.id, "text-config")
+  assert.equal(modelInfo.styleConfig.id, "style-config")
+  assert.deepEqual(targets.map((target) => ({
+    capabilities: target.capabilities,
+    id: target.config.id,
+  })), [
+    { capabilities: ["text"], id: "text-config" },
+    { capabilities: ["style_evolution"], id: "style-config" },
+  ])
+})
+
+test("production acceptance runner merges provider health targets for shared routes", async () => {
+  const { findConfiguredLlm, buildProviderHealthTargets } = await loadRunner()
+  const configs = [
+    {
+      id: "shared-config",
+      name: "Shared route",
+      api_key_configured: true,
+      base_url: "https://relay.example/shared",
+      model_name: "shared-model",
+      api_mode: "responses",
+      is_active: 1,
+    },
+  ]
+  const routes = [
+    { capability: "text", config_id: "shared-config" },
+    { capability: "style_evolution", config_id: "shared-config" },
+  ]
+
+  const modelInfo = findConfiguredLlm({ configs, routes })
+  const targets = buildProviderHealthTargets(modelInfo)
+
+  assert.equal(targets.length, 1)
+  assert.deepEqual(targets[0].capabilities, ["text", "style_evolution"])
+  assert.equal(targets[0].config.id, "shared-config")
+})
+
 test("production acceptance runner rejects thin foundations and dry repeated prose", async () => {
   const {
     auditStoryFoundationForAcceptance,
