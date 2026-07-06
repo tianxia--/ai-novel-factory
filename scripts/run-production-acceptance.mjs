@@ -516,6 +516,163 @@ function extractKnownCastNames(snapshot) {
   return [...new Set(names.filter((name) => name.length >= 2 && !/^(主角|配角|对抗力量|关键关系对象)$/u.test(name)))]
 }
 
+function extractAcceptanceCharacterDossiers(snapshot) {
+  const dossiers = Array.isArray(snapshot?.characters?.dossiers) ? snapshot.characters.dossiers : []
+  const knownNames = extractKnownCastNames(snapshot)
+  const byName = new Map()
+  for (const dossier of dossiers) {
+    const canonicalName = String(dossier?.canonicalName || dossier?.name || "").trim()
+    if (!canonicalName) continue
+    byName.set(canonicalName, {
+      name: canonicalName,
+      aliases: (Array.isArray(dossier?.aliases) ? dossier.aliases : []).map((alias) => String(alias || "").trim()).filter(Boolean),
+      speechMarkers: (Array.isArray(dossier?.speechMarkers) ? dossier.speechMarkers : []).map((item) => String(item || "").trim()).filter(Boolean),
+      behaviorHabits: (Array.isArray(dossier?.behaviorHabits) ? dossier.behaviorHabits : []).map((item) => String(item || "").trim()).filter(Boolean),
+    })
+  }
+  for (const name of knownNames) {
+    if (!byName.has(name)) {
+      byName.set(name, { name, aliases: [], speechMarkers: [], behaviorHabits: [] })
+    }
+  }
+  return Array.from(byName.values())
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function collectRegexGroupMatches(text, pattern) {
+  const matches = []
+  for (const match of String(text || "").matchAll(pattern)) {
+    const value = String(match[1] || "").trim()
+    if (value) matches.push(value)
+  }
+  return matches
+}
+
+function collectCharacterDialogueSamples(body, names) {
+  const speechVerb = "(?:说|问|道|喊|低声|冷笑|答|叹|唤|喝|回|提醒|催促|开口|接话|咬牙|摇头)"
+  const samples = []
+  for (const rawName of names) {
+    const name = String(rawName || "").trim()
+    if (!name) continue
+    const escapedName = escapeRegExp(name)
+    samples.push(
+      ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^。！？!?；;\\n「“]{0,50}${speechVerb}[^「“\\n]{0,24}[「“]([^」”]{2,120})[」”]`, "gu")),
+      ...collectRegexGroupMatches(body, new RegExp(`[「“]([^」”]{2,120})[」”][^。！？!?；;\\n]{0,45}${escapedName}[^。！？!?；;\\n]{0,30}${speechVerb}`, "gu")),
+      ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^。！？!?；;\\n]{0,50}${speechVerb}[^：:\\n]{0,20}[：:]\\s*[「“]?([^」”。！？!?；;\\n]{2,80})[」”]?`, "gu")),
+    )
+  }
+  return samples
+}
+
+function collectCharacterWindows(body, names, radius = 90) {
+  const source = String(body || "")
+  const windows = []
+  for (const rawName of names) {
+    const name = String(rawName || "").trim()
+    if (!name) continue
+    let index = source.indexOf(name)
+    while (index >= 0) {
+      windows.push(source.slice(Math.max(0, index - radius), Math.min(source.length, index + name.length + radius)))
+      index = source.indexOf(name, index + name.length)
+    }
+  }
+  return windows
+}
+
+function isTemplateDialogue(value) {
+  return /这件事很重要|情况很复杂|未来.*危险|我们必须|必须继续|我知道了|我明白|你说得对|怎么办|没时间了|很严重|不能再等/u.test(String(value || ""))
+}
+
+export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const dossiers = extractAcceptanceCharacterDossiers(snapshot)
+  const allBody = chapters.map((chapter) => String(chapter?.body || "")).join("\n\n")
+  const issues = []
+  const characterAudits = []
+  const dialogueOwners = new Map()
+  let totalAttributedDialogue = 0
+  let templateDialogue = 0
+
+  for (const dossier of dossiers) {
+    const names = [dossier.name, ...dossier.aliases].filter(Boolean)
+    const bodyMentions = names.reduce((sum, name) => sum + countMatches(allBody, new RegExp(escapeRegExp(name), "gu")), 0)
+    const dialogueSamples = collectCharacterDialogueSamples(allBody, names)
+    const normalizedDialogue = dialogueSamples.map((sample) => normalizeAuditText(sample)).filter((sample) => sample.length >= 4)
+    const uniqueDialogue = [...new Set(normalizedDialogue)]
+    const windows = collectCharacterWindows(allBody, names)
+    const joinedWindows = windows.join("\n")
+    const actionSignals = countMatches(joinedWindows, /走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默|合上|推开|退|挡|攥|盯|避开/gu)
+    const pressureSignals = countMatches(joinedWindows, /必须|不能|决定|选择|代价|风险|欠|债|怕|查清|追问|交出|保住|隐瞒|裂缝|怀疑|逼|拦|失去|暴露|不肯|犹豫/gu)
+    const matchedSpeechMarkers = dossier.speechMarkers.filter((marker) => marker.length >= 2 && joinedWindows.includes(marker)).slice(0, 5)
+    const matchedBehaviorHabits = dossier.behaviorHabits.filter((habit) => habit.length >= 2 && joinedWindows.includes(habit)).slice(0, 5)
+    for (const sample of uniqueDialogue) {
+      if (sample.length >= 8) {
+        const owners = dialogueOwners.get(sample) || new Set()
+        owners.add(dossier.name)
+        dialogueOwners.set(sample, owners)
+      }
+    }
+    totalAttributedDialogue += dialogueSamples.length
+    templateDialogue += dialogueSamples.filter(isTemplateDialogue).length
+    characterAudits.push({
+      name: dossier.name,
+      mentionCount: bodyMentions,
+      dialogueCount: dialogueSamples.length,
+      uniqueDialogueCount: uniqueDialogue.length,
+      actionSignals,
+      pressureSignals,
+      matchedSpeechMarkers,
+      matchedBehaviorHabits,
+      active: bodyMentions > 0 && (dialogueSamples.length > 0 || actionSignals >= 3 || pressureSignals >= 2),
+      voiced: dialogueSamples.length > 0,
+      sampleDialogue: dialogueSamples.slice(0, 3),
+    })
+  }
+
+  const knownCast = dossiers.length
+  const activeCharacters = characterAudits.filter((audit) => audit.active).length
+  const voicedCharacters = characterAudits.filter((audit) => audit.voiced).length
+  const requiredCharacters = knownCast >= 3 ? 3 : Math.min(2, knownCast)
+  const requiredVoicedCharacters = Math.min(2, knownCast)
+  const repeatedAcrossSpeakers = Array.from(dialogueOwners.entries())
+    .filter(([, owners]) => owners.size >= 2)
+    .map(([sample, owners]) => ({ sample: sample.slice(0, 80), speakers: Array.from(owners) }))
+  const templateRatio = totalAttributedDialogue ? templateDialogue / totalAttributedDialogue : 0
+
+  if (knownCast >= 2 && voicedCharacters < requiredVoicedCharacters) {
+    issues.push(`character voice evidence ${voicedCharacters}/${knownCast} below required ${requiredVoicedCharacters}`)
+  }
+  if (knownCast >= 2 && activeCharacters < requiredCharacters) {
+    issues.push(`character agency evidence ${activeCharacters}/${knownCast} below required ${requiredCharacters}`)
+  }
+  if (repeatedAcrossSpeakers.length > 0) {
+    issues.push(`same dialogue used across speakers: ${repeatedAcrossSpeakers[0].sample}`)
+  }
+  if (totalAttributedDialogue >= Math.max(6, requiredVoicedCharacters * 3) && templateRatio > 0.45) {
+    issues.push(`template dialogue ratio ${(templateRatio * 100).toFixed(1)}% is too high`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      knownCast,
+      activeCharacters,
+      requiredCharacters,
+      voicedCharacters,
+      requiredVoicedCharacters,
+      totalAttributedDialogue,
+      templateDialogue,
+      templateRatio,
+    },
+    repeatedAcrossSpeakers: repeatedAcrossSpeakers.slice(0, 5),
+    characters: characterAudits,
+  }
+}
+
 const CONTINUITY_CONCRETE_TERMS = [
   "账本", "账册", "缺页", "信纸", "印章", "官印", "钥匙", "地图", "脚步", "旧账", "证据", "线索",
   "伤口", "债务", "尸体", "药瓶", "木盒", "书卷", "铜镜", "玉佩", "戒指", "铃铛", "符纸", "阵图",
@@ -1318,6 +1475,15 @@ async function verifyReader(api, projectId, options, report) {
       repeatedDialogueSamples: narrativeAudit.repeatedDialogueSamples,
     })
   }
+  const characterVoiceAudit = auditCharacterVoiceForAcceptance(auditSnapshot, options)
+  if (!characterVoiceAudit.passed) {
+    throw new AcceptanceError("Character voice acceptance audit failed.", {
+      issues: characterVoiceAudit.issues.slice(0, 30),
+      summary: characterVoiceAudit.summary,
+      repeatedAcrossSpeakers: characterVoiceAudit.repeatedAcrossSpeakers,
+      characters: characterVoiceAudit.characters.slice(0, 8),
+    })
+  }
   const continuityAudit = auditContinuityForAcceptance(auditSnapshot, options)
   if (!continuityAudit.passed) {
     throw new AcceptanceError("Cross-chapter continuity acceptance audit failed.", {
@@ -1337,6 +1503,7 @@ async function verifyReader(api, projectId, options, report) {
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalNarrativeAudit = narrativeAudit
+  report.finalCharacterVoiceAudit = characterVoiceAudit
   report.finalContinuityAudit = continuityAudit
   report.steps.push({
     step: "reader_acceptance",
@@ -1346,6 +1513,7 @@ async function verifyReader(api, projectId, options, report) {
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    characterVoice: characterVoiceAudit.summary,
     continuity: continuityAudit.summary,
   })
   log("Reader acceptance passed.", {
@@ -1354,6 +1522,7 @@ async function verifyReader(api, projectId, options, report) {
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    characterVoice: characterVoiceAudit.summary,
     continuity: continuityAudit.summary,
   })
   return snapshot
@@ -1380,6 +1549,7 @@ async function main() {
     finalReader: null,
     finalStoryFoundationAudit: null,
     finalNarrativeAudit: null,
+    finalCharacterVoiceAudit: null,
     finalContinuityAudit: null,
     error: null,
   }

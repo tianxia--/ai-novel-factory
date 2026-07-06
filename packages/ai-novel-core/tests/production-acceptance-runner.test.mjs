@@ -90,6 +90,7 @@ test("production acceptance runner audits story foundation and narrative quality
   const {
     auditStoryFoundationForAcceptance,
     auditNarrativeQualityForAcceptance,
+    auditCharacterVoiceForAcceptance,
     auditContinuityForAcceptance,
   } = await loadRunner()
   const snapshot = richSnapshot()
@@ -104,6 +105,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(narrativeAudit.summary.totalChapters, 4)
   assert.ok(narrativeAudit.summary.totalDialogue >= narrativeAudit.summary.requiredDialogue)
   assert.equal(narrativeAudit.summary.mentionedCast >= 2, true)
+
+  const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterVoiceAudit.passed, true)
+  assert.equal(characterVoiceAudit.summary.voicedCharacters >= 2, true)
+  assert.equal(characterVoiceAudit.summary.activeCharacters >= 3, true)
 
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, true)
@@ -146,4 +152,21 @@ test("production acceptance runner rejects broken cross-chapter handoffs", async
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, false)
   assert.match(continuityAudit.issues.join("\n"), /no visible handoff anchor|continuity coverage/)
+})
+
+test("production acceptance runner rejects same-voice character dialogue", async () => {
+  const { auditCharacterVoiceForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "雨声贴着窗纸往下滑。沈砚把缺页账本推到灯下，老周站在门槛外，少尹按住官印，三个人都在等同一个答案。",
+      "沈砚道：“这件事很重要，我们必须继续调查。”他伸手合上账册，决定先藏住缺页。",
+      "老周道：“这件事很重要，我们必须继续调查。”他低头退开，袖口却压着半枚湿印。",
+      "少尹看向门外脚步，手指扣住官印，追问谁还隐瞒了旧账。这个选择让关系裂开，也把风险留在屋里。",
+    ].join("\n\n")
+  }
+
+  const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterVoiceAudit.passed, false)
+  assert.match(characterVoiceAudit.issues.join("\n"), /same dialogue used across speakers|template dialogue ratio/)
 })
