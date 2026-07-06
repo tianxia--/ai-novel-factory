@@ -516,6 +516,119 @@ function extractKnownCastNames(snapshot) {
   return [...new Set(names.filter((name) => name.length >= 2 && !/^(主角|配角|对抗力量|关键关系对象)$/u.test(name)))]
 }
 
+const CONTINUITY_CONCRETE_TERMS = [
+  "账本", "账册", "缺页", "信纸", "印章", "官印", "钥匙", "地图", "脚步", "旧账", "证据", "线索",
+  "伤口", "债务", "尸体", "药瓶", "木盒", "书卷", "铜镜", "玉佩", "戒指", "铃铛", "符纸", "阵图",
+  "门外", "窗纸", "灯火", "雨声", "风声", "雪夜", "长船", "马车", "城门", "宫门", "井口", "石碑",
+]
+
+const CONTINUITY_PRESSURE_TERMS = [
+  "为何", "为什么", "没有答", "未答", "只剩", "忽然", "线索", "风险", "代价", "怀疑",
+  "隐瞒", "暴露", "失去", "追问", "追查", "查清", "交出", "裂缝", "选择", "决定", "真相",
+]
+
+function firstTextSlice(value, length) {
+  return String(value || "").slice(0, length)
+}
+
+function lastTextSlice(value, length) {
+  const text = String(value || "")
+  return text.slice(Math.max(0, text.length - length))
+}
+
+function extractContinuityAnchors(text, knownCast = []) {
+  const source = String(text || "")
+  const anchors = []
+  const push = (term, type) => {
+    const value = String(term || "").trim()
+    if (type !== "cast" && value.length < 2) return
+    if (!value || !source.includes(value)) return
+    anchors.push({ value, type })
+  }
+  for (const name of knownCast) push(name, "cast")
+  for (const term of CONTINUITY_CONCRETE_TERMS) push(term, "concrete")
+  for (const term of CONTINUITY_PRESSURE_TERMS) push(term, "pressure")
+  return [...new Map(anchors.map((anchor) => [`${anchor.type}:${anchor.value}`, anchor])).values()]
+}
+
+function sharedContinuityAnchors(leftAnchors, rightAnchors) {
+  const rightValues = new Set(rightAnchors.map((anchor) => anchor.value))
+  return leftAnchors.filter((anchor) => rightValues.has(anchor.value))
+}
+
+function hasContinuationCue(text) {
+  return /仍|还|再|又|接着|随后|刚才|昨夜|昨日|翌日|次日|那页|那封|那枚|那道|那个人|门外|脚步|线索|证据|旧账|缺页|余波|没有答|未答/u.test(String(text || ""))
+}
+
+export function auditContinuityForAcceptance(snapshot, options = {}) {
+  const chapters = (Array.isArray(snapshot?.chapters) ? snapshot.chapters : [])
+    .map((chapter) => ({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      body: String(chapter?.body || ""),
+    }))
+    .filter((chapter) => chapter.chapterNumber > 0)
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const knownCast = extractKnownCastNames(snapshot)
+  const issues = []
+  const transitions = []
+
+  for (let index = 0; index < chapters.length - 1; index += 1) {
+    const previous = chapters[index]
+    const next = chapters[index + 1]
+    const previousTail = lastTextSlice(previous.body, 900)
+    const nextHead = firstTextSlice(next.body, 900)
+    const previousAnchors = extractContinuityAnchors(previousTail, knownCast)
+    const nextAnchors = extractContinuityAnchors(nextHead, knownCast)
+    const shared = sharedContinuityAnchors(previousAnchors, nextAnchors)
+    const sharedConcrete = shared.filter((anchor) => anchor.type === "concrete")
+    const sharedCast = shared.filter((anchor) => anchor.type === "cast")
+    const sharedPressure = shared.filter((anchor) => anchor.type === "pressure")
+    const bridged = sharedConcrete.length > 0
+      || sharedPressure.length > 0
+      || sharedCast.length >= 2
+      || (sharedCast.length >= 1 && hasContinuationCue(nextHead))
+    const transition = {
+      fromChapter: previous.chapterNumber,
+      toChapter: next.chapterNumber,
+      bridged,
+      sharedConcrete: sharedConcrete.map((anchor) => anchor.value).slice(0, 8),
+      sharedCast: sharedCast.map((anchor) => anchor.value).slice(0, 8),
+      sharedPressure: sharedPressure.map((anchor) => anchor.value).slice(0, 8),
+      previousAnchorCount: previousAnchors.length,
+      nextAnchorCount: nextAnchors.length,
+      continuationCue: hasContinuationCue(nextHead),
+    }
+    transitions.push(transition)
+    if (!bridged) {
+      issues.push(`chapter ${previous.chapterNumber}->${next.chapterNumber}: no visible handoff anchor from previous tail to next opening`)
+    }
+  }
+
+  const pairCount = transitions.length
+  const bridgedPairs = transitions.filter((transition) => transition.bridged).length
+  const requiredBridgedPairs = pairCount >= 3 ? Math.ceil(pairCount * 0.8) : pairCount
+  if (pairCount > 0 && bridgedPairs < requiredBridgedPairs) {
+    issues.push(`chapter continuity coverage ${bridgedPairs}/${pairCount} below required ${requiredBridgedPairs}/${pairCount}`)
+  }
+  if (chapters.length !== (Number(snapshot?.project?.totalChapters || options.chapters || chapters.length) || chapters.length)) {
+    issues.push(`continuity audit chapter count ${chapters.length} does not match project total`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters: chapters.length,
+      transitionPairs: pairCount,
+      bridgedPairs,
+      requiredBridgedPairs,
+      knownCast: knownCast.length,
+    },
+    transitions,
+  }
+}
+
 export function auditStoryFoundationForAcceptance(snapshot, options = {}) {
   const project = snapshot?.project || {}
   const totalChapters = Number(project.totalChapters || options.chapters || 0)
@@ -1205,6 +1318,14 @@ async function verifyReader(api, projectId, options, report) {
       repeatedDialogueSamples: narrativeAudit.repeatedDialogueSamples,
     })
   }
+  const continuityAudit = auditContinuityForAcceptance(auditSnapshot, options)
+  if (!continuityAudit.passed) {
+    throw new AcceptanceError("Cross-chapter continuity acceptance audit failed.", {
+      issues: continuityAudit.issues.slice(0, 30),
+      summary: continuityAudit.summary,
+      transitions: continuityAudit.transitions.slice(0, 12),
+    })
+  }
 
   report.finalReader = {
     project,
@@ -1216,6 +1337,7 @@ async function verifyReader(api, projectId, options, report) {
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalNarrativeAudit = narrativeAudit
+  report.finalContinuityAudit = continuityAudit
   report.steps.push({
     step: "reader_acceptance",
     status: "passed",
@@ -1224,6 +1346,7 @@ async function verifyReader(api, projectId, options, report) {
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    continuity: continuityAudit.summary,
   })
   log("Reader acceptance passed.", {
     totalWords,
@@ -1231,6 +1354,7 @@ async function verifyReader(api, projectId, options, report) {
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
     narrative: narrativeAudit.summary,
+    continuity: continuityAudit.summary,
   })
   return snapshot
 }
@@ -1256,6 +1380,7 @@ async function main() {
     finalReader: null,
     finalStoryFoundationAudit: null,
     finalNarrativeAudit: null,
+    finalContinuityAudit: null,
     error: null,
   }
 

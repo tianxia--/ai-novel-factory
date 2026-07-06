@@ -90,6 +90,7 @@ test("production acceptance runner audits story foundation and narrative quality
   const {
     auditStoryFoundationForAcceptance,
     auditNarrativeQualityForAcceptance,
+    auditContinuityForAcceptance,
   } = await loadRunner()
   const snapshot = richSnapshot()
 
@@ -103,6 +104,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(narrativeAudit.summary.totalChapters, 4)
   assert.ok(narrativeAudit.summary.totalDialogue >= narrativeAudit.summary.requiredDialogue)
   assert.equal(narrativeAudit.summary.mentionedCast >= 2, true)
+
+  const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(continuityAudit.passed, true)
+  assert.equal(continuityAudit.summary.bridgedPairs, 3)
 })
 
 test("production acceptance runner rejects thin foundations and dry repeated prose", async () => {
@@ -128,4 +133,17 @@ test("production acceptance runner rejects thin foundations and dry repeated pro
   const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(narrativeAudit.passed, false)
   assert.match(narrativeAudit.issues.join("\n"), /repeated paragraph|weak action|word count/)
+})
+
+test("production acceptance runner rejects broken cross-chapter handoffs", async () => {
+  const { auditContinuityForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[1].body = [
+    "晨潮从码头外升起。陌生商队清点蓝色玻璃，簿册里全是南方盐价，没有人提昨夜的屋檐，也没有人记得旧案。",
+    "领队把货单卷好，吩咐伙计换旗。整段开场像换了一本书，前一章留下的关系压力、物件和问题都断在原地。",
+  ].join("\n\n")
+
+  const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(continuityAudit.passed, false)
+  assert.match(continuityAudit.issues.join("\n"), /no visible handoff anchor|continuity coverage/)
 })
