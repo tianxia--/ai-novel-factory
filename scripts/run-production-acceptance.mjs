@@ -1186,6 +1186,168 @@ function extractExecutionTerms(value) {
   return Array.from(terms).slice(0, 32)
 }
 
+function isGenericWorldbuildingTerm(term) {
+  return /^(世界|世界观|规则|服务|核心|创意|清晰|题材|读者|承压|持续|钩住|漂移|设定|人物|情节|故事|正文|主角|配角|章节|文本|关系|变化|推进|必须|来源|方式)$/u
+    .test(String(term || "").trim())
+}
+
+function isGenericWorldbuildingPhrase(term) {
+  const text = String(term || "").trim()
+  if (text.length < 2) return true
+  const compact = text.replace(/[，。、“”‘’：:；;,.\s]/gu, "")
+  return compact.length < 2
+    || /^(世界规则服务核心创意|设定清晰人物承压情节持续钩住读者|不漂移题材)$/u.test(compact)
+}
+
+function addWorldbuildingAnchor(anchors, labels, value) {
+  const label = String(value || "").trim()
+  if (label.length < 2 || label.length > 18 || isGenericWorldbuildingPhrase(label)) return
+  const variants = new Set()
+  const addVariant = (term) => {
+    const normalized = String(term || "").trim()
+    if (normalized.length < 2 || normalized.length > 18 || isGenericWorldbuildingTerm(normalized)) return
+    variants.add(normalized)
+  }
+  addVariant(label)
+  for (const word of splitLedgerWords(label)) addVariant(word)
+  for (const sequence of label.match(/\p{Script=Han}{2,}/gu) || []) {
+    if (sequence.length <= 6) addVariant(sequence)
+    if (sequence.length > 3) {
+      for (const size of [2, 3, 4]) {
+        for (let index = 0; index <= sequence.length - size; index += 1) {
+          addVariant(sequence.slice(index, index + size))
+        }
+      }
+    }
+  }
+  const key = label.replace(/\s+/gu, "")
+  if (!key || labels.has(key) || variants.size === 0) return
+  labels.add(key)
+  anchors.push({ label, variants: Array.from(variants) })
+}
+
+function collectWorldbuildingAnchors(value, anchors, labels, depth = 0) {
+  if (depth > 4 || value === null || value === undefined) return
+  if (typeof value === "string" || typeof value === "number") {
+    const text = String(value).trim()
+    for (const part of text.split(/[，。、“”‘’：:；;,.!?！？\n]+/u)) {
+      addWorldbuildingAnchor(anchors, labels, part)
+    }
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectWorldbuildingAnchors(item, anchors, labels, depth + 1)
+    return
+  }
+  if (typeof value === "object") {
+    for (const key of ["name", "title", "label", "anchor", "term"]) {
+      if (value[key]) addWorldbuildingAnchor(anchors, labels, value[key])
+    }
+    for (const item of Object.values(value)) collectWorldbuildingAnchors(item, anchors, labels, depth + 1)
+  }
+}
+
+function extractWorldbuildingAnchors(snapshot) {
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const sources = [
+    getObjectPath(foundation.worldMatrix, "continuityAnchors"),
+    getObjectPath(foundation.worldMatrix, "rules"),
+    getObjectPath(foundation.worldMatrix, "locations"),
+    getObjectPath(foundation.worldMatrix, "factions"),
+    getObjectPath(foundation.worldMatrix, "constraints"),
+    getObjectPath(foundation.storyBible, "nonNegotiableContracts"),
+  ]
+  const anchors = []
+  const labels = new Set()
+  for (const source of sources) {
+    collectWorldbuildingAnchors(source, anchors, labels)
+  }
+  return anchors.slice(0, 40)
+}
+
+function countWorldTextureSignals(body) {
+  return countMatches(
+    body,
+    /官|税|册|账|吏|司|坊|城|门|印|契|债|族|宗|禁|律|规|令|库|档|户|籍|役|粮|盐|商|兵|庙|宫|县|州|衙|市|渡|码头|宗门|王朝|朝廷|帮派|公司|议会|学院|星港|殖民|芯片|网络|系统|规则/gu,
+  )
+}
+
+export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const anchors = extractWorldbuildingAnchors(snapshot)
+  const issues = []
+  const chapterAudits = []
+  let anchoredChapters = 0
+  let texturedChapters = 0
+  const matchedTerms = new Set()
+
+  if (anchors.length === 0) {
+    issues.push("no worldbuilding anchors available for worldbuilding integration audit")
+  }
+
+  for (const chapter of chapters) {
+    const body = String(chapter?.body || "")
+    const matches = anchors
+      .filter((anchor) => anchor.variants.some((term) => body.includes(term)))
+      .map((anchor) => anchor.label)
+    for (const term of matches) matchedTerms.add(term)
+    const textureSignals = countWorldTextureSignals(body)
+    const requiredMatches = anchors.length >= 3 ? 2 : Math.min(1, anchors.length)
+    const anchored = requiredMatches > 0 && matches.length >= requiredMatches
+    const textured = textureSignals >= 4
+    if (anchored) anchoredChapters += 1
+    if (textured) texturedChapters += 1
+    const chapterIssues = []
+    if (!anchored) chapterIssues.push(`world anchor matches ${matches.length}/${requiredMatches}`)
+    if (!textured) chapterIssues.push(`weak world texture signals ${textureSignals}`)
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      matchedTerms: matches.slice(0, 10),
+      textureSignals,
+      anchored,
+      textured,
+      issues: chapterIssues,
+    })
+  }
+
+  const requiredAnchoredChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.75) : chapters.length
+  const requiredTexturedChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.75) : chapters.length
+  const requiredDistinctTerms = anchors.length >= 4 ? Math.min(4, Math.ceil(anchors.length * 0.4)) : anchors.length
+  if (chapters.length === 0) {
+    issues.push("no readable chapters available for worldbuilding integration audit")
+  }
+  if (anchoredChapters < requiredAnchoredChapters) {
+    issues.push(`worldbuilding anchor chapter coverage ${anchoredChapters}/${chapters.length} below required ${requiredAnchoredChapters}`)
+  }
+  if (texturedChapters < requiredTexturedChapters) {
+    issues.push(`worldbuilding texture chapter coverage ${texturedChapters}/${chapters.length} below required ${requiredTexturedChapters}`)
+  }
+  if (anchors.length > 0 && matchedTerms.size < requiredDistinctTerms) {
+    issues.push(`distinct worldbuilding anchors used ${matchedTerms.size}/${anchors.length} below required ${requiredDistinctTerms}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters: chapters.length,
+      worldbuildingAnchors: anchors.length,
+      distinctMatchedAnchors: matchedTerms.size,
+      anchoredChapters,
+      requiredAnchoredChapters,
+      texturedChapters,
+      requiredTexturedChapters,
+      requiredDistinctTerms,
+    },
+    anchors: anchors.map((anchor) => anchor.label).slice(0, 20),
+    chapters: chapterAudits,
+  }
+}
+
 function firstArrayValue(...values) {
   return values.find((value) => Array.isArray(value)) || []
 }
@@ -2089,6 +2251,15 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       counts: storyFoundationAudit.counts,
     })
   }
+  const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(auditSnapshot, options)
+  if (!worldbuildingAudit.passed) {
+    throw new AcceptanceError("Worldbuilding integration acceptance audit failed.", {
+      issues: worldbuildingAudit.issues.slice(0, 30),
+      summary: worldbuildingAudit.summary,
+      anchors: worldbuildingAudit.anchors,
+      chapters: worldbuildingAudit.chapters.slice(0, 8),
+    })
+  }
   const plotExecutionAudit = auditPlotExecutionForAcceptance(auditSnapshot, options)
   if (!plotExecutionAudit.passed) {
     throw new AcceptanceError("Plot execution acceptance audit failed.", {
@@ -2156,6 +2327,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     chapterChecks,
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
+  report.finalWorldbuildingAudit = worldbuildingAudit
   report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
@@ -2170,6 +2342,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalWords,
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
+    worldbuilding: worldbuildingAudit.summary,
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
@@ -2188,6 +2361,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     readableChapters,
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
+    worldbuilding: worldbuildingAudit.summary,
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
@@ -2236,6 +2410,7 @@ async function main() {
     progress: [],
     finalReader: null,
     finalStoryFoundationAudit: null,
+    finalWorldbuildingAudit: null,
     finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,

@@ -97,6 +97,7 @@ function richSnapshot() {
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
+    auditWorldbuildingIntegrationForAcceptance,
     auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
@@ -111,6 +112,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(foundationAudit.passed, true)
   assert.equal(foundationAudit.counts.plotChapters, 4)
   assert.equal(foundationAudit.counts.foreshadowingEntries, 4)
+
+  const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(worldbuildingAudit.passed, true)
+  assert.equal(worldbuildingAudit.summary.anchoredChapters, 4)
+  assert.equal(worldbuildingAudit.summary.texturedChapters, 4)
 
   const plotExecutionAudit = auditPlotExecutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(plotExecutionAudit.passed, true)
@@ -282,6 +288,21 @@ test("production acceptance runner rejects chapters that ignore the planned plot
   const plotExecutionAudit = auditPlotExecutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(plotExecutionAudit.passed, false)
   assert.match(plotExecutionAudit.issues.join("\n"), /planned objective anchors|state delta|plot execution coverage/)
+})
+
+test("production acceptance runner rejects missing worldbuilding anchors in prose", async () => {
+  const { auditWorldbuildingIntegrationForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.lore.storyFoundation.worldMatrix = {
+    rules: ["蓝色玻璃控制南方盐价，码头商队按潮汐契约交换身份。"],
+    continuityAnchors: ["蓝色玻璃", "南方盐价", "码头商队", "潮汐契约"],
+  }
+  snapshot.lore.storyFoundation.storyBible.readerPromise = "蓝色玻璃和南方盐价必须成为每章可见的世界规则压力。"
+  snapshot.lore.storyFoundation.contract.genre.readerPromise = "蓝色玻璃、南方盐价、码头商队共同驱动世界观。"
+
+  const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(worldbuildingAudit.passed, false)
+  assert.match(worldbuildingAudit.issues.join("\n"), /world anchor|worldbuilding anchor chapter coverage|distinct worldbuilding anchors/)
 })
 
 test("production acceptance runner rejects same-voice character dialogue", async () => {
