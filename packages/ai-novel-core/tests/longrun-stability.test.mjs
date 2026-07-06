@@ -171,6 +171,13 @@ async function approveLongrunWritingStyle(rootDir, options = {}) {
       blockingReasons: [],
       checkedAt: "2026-06-25T00:00:00.000Z",
     },
+    refinement: {
+      source: "llm_refiner",
+      summary: "保持克制冷感，短对白，动作先行。",
+      promptAdjustments: ["继续压缩对白，增强动作压力。"],
+      contractAdjustments: ["冻结时固化短对白和动作先行约束。"],
+      nextPrompt: "继续保持克制冷感，用动作、物件和短对白推进悬疑压力。",
+    },
   })
   await acceptStyleEvolutionCandidate(rootDir, {
     version: 1,
@@ -184,6 +191,11 @@ async function approveLongrunWritingStyle(rootDir, options = {}) {
       sentenceRhythm: "短动作句与中句承接后果，避免解释性长段。",
       dialogueRules: ["对白短，带压力，不解释背景。"],
       descriptionRules: ["先物件、声音、身体反应，再给判断。"],
+      emotionRules: ["情绪通过选择、停顿、动作和细节外化，减少直接说明。"],
+      pacingRules: ["每段必须推进线索、关系或代价，不允许纯装饰段。"],
+      povRules: ["保持第三人称限知视角，不泄露主角以外的内心。"],
+      openingRules: ["章节开场落在具体现场压力上，不从抽象概括入手。"],
+      endingHookRules: ["结尾留下可追踪问题、关系裂缝或线索余波。"],
       forbiddenPatterns: ["解释创作意图", "总结式升华", "同质化对白"],
       positiveExamples: ["沈砚合上账册，只问了一句：谁动过这一页？"],
     },

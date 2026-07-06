@@ -185,6 +185,45 @@ function reinforceRefinementWithAigc(
   }
 }
 
+function isStyleEvaluatorDirectApproval(input: {
+  evaluation?: StyleEvolutionEvaluation
+  verification: ReturnType<typeof buildStyleGenerationVerification>
+  retryPolicy: NonNullable<StyleEvolutionContract["retryPolicy"]>
+  totalRounds: number
+}) {
+  const overall = Number(input.evaluation?.scores?.overall || 0)
+  const forbiddenHits = input.evaluation?.forbiddenHits?.length || 0
+  return Boolean(
+    input.evaluation?.source === "llm_critic"
+    && input.evaluation.verdict === "approve"
+    && input.verification.status === "passed"
+    && overall >= Number(input.retryPolicy.approvalScoreThreshold || 8.6)
+    && forbiddenHits <= Math.max(0, Number(input.retryPolicy.maxForbiddenHitCount || 1))
+    && input.totalRounds >= Math.max(1, Number(input.retryPolicy.approvalMinRounds || 2)),
+  )
+}
+
+function buildEvaluatorApprovedRefinement(input: {
+  evaluation: StyleEvolutionEvaluation
+  prompt: string
+  aigcSignal: ReturnType<typeof normalizeStyleAigcSignal> | undefined
+}): StyleEvolutionRefinement {
+  const promptAdjustments = input.evaluation.nextFocus?.length
+    ? input.evaluation.nextFocus
+    : ["保持 evaluator 已确认的叙事声音、节奏和人物区分。"]
+  const contractAdjustments = [
+    ...input.evaluation.strengths.slice(0, 3),
+    ...input.evaluation.deviations.slice(0, 2).map((item) => `冻结后继续规避：${item}`),
+  ].filter(Boolean)
+  return reinforceRefinementWithAigc({
+    source: "llm_critic",
+    summary: "Evaluator 已判定当前样段可进入冻结确认，跳过额外 refiner 请求以避免达标后继续消耗模型调用。",
+    promptAdjustments,
+    contractAdjustments,
+    nextPrompt: input.prompt,
+  }, input.aigcSignal)
+}
+
 async function detectStyleAigcSignal(
   sample: string,
   config: AigcDetectionConfig,
@@ -849,67 +888,93 @@ async function runStyleEvolutionLoop(options: {
           evaluation = mergeStyleEvaluationWithAigc(parsedEvaluation.evaluation, aigcSignal)
         }
 
-        const refinementPrompt = buildStyleEvolutionRefinementOnlyPrompt({
-          projectTitle: options.projectTitle,
-          idea: options.idea,
-          userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
-          referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
-          desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
-          seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
-          prompt: promptBundle.prompt,
-          sample,
+        const directApprovalVerification = buildStyleGenerationVerification({
           evaluation,
-          iterationFeedback: carriedFeedback,
+          checkedAt: new Date().toISOString(),
         })
-        const rawRefinement = await requestLlmTextCompletion({
-          baseUrl: options.textConfig.provider.baseUrl,
-          apiKey: options.apiKey,
-          modelName: options.textConfig.provider.modelName,
-          apiMode: options.textConfig.provider.apiMode,
-          timeoutMs: options.textConfig.provider.timeoutMs,
-          temperature: 0.1,
-          maxTokens: 1400,
-          messages: [
-            { role: "system", content: refinementPrompt.system },
-            { role: "user", content: refinementPrompt.user },
-          ],
-        })
-        const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement)
-        if (parsedRefinement) {
-          refinement = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal)
-        }
-
-        const freezePrompt = buildStyleFreezeAdvicePrompt({
-          sample,
-          prompt: promptBundle.prompt,
-          userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
-          referenceText: options.referenceText || styleEvolution.contract.referenceText,
-          referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
-          desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
-          seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+        if (isStyleEvaluatorDirectApproval({
           evaluation,
-          refinement,
-        })
-        const rawFreezeAdvice = await requestLlmTextCompletion({
-          baseUrl: options.textConfig.provider.baseUrl,
-          apiKey: options.apiKey,
-          modelName: options.textConfig.provider.modelName,
-          apiMode: options.textConfig.provider.apiMode,
-          timeoutMs: options.textConfig.provider.timeoutMs,
-          temperature: 0.1,
-          maxTokens: 800,
-          messages: [
-            { role: "system", content: freezePrompt.system },
-            { role: "user", content: freezePrompt.user },
-          ],
-        })
-        freezeAdvice = parseStyleFreezeAdviceFromText(rawFreezeAdvice)
-        if (freezeAdvice) {
-          refinement = {
-            ...refinement,
-            contractAdjustments: [
-              ...new Set([...(refinement.contractAdjustments || []), ...(freezeAdvice.contractAdjustments || [])]),
+          verification: directApprovalVerification,
+          retryPolicy,
+          totalRounds: Number(styleEvolution.contract.loop?.currentIteration || styleEvolution.contract.evolutionHistory?.length || 0) + 1,
+        })) {
+          refinement = buildEvaluatorApprovedRefinement({
+            evaluation,
+            prompt: promptBundle.prompt,
+            aigcSignal,
+          })
+          freezeAdvice = {
+            freezeVerdict: "ready",
+            freezeSummary: "Evaluator direct approval: 当前样段已达到可冻结写法底盘。",
+            blockingReasons: [],
+            contractAdjustments: refinement.contractAdjustments || [],
+            forbiddenPatterns: [],
+            positiveExamples: evaluation.strengths.slice(0, 4),
+            inheritedRules: refinement.promptAdjustments || [],
+          }
+        } else {
+          const refinementPrompt = buildStyleEvolutionRefinementOnlyPrompt({
+            projectTitle: options.projectTitle,
+            idea: options.idea,
+            userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
+            referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
+            desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
+            seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+            prompt: promptBundle.prompt,
+            sample,
+            evaluation,
+            iterationFeedback: carriedFeedback,
+          })
+          const rawRefinement = await requestLlmTextCompletion({
+            baseUrl: options.textConfig.provider.baseUrl,
+            apiKey: options.apiKey,
+            modelName: options.textConfig.provider.modelName,
+            apiMode: options.textConfig.provider.apiMode,
+            timeoutMs: options.textConfig.provider.timeoutMs,
+            temperature: 0.1,
+            maxTokens: 1400,
+            messages: [
+              { role: "system", content: refinementPrompt.system },
+              { role: "user", content: refinementPrompt.user },
             ],
+          })
+          const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement)
+          if (parsedRefinement) {
+            refinement = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal)
+          }
+
+          const freezePrompt = buildStyleFreezeAdvicePrompt({
+            sample,
+            prompt: promptBundle.prompt,
+            userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
+            referenceText: options.referenceText || styleEvolution.contract.referenceText,
+            referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
+            desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
+            seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+            evaluation,
+            refinement,
+          })
+          const rawFreezeAdvice = await requestLlmTextCompletion({
+            baseUrl: options.textConfig.provider.baseUrl,
+            apiKey: options.apiKey,
+            modelName: options.textConfig.provider.modelName,
+            apiMode: options.textConfig.provider.apiMode,
+            timeoutMs: options.textConfig.provider.timeoutMs,
+            temperature: 0.1,
+            maxTokens: 800,
+            messages: [
+              { role: "system", content: freezePrompt.system },
+              { role: "user", content: freezePrompt.user },
+            ],
+          })
+          freezeAdvice = parseStyleFreezeAdviceFromText(rawFreezeAdvice)
+          if (freezeAdvice) {
+            refinement = {
+              ...refinement,
+              contractAdjustments: [
+                ...new Set([...(refinement.contractAdjustments || []), ...(freezeAdvice.contractAdjustments || [])]),
+              ],
+            }
           }
         }
       } catch (error) {

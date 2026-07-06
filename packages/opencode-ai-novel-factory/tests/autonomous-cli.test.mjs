@@ -78,7 +78,12 @@ async function seedActiveTextLlmConfig(rootDir, overrides = {}) {
 }
 
 async function approveTestWritingStyle(projectRoot) {
-  const { appendStyleEvolutionCandidate, approveStyleEvolutionSample, initializeStyleEvolution } = await loadCoreModule()
+  const {
+    acceptStyleEvolutionCandidate,
+    appendStyleEvolutionCandidate,
+    approveStyleEvolutionSample,
+    initializeStyleEvolution,
+  } = await loadCoreModule()
   await initializeStyleEvolution(projectRoot, {
     projectTitle: "插件测试小说",
     idea: "一名审雨官发现降雨记录被篡改",
@@ -121,6 +126,24 @@ async function approveTestWritingStyle(projectRoot) {
         highRiskPreviews: [],
       },
     },
+    refinement: {
+      source: "llm_refiner",
+      summary: "插件测试夹具：保持冷感白描、短对白和物件压力。",
+      promptAdjustments: ["继续用动作、物件和短对白推进悬疑压力。"],
+      contractAdjustments: ["冻结时固化冷感白描、短对白、动作先行约束。"],
+      nextPrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    },
+    freezer: {
+      source: "llm_critic",
+      verdict: "ready",
+      summary: "插件测试夹具：样段已经达到可冻结写法底盘。",
+      blockingReasons: [],
+      checkedAt: "2026-06-25T00:00:00.000Z",
+    },
+  })
+  await acceptStyleEvolutionCandidate(projectRoot, {
+    version: 1,
+    acceptedAt: "2026-06-25T00:00:00.000Z",
   })
   const result = await approveStyleEvolutionSample(projectRoot, {
     version: 1,
@@ -1427,7 +1450,13 @@ test("novel studio API can explicitly retry a blocked chapter", async () => {
   assert.equal(limited.payload.recoveryLimited, false)
   assert.equal(limited.payload.state.plan.chapterTasks[0].recoveryBlocked, false)
   assert.equal(limited.payload.state.plan.chapterTasks[0].status, "complete")
-  assert.ok(limited.payload.factorySnapshot.latestEvents.some((event) => event.type === "CHAPTER_PIPELINE_AUTO_REWRITE_QUEUED"))
+  const limitedEvents = await withFactoryDb(tempDir, async (db) => db.db.prepare(`
+    SELECT type, payload_json
+    FROM events
+    WHERE project_id = ?
+    ORDER BY created_at DESC
+  `).all(created.project.id))
+  assert.ok(limitedEvents.some((event) => event.type === "CHAPTER_PIPELINE_AUTO_REWRITE_QUEUED"))
 })
 
 test("novel studio API records interruption changes through director command events", async () => {

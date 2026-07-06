@@ -138,7 +138,44 @@ var TRAILING_NON_NAME_CHARS = /* @__PURE__ */ new Set([
   "\u7740",
   "\u7684",
   "\u5F97",
-  "\u5730"
+  "\u5730",
+  // 扩展：更多常见非人名结尾字
+  "\u58F0",
+  "\u5374",
+  "\u90FD",
+  "\u4F60",
+  "\u6211",
+  "\u4ED6",
+  "\u5979",
+  "\u5B83",
+  "\u4EEC",
+  "\u5417",
+  "\u5462",
+  "\u554A",
+  "\u54E6",
+  "\u55EF",
+  "\u54C8",
+  "\u53BB",
+  "\u6765",
+  "\u91CC",
+  "\u4E2D",
+  "\u4E0A",
+  "\u4E0B",
+  "\u524D",
+  "\u540E",
+  "\u624D",
+  "\u4E5F",
+  "\u53C8",
+  "\u8FD8",
+  "\u518D",
+  "\u6CA1",
+  "\u5DF1",
+  "\u8FC7",
+  "\u8D77",
+  "\u53EA",
+  "\u5E76",
+  "\u5219",
+  "\u4EE5"
 ]);
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -165,6 +202,18 @@ function isRoleOrGenericName(name) {
     return true;
   }
   if (/(?:家庄|河边|蹄声|木门|土墙|陶碗|草鞋|地铺|县衙|公文|契书)$/u.test(name)) {
+    return true;
+  }
+  if (/^(?:时候|这时|此时|当时|当年|平时|往时|有时|任时|那时|同时|从时|即时|顿时|临时|随时|暂时|及时|按时|定时|准时|平日|日后|日前|此刻|此际|彼时|早时|夜时|晌午|傍晚|清晨|黎明|正午|午时|子时|丑时|寅时|卯时|辰时|巳时|午时|未时|申时|酉时|戌时|亥时)$/u.test(name)) {
+    return true;
+  }
+  if (/[声却都你我他她它们吗呢啊哦嗯哈去来里中上下前后才也又还再没己过起只并则以低高请求允带送交藏拦护推拿按追逃]$/u.test(name)) {
+    return true;
+  }
+  if (/官仓|官府|官印|少尹|仓曹|门外|门口|廊下|屋内|屋外|账册|税册|贡品|档案|契书|礼部/u.test(name)) {
+    return true;
+  }
+  if (name.length >= 3 && /[一二三四五六七八九十百千万添减增]/u.test(name)) {
     return true;
   }
   return ROLE_TITLE_SUFFIXES.some((suffix) => name.endsWith(suffix));

@@ -4325,11 +4325,39 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     "单章字数",
     "成语",
     "章以后",
+    // 常见时间词，避免被误识别为角色名
+    "时候",
+    "这时",
+    "此时",
+    "当时",
+    "同时",
+    "平时",
+    "有时",
+    "任时",
+    "随时",
+    "暂时",
+    "那时",
+    "此刻",
+    "傍晚",
+    "清晨",
+    "黎明",
+    "正午",
+    "午时",
   ])
+  const castNameInBody = (name: string) => {
+    if (name.length >= 2) {
+      return body.includes(name)
+    }
+    // 单字名容易误撞普通汉字，只在前后不是汉字时命中。
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp(`(?<![\\u4e00-\\u9fff])${escaped}(?![\\u4e00-\\u9fff])`, 'u')
+    return pattern.test(body)
+  }
   const cast = contract.knownCast
     .map((name) => name.trim())
-    .filter((name) => name && !abstractCastTerms.has(name) && body.includes(name))
+    .filter((name) => name && !abstractCastTerms.has(name) && castNameInBody(name))
     .slice(0, 6)
+
   if (cast.length < 2) {
     return {
       status: "eligible" as const,
@@ -9524,7 +9552,7 @@ export async function runChapterProductionPipeline(
     })
   }
   const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
-  let finalGate = (aigcDetection.status !== "passed" && !isAigcGateBypassed)
+  let finalGate = (aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed)
     ? {
         ...baseFinalGate,
         passed: false,

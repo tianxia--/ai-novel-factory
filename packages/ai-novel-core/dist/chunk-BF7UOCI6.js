@@ -1,21 +1,21 @@
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-3HD6Y2Y7.js";
+} from "./chunk-VL6XPQ5B.js";
 import {
   formatKnowledgeForPrompt,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-6FIX7JTJ.js";
+} from "./chunk-E4OGC67J.js";
 import {
   createLocalTextEmbedding
-} from "./chunk-DBOF57KW.js";
+} from "./chunk-4A6LNSPI.js";
 import {
   evaluateChapterConsistency,
   extractChinesePersonNames,
   inferLockedProtagonistName,
   withFactoryDb
-} from "./chunk-ZNVS54L4.js";
+} from "./chunk-JD3MNOTZ.js";
 import {
   agentTypeFromLabel,
   createAgentMessage,
@@ -6926,9 +6926,35 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     "\u4EFB\u4F55\u4E3B\u89D2",
     "\u5355\u7AE0\u5B57\u6570",
     "\u6210\u8BED",
-    "\u7AE0\u4EE5\u540E"
+    "\u7AE0\u4EE5\u540E",
+    // 常见时间词，避免被误识别为角色名
+    "\u65F6\u5019",
+    "\u8FD9\u65F6",
+    "\u6B64\u65F6",
+    "\u5F53\u65F6",
+    "\u540C\u65F6",
+    "\u5E73\u65F6",
+    "\u6709\u65F6",
+    "\u4EFB\u65F6",
+    "\u968F\u65F6",
+    "\u6682\u65F6",
+    "\u90A3\u65F6",
+    "\u6B64\u523B",
+    "\u508D\u665A",
+    "\u6E05\u6668",
+    "\u9ECE\u660E",
+    "\u6B63\u5348",
+    "\u5348\u65F6"
   ]);
-  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && !abstractCastTerms.has(name) && body.includes(name)).slice(0, 6);
+  const castNameInBody = (name) => {
+    if (name.length >= 2) {
+      return body.includes(name);
+    }
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?<![\\u4e00-\\u9fff])${escaped}(?![\\u4e00-\\u9fff])`, "u");
+    return pattern.test(body);
+  };
+  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && !abstractCastTerms.has(name) && castNameInBody(name)).slice(0, 6);
   if (cast.length < 2) {
     return {
       status: "eligible",
@@ -11350,7 +11376,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     });
   }
   const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
-  let finalGate = aigcDetection.status !== "passed" && !isAigcGateBypassed ? {
+  let finalGate = aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed ? {
     ...baseFinalGate,
     passed: false,
     status: "blocked",

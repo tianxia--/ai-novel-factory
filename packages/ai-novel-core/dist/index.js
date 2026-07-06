@@ -4,7 +4,7 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-KZVRWKKP.js";
+} from "./chunk-HBBTAZJC.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage
@@ -14,7 +14,7 @@ import {
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-S7V7IKKA.js";
+} from "./chunk-C2JMVJMP.js";
 import {
   buildDirectorDiscussionMessage,
   createFollowUpAdvanceCommand,
@@ -58,7 +58,7 @@ import {
   upsertDiscussionInSuperGraph,
   upsertProjectEnvValues,
   validateSuperGraph
-} from "./chunk-VDJGE5UH.js";
+} from "./chunk-KRKIYBBU.js";
 import {
   ProductionReadinessBlockedError,
   acceptStyleEvolutionCandidate,
@@ -144,7 +144,7 @@ import {
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-GN2XBVVK.js";
+} from "./chunk-BF7UOCI6.js";
 import {
   createAigcDetectorClient,
   detectAigcSegments,
@@ -154,7 +154,7 @@ import {
   getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-3HD6Y2Y7.js";
+} from "./chunk-VL6XPQ5B.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -165,11 +165,11 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-6FIX7JTJ.js";
+} from "./chunk-E4OGC67J.js";
 import {
   backfillPendingMemoryEmbeddings,
   createLocalTextEmbedding
-} from "./chunk-DBOF57KW.js";
+} from "./chunk-4A6LNSPI.js";
 import {
   FactoryDb,
   evaluateChapterConsistency,
@@ -180,7 +180,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-ZNVS54L4.js";
+} from "./chunk-JD3MNOTZ.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,

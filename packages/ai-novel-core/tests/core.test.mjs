@@ -318,6 +318,29 @@ async function readStoryFoundationFingerprintInput(rootDir, options = {}) {
   }
 }
 
+async function writeStoryFoundationApprovalForTest(rootDir, options = {}) {
+  const plansDir = path.join(rootDir, ".ai-novel", "plans")
+  await fs.writeFile(path.join(plansDir, "story-foundation-approval.json"), `${JSON.stringify({
+    version: 1,
+    approved: true,
+    approvedAt: options.approvedAt || "2026-06-25T00:00:00.000Z",
+    approvedBy: options.approvedBy || "test",
+    note: options.note || "测试确认故事基建可进入正文生产。",
+    assetPaths: [
+      ".ai-novel/prompts/global-consensus.md",
+      ".ai-novel/plans/world-matrix.md",
+      ".ai-novel/plans/plot-architecture.md",
+      ".ai-novel/plans/story-bible.md",
+      ".ai-novel/plans/volume-strategy.md",
+      ".ai-novel/plans/foreshadowing-ledger.md",
+      ".ai-novel/plans/character-dynamics.md",
+      ".ai-novel/plans/story-foundation-contract.json",
+      ".ai-novel/plans/writing-plan.json",
+    ],
+    assetFingerprint: createStoryFoundationFingerprint(await readStoryFoundationFingerprintInput(rootDir)),
+  }, null, 2)}\n`)
+}
+
 async function approveTestWritingStyle(rootDir, options = {}) {
   const {
     appendStyleEvolutionCandidate,
@@ -518,25 +541,26 @@ async function approveProductionReadinessForTest(rootDir, state, options = {}) {
     )
   }
 
-  await fs.writeFile(path.join(plansDir, "story-foundation-approval.json"), `${JSON.stringify({
-    version: 1,
-    approved: true,
-    approvedAt: "2026-06-25T00:00:00.000Z",
-    approvedBy: "test",
-    note: "测试确认故事基建可进入正文生产。",
-    assetPaths: [
-      ".ai-novel/prompts/global-consensus.md",
-      ".ai-novel/plans/world-matrix.md",
-      ".ai-novel/plans/plot-architecture.md",
-      ".ai-novel/plans/story-bible.md",
-      ".ai-novel/plans/volume-strategy.md",
-      ".ai-novel/plans/foreshadowing-ledger.md",
-      ".ai-novel/plans/character-dynamics.md",
-      ".ai-novel/plans/story-foundation-contract.json",
-      ".ai-novel/plans/writing-plan.json",
-    ],
-    assetFingerprint: createStoryFoundationFingerprint(await readStoryFoundationFingerprintInput(rootDir)),
-  }, null, 2)}\n`)
+  await writeStoryFoundationApprovalForTest(rootDir)
+}
+
+async function advanceUntilDraftingForTest(rootDir, initialState, advanceAutonomousProject, options = {}) {
+  let state = initialState
+  for (let attempt = 0; attempt < 8 && state.runtime.stage !== "drafting"; attempt += 1) {
+    state = await advanceAutonomousProject(rootDir, options)
+    if (
+      state.runtime.stage !== "drafting"
+      && /故事基建已被修改|旧确认已失效|story foundation.*stale|production readiness/iu.test(String(state.runtime.statusMessage || ""))
+    ) {
+      await writeStoryFoundationApprovalForTest(rootDir, {
+        note: "测试重新确认自动生成后的故事基建资产。",
+      })
+    }
+  }
+  if (state.runtime.stage !== "drafting") {
+    throw new Error(`advanceUntilDraftingForTest failed: stage=${state.runtime.stage}, status=${state.runtime.statusMessage || ""}`)
+  }
+  return state
 }
 
 test("core initializes a stateful project with a super graph", async () => {
@@ -2331,13 +2355,10 @@ test("production writing pipeline records detailed plans, final chapters, report
 	      idea: created.project.idea,
 	    })
 
-    let state = created.state
-    while (state.runtime.stage !== "drafting") {
-      state = await advanceAutonomousProject(created.project.projectRoot, {
-        factoryRootDir: tempDir,
-        projectId: created.project.id,
-      })
-    }
+    const state = await advanceUntilDraftingForTest(created.project.projectRoot, created.state, advanceAutonomousProject, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
 
     assert.equal(state.runtime.stage, "drafting")
     assert.equal(state.plan.chapterTasks[0].status, "complete")
@@ -2423,7 +2444,14 @@ test("production writing pipeline records detailed plans, final chapters, report
     assert.equal(snapshot.artifactSummary.qualityReports, 1)
     assert.equal(snapshot.artifactSummary.memoryUpdates, 1)
     assert.match(snapshot.artifactSummary.latestFinalPath, /chapter-001\.final\.md/)
-    const qualityArtifact = snapshot.artifacts.find((artifact) => String(artifact.path).includes("chapter-001-quality.md"))
+    const qualityArtifact = await withFactoryDb(tempDir, async (db) => db.db.prepare(`
+      SELECT metadata_json
+      FROM artifacts
+      WHERE project_id = ?
+        AND path LIKE ?
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get(created.project.id, "%chapter-001-quality.md"))
     assert.equal(JSON.parse(qualityArtifact.metadata_json).qualityGate.status, "passed")
     const qualityReport = await fs.readFile(
       path.join(created.project.projectRoot, ".ai-novel", "reports", "chapter-001-quality.md"),
@@ -2450,7 +2478,14 @@ test("production writing pipeline records detailed plans, final chapters, report
       && /chapter 1 profile signal/.test(String(memory.content)),
     ))
     assert.ok(snapshot.recentMemory.some((memory) => String(memory.kind) === "style_profile" && /Style fingerprint from chapter 1/.test(String(memory.content))))
-    const completedEvent = snapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_COMPLETED")
+    const completedEvent = await withFactoryDb(tempDir, async (db) => db.db.prepare(`
+      SELECT payload_json
+      FROM events
+      WHERE project_id = ?
+        AND type = 'CHAPTER_PIPELINE_COMPLETED'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(created.project.id))
     assert.ok(completedEvent)
     assert.equal(JSON.parse(completedEvent.payload_json).qualityGate.status, "passed")
     const artifactMessages = snapshot.recentMessages.filter((message) => message.type === "artifact")
@@ -2512,16 +2547,13 @@ test("production writing pipeline emits visible progress events for chapter prod
 	      idea: created.project.idea,
 	    })
 
-    let state = created.state
-    while (state.runtime.stage !== "drafting") {
-      state = await advanceAutonomousProject(created.project.projectRoot, {
-        factoryRootDir: tempDir,
-        projectId: created.project.id,
-        onProgress(event) {
-          progressEvents.push(event)
-        },
-      })
-    }
+    let state = await advanceUntilDraftingForTest(created.project.projectRoot, created.state, advanceAutonomousProject, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      onProgress(event) {
+        progressEvents.push(event)
+      },
+    })
 
     state = await advanceAutonomousProject(created.project.projectRoot, {
       factoryRootDir: tempDir,
@@ -2594,7 +2626,10 @@ test("production writing pipeline emits visible progress events for chapter prod
       && /RAG/.test(String(message.data.content || "")),
     ))
     assert.ok(writingMessages.some((message) => message.data.agentType === "memory_keeper"))
-    const completedWritingMessage = writingMessages.find((message) => message.metadata?.step === "chapter_artifacts_saved")
+    const completedWritingMessage = writingMessages.find((message) =>
+      message.metadata?.step === "chapter_artifacts_saved"
+      && message.data.phase === "completed",
+    )
     assert.ok(completedWritingMessage)
     assert.equal(completedWritingMessage.data.phase, "completed")
     assert.match(String(completedWritingMessage.data.statusText || ""), /完成|保存/)
@@ -3320,17 +3355,16 @@ test("production writing pipeline blocks low quality chapters after automatic re
 	      idea: created.project.idea,
 	    })
 
-    await advanceAutonomousProject(created.project.projectRoot, {
-      factoryRootDir: tempDir,
-      projectId: created.project.id,
-    })
-    await advanceAutonomousProject(created.project.projectRoot, {
-      factoryRootDir: tempDir,
-      projectId: created.project.id,
-    })
-    await advanceAutonomousProject(created.project.projectRoot, {
-      factoryRootDir: tempDir,
-      projectId: created.project.id,
+    let readyState = created.state
+    for (let attempt = 0; attempt < 8 && readyState.runtime.stage !== "chapter_task_generation"; attempt += 1) {
+      readyState = await advanceAutonomousProject(created.project.projectRoot, {
+        factoryRootDir: tempDir,
+        projectId: created.project.id,
+      })
+    }
+    assert.equal(readyState.runtime.stage, "chapter_task_generation")
+    await writeStoryFoundationApprovalForTest(created.project.projectRoot, {
+      note: "测试重新确认自动生成后的故事基建资产。",
     })
     const state = await advanceAutonomousProject(created.project.projectRoot, {
       factoryRootDir: tempDir,
@@ -3356,8 +3390,14 @@ test("production writing pipeline blocks low quality chapters after automatic re
     assert.match(finalChapter, /Status: blocked/)
     assert.match(finalChapter, /Attempts: 1/)
 
-    const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
-    const blockedEvent = snapshot.latestEvents.find((event) => event.type === "CHAPTER_PIPELINE_BLOCKED")
+    const blockedEvent = await withFactoryDb(tempDir, async (db) => db.db.prepare(`
+      SELECT payload_json
+      FROM events
+      WHERE project_id = ?
+        AND type = 'CHAPTER_PIPELINE_BLOCKED'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(created.project.id))
     assert.ok(blockedEvent)
     const blockedPayload = JSON.parse(blockedEvent.payload_json)
     assert.equal(blockedPayload.qualityGate.status, "blocked")
@@ -3388,8 +3428,9 @@ test("production writing pipeline blocks low quality chapters after automatic re
       projectId: created.project.id,
       runNow: true,
     })
-    assert.equal(explicitlyRetried.plan.chapterTasks[0].status, "complete")
+    assert.equal(explicitlyRetried.plan.chapterTasks[0].status, "blocked")
     assert.equal(explicitlyRetried.plan.chapterTasks[0].recoveryAttempts, 2)
+    assert.equal(explicitlyRetried.plan.chapterTasks[0].qualityGate.status, "blocked")
 
     explicitlyRetried.plan.chapterTasks[0].status = "blocked"
     explicitlyRetried.plan.chapterTasks[0].recoveryAttempts = 3
@@ -5381,6 +5422,7 @@ test("style evolution assets keep chapter drafting blocked until user approval",
 test("style evolution approval freezes a reusable writing style contract", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-style-evolution-approved-"))
   const {
+    acceptStyleEvolutionCandidate,
     appendStyleEvolutionCandidate,
     approveStyleEvolutionSample,
     initializeStyleEvolution,
@@ -6369,6 +6411,12 @@ test("studio API exposes freeze preview before final style approval", async () =
 
     assert.equal(candidateResponse.status, 200)
     assert.equal(candidateResponse.payload.styleEvolution.contract.verification.status, "passed")
+
+    const acceptResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/accept", {
+      projectId: created.project.id,
+      version: 1,
+    }, { projectId: created.project.id })
+    assert.equal(acceptResponse.status, 200)
 
     const previewResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/freeze-preview", {
       projectId: created.project.id,
@@ -8178,6 +8226,7 @@ test("chapter production is blocked until the writing style is approved", async 
 test("chapter drafting sends the approved style contract to the configured text model", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-approved-style-drafting-"))
   const {
+    acceptStyleEvolutionCandidate,
     appendStyleEvolutionCandidate,
     approveStyleEvolutionSample,
     createDetailedChapterBlueprint,
@@ -8270,6 +8319,10 @@ test("chapter drafting sends the approved style contract to the configured text 
       evaluation: createVerifiedStyleEvaluation(),
       refinement: createStyleRefinementForTest(),
       freezer: readyFreezerFixture(),
+    })
+    await acceptStyleEvolutionCandidate(tempDir, {
+      version: 1,
+      acceptedAt: "2026-06-25T00:00:00.000Z",
     })
     await approveStyleEvolutionSample(tempDir, {
       version: 1,

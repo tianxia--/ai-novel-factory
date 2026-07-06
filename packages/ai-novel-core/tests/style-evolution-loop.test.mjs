@@ -322,6 +322,137 @@ test("style evolution loop marks llm fallback when refiner and combined critic f
   }
 })
 
+test("style evolution loop stops after evaluator approval without extra refiner freezer calls", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-loop-direct-approval-"))
+  const { createManagedAutonomousProject, getStyleEvolutionAssetPaths } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  let responsesHit = 0
+  let aigcServer = null
+  const server = http.createServer(async (request, response) => {
+    const rawBody = await readBody(request)
+    if (request.url === "/responses") {
+      responsesHit += 1
+      JSON.parse(rawBody)
+      if (responsesHit === 1) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({
+          output_text: "沈砚把回执往外抽了半寸。赵典簿先伸手，袖口压住承办格，不让封条再蹭过去。皂隶抱着牒袋凑近，麻绳缠到指缝里，只敢低声问：这一格，还要谁押？",
+        }))
+        return
+      }
+      if (responsesHit === 2) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({
+          output_text: JSON.stringify({
+            evaluation: {
+              verdict: "approve",
+              summary: "样段已经达到可冻结的场景化写法底盘，可以进入用户确认。",
+              scores: {
+                narrativeVoice: 9.1,
+                sentenceRhythm: 8.9,
+                dialogueTexture: 8.8,
+                informationDensity: 8.9,
+                emotionalTension: 8.7,
+                readability: 8.9,
+                requirementAlignment: 9.2,
+                forbiddenPatternRisk: 0.6,
+                overall: 9.0,
+              },
+              strengths: ["手续后果推动清楚。", "人物关系由纸面动作承载。"],
+              deviations: [],
+              forbiddenHits: [],
+              nextFocus: ["保持低密度推进和手续压力。"],
+            },
+          }),
+        }))
+        return
+      }
+      response.writeHead(403, { "content-type": "text/plain" })
+      response.end("request_error")
+      return
+    }
+    response.writeHead(404).end()
+  })
+
+  const previousProvider = process.env.AIGC_DETECTOR_PROVIDER
+  const previousUrl = process.env.AIGC_DETECTOR_URL
+  const previousThreshold = process.env.AIGC_DETECTOR_THRESHOLD
+
+  try {
+    const address = await listen(server)
+    aigcServer = http.createServer(async (request, response) => {
+      await readBody(request)
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ aiProbability: 0.08, label: "human", confidence: 0.92 }))
+    })
+    const aigcAddress = await listen(aigcServer)
+
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 12,
+      chapterWordTarget: 2500,
+    })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
+
+    const initResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/init", {
+      projectId: created.project.id,
+      userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    }, { projectId: created.project.id })
+    assert.equal(initResponse.status, 200)
+
+    const paths = getStyleEvolutionAssetPaths(created.project.projectRoot)
+    const contract = JSON.parse(await fs.readFile(paths.styleContract, "utf8"))
+    contract.retryPolicy = {
+      ...(contract.retryPolicy || {}),
+      approvalMinRounds: 1,
+      approvalScoreThreshold: 8.6,
+      maxForbiddenHitCount: 0,
+    }
+    await fs.writeFile(paths.styleContract, `${JSON.stringify(contract, null, 2)}\n`)
+
+    const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+      name: "Direct Approval Loop Model",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiKey: "test-key",
+      modelName: "direct-approval-loop-model",
+      apiMode: "responses",
+      timeoutMs: 1000,
+    })
+    assert.equal(configResponse.status, 200)
+
+    const generateResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/generate-candidate", {
+      projectId: created.project.id,
+      loopIterations: 1,
+    }, { projectId: created.project.id })
+
+    assert.equal(generateResponse.status, 200)
+    assert.equal(responsesHit, 2)
+    assert.equal(generateResponse.payload.loopRun.stopReason, "ready_for_approval")
+    assert.equal(generateResponse.payload.loopIteration.evaluation.source, "llm_critic")
+    assert.equal(generateResponse.payload.loopIteration.refinement.source, "llm_critic")
+    assert.match(generateResponse.payload.loopIteration.refinement.summary, /Evaluator 已判定/)
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].freezer.source, "llm_critic")
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].freezer.verdict, "ready")
+    assert.equal(generateResponse.payload.loopIteration.candidates[0].llmFallbackUsed, false)
+    assert.deepEqual(generateResponse.payload.loopIteration.candidates[0].fallbackReasons, [])
+    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory[0].readyForApproval, true)
+    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory[0].llmFallbackUsed, false)
+  } finally {
+    await close(server)
+    if (aigcServer) {
+      await close(aigcServer)
+    }
+    if (previousProvider === undefined) delete process.env.AIGC_DETECTOR_PROVIDER
+    else process.env.AIGC_DETECTOR_PROVIDER = previousProvider
+    if (previousUrl === undefined) delete process.env.AIGC_DETECTOR_URL
+    else process.env.AIGC_DETECTOR_URL = previousUrl
+    if (previousThreshold === undefined) delete process.env.AIGC_DETECTOR_THRESHOLD
+    else process.env.AIGC_DETECTOR_THRESHOLD = previousThreshold
+  }
+})
+
 test("style evolution keeps AIGC verification attached when structured evaluator output replaces heuristic evaluation", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-loop-aigc-"))
   const { createManagedAutonomousProject } = await loadCore()

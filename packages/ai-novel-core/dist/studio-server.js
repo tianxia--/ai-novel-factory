@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-S7V7IKKA.js";
+} from "./chunk-C2JMVJMP.js";
 import "./chunk-UIQAXZB3.js";
 import "./chunk-SDIPDDNZ.js";
 import {
@@ -33,7 +33,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-VDJGE5UH.js";
+} from "./chunk-KRKIYBBU.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -73,21 +73,21 @@ import {
   requestLlmTextCompletion,
   testProviderConnectivity,
   writeProductionStoryBibleAssets
-} from "./chunk-GN2XBVVK.js";
+} from "./chunk-BF7UOCI6.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-3HD6Y2Y7.js";
+} from "./chunk-VL6XPQ5B.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-6FIX7JTJ.js";
-import "./chunk-DBOF57KW.js";
+} from "./chunk-E4OGC67J.js";
+import "./chunk-4A6LNSPI.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-ZNVS54L4.js";
+} from "./chunk-JD3MNOTZ.js";
 import {
   createStatusMessage,
   createToolMessage,
@@ -171,6 +171,27 @@ function reinforceRefinementWithAigc(refinement, aigcSignal) {
       ])
     ]
   };
+}
+function isStyleEvaluatorDirectApproval(input) {
+  const overall = Number(input.evaluation?.scores?.overall || 0);
+  const forbiddenHits = input.evaluation?.forbiddenHits?.length || 0;
+  return Boolean(
+    input.evaluation?.source === "llm_critic" && input.evaluation.verdict === "approve" && input.verification.status === "passed" && overall >= Number(input.retryPolicy.approvalScoreThreshold || 8.6) && forbiddenHits <= Math.max(0, Number(input.retryPolicy.maxForbiddenHitCount || 1)) && input.totalRounds >= Math.max(1, Number(input.retryPolicy.approvalMinRounds || 2))
+  );
+}
+function buildEvaluatorApprovedRefinement(input) {
+  const promptAdjustments = input.evaluation.nextFocus?.length ? input.evaluation.nextFocus : ["\u4FDD\u6301 evaluator \u5DF2\u786E\u8BA4\u7684\u53D9\u4E8B\u58F0\u97F3\u3001\u8282\u594F\u548C\u4EBA\u7269\u533A\u5206\u3002"];
+  const contractAdjustments = [
+    ...input.evaluation.strengths.slice(0, 3),
+    ...input.evaluation.deviations.slice(0, 2).map((item) => `\u51BB\u7ED3\u540E\u7EE7\u7EED\u89C4\u907F\uFF1A${item}`)
+  ].filter(Boolean);
+  return reinforceRefinementWithAigc({
+    source: "llm_critic",
+    summary: "Evaluator \u5DF2\u5224\u5B9A\u5F53\u524D\u6837\u6BB5\u53EF\u8FDB\u5165\u51BB\u7ED3\u786E\u8BA4\uFF0C\u8DF3\u8FC7\u989D\u5916 refiner \u8BF7\u6C42\u4EE5\u907F\u514D\u8FBE\u6807\u540E\u7EE7\u7EED\u6D88\u8017\u6A21\u578B\u8C03\u7528\u3002",
+    promptAdjustments,
+    contractAdjustments,
+    nextPrompt: input.prompt
+  }, input.aigcSignal);
 }
 async function detectStyleAigcSignal(sample, config, context) {
   const diagnostics = {
@@ -716,67 +737,93 @@ async function runStyleEvolutionLoop(options) {
         if (parsedEvaluation) {
           evaluation2 = mergeStyleEvaluationWithAigc(parsedEvaluation.evaluation, aigcSignal);
         }
-        const refinementPrompt = buildStyleEvolutionRefinementOnlyPrompt({
-          projectTitle: options.projectTitle,
-          idea: options.idea,
-          userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
-          referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
-          desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
-          seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
-          prompt: promptBundle.prompt,
-          sample: sample2,
+        const directApprovalVerification = buildStyleGenerationVerification({
           evaluation: evaluation2,
-          iterationFeedback: carriedFeedback
+          checkedAt: (/* @__PURE__ */ new Date()).toISOString()
         });
-        const rawRefinement = await requestLlmTextCompletion({
-          baseUrl: options.textConfig.provider.baseUrl,
-          apiKey: options.apiKey,
-          modelName: options.textConfig.provider.modelName,
-          apiMode: options.textConfig.provider.apiMode,
-          timeoutMs: options.textConfig.provider.timeoutMs,
-          temperature: 0.1,
-          maxTokens: 1400,
-          messages: [
-            { role: "system", content: refinementPrompt.system },
-            { role: "user", content: refinementPrompt.user }
-          ]
-        });
-        const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement);
-        if (parsedRefinement) {
-          refinement2 = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal);
-        }
-        const freezePrompt = buildStyleFreezeAdvicePrompt({
-          sample: sample2,
-          prompt: promptBundle.prompt,
-          userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
-          referenceText: options.referenceText || styleEvolution.contract.referenceText,
-          referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
-          desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
-          seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+        if (isStyleEvaluatorDirectApproval({
           evaluation: evaluation2,
-          refinement: refinement2
-        });
-        const rawFreezeAdvice = await requestLlmTextCompletion({
-          baseUrl: options.textConfig.provider.baseUrl,
-          apiKey: options.apiKey,
-          modelName: options.textConfig.provider.modelName,
-          apiMode: options.textConfig.provider.apiMode,
-          timeoutMs: options.textConfig.provider.timeoutMs,
-          temperature: 0.1,
-          maxTokens: 800,
-          messages: [
-            { role: "system", content: freezePrompt.system },
-            { role: "user", content: freezePrompt.user }
-          ]
-        });
-        freezeAdvice2 = parseStyleFreezeAdviceFromText(rawFreezeAdvice);
-        if (freezeAdvice2) {
-          refinement2 = {
-            ...refinement2,
-            contractAdjustments: [
-              .../* @__PURE__ */ new Set([...refinement2.contractAdjustments || [], ...freezeAdvice2.contractAdjustments || []])
-            ]
+          verification: directApprovalVerification,
+          retryPolicy,
+          totalRounds: Number(styleEvolution.contract.loop?.currentIteration || styleEvolution.contract.evolutionHistory?.length || 0) + 1
+        })) {
+          refinement2 = buildEvaluatorApprovedRefinement({
+            evaluation: evaluation2,
+            prompt: promptBundle.prompt,
+            aigcSignal
+          });
+          freezeAdvice2 = {
+            freezeVerdict: "ready",
+            freezeSummary: "Evaluator direct approval: \u5F53\u524D\u6837\u6BB5\u5DF2\u8FBE\u5230\u53EF\u51BB\u7ED3\u5199\u6CD5\u5E95\u76D8\u3002",
+            blockingReasons: [],
+            contractAdjustments: refinement2.contractAdjustments || [],
+            forbiddenPatterns: [],
+            positiveExamples: evaluation2.strengths.slice(0, 4),
+            inheritedRules: refinement2.promptAdjustments || []
           };
+        } else {
+          const refinementPrompt = buildStyleEvolutionRefinementOnlyPrompt({
+            projectTitle: options.projectTitle,
+            idea: options.idea,
+            userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
+            referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
+            desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
+            seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+            prompt: promptBundle.prompt,
+            sample: sample2,
+            evaluation: evaluation2,
+            iterationFeedback: carriedFeedback
+          });
+          const rawRefinement = await requestLlmTextCompletion({
+            baseUrl: options.textConfig.provider.baseUrl,
+            apiKey: options.apiKey,
+            modelName: options.textConfig.provider.modelName,
+            apiMode: options.textConfig.provider.apiMode,
+            timeoutMs: options.textConfig.provider.timeoutMs,
+            temperature: 0.1,
+            maxTokens: 1400,
+            messages: [
+              { role: "system", content: refinementPrompt.system },
+              { role: "user", content: refinementPrompt.user }
+            ]
+          });
+          const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement);
+          if (parsedRefinement) {
+            refinement2 = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal);
+          }
+          const freezePrompt = buildStyleFreezeAdvicePrompt({
+            sample: sample2,
+            prompt: promptBundle.prompt,
+            userStylePrompt: options.userStylePrompt || styleEvolution.contract.userStylePrompt,
+            referenceText: options.referenceText || styleEvolution.contract.referenceText,
+            referenceWorks: options.referenceWorks || styleEvolution.contract.referenceWorks,
+            desiredVibes: options.desiredVibes || styleEvolution.contract.desiredVibes,
+            seedForbiddenPatterns: options.seedForbiddenPatterns || styleEvolution.contract.seedForbiddenPatterns,
+            evaluation: evaluation2,
+            refinement: refinement2
+          });
+          const rawFreezeAdvice = await requestLlmTextCompletion({
+            baseUrl: options.textConfig.provider.baseUrl,
+            apiKey: options.apiKey,
+            modelName: options.textConfig.provider.modelName,
+            apiMode: options.textConfig.provider.apiMode,
+            timeoutMs: options.textConfig.provider.timeoutMs,
+            temperature: 0.1,
+            maxTokens: 800,
+            messages: [
+              { role: "system", content: freezePrompt.system },
+              { role: "user", content: freezePrompt.user }
+            ]
+          });
+          freezeAdvice2 = parseStyleFreezeAdviceFromText(rawFreezeAdvice);
+          if (freezeAdvice2) {
+            refinement2 = {
+              ...refinement2,
+              contractAdjustments: [
+                .../* @__PURE__ */ new Set([...refinement2.contractAdjustments || [], ...freezeAdvice2.contractAdjustments || []])
+              ]
+            };
+          }
         }
       } catch (error) {
         fallbackReasons.push(`split_chain_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 360));
