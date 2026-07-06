@@ -992,6 +992,167 @@ export function auditStoryFoundationForAcceptance(snapshot, options = {}) {
   }
 }
 
+function collectAcceptanceStrings(value, depth = 0) {
+  if (depth > 4 || value === null || value === undefined) return []
+  if (typeof value === "string" || typeof value === "number") return [String(value)]
+  if (Array.isArray(value)) return value.flatMap((item) => collectAcceptanceStrings(item, depth + 1))
+  if (typeof value === "object") return Object.values(value).flatMap((item) => collectAcceptanceStrings(item, depth + 1))
+  return []
+}
+
+function isGenericExecutionTerm(term) {
+  return /^(本章|章节|故事|情节|剧情|主线|推进|塑造|设定|世界观|写作|文本|读者|目标|变化|发生|后续|计划|蓝图|任务|场景|人物|角色|chapter|title|objective)$/iu
+    .test(String(term || "").trim())
+}
+
+function extractExecutionTerms(value) {
+  const text = collectAcceptanceStrings(value).join("\n")
+  const terms = new Set()
+  const add = (term) => {
+    const value = String(term || "").trim()
+    if (value.length < 2 || value.length > 10 || isGenericExecutionTerm(value)) return
+    terms.add(value)
+  }
+  for (const word of splitLedgerWords(text)) add(word)
+  for (const sequence of text.match(/\p{Script=Han}{2,}/gu) || []) {
+    if (sequence.length <= 6) add(sequence)
+    for (const size of [2, 3, 4]) {
+      for (let index = 0; index <= sequence.length - size; index += 1) {
+        add(sequence.slice(index, index + size))
+      }
+    }
+  }
+  return Array.from(terms).slice(0, 32)
+}
+
+function firstArrayValue(...values) {
+  return values.find((value) => Array.isArray(value)) || []
+}
+
+function plannedChapterNumber(entry, index) {
+  return Number(entry?.chapterNumber || entry?.chapter || entry?.number || entry?.index || index + 1)
+}
+
+function plannedChaptersForAcceptance(snapshot) {
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const contract = foundation.contract || {}
+  const planChapters = firstArrayValue(
+    getObjectPath(foundation.writingPlan, "chapters"),
+    getObjectPath(foundation.plotArchitecture, "chapters"),
+    getObjectPath(contract, "plot.chapters"),
+  )
+  const deltas = firstArrayValue(
+    getObjectPath(foundation.characterDynamics, "chapterStateDeltas"),
+    getObjectPath(foundation.storyBible, "characterStateDeltas"),
+    getObjectPath(contract, "characters.stateDeltas"),
+  )
+  const deltasByChapter = new Map()
+  for (const [index, delta] of deltas.entries()) {
+    deltasByChapter.set(plannedChapterNumber(delta, index), delta)
+  }
+  return planChapters.map((plan, index) => {
+    const chapterNumber = plannedChapterNumber(plan, index)
+    const stateDelta = deltasByChapter.get(chapterNumber) || null
+    return {
+      chapterNumber,
+      plan,
+      stateDelta,
+      planTerms: extractExecutionTerms(plan),
+      stateDeltaTerms: extractExecutionTerms(stateDelta),
+    }
+  }).filter((entry) => Number.isFinite(entry.chapterNumber) && entry.chapterNumber > 0)
+}
+
+export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const byChapter = chapterBodyByNumber(chapters)
+  const plannedChapters = plannedChaptersForAcceptance(snapshot)
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+  const chapterAudits = []
+  let anchoredChapters = 0
+  let agencyChapters = 0
+  let consequenceChapters = 0
+  let stateDeltaChapters = 0
+  let executedChapters = 0
+
+  if (plannedChapters.length === 0) {
+    issues.push("no planned chapters available for plot execution audit")
+  }
+  if (totalChapters > 0 && plannedChapters.length < totalChapters) {
+    issues.push(`planned chapter entries ${plannedChapters.length} below total chapters ${totalChapters}`)
+  }
+
+  for (const entry of plannedChapters) {
+    const body = byChapter.get(entry.chapterNumber) || ""
+    const terms = [...new Set([...entry.planTerms, ...entry.stateDeltaTerms])]
+    const matchedTerms = terms.filter((term) => body.includes(term))
+    const requiredTermMatches = terms.length >= 3 ? 2 : Math.min(1, terms.length)
+    const objectiveAnchored = requiredTermMatches > 0 && matchedTerms.length >= requiredTermMatches
+    const decisionSignals = countMatches(body, /决定|选择|不肯|必须|不能|留下|藏|交出|拦住|推回|合上|按住|追问|承认|拒绝|答应|转身|伸手|扣住|递出|收回/gu)
+    const consequenceSignals = countMatches(body, /让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|留下|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系/gu)
+    const stateDeltaMatched = entry.stateDeltaTerms.length === 0 || entry.stateDeltaTerms.some((term) => body.includes(term))
+    const agencyVisible = decisionSignals > 0
+    const consequenceVisible = consequenceSignals > 0
+    const executed = objectiveAnchored && agencyVisible && consequenceVisible && stateDeltaMatched
+
+    if (objectiveAnchored) anchoredChapters += 1
+    if (agencyVisible) agencyChapters += 1
+    if (consequenceVisible) consequenceChapters += 1
+    if (stateDeltaMatched) stateDeltaChapters += 1
+    if (executed) executedChapters += 1
+
+    const chapterIssues = []
+    if (!body.trim()) chapterIssues.push("missing chapter body")
+    if (!objectiveAnchored) chapterIssues.push(`planned objective anchors matched ${matchedTerms.length}/${requiredTermMatches}`)
+    if (!agencyVisible) chapterIssues.push("missing visible character decision/agency")
+    if (!consequenceVisible) chapterIssues.push("missing visible consequence/state change")
+    if (!stateDeltaMatched) chapterIssues.push("missing planned character state delta anchor")
+    if (chapterIssues.length) {
+      issues.push(`chapter ${entry.chapterNumber}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: entry.chapterNumber,
+      requiredTermMatches,
+      matchedTerms: matchedTerms.slice(0, 10),
+      planTerms: entry.planTerms.slice(0, 12),
+      stateDeltaTerms: entry.stateDeltaTerms.slice(0, 12),
+      decisionSignals,
+      consequenceSignals,
+      objectiveAnchored,
+      agencyVisible,
+      consequenceVisible,
+      stateDeltaMatched,
+      executed,
+      issues: chapterIssues,
+    })
+  }
+
+  const requiredExecutedChapters = plannedChapters.length >= 3
+    ? Math.ceil(plannedChapters.length * 0.8)
+    : plannedChapters.length
+  if (plannedChapters.length > 0 && executedChapters < requiredExecutedChapters) {
+    issues.push(`plot execution coverage ${executedChapters}/${plannedChapters.length} below required ${requiredExecutedChapters}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters: chapters.length,
+      plannedChapters: plannedChapters.length,
+      executedChapters,
+      requiredExecutedChapters,
+      anchoredChapters,
+      agencyChapters,
+      consequenceChapters,
+      stateDeltaChapters,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const project = snapshot?.project || {}
@@ -1767,6 +1928,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       counts: storyFoundationAudit.counts,
     })
   }
+  const plotExecutionAudit = auditPlotExecutionForAcceptance(auditSnapshot, options)
+  if (!plotExecutionAudit.passed) {
+    throw new AcceptanceError("Plot execution acceptance audit failed.", {
+      issues: plotExecutionAudit.issues.slice(0, 30),
+      summary: plotExecutionAudit.summary,
+      chapters: plotExecutionAudit.chapters.slice(0, 8),
+    })
+  }
   const narrativeAudit = auditNarrativeQualityForAcceptance(auditSnapshot, options)
   if (!narrativeAudit.passed) {
     throw new AcceptanceError("Narrative quality acceptance audit failed.", {
@@ -1818,6 +1987,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     chapterChecks,
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
+  report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
@@ -1830,6 +2000,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalWords,
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
+    plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
@@ -1846,6 +2017,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     readableChapters,
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
+    plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
@@ -1892,6 +2064,7 @@ async function main() {
     progress: [],
     finalReader: null,
     finalStoryFoundationAudit: null,
+    finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
     finalCharacterVoiceAudit: null,

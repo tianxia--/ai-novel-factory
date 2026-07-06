@@ -97,6 +97,7 @@ function richSnapshot() {
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
+    auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
     auditCharacterVoiceForAcceptance,
@@ -109,6 +110,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(foundationAudit.passed, true)
   assert.equal(foundationAudit.counts.plotChapters, 4)
   assert.equal(foundationAudit.counts.foreshadowingEntries, 4)
+
+  const plotExecutionAudit = auditPlotExecutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(plotExecutionAudit.passed, true)
+  assert.equal(plotExecutionAudit.summary.executedChapters, 4)
+  assert.equal(plotExecutionAudit.summary.anchoredChapters, 4)
 
   const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(narrativeAudit.passed, true)
@@ -249,6 +255,27 @@ test("production acceptance runner rejects broken cross-chapter handoffs", async
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, false)
   assert.match(continuityAudit.issues.join("\n"), /no visible handoff anchor|continuity coverage/)
+})
+
+test("production acceptance runner rejects chapters that ignore the planned plot", async () => {
+  const { auditPlotExecutionForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  const offPlanChapters = snapshot.chapters.map((chapter) => ({
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    causalObjective: "蓝色玻璃、南方盐价和码头商队必须推动本章真相。",
+  }))
+  snapshot.lore.storyFoundation.contract.plot.chapters = offPlanChapters
+  snapshot.lore.storyFoundation.plotArchitecture.chapters = offPlanChapters
+  snapshot.lore.storyFoundation.writingPlan.chapters = offPlanChapters
+  snapshot.lore.storyFoundation.characterDynamics.chapterStateDeltas = snapshot.chapters.map((chapter) => ({
+    chapterNumber: chapter.chapterNumber,
+    delta: "商队同盟背叛，盐价账目改变主角立场。",
+  }))
+
+  const plotExecutionAudit = auditPlotExecutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(plotExecutionAudit.passed, false)
+  assert.match(plotExecutionAudit.issues.join("\n"), /planned objective anchors|state delta|plot execution coverage/)
 })
 
 test("production acceptance runner rejects same-voice character dialogue", async () => {
