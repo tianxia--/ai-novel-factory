@@ -281,6 +281,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditCharacterArcForAcceptance,
     auditRelationshipArcForAcceptance,
     auditForeshadowingPayoffForAcceptance,
+    auditFinalResolutionForAcceptance,
     auditContinuityForAcceptance,
   } = await loadRunner()
   const snapshot = richSnapshot()
@@ -352,6 +353,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(foreshadowingAudit.passed, true)
   assert.equal(foreshadowingAudit.summary.seededEntries >= 3, true)
   assert.equal(foreshadowingAudit.summary.advancedEntries >= 2, true)
+
+  const finalResolutionAudit = auditFinalResolutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(finalResolutionAudit.passed, true)
+  assert.equal(finalResolutionAudit.summary.skipped, true)
 
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, true)
@@ -548,6 +553,17 @@ test("production acceptance runner audits long-form language craft", async () =>
   assert.equal(languageCraftAudit.summary.totalClicheSignals <= languageCraftAudit.summary.allowedTotalCliches, true)
 })
 
+test("production acceptance runner audits long-form final resolution", async () => {
+  const { auditFinalResolutionForAcceptance } = await loadRunner()
+  const snapshot = variedLongSnapshot()
+
+  const finalResolutionAudit = auditFinalResolutionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(finalResolutionAudit.passed, true)
+  assert.equal(finalResolutionAudit.summary.resolvedFinalChapters, 2)
+  assert.equal(finalResolutionAudit.summary.finalChapterResolved, true)
+  assert.equal(finalResolutionAudit.summary.payoffAnchors >= 1, true)
+})
+
 test("production acceptance runner rejects repeated chapter templates", async () => {
   const { auditCrossChapterVariationForAcceptance } = await loadRunner()
   const snapshot = structuralSnapshot(false)
@@ -679,6 +695,22 @@ test("production acceptance runner rejects cliche-heavy long-form language", asy
   const languageCraftAudit = auditLanguageCraftForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
   assert.equal(languageCraftAudit.passed, false)
   assert.match(languageCraftAudit.issues.join("\n"), /cliche|abstract emotion|language craft/)
+})
+
+test("production acceptance runner rejects open-ended long-form finales", async () => {
+  const { auditFinalResolutionForAcceptance } = await loadRunner()
+  const snapshot = variedLongSnapshot()
+  for (const chapter of snapshot.chapters.slice(-2)) {
+    chapter.body = [
+      "沈砚站在雨里，知道后续还有更加危险的真相，所有伏笔都将在下一章继续推进。",
+      "老周和少尹都没有给出答案，新的危机正在升级，未来只会更加复杂。",
+      "这一切还没有结束，谜团进一步加深，关系也会在后续发生更大的变化。",
+    ].join("\n\n")
+  }
+
+  const finalResolutionAudit = auditFinalResolutionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(finalResolutionAudit.passed, false)
+  assert.match(finalResolutionAudit.issues.join("\n"), /final resolution|open-ended|final chapter/)
 })
 
 test("production acceptance runner rejects non-novel reader metadata leaks", async () => {

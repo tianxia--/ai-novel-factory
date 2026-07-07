@@ -2672,6 +2672,189 @@ export function auditCrossChapterVariationForAcceptance(snapshot, options = {}) 
   }
 }
 
+function countFinalResolutionSignals(body) {
+  return countMatches(
+    body,
+    /摊牌|揭开|揭示|查清|真相|终于|回收|兑现|承认|拒绝|交出|付出|付清|清算|审判|定局|了结|合上|裂开|天亮|尾声|卷尾|余波|新局|从此|再也|改变|翻面|答案|供词|代价|不能退|不可逆|只剩|离开|留下/gu,
+  )
+}
+
+function countFinalConsequenceSignals(body) {
+  return countMatches(
+    body,
+    /代价|因此|于是|换来|导致|从此|再也|改变|失去|留下|只剩|裂|暴露|身份|位置|关系|债|命|清算|余波|不可逆|供词|答案/gu,
+  )
+}
+
+function countOpenEndedFinaleSignals(body) {
+  return countMatches(
+    body,
+    /更加危险|更加复杂|更大.*真相|新的危机|继续追查|继续调查|后续|下一章|所有伏笔|未来.*危险|一切都不简单|仍然没有答案|没有答案|谜团.*加深|危机.*升级|还没有结束|只是开始/gu,
+  )
+}
+
+function uniqueTermsInText(text, terms) {
+  const source = String(text || "")
+  return [...new Set((terms || []).map((term) => String(term || "").trim()).filter((term) => term.length >= 2))]
+    .filter((term) => source.includes(term))
+}
+
+export function auditFinalResolutionForAcceptance(snapshot, options = {}) {
+  const chapters = (Array.isArray(snapshot?.chapters) ? snapshot.chapters : [])
+    .map((chapter) => ({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      body: String(chapter?.body || ""),
+    }))
+    .filter((chapter) => chapter.chapterNumber > 0)
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const totalChapters = Number(snapshot?.project?.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+
+  if (totalChapters < 6 || chapters.length < 6) {
+    return {
+      passed: true,
+      issues: [],
+      summary: {
+        totalChapters,
+        readableChapters: chapters.length,
+        skipped: true,
+        reason: "short-form sample below final resolution threshold",
+      },
+      chapters: [],
+    }
+  }
+
+  const finalWindowSize = Math.max(2, Math.ceil(chapters.length * 0.25))
+  const finalChapters = chapters.slice(-finalWindowSize)
+  const finalBody = finalChapters.map((chapter) => chapter.body).join("\n\n")
+  const finalChapter = finalChapters.at(-1)
+  const finalChapterBody = finalChapter?.body || ""
+  const dossiers = extractAcceptanceCharacterDossiers(snapshot)
+  const protagonist = identifyProtagonistForAcceptance(snapshot, dossiers)
+  const protagonistNames = protagonist ? [protagonist.name, ...protagonist.aliases].filter(Boolean) : []
+  const relationshipEntries = extractRelationshipEntriesForAcceptance(snapshot)
+    .map((entry, index) => normalizeRelationshipEntryForAcceptance(entry, extractKnownCastNames(snapshot), index))
+    .filter((entry) => entry.from && entry.to)
+  const relationshipNames = [...new Set(relationshipEntries.flatMap((entry) => [entry.from, entry.to]).filter(Boolean))]
+  const foreshadowingTerms = [...new Set(extractForeshadowingEntries(snapshot).flatMap((entry) => extractForeshadowingAnchorTerms(entry)))]
+  const payoffAnchors = uniqueTermsInText(finalBody, foreshadowingTerms)
+  const finalResolutionSignals = countFinalResolutionSignals(finalBody)
+  const finalConsequenceSignals = countFinalConsequenceSignals(finalBody)
+  const finalOpenEndedSignals = countOpenEndedFinaleSignals(finalBody)
+  const finalChapterResolutionSignals = countFinalResolutionSignals(finalChapterBody)
+  const finalChapterConsequenceSignals = countFinalConsequenceSignals(finalChapterBody)
+  const finalChapterOpenEndedSignals = countOpenEndedFinaleSignals(finalChapterBody)
+  const finalChapterProtagonistMentioned = containsAnyTerm(finalChapterBody, protagonistNames)
+  const finalChapterResolved = finalChapterResolutionSignals >= 2
+    && finalChapterConsequenceSignals >= 1
+    && finalChapterProtagonistMentioned
+    && finalChapterOpenEndedSignals <= Math.max(1, finalChapterResolutionSignals)
+
+  const chapterAudits = []
+  let resolvedFinalChapters = 0
+  let protagonistFinalChapters = 0
+  let relationshipFinalChapters = 0
+  for (const chapter of finalChapters) {
+    const body = chapter.body
+    const resolutionSignals = countFinalResolutionSignals(body)
+    const consequenceSignals = countFinalConsequenceSignals(body)
+    const openEndedSignals = countOpenEndedFinaleSignals(body)
+    const protagonistMentioned = containsAnyTerm(body, protagonistNames)
+    const relationshipMentions = relationshipNames.filter((name) => body.includes(name))
+    const relationshipClosure = relationshipMentions.length >= 2 && countCharacterPressureSignals(body) >= 2
+    const payoffAnchorMatches = uniqueTermsInText(body, foreshadowingTerms)
+    const resolved = resolutionSignals >= 2
+      && consequenceSignals >= 1
+      && protagonistMentioned
+      && openEndedSignals <= Math.max(1, resolutionSignals)
+    if (resolved) resolvedFinalChapters += 1
+    if (protagonistMentioned) protagonistFinalChapters += 1
+    if (relationshipClosure) relationshipFinalChapters += 1
+    const chapterIssues = []
+    if (resolutionSignals < 2) chapterIssues.push(`weak resolution signals ${resolutionSignals}`)
+    if (consequenceSignals < 1) chapterIssues.push(`weak consequence/aftermath signals ${consequenceSignals}`)
+    if (!protagonistMentioned && protagonistNames.length > 0) chapterIssues.push("protagonist absent from final resolution window")
+    if (openEndedSignals > Math.max(1, resolutionSignals)) chapterIssues.push(`open-ended escalation dominates ${openEndedSignals}/${resolutionSignals}`)
+    chapterAudits.push({
+      chapterNumber: chapter.chapterNumber,
+      title: chapter.title,
+      resolutionSignals,
+      consequenceSignals,
+      openEndedSignals,
+      protagonistMentioned,
+      relationshipMentions: relationshipMentions.slice(0, 8),
+      relationshipClosure,
+      payoffAnchorMatches: payoffAnchorMatches.slice(0, 8),
+      resolved,
+      issues: chapterIssues,
+    })
+  }
+
+  const requiredResolvedFinalChapters = Math.ceil(finalChapters.length * 0.75)
+  const requiredProtagonistFinalChapters = finalChapters.length
+  const requiredRelationshipFinalChapters = relationshipEntries.length > 0 ? Math.max(1, Math.ceil(finalChapters.length * 0.5)) : 0
+  const requiredPayoffAnchors = foreshadowingTerms.length > 0 ? 1 : 0
+  const allowedOpenEndedSignals = Math.max(2, Math.floor(finalChapters.length * 1.5))
+
+  if (resolvedFinalChapters < requiredResolvedFinalChapters) {
+    issues.push(`final resolution chapter coverage ${resolvedFinalChapters}/${finalChapters.length} below required ${requiredResolvedFinalChapters}`)
+  }
+  if (protagonistFinalChapters < requiredProtagonistFinalChapters) {
+    issues.push(`protagonist final-window coverage ${protagonistFinalChapters}/${finalChapters.length} below required ${requiredProtagonistFinalChapters}`)
+  }
+  if (relationshipFinalChapters < requiredRelationshipFinalChapters) {
+    issues.push(`relationship closure coverage ${relationshipFinalChapters}/${finalChapters.length} below required ${requiredRelationshipFinalChapters}`)
+  }
+  if (payoffAnchors.length < requiredPayoffAnchors) {
+    issues.push(`final payoff anchors ${payoffAnchors.length}/${foreshadowingTerms.length} below required ${requiredPayoffAnchors}`)
+  }
+  if (finalResolutionSignals < finalChapters.length * 3) {
+    issues.push(`final resolution signals ${finalResolutionSignals} below required ${finalChapters.length * 3}`)
+  }
+  if (finalConsequenceSignals < finalChapters.length * 2) {
+    issues.push(`final consequence/aftermath signals ${finalConsequenceSignals} below required ${finalChapters.length * 2}`)
+  }
+  if (finalOpenEndedSignals > allowedOpenEndedSignals && finalOpenEndedSignals > finalResolutionSignals) {
+    issues.push(`open-ended finale signals ${finalOpenEndedSignals} exceed allowed ${allowedOpenEndedSignals} and dominate resolution`)
+  }
+  if (!finalChapterResolved) {
+    issues.push(`final chapter ${finalChapter?.chapterNumber || "?"} does not show concrete resolution and aftermath`)
+  }
+
+  for (const chapter of chapterAudits) {
+    if (chapter.issues.length) {
+      issues.push(`chapter ${chapter.chapterNumber}: ${chapter.issues.join("; ")}`)
+    }
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      readableChapters: chapters.length,
+      finalWindowSize,
+      resolvedFinalChapters,
+      requiredResolvedFinalChapters,
+      protagonistFinalChapters,
+      requiredProtagonistFinalChapters,
+      relationshipFinalChapters,
+      requiredRelationshipFinalChapters,
+      payoffAnchors: payoffAnchors.length,
+      requiredPayoffAnchors,
+      finalResolutionSignals,
+      finalConsequenceSignals,
+      finalOpenEndedSignals,
+      allowedOpenEndedSignals,
+      finalChapterResolved,
+      skipped: false,
+    },
+    payoffAnchors: payoffAnchors.slice(0, 12),
+    chapters: chapterAudits,
+  }
+}
+
 function collectStyleFallbackSignals(payload) {
   const signals = []
   const inspectCandidate = (candidate, label) => {
@@ -3301,6 +3484,15 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       entries: foreshadowingAudit.entries.slice(0, 12),
     })
   }
+  const finalResolutionAudit = auditFinalResolutionForAcceptance(auditSnapshot, options)
+  if (!finalResolutionAudit.passed) {
+    throw new AcceptanceError("Final resolution acceptance audit failed.", {
+      issues: finalResolutionAudit.issues.slice(0, 30),
+      summary: finalResolutionAudit.summary,
+      payoffAnchors: finalResolutionAudit.payoffAnchors,
+      chapters: finalResolutionAudit.chapters.slice(0, 8),
+    })
+  }
   const continuityAudit = auditContinuityForAcceptance(auditSnapshot, options)
   if (!continuityAudit.passed) {
     throw new AcceptanceError("Cross-chapter continuity acceptance audit failed.", {
@@ -3333,6 +3525,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalCharacterArcAudit = characterArcAudit
   report.finalRelationshipArcAudit = relationshipArcAudit
   report.finalForeshadowingAudit = foreshadowingAudit
+  report.finalResolutionAudit = finalResolutionAudit
   report.finalContinuityAudit = continuityAudit
   report.steps.push({
     step: "reader_acceptance",
@@ -3355,6 +3548,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
+    finalResolution: finalResolutionAudit.summary,
     continuity: continuityAudit.summary,
   })
   await maybeWriteCheckpoint(checkpoint, "reader_acceptance_passed", {
@@ -3381,6 +3575,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
+    finalResolution: finalResolutionAudit.summary,
     continuity: continuityAudit.summary,
   })
   return snapshot
@@ -3437,6 +3632,7 @@ async function main() {
     finalCharacterArcAudit: null,
     finalRelationshipArcAudit: null,
     finalForeshadowingAudit: null,
+    finalResolutionAudit: null,
     finalContinuityAudit: null,
     checkpoints: [],
     lastCheckpoint: null,
