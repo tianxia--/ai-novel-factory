@@ -9,12 +9,15 @@ studio/production/chapters/*.md
 .DS_Store
 node_modules/
 *.zip
+pnpm-lock.yaml
 .env
 .env.*
 !.env.example
 .ai-novel/
 .ai-novel-projects/
 .ai-novel-factory/
+.kunsdd/
+.preview/
 
 # 截图文件（允许提交）
 !screenshots/**/*.png
