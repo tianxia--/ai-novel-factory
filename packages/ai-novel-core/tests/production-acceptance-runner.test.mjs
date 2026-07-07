@@ -83,9 +83,31 @@ function richSnapshot() {
     },
     characters: {
       dossiers: [
-        { canonicalName: "沈砚", aliases: [] },
-        { canonicalName: "老周", aliases: [] },
-        { canonicalName: "少尹", aliases: [] },
+        {
+          id: "protagonist",
+          canonicalName: "沈砚",
+          role: "protagonist",
+          coreDesire: "查清税册缺页背后的旧债",
+          aliases: [],
+          speechMarkers: ["谁动过"],
+          behaviorHabits: ["按住纸边", "合上账册"],
+        },
+        {
+          canonicalName: "老周",
+          role: "supporting",
+          coreDesire: "保住旧债秘密",
+          aliases: [],
+          speechMarkers: ["少尹的人"],
+          behaviorHabits: ["攥紧袖口"],
+        },
+        {
+          canonicalName: "少尹",
+          role: "pressure-force",
+          coreDesire: "夺回缺页账册",
+          aliases: [],
+          speechMarkers: [],
+          behaviorHabits: ["派人守在门外"],
+        },
       ],
       relationshipGraph: {
         characters: [{ name: "沈砚" }, { name: "老周" }, { name: "少尹" }],
@@ -148,6 +170,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
     auditCharacterVoiceForAcceptance,
+    auditCharacterArcForAcceptance,
     auditRelationshipArcForAcceptance,
     auditForeshadowingPayoffForAcceptance,
     auditContinuityForAcceptance,
@@ -184,6 +207,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(characterVoiceAudit.passed, true)
   assert.equal(characterVoiceAudit.summary.voicedCharacters >= 2, true)
   assert.equal(characterVoiceAudit.summary.activeCharacters >= 3, true)
+
+  const characterArcAudit = auditCharacterArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterArcAudit.passed, true)
+  assert.equal(characterArcAudit.summary.protagonist, "沈砚")
+  assert.equal(characterArcAudit.summary.activeSupporting >= 2, true)
 
   const relationshipArcAudit = auditRelationshipArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(relationshipArcAudit.passed, true)
@@ -385,6 +413,27 @@ test("production acceptance runner rejects same-voice character dialogue", async
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, false)
   assert.match(characterVoiceAudit.issues.join("\n"), /same dialogue used across speakers|template dialogue ratio/)
+})
+
+test("production acceptance runner rejects missing protagonist arc and supporting cast usage", async () => {
+  const { auditCharacterArcForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[1].body = [
+    "陌生账吏把蓝色玻璃搬上码头，商队只谈南方盐价。",
+    "他检查货单，决定先躲开雨棚，没人提沈砚、老周或少尹留下的问题。",
+  ].join("\n\n")
+  snapshot.chapters[2].body = [
+    "码头掌柜翻开潮汐契约，陌生账吏听见远处鼓声。",
+    "他选择把货单藏进箱底，新的商队线索把原本的人物弧切断。",
+  ].join("\n\n")
+  snapshot.chapters[3].body = [
+    "南方盐价忽然翻倍，陌生账吏只看见账面数字。",
+    "他把玻璃推回船舱，故事没有承接主角压力，也没有让关键配角参与。",
+  ].join("\n\n")
+
+  const characterArcAudit = auditCharacterArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterArcAudit.passed, false)
+  assert.match(characterArcAudit.issues.join("\n"), /protagonist|supporting cast|character cast/)
 })
 
 test("production acceptance runner rejects missing relationship arc pressure", async () => {

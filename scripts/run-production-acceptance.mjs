@@ -527,15 +527,31 @@ function extractAcceptanceCharacterDossiers(snapshot) {
     const canonicalName = String(dossier?.canonicalName || dossier?.name || "").trim()
     if (!canonicalName) continue
     byName.set(canonicalName, {
+      id: String(dossier?.id || "").trim(),
       name: canonicalName,
+      role: String(dossier?.role || dossier?.type || "").trim(),
+      coreDesire: String(dossier?.coreDesire || dossier?.desire || dossier?.goal || "").trim(),
       aliases: (Array.isArray(dossier?.aliases) ? dossier.aliases : []).map((alias) => String(alias || "").trim()).filter(Boolean),
       speechMarkers: (Array.isArray(dossier?.speechMarkers) ? dossier.speechMarkers : []).map((item) => String(item || "").trim()).filter(Boolean),
       behaviorHabits: (Array.isArray(dossier?.behaviorHabits) ? dossier.behaviorHabits : []).map((item) => String(item || "").trim()).filter(Boolean),
+      profileTerms: collectAcceptanceStrings([
+        dossier?.identityAndRole,
+        dossier?.coreDesire,
+        dossier?.desire,
+        dossier?.goal,
+        dossier?.wound,
+        dossier?.appearanceAndBody,
+        dossier?.relationshipState,
+        dossier?.currentChapterDelta,
+        dossier?.skills,
+        dossier?.speechMarkers,
+        dossier?.behaviorHabits,
+      ]).map((item) => String(item || "").trim()).filter((item) => item.length >= 2),
     })
   }
   for (const name of knownNames) {
     if (!byName.has(name)) {
-      byName.set(name, { name, aliases: [], speechMarkers: [], behaviorHabits: [] })
+      byName.set(name, { id: "", name, role: "", coreDesire: "", aliases: [], speechMarkers: [], behaviorHabits: [], profileTerms: [] })
     }
   }
   return Array.from(byName.values())
@@ -672,6 +688,156 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
       templateRatio,
     },
     repeatedAcrossSpeakers: repeatedAcrossSpeakers.slice(0, 5),
+    characters: characterAudits,
+  }
+}
+
+function identifyProtagonistForAcceptance(snapshot, dossiers) {
+  const foundation = snapshot?.lore?.storyFoundation || {}
+  const contract = foundation.contract || {}
+  const explicitCandidates = [
+    getObjectPath(foundation.characterDynamics, "protagonist"),
+    getObjectPath(contract, "characters.protagonist"),
+    snapshot?.characters?.protagonist,
+    snapshot?.project?.protagonist,
+  ].map((value) => String(value || "").trim()).filter(Boolean)
+  for (const candidate of explicitCandidates) {
+    const matched = dossiers.find((dossier) => dossier.name === candidate || dossier.aliases.includes(candidate))
+    if (matched) return matched
+  }
+  const roleMatched = dossiers.find((dossier) => /protagonist|main|主角|核心/u.test(`${dossier.id} ${dossier.role} ${dossier.aliases.join(" ")}`))
+  return roleMatched || dossiers[0] || null
+}
+
+function countCharacterActionSignals(text) {
+  return countMatches(
+    text,
+    /走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默|合上|推开|退|挡|攥|盯|避开|靠近|离开|打开|关上/gu,
+  )
+}
+
+function countCharacterPressureSignals(text) {
+  return countMatches(
+    text,
+    /必须|不能|决定|选择|代价|风险|欠|债|怕|查清|追问|交出|保住|隐瞒|裂缝|怀疑|逼|拦|失去|暴露|不肯|犹豫|背叛|威胁|保护|利用|亏欠|试探|让步|翻脸|改变|真相/gu,
+  )
+}
+
+export function auditCharacterArcForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const dossiers = extractAcceptanceCharacterDossiers(snapshot)
+  const protagonist = identifyProtagonistForAcceptance(snapshot, dossiers)
+  const issues = []
+  const characterAudits = []
+  const supportingNamesByChapter = new Map()
+
+  if (dossiers.length < 2) {
+    issues.push(`character cast size ${dossiers.length} below required protagonist plus supporting cast`)
+  }
+  if (!protagonist) {
+    issues.push("no protagonist dossier available for character arc audit")
+  }
+
+  for (const dossier of dossiers) {
+    const names = [dossier.name, ...dossier.aliases].filter(Boolean)
+    const mentionedChapters = []
+    let dialogueCount = 0
+    let actionSignals = 0
+    let pressureSignals = 0
+    let profileSignals = 0
+    for (const chapter of chapters) {
+      const body = String(chapter?.body || "")
+      const chapterNumber = Number(chapter?.chapterNumber || 0)
+      const mentioned = names.some((name) => body.includes(name))
+      if (!mentioned) continue
+      mentionedChapters.push(chapterNumber)
+      if (dossier.name !== protagonist?.name) {
+        const supporting = supportingNamesByChapter.get(chapterNumber) || new Set()
+        supporting.add(dossier.name)
+        supportingNamesByChapter.set(chapterNumber, supporting)
+      }
+      const windows = collectCharacterWindows(body, names, 150).join("\n")
+      dialogueCount += collectCharacterDialogueSamples(body, names).length
+      actionSignals += countCharacterActionSignals(windows)
+      pressureSignals += countCharacterPressureSignals(windows)
+      profileSignals += dossier.profileTerms.filter((term) => term.length >= 2 && term.length <= 18 && windows.includes(term)).length
+    }
+    const active = mentionedChapters.length > 0 && (dialogueCount > 0 || actionSignals >= 2 || pressureSignals >= 1)
+    characterAudits.push({
+      name: dossier.name,
+      role: dossier.role,
+      protagonist: dossier.name === protagonist?.name,
+      mentionChapters: mentionedChapters,
+      mentionedChapterCount: mentionedChapters.length,
+      dialogueCount,
+      actionSignals,
+      pressureSignals,
+      profileSignals,
+      active,
+    })
+  }
+
+  const totalChapters = chapters.length
+  const protagonistAudit = protagonist
+    ? characterAudits.find((audit) => audit.name === protagonist.name)
+    : null
+  const protagonistMentionChapters = protagonistAudit?.mentionedChapterCount || 0
+  let protagonistAgencyChapters = 0
+  let protagonistPressureChapters = 0
+  if (protagonist) {
+    const names = [protagonist.name, ...protagonist.aliases].filter(Boolean)
+    for (const chapter of chapters) {
+      const body = String(chapter?.body || "")
+      if (!names.some((name) => body.includes(name))) continue
+      const windows = collectCharacterWindows(body, names, 170).join("\n")
+      if (countCharacterActionSignals(windows) >= 2 && countCharacterPressureSignals(windows) >= 1) protagonistAgencyChapters += 1
+      if (countCharacterPressureSignals(windows) >= 1) protagonistPressureChapters += 1
+    }
+  }
+
+  const supportingAudits = characterAudits.filter((audit) => !audit.protagonist)
+  const activeSupporting = supportingAudits.filter((audit) => audit.active).length
+  const supportingCoverageChapters = Array.from(supportingNamesByChapter.values()).filter((names) => names.size > 0).length
+  const requiredProtagonistChapters = totalChapters >= 6 ? Math.ceil(totalChapters * 0.8) : totalChapters
+  const requiredAgencyChapters = totalChapters >= 6 ? Math.ceil(totalChapters * 0.65) : totalChapters
+  const requiredPressureChapters = totalChapters >= 6 ? Math.ceil(totalChapters * 0.6) : Math.min(totalChapters, Math.max(1, totalChapters - 1))
+  const requiredSupportingCharacters = dossiers.length >= 3 ? Math.min(2, dossiers.length - 1) : Math.min(1, dossiers.length - 1)
+  const requiredSupportingCoverage = totalChapters >= 6 ? Math.ceil(totalChapters * 0.6) : Math.ceil(totalChapters * 0.5)
+
+  if (protagonistMentionChapters < requiredProtagonistChapters) {
+    issues.push(`protagonist chapter coverage ${protagonistMentionChapters}/${totalChapters} below required ${requiredProtagonistChapters}`)
+  }
+  if (protagonistAgencyChapters < requiredAgencyChapters) {
+    issues.push(`protagonist agency/decision coverage ${protagonistAgencyChapters}/${totalChapters} below required ${requiredAgencyChapters}`)
+  }
+  if (protagonistPressureChapters < requiredPressureChapters) {
+    issues.push(`protagonist pressure/change coverage ${protagonistPressureChapters}/${totalChapters} below required ${requiredPressureChapters}`)
+  }
+  if (activeSupporting < requiredSupportingCharacters) {
+    issues.push(`active supporting cast ${activeSupporting}/${supportingAudits.length} below required ${requiredSupportingCharacters}`)
+  }
+  if (supportingCoverageChapters < requiredSupportingCoverage) {
+    issues.push(`supporting cast chapter coverage ${supportingCoverageChapters}/${totalChapters} below required ${requiredSupportingCoverage}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      knownCast: dossiers.length,
+      protagonist: protagonist?.name || "",
+      protagonistMentionChapters,
+      requiredProtagonistChapters,
+      protagonistAgencyChapters,
+      requiredAgencyChapters,
+      protagonistPressureChapters,
+      requiredPressureChapters,
+      activeSupporting,
+      requiredSupportingCharacters,
+      supportingCoverageChapters,
+      requiredSupportingCoverage,
+    },
     characters: characterAudits,
   }
 }
@@ -2422,6 +2588,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       characters: characterVoiceAudit.characters.slice(0, 8),
     })
   }
+  const characterArcAudit = auditCharacterArcForAcceptance(auditSnapshot, options)
+  if (!characterArcAudit.passed) {
+    throw new AcceptanceError("Character arc and supporting cast acceptance audit failed.", {
+      issues: characterArcAudit.issues.slice(0, 30),
+      summary: characterArcAudit.summary,
+      characters: characterArcAudit.characters.slice(0, 8),
+    })
+  }
   const relationshipArcAudit = auditRelationshipArcForAcceptance(auditSnapshot, options)
   if (!relationshipArcAudit.passed) {
     throw new AcceptanceError("Relationship arc acceptance audit failed.", {
@@ -2462,6 +2636,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
+  report.finalCharacterArcAudit = characterArcAudit
   report.finalRelationshipArcAudit = relationshipArcAudit
   report.finalForeshadowingAudit = foreshadowingAudit
   report.finalContinuityAudit = continuityAudit
@@ -2478,6 +2653,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
@@ -2498,6 +2674,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     characterVoice: characterVoiceAudit.summary,
+    characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
     foreshadowing: foreshadowingAudit.summary,
     continuity: continuityAudit.summary,
@@ -2548,6 +2725,7 @@ async function main() {
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
     finalCharacterVoiceAudit: null,
+    finalCharacterArcAudit: null,
     finalRelationshipArcAudit: null,
     finalForeshadowingAudit: null,
     finalContinuityAudit: null,
