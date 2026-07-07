@@ -1386,6 +1386,127 @@ function plannedChaptersForAcceptance(snapshot) {
   }).filter((entry) => Number.isFinite(entry.chapterNumber) && entry.chapterNumber > 0)
 }
 
+function structuralPhaseDefinitions(totalChapters) {
+  return [
+    {
+      key: "opening",
+      label: "opening setup",
+      start: 1,
+      end: Math.max(1, Math.ceil(totalChapters * 0.2)),
+      planPattern: /开端|引子|起点|触发|导火索|建立|出场|入局|初始|破局|问题|契机|第一幕/u,
+      bodyPattern: /第一次|开始|发现|入局|触发|决定|选择|看见|听见|查|追问|证据|线索/u,
+    },
+    {
+      key: "turning",
+      label: "midpoint turn",
+      start: Math.max(1, Math.floor(totalChapters * 0.35)),
+      end: Math.max(1, Math.ceil(totalChapters * 0.65)),
+      planPattern: /转折|中段|中点|反转|真相|升级|失控|背叛|代价|暴露|改变|不可逆|第二幕/u,
+      bodyPattern: /却|原来|忽然|暴露|背叛|真相|意识到|代价|改变|再也|失去|裂|不得不|不能回头|升级/u,
+    },
+    {
+      key: "climax",
+      label: "climax/payoff",
+      start: Math.max(1, Math.floor(totalChapters * 0.7)),
+      end: Math.max(1, Math.ceil(totalChapters * 0.9)),
+      planPattern: /高潮|决战|摊牌|最终|回收|揭示|爆发|最大|主线|收束|逼近|终局|第三幕/u,
+      bodyPattern: /摊牌|真相|终于|揭开|回收|爆发|最后|不能退|决定|代价|选择|交出|承认|拒绝|只剩/u,
+    },
+    {
+      key: "resolution",
+      label: "volume close",
+      start: Math.max(1, Math.floor(totalChapters * 0.9)),
+      end: totalChapters,
+      planPattern: /结尾|收束|卷尾|尾声|新局|余波|改变|位置|关系网络|世界认知|下一卷|下一阶段/u,
+      bodyPattern: /天亮|余波|只剩|从此|再也|明日|下一|新的|改变|离开|回头|门外|答案|代价|风险/u,
+    },
+  ].map((phase) => ({
+    ...phase,
+    start: Math.min(totalChapters, Math.max(1, phase.start)),
+    end: Math.min(totalChapters, Math.max(phase.start, phase.end)),
+  }))
+}
+
+function textForPlannedEntry(entry) {
+  return collectAcceptanceStrings([entry?.plan, entry?.stateDelta]).join("\n")
+}
+
+export function auditStructuralProgressionForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const byChapter = chapterBodyByNumber(chapters)
+  const plannedChapters = plannedChaptersForAcceptance(snapshot)
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+
+  if (totalChapters < 6) {
+    return {
+      passed: true,
+      issues: [],
+      summary: {
+        totalChapters,
+        plannedChapters: plannedChapters.length,
+        skipped: true,
+        reason: "short-form sample below structural progression threshold",
+      },
+      phases: [],
+    }
+  }
+
+  if (plannedChapters.length < totalChapters) {
+    issues.push(`structural progression planned chapters ${plannedChapters.length} below total chapters ${totalChapters}`)
+  }
+  if (chapters.length < totalChapters) {
+    issues.push(`structural progression readable chapters ${chapters.length} below total chapters ${totalChapters}`)
+  }
+
+  const phases = structuralPhaseDefinitions(totalChapters).map((phase) => {
+    const plannedInWindow = plannedChapters.filter((entry) => entry.chapterNumber >= phase.start && entry.chapterNumber <= phase.end)
+    const chaptersInWindow = chapters.filter((chapter) => Number(chapter?.chapterNumber || 0) >= phase.start && Number(chapter?.chapterNumber || 0) <= phase.end)
+    const planHits = plannedInWindow
+      .filter((entry) => phase.planPattern.test(textForPlannedEntry(entry)))
+      .map((entry) => entry.chapterNumber)
+    const bodyHits = chaptersInWindow
+      .filter((chapter) => phase.bodyPattern.test(byChapter.get(Number(chapter?.chapterNumber || 0)) || ""))
+      .map((chapter) => Number(chapter?.chapterNumber || 0))
+    const passed = planHits.length > 0 && bodyHits.length > 0
+    if (!planHits.length) {
+      issues.push(`structural phase ${phase.key} missing planned ${phase.label} marker in chapters ${phase.start}-${phase.end}`)
+    }
+    if (!bodyHits.length) {
+      issues.push(`structural phase ${phase.key} missing visible prose ${phase.label} marker in chapters ${phase.start}-${phase.end}`)
+    }
+    return {
+      key: phase.key,
+      label: phase.label,
+      start: phase.start,
+      end: phase.end,
+      planHits,
+      bodyHits,
+      passed,
+    }
+  })
+
+  const passedPhases = phases.filter((phase) => phase.passed).length
+  if (passedPhases < phases.length) {
+    issues.push(`long-form structural progression coverage ${passedPhases}/${phases.length} below required ${phases.length}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      plannedChapters: plannedChapters.length,
+      readableChapters: chapters.length,
+      passedPhases,
+      requiredPhases: phases.length,
+      skipped: false,
+    },
+    phases,
+  }
+}
+
 export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const byChapter = chapterBodyByNumber(chapters)
@@ -2260,6 +2381,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       chapters: worldbuildingAudit.chapters.slice(0, 8),
     })
   }
+  const structuralProgressionAudit = auditStructuralProgressionForAcceptance(auditSnapshot, options)
+  if (!structuralProgressionAudit.passed) {
+    throw new AcceptanceError("Long-form structural progression acceptance audit failed.", {
+      issues: structuralProgressionAudit.issues.slice(0, 30),
+      summary: structuralProgressionAudit.summary,
+      phases: structuralProgressionAudit.phases,
+    })
+  }
   const plotExecutionAudit = auditPlotExecutionForAcceptance(auditSnapshot, options)
   if (!plotExecutionAudit.passed) {
     throw new AcceptanceError("Plot execution acceptance audit failed.", {
@@ -2328,6 +2457,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalWorldbuildingAudit = worldbuildingAudit
+  report.finalStructuralProgressionAudit = structuralProgressionAudit
   report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
@@ -2343,6 +2473,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
     worldbuilding: worldbuildingAudit.summary,
+    structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
@@ -2362,6 +2493,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
     worldbuilding: worldbuildingAudit.summary,
+    structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
@@ -2411,6 +2543,7 @@ async function main() {
     finalReader: null,
     finalStoryFoundationAudit: null,
     finalWorldbuildingAudit: null,
+    finalStructuralProgressionAudit: null,
     finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,

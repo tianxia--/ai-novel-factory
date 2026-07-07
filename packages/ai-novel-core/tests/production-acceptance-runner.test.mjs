@@ -94,6 +94,52 @@ function richSnapshot() {
   }
 }
 
+function structuralSnapshot(withMarkers = true) {
+  const snapshot = richSnapshot()
+  const totalChapters = 8
+  const phasePlans = [
+    "开端入局：沈砚第一次发现税册缺页，旧案被触发。",
+    "调查延展：沈砚继续追问账册来历，关系压力加深。",
+    "压力升级：老周的债务牵出少尹权力追索。",
+    "中段转折：蓝色玻璃账页暴露真相，沈砚意识到代价已经不可逆。",
+    "反转加压：少尹背叛旧约，主角位置改变。",
+    "高潮逼近：缺页账册、旧印章和门外脚步开始集中回收。",
+    "高潮摊牌：沈砚终于揭开王朝税册真相，不能再退。",
+    "卷尾余波：新局打开，关系网络改变，下一阶段风险站在门外。",
+  ]
+  const genericPlan = "继续追查账册疑案，让人物保持压力并推动事件。"
+  snapshot.project.totalChapters = totalChapters
+  snapshot.chapters = Array.from({ length: totalChapters }, (_, index) => {
+    const chapterNumber = index + 1
+    const marker = withMarkers ? phasePlans[index] : "沈砚检查账册，老周站在门外，少尹派人追索。"
+    return {
+      chapterNumber,
+      title: `第 ${chapterNumber} 章`,
+      wordCount: 2500,
+      body: `${richBody(chapterNumber)}\n\n${marker}`,
+      publishReadiness: { ready: true },
+    }
+  })
+  const plotChapters = snapshot.chapters.map((chapter, index) => ({
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    causalObjective: withMarkers ? phasePlans[index] : genericPlan,
+  }))
+  const stateDeltas = snapshot.chapters.map((chapter, index) => ({
+    chapterNumber: chapter.chapterNumber,
+    delta: withMarkers ? phasePlans[index] : "信任、债务或身份风险发生变化。",
+  }))
+  snapshot.lore.storyFoundation.contract.plot.chapters = plotChapters
+  snapshot.lore.storyFoundation.plotArchitecture.chapters = plotChapters
+  snapshot.lore.storyFoundation.plotArchitecture.timeline = plotChapters
+  snapshot.lore.storyFoundation.writingPlan.totalChapters = totalChapters
+  snapshot.lore.storyFoundation.writingPlan.chapters = plotChapters
+  snapshot.lore.storyFoundation.contract.characters.stateDeltas = stateDeltas
+  snapshot.lore.storyFoundation.storyBible.characterStateDeltas = stateDeltas
+  snapshot.lore.storyFoundation.characterDynamics.chapterStateDeltas = stateDeltas
+  return snapshot
+}
+
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
@@ -303,6 +349,25 @@ test("production acceptance runner rejects missing worldbuilding anchors in pros
   const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(worldbuildingAudit.passed, false)
   assert.match(worldbuildingAudit.issues.join("\n"), /world anchor|worldbuilding anchor chapter coverage|distinct worldbuilding anchors/)
+})
+
+test("production acceptance runner audits long-form structural progression", async () => {
+  const { auditStructuralProgressionForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(true)
+
+  const structuralAudit = auditStructuralProgressionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(structuralAudit.passed, true)
+  assert.equal(structuralAudit.summary.passedPhases, 4)
+  assert.equal(structuralAudit.phases.every((phase) => phase.planHits.length > 0 && phase.bodyHits.length > 0), true)
+})
+
+test("production acceptance runner rejects missing long-form structural progression", async () => {
+  const { auditStructuralProgressionForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(false)
+
+  const structuralAudit = auditStructuralProgressionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(structuralAudit.passed, false)
+  assert.match(structuralAudit.issues.join("\n"), /structural phase|long-form structural progression/)
 })
 
 test("production acceptance runner rejects same-voice character dialogue", async () => {
