@@ -1472,6 +1472,72 @@ export function auditProductionValidationForAcceptance(snapshot, options = {}) {
   }
 }
 
+const READER_NON_NOVEL_PATTERNS = [
+  ["quality gate heading", /(?:^|\n)#{1,6}\s*(?:Quality Gate|Chapter Quality Report|章节质量报告|质量报告|质量门禁)\b.*$/imu],
+  ["naturalness report heading", /(?:^|\n)#{1,6}\s*(?:Naturalness Report|Naturalness Pass|自然度报告|自然度处理)\b.*$/imu],
+  ["drafting metadata heading", /(?:^|\n)#{1,6}\s*(?:Drafting Metadata|Chapter Execution Contract|Drafting Contract|章节元数据|章节元信息|章节执行合同)\b.*$/imu],
+  ["style gate heading", /(?:^|\n)#{1,6}\s*(?:Style Contract Freeze Gate|Generation Verification Gate|Style Conformance|写法生成验证|风格漂移|写法继承验证)\b.*$/imu],
+  ["aigc report heading", /(?:^|\n)#{1,6}\s*(?:AIGC Detection|AIGC Report|AIGC 检测|AIGC 报告)\b.*$/imu],
+  ["quality score table", /\|\s*(?:Dimension|维度)\s*\|\s*(?:Score|评分)\s*\|\s*(?:Notes|说明|备注)\s*\|/iu],
+  ["word count check", /\bWORD_COUNT_CHECK\s*:/iu],
+  ["required fixes block", /(?:^|\n)#{1,6}\s*(?:Required Fixes|Checks|Scores|风险项|修复要求)\b.*$/imu],
+  ["chinese production label", /(?:^|\n)\s*【(?:章节标题|质检报告|AIGC 检测报告|待修复的高风险片段数|质量门禁报告|自然化报告)】/u],
+  ["llm request log", /\[(?:LLM REQUEST|LLM RESPONSE|LLM STREAM|CTX BUDGET|WRITING CTX|QUALITY REWORK|AIGC PATCH)[^\]]*\]/iu],
+  ["llm transcript fence", /(?:^|\n)={5,}\s*\[(?:LLM|QUALITY|AIGC|CTX|WRITING)[^\]]*\]\s*={5,}/imu],
+  ["prompt transcript", /(?:^|\n)(?:Global Consensus|Response contract|System Prompt|User Message|Developer Message|当前工作流阶段)\s*[:：]/imu],
+  ["json production fields", /"(?:qualityGate|aigcDetection|publishReadiness|styleInheritanceVerification|styleConformanceDrift)"\s*:/u],
+]
+
+function findReaderBodyLeaks(body) {
+  const text = String(body || "")
+  return READER_NON_NOVEL_PATTERNS
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([label, pattern]) => ({ label, pattern: String(pattern) }))
+}
+
+export function auditReaderPurityForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const issues = []
+  const chapterAudits = []
+  let cleanChapters = 0
+
+  for (const chapter of chapters) {
+    const leaks = findReaderBodyLeaks(chapter?.body || "")
+    if (leaks.length === 0) {
+      cleanChapters += 1
+    } else {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: non-novel reader metadata leaked (${leaks.map((leak) => leak.label).join(", ")})`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      clean: leaks.length === 0,
+      leaks,
+    })
+  }
+
+  const totalChapters = Number(snapshot?.project?.totalChapters || options.chapters || chapters.length || 0)
+  if (chapters.length === 0) issues.push("no readable chapters available for reader purity audit")
+  if (totalChapters > 0 && chapters.length < totalChapters) {
+    issues.push(`reader purity readable chapters ${chapters.length} below total chapters ${totalChapters}`)
+  }
+  if (cleanChapters < chapters.length) {
+    issues.push(`reader purity clean chapter coverage ${cleanChapters}/${chapters.length} below required ${chapters.length}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      readableChapters: chapters.length,
+      cleanChapters,
+      leakedChapters: chapters.length - cleanChapters,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function collectAcceptanceStrings(value, depth = 0) {
   if (depth > 4 || value === null || value === undefined) return []
   if (typeof value === "string" || typeof value === "number") return [String(value)]
@@ -2924,16 +2990,6 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     })
   }
 
-  const leakPatterns = [
-    /Quality Gate/iu,
-    /Naturalness Report/iu,
-    /Drafting Metadata/iu,
-    /Chapter Execution Contract/iu,
-    /Style Contract Freeze Gate/iu,
-    /LLM REQUEST/iu,
-    /AIGC Detection/iu,
-    /Generation Verification Gate/iu,
-  ]
   const chapterChecks = []
   const chapterBodies = []
   for (let chapterNumber = 1; chapterNumber <= totalChapters; chapterNumber += 1) {
@@ -2945,15 +3001,8 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     )
     const chapter = chapterPayload.chapter || {}
     const body = String(chapter.body || "")
-    const leaked = leakPatterns.filter((pattern) => pattern.test(body)).map((pattern) => String(pattern))
     if (!body.trim()) {
       throw new AcceptanceError("Reader returned an empty chapter body.", { chapterNumber })
-    }
-    if (leaked.length > 0) {
-      throw new AcceptanceError("Reader body contains non-novel production metadata.", {
-        chapterNumber,
-        leaked,
-      })
     }
     chapterBodies.push({
       chapterNumber,
@@ -2991,6 +3040,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     throw new AcceptanceError("Story foundation acceptance audit failed.", {
       issues: storyFoundationAudit.issues.slice(0, 20),
       counts: storyFoundationAudit.counts,
+    })
+  }
+  const readerPurityAudit = auditReaderPurityForAcceptance(auditSnapshot, options)
+  if (!readerPurityAudit.passed) {
+    throw new AcceptanceError("Reader purity acceptance audit failed.", {
+      issues: readerPurityAudit.issues.slice(0, 30),
+      summary: readerPurityAudit.summary,
+      chapters: readerPurityAudit.chapters.filter((chapter) => !chapter.clean).slice(0, 8),
     })
   }
   const productionValidationAudit = auditProductionValidationForAcceptance(auditSnapshot, options)
@@ -3111,6 +3168,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     chapterChecks,
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
+  report.finalReaderPurityAudit = readerPurityAudit
   report.finalProductionValidationAudit = productionValidationAudit
   report.finalWorldbuildingAudit = worldbuildingAudit
   report.finalStructuralProgressionAudit = structuralProgressionAudit
@@ -3131,6 +3189,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalWords,
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
+    readerPurity: readerPurityAudit.summary,
     productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
@@ -3155,6 +3214,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     readableChapters,
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
+    readerPurity: readerPurityAudit.summary,
     productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
@@ -3209,6 +3269,7 @@ async function main() {
     progress: [],
     finalReader: null,
     finalStoryFoundationAudit: null,
+    finalReaderPurityAudit: null,
     finalProductionValidationAudit: null,
     finalWorldbuildingAudit: null,
     finalStructuralProgressionAudit: null,

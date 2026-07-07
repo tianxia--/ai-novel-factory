@@ -268,6 +268,7 @@ function variedLongSnapshot() {
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
+    auditReaderPurityForAcceptance,
     auditProductionValidationForAcceptance,
     auditWorldbuildingIntegrationForAcceptance,
     auditPlotExecutionForAcceptance,
@@ -287,6 +288,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(foundationAudit.passed, true)
   assert.equal(foundationAudit.counts.plotChapters, 4)
   assert.equal(foundationAudit.counts.foreshadowingEntries, 4)
+
+  const readerPurityAudit = auditReaderPurityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(readerPurityAudit.passed, true)
+  assert.equal(readerPurityAudit.summary.cleanChapters, 4)
 
   const productionValidationAudit = auditProductionValidationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(productionValidationAudit.passed, true)
@@ -642,6 +647,24 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner rejects non-novel reader metadata leaks", async () => {
+  const { auditReaderPurityForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[0].body = [
+    richBody(1),
+    "## Chapter Quality Report",
+    "| Dimension | Score | Notes |",
+    "| 情节推进 | 8/10 | ok |",
+    "WORD_COUNT_CHECK: 2480/2500",
+    "========== [LLM REQUEST SEND] ==========",
+    "{\"qualityGate\":{\"status\":\"passed\"}}",
+  ].join("\n")
+
+  const readerPurityAudit = auditReaderPurityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(readerPurityAudit.passed, false)
+  assert.match(readerPurityAudit.issues.join("\n"), /non-novel reader metadata|quality gate heading|word count check|llm/i)
 })
 
 test("production acceptance runner rejects missing production validation evidence", async () => {
