@@ -4597,6 +4597,84 @@ function extractKeywords(list: string[] | string): string[] {
   return keywords
 }
 
+const ABSTRACT_RELATIONSHIP_KEYWORDS = new Set([
+  "关系",
+  "关系网络",
+  "关系状态",
+  "关系压力",
+  "压力",
+  "变化",
+  "状态",
+  "选择",
+  "风险",
+  "代价",
+  "信任",
+  "怀疑",
+  "冲突",
+  "敌对",
+  "同伴",
+  "立场",
+  "互动",
+  "牵制",
+  "对峙",
+  "obligation",
+  "opposition",
+  "opposes",
+  "pressure",
+  "relationship",
+])
+
+function cleanRelationshipKeyword(value: string) {
+  return value
+    .replace(/^[,;；，\s、/|\\.]+|[,;；，\s、/|\\.]+$/gu, "")
+    .replace(/^(?:被|与|和|同|向|把|因|因而|通过|围绕|处于)/u, "")
+    .trim()
+}
+
+function isConcreteRelationshipKeyword(value: string) {
+  const normalized = cleanRelationshipKeyword(value)
+  if (normalized.length < 2) return false
+  if (ABSTRACT_RELATIONSHIP_KEYWORDS.has(normalized)) return false
+  if (isPlaceholderProfileText(normalized)) return false
+  if (/^(?:must|needs?|pending|tracked|through|across|chapters?|enter|memory|ledger|externalized|conflict|emotional|social)$/iu.test(normalized)) {
+    return false
+  }
+  return /[\u4e00-\u9fff]/u.test(normalized) || normalized.length >= 4
+}
+
+function extractConcreteRelationshipKeywords(list: string[] | string): string[] {
+  const rawKeywords = extractKeywords(list)
+  const candidates: string[] = []
+  for (const keyword of rawKeywords) {
+    const cleaned = cleanRelationshipKeyword(keyword)
+    candidates.push(keyword, cleaned)
+    const compactChinese = cleaned.match(/[\u4e00-\u9fff]{2,}/gu) || []
+    candidates.push(...compactChinese)
+  }
+  return uniqueStrings(candidates.map(cleanRelationshipKeyword).filter(isConcreteRelationshipKeyword)).slice(0, 10)
+}
+
+function evaluateRelationshipPressureEvidence(localWindows: string[], relationshipKeywords: string[]) {
+  const matchedTerms: string[] = []
+  const drivenTerms: string[] = []
+  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|退到|站到|低声|说|问|道|喊|提醒/u
+
+  for (const window of localWindows) {
+    const windowMatches = relationshipKeywords.filter((keyword) => window.includes(keyword))
+    if (!windowMatches.length) continue
+    matchedTerms.push(...windowMatches)
+    if (driverPattern.test(window)) {
+      drivenTerms.push(...windowMatches)
+    }
+  }
+
+  return {
+    matchedTerms: uniqueStrings(matchedTerms),
+    drivenTerms: uniqueStrings(drivenTerms),
+    hasDrivenEvidence: drivenTerms.length > 0,
+  }
+}
+
 function extractCharacterEvidenceWindow(body: string, index: number, nameLength: number) {
   const leftBoundary = Math.max(
     body.lastIndexOf("\n", index),
@@ -4806,6 +4884,9 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     let matchedHabits: string[] = []
     let matchedSpeech: string[] = []
     let matchedRelations: string[] = []
+    let drivenRelationshipTerms: string[] = []
+    let requiresConcreteRelationshipPressure = false
+    let hasRelationshipPressureDrivenEvidence = false
     let matchedSkills: string[] = []
     let explicitDossierFieldCount = 0
     let dossierEvidenceCount = 0
@@ -4825,10 +4906,16 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
         dossier.relationshipState || "",
         ...(dossier.relationshipEdges || []).map((e: { label: string; pressure: string }) => `${e.label} ${e.pressure}`)
       ]
-      const relationKeywords = extractKeywords(relations)
+      const relationKeywords = extractConcreteRelationshipKeywords(relations)
       if (relationKeywords.length) explicitDossierFieldCount += 1
-      matchedRelations = relationKeywords.filter(k => windows.includes(k))
-      hasRelationEvidence = matchedRelations.length > 0
+      requiresConcreteRelationshipPressure = relationKeywords.length > 0
+      const relationshipEvidence = evaluateRelationshipPressureEvidence(localWindows, relationKeywords)
+      matchedRelations = relationshipEvidence.matchedTerms
+      drivenRelationshipTerms = relationshipEvidence.drivenTerms
+      hasRelationshipPressureDrivenEvidence = relationshipEvidence.hasDrivenEvidence
+      hasRelationEvidence = requiresConcreteRelationshipPressure
+        ? hasRelationshipPressureDrivenEvidence
+        : /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
 
       const skillsAndLimits = [
         ...(dossier.skills || []),
@@ -4850,7 +4937,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     } else {
       hasHabitEvidence = hasGeneralHabit
       hasSpeechEvidence = hasDialogue
-      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows)
+      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence
@@ -4889,12 +4976,15 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       hasSkillLimitationEvidence,
       hasGoalPressureEvidence,
       hasActiveStanceEvidence,
+      requiresConcreteRelationshipPressure,
+      hasRelationshipPressureDrivenEvidence,
       dialogues,
       explicitDossierFieldCount,
       dossierEvidenceCount,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
+      drivenRelationshipTerms,
       matchedSkills
     }
   })
@@ -4913,6 +5003,9 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
   }
 
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2)
+  const relationshipPressureWeak = coreRoles.filter((entry) =>
+    entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence
+  )
   const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles)
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length
   const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length
@@ -4931,6 +5024,9 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
   if (weak.length) {
     missing.push(`弱核心角色信号（缺少目标/选择/关系压力）：${weak.map((entry) => entry.name).join("、")}`)
   }
+  if (relationshipPressureWeak.length) {
+    missing.push(`角色档案关系压力未进入行动/对白/选择：${relationshipPressureWeak.map((entry) => entry.name).join("、")}`)
+  }
   if (repeatedDialogues.length) {
     const first = repeatedDialogues[0]
     missing.push(`跨角色对白复用：${first.speakers.join("、")} 都说出近似句「${first.sample.slice(0, 28)}...」`)
@@ -4941,16 +5037,21 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
 
   const totalWeakProportion = weak.length / coreRoles.length
   const isFlattenedDialogue = clearlyFlattened
+    || relationshipPressureWeak.length > 0
     || repeatedDialogues.length > 0
     || (weak.length > 0 && (totalWeakProportion >= 0.5 || (quotedDialogueCount >= 1 && coreRoles.length <= 2)))
 
   if (isFlattenedDialogue) {
-    const flaggedRoles = weak.length ? weak : coreRoles
+    const flaggedRoles = relationshipPressureWeak.length ? relationshipPressureWeak : (weak.length ? weak : coreRoles)
     const weakDetails = flaggedRoles.map(entry => {
       const missingDims: string[] = []
       if (!entry.hasGoalPressureEvidence) missingDims.push("本章目标/压力")
       if (!entry.hasActiveStanceEvidence) missingDims.push("推动局势的动作选择")
-      if (!entry.hasRelationEvidence) missingDims.push("与其他角色的信任/敌对/债务关系")
+      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence) {
+        missingDims.push("角色档案关系压力未驱动行动/对白/选择")
+      } else if (!entry.hasRelationEvidence) {
+        missingDims.push("与其他角色的信任/敌对/债务关系")
+      }
       if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("自然对白或可见行为呈现")
       if (entry.explicitDossierFieldCount >= 2 && entry.dossierEvidenceCount === 0) missingDims.push("角色档案专属习惯/口吻/能力证据")
       if (missingDims.length === 0) missingDims.push("表达方式过于同质化，缺少具体场景分歧")

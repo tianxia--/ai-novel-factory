@@ -12373,6 +12373,74 @@ function extractKeywords(list) {
   }
   return keywords;
 }
+var ABSTRACT_RELATIONSHIP_KEYWORDS = /* @__PURE__ */ new Set([
+  "\u5173\u7CFB",
+  "\u5173\u7CFB\u7F51\u7EDC",
+  "\u5173\u7CFB\u72B6\u6001",
+  "\u5173\u7CFB\u538B\u529B",
+  "\u538B\u529B",
+  "\u53D8\u5316",
+  "\u72B6\u6001",
+  "\u9009\u62E9",
+  "\u98CE\u9669",
+  "\u4EE3\u4EF7",
+  "\u4FE1\u4EFB",
+  "\u6000\u7591",
+  "\u51B2\u7A81",
+  "\u654C\u5BF9",
+  "\u540C\u4F34",
+  "\u7ACB\u573A",
+  "\u4E92\u52A8",
+  "\u7275\u5236",
+  "\u5BF9\u5CD9",
+  "obligation",
+  "opposition",
+  "opposes",
+  "pressure",
+  "relationship"
+]);
+function cleanRelationshipKeyword(value) {
+  return value.replace(/^[,;；，\s、/|\\.]+|[,;；，\s、/|\\.]+$/gu, "").replace(/^(?:被|与|和|同|向|把|因|因而|通过|围绕|处于)/u, "").trim();
+}
+function isConcreteRelationshipKeyword(value) {
+  const normalized = cleanRelationshipKeyword(value);
+  if (normalized.length < 2) return false;
+  if (ABSTRACT_RELATIONSHIP_KEYWORDS.has(normalized)) return false;
+  if (isPlaceholderProfileText(normalized)) return false;
+  if (/^(?:must|needs?|pending|tracked|through|across|chapters?|enter|memory|ledger|externalized|conflict|emotional|social)$/iu.test(normalized)) {
+    return false;
+  }
+  return /[\u4e00-\u9fff]/u.test(normalized) || normalized.length >= 4;
+}
+function extractConcreteRelationshipKeywords(list) {
+  const rawKeywords = extractKeywords(list);
+  const candidates = [];
+  for (const keyword of rawKeywords) {
+    const cleaned = cleanRelationshipKeyword(keyword);
+    candidates.push(keyword, cleaned);
+    const compactChinese = cleaned.match(/[\u4e00-\u9fff]{2,}/gu) || [];
+    candidates.push(...compactChinese);
+  }
+  return uniqueStrings(candidates.map(cleanRelationshipKeyword).filter(isConcreteRelationshipKeyword)).slice(0, 10);
+}
+function evaluateRelationshipPressureEvidence(localWindows, relationshipKeywords) {
+  const matchedTerms = [];
+  const drivenTerms = [];
+  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|退到|站到|低声|说|问|道|喊|提醒/u;
+  for (const window of localWindows) {
+    const windowMatches = relationshipKeywords.filter((keyword) => window.includes(keyword));
+    if (!windowMatches.length) continue;
+    matchedTerms.push(...windowMatches);
+    if (driverPattern.test(window)) {
+      drivenTerms.push(...windowMatches);
+    }
+  }
+  return {
+    matchedTerms: uniqueStrings(matchedTerms),
+    drivenTerms: uniqueStrings(drivenTerms),
+    hasDrivenEvidence: drivenTerms.length > 0
+  };
+}
 function extractCharacterEvidenceWindow(body, index, nameLength) {
   const leftBoundary = Math.max(
     body.lastIndexOf("\n", index),
@@ -12546,6 +12614,9 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     let matchedHabits = [];
     let matchedSpeech = [];
     let matchedRelations = [];
+    let drivenRelationshipTerms = [];
+    let requiresConcreteRelationshipPressure = false;
+    let hasRelationshipPressureDrivenEvidence = false;
     let matchedSkills = [];
     let explicitDossierFieldCount = 0;
     let dossierEvidenceCount = 0;
@@ -12562,10 +12633,14 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
         dossier.relationshipState || "",
         ...(dossier.relationshipEdges || []).map((e) => `${e.label} ${e.pressure}`)
       ];
-      const relationKeywords = extractKeywords(relations);
+      const relationKeywords = extractConcreteRelationshipKeywords(relations);
       if (relationKeywords.length) explicitDossierFieldCount += 1;
-      matchedRelations = relationKeywords.filter((k) => windows.includes(k));
-      hasRelationEvidence = matchedRelations.length > 0;
+      requiresConcreteRelationshipPressure = relationKeywords.length > 0;
+      const relationshipEvidence = evaluateRelationshipPressureEvidence(localWindows, relationKeywords);
+      matchedRelations = relationshipEvidence.matchedTerms;
+      drivenRelationshipTerms = relationshipEvidence.drivenTerms;
+      hasRelationshipPressureDrivenEvidence = relationshipEvidence.hasDrivenEvidence;
+      hasRelationEvidence = requiresConcreteRelationshipPressure ? hasRelationshipPressureDrivenEvidence : /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
       const skillsAndLimits = [
         ...dossier.skills || [],
         ...dossier.limitations || [],
@@ -12586,7 +12661,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     } else {
       hasHabitEvidence = hasGeneralHabit;
       hasSpeechEvidence = hasDialogue;
-      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|让|替/u.test(windows);
+      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence;
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence;
@@ -12619,12 +12694,15 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       hasSkillLimitationEvidence,
       hasGoalPressureEvidence,
       hasActiveStanceEvidence,
+      requiresConcreteRelationshipPressure,
+      hasRelationshipPressureDrivenEvidence,
       dialogues,
       explicitDossierFieldCount,
       dossierEvidenceCount,
       matchedHabits,
       matchedSpeech,
       matchedRelations,
+      drivenRelationshipTerms,
       matchedSkills
     };
   });
@@ -12639,6 +12717,9 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     };
   }
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2);
+  const relationshipPressureWeak = coreRoles.filter(
+    (entry) => entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence
+  );
   const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles);
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length;
   const speechCarriers = coreRoles.filter((entry) => entry.hasSpeechEvidence).length;
@@ -12656,20 +12737,27 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
   if (weak.length) {
     missing.push(`\u5F31\u6838\u5FC3\u89D2\u8272\u4FE1\u53F7\uFF08\u7F3A\u5C11\u76EE\u6807/\u9009\u62E9/\u5173\u7CFB\u538B\u529B\uFF09\uFF1A${weak.map((entry) => entry.name).join("\u3001")}`);
   }
+  if (relationshipPressureWeak.length) {
+    missing.push(`\u89D2\u8272\u6863\u6848\u5173\u7CFB\u538B\u529B\u672A\u8FDB\u5165\u884C\u52A8/\u5BF9\u767D/\u9009\u62E9\uFF1A${relationshipPressureWeak.map((entry) => entry.name).join("\u3001")}`);
+  }
   if (repeatedDialogues.length) {
     const first = repeatedDialogues[0];
     missing.push(`\u8DE8\u89D2\u8272\u5BF9\u767D\u590D\u7528\uFF1A${first.speakers.join("\u3001")} \u90FD\u8BF4\u51FA\u8FD1\u4F3C\u53E5\u300C${first.sample.slice(0, 28)}...\u300D`);
   }
   const clearlyFlattened = (homogenizedSignals >= 2 || templateVoiceSignals >= cast.length + 1) && (quotedDialogueCount < 2 || coreRoles.filter((s) => s.dramaticScore >= 2).length < 2);
   const totalWeakProportion = weak.length / coreRoles.length;
-  const isFlattenedDialogue = clearlyFlattened || repeatedDialogues.length > 0 || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
+  const isFlattenedDialogue = clearlyFlattened || relationshipPressureWeak.length > 0 || repeatedDialogues.length > 0 || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
   if (isFlattenedDialogue) {
-    const flaggedRoles = weak.length ? weak : coreRoles;
+    const flaggedRoles = relationshipPressureWeak.length ? relationshipPressureWeak : weak.length ? weak : coreRoles;
     const weakDetails = flaggedRoles.map((entry) => {
       const missingDims = [];
       if (!entry.hasGoalPressureEvidence) missingDims.push("\u672C\u7AE0\u76EE\u6807/\u538B\u529B");
       if (!entry.hasActiveStanceEvidence) missingDims.push("\u63A8\u52A8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9");
-      if (!entry.hasRelationEvidence) missingDims.push("\u4E0E\u5176\u4ED6\u89D2\u8272\u7684\u4FE1\u4EFB/\u654C\u5BF9/\u503A\u52A1\u5173\u7CFB");
+      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence) {
+        missingDims.push("\u89D2\u8272\u6863\u6848\u5173\u7CFB\u538B\u529B\u672A\u9A71\u52A8\u884C\u52A8/\u5BF9\u767D/\u9009\u62E9");
+      } else if (!entry.hasRelationEvidence) {
+        missingDims.push("\u4E0E\u5176\u4ED6\u89D2\u8272\u7684\u4FE1\u4EFB/\u654C\u5BF9/\u503A\u52A1\u5173\u7CFB");
+      }
       if (!entry.hasSpeechEvidence && !entry.hasHabitEvidence) missingDims.push("\u81EA\u7136\u5BF9\u767D\u6216\u53EF\u89C1\u884C\u4E3A\u5448\u73B0");
       if (entry.explicitDossierFieldCount >= 2 && entry.dossierEvidenceCount === 0) missingDims.push("\u89D2\u8272\u6863\u6848\u4E13\u5C5E\u4E60\u60EF/\u53E3\u543B/\u80FD\u529B\u8BC1\u636E");
       if (missingDims.length === 0) missingDims.push("\u8868\u8FBE\u65B9\u5F0F\u8FC7\u4E8E\u540C\u8D28\u5316\uFF0C\u7F3A\u5C11\u5177\u4F53\u573A\u666F\u5206\u6B67");

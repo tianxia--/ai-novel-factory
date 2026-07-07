@@ -8682,7 +8682,7 @@ test("chapter final gate blocks drafts that need naturalness revision", async ()
     `老周站在门边，肩上的旧衣滴着第 ${index} 串水，低声问：「沈大人，真要帮我挡这一回？」`,
     `沈砚看向他：「你欠我的不是一句谢，是把少尹第 ${index} 次脚步拦在门外。」`,
     `老周握住门栓，声音发紧：「小人不会查账，只会认第 ${index} 场雨脚；若有人追来，我先骗他说账房没人。」`,
-    `突然灯花弯了一下，然而窗外的巡夜声仿佛又近了些，沈砚忽然把第 ${index} 枚旧印章扣住缺口，渐渐明白这道问题会把他们一起拖下水。`,
+    `突然灯花弯了一下，然而窗外的巡夜声仿佛又近了些，沈砚与压力方对峙，忽然把第 ${index} 枚旧印章扣住缺口，渐渐明白这道问题会把他们一起拖下水。`,
     `最后，他决定留下第 ${index} 片湿纸作钩子，把密信藏回袖底，门外脚步停住，下一章必须处理少尹来查账的风险。`,
   ].join("\n")
   const server = http.createServer((request, response) => {
@@ -10651,7 +10651,7 @@ test("character profile gate requires per-character evidence windows", async () 
   const mismatched = [
     "## Final Body",
     "李延必须在天亮前查清田册，他站在案前一言不发，神色冷漠。",
-    "宋管事必须保住账本，却习惯揉搓衣角，低头说：小人知罪。",
+    "宋管事必须保住账本，却习惯揉搓衣角，低头说：「小人知罪。」",
   ].join("\n")
 
   const gateResult = evaluateCharacterProfilePresence(mismatched, contract)
@@ -10770,13 +10770,99 @@ test("character voice gate accepts distinct dossier-backed speech and habits", a
   const distinctVoice = [
     "## Final Body",
     "李延按住桌角，指腹压着缺页，低声道：「的确，田册少了一页，今晚不能当场交出去。」",
-    "他决定先复核田册，把官印扣在灯下，逼自己承担被问责的风险。",
+    "他被宋管事拖入账册风险，仍决定先复核田册，把官印扣在灯下，逼自己承担被问责的风险。",
     "宋管事拨算盘珠，退到门边，哑声道：「老奴知罪，可少尹的人就在外头。」",
     "他欠李延一次隐瞒，只能替他挡住脚步，却不敢违逆少尹的传话。",
   ].join("\n")
 
   const gateResult = evaluateCharacterProfilePresence(distinctVoice, contract)
   assert.equal(gateResult.status, "eligible")
+  assert.match(gateResult.reason, /角色差异化通过/)
+})
+
+test("character relationship pressure gate quarantines generic tension without dossier terms", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["的确"],
+        relationshipState: "逼宋管事交出缺页",
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["拨算盘珠"],
+        speechMarkers: ["老奴知罪"],
+        relationshipState: "欠李延一次隐瞒",
+      }
+    ]
+  }
+
+  const genericRelationship = [
+    "## Final Body",
+    "李延按住桌角，低声道：「的确，账还不能交。」他只觉得自己和宋管事之间越来越紧张。",
+    "宋管事拨算盘珠，哑声道：「老奴知罪，可这事谁也担不起。」他也明白两个人的关系已经绷得很紧。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(genericRelationship, contract)
+  assert.equal(gateResult.status, "quarantined")
+  assert.ok(gateResult.missing.includes("核心角色关系网络差异"))
+  assert.match(gateResult.reason, /角色档案关系压力未驱动行动\/对白\/选择|角色差异化不足/)
+})
+
+test("character relationship pressure gate accepts dossier terms driving local action", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["的确"],
+        relationshipState: "逼宋管事交出缺页",
+        relationshipEdges: [
+          { targetId: "song", label: "逼问账册", pressure: "交出缺页" },
+        ],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["拨算盘珠"],
+        speechMarkers: ["老奴知罪"],
+        relationshipState: "欠李延一次隐瞒",
+        relationshipEdges: [
+          { targetId: "li", label: "欠债", pressure: "隐瞒缺页" },
+        ],
+      }
+    ]
+  }
+
+  const dossierBackedRelationship = [
+    "## Final Body",
+    "李延按住桌角，低声道：「的确，账还不能交。」他现在只想逼宋管事交出缺页。",
+    "宋管事拨算盘珠，哑声道：「老奴知罪，可门外的人已经到了。」他欠李延一次隐瞒，只能先替他拖住脚步。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(dossierBackedRelationship, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.doesNotMatch(gateResult.missing.join("\n"), /核心角色关系网络差异/)
   assert.match(gateResult.reason, /角色差异化通过/)
 })
 
