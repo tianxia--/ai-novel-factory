@@ -1730,7 +1730,7 @@ function enforceFinalDraftQualityGate(
     continuityContract,
     characterProfileContract,
   })
-  if (naturalnessReport.status === "blocked") {
+  if (naturalnessReport.status !== "passed") {
     return {
       ...gate,
       passed: false,

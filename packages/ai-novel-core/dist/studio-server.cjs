@@ -9470,7 +9470,7 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
     continuityContract,
     characterProfileContract
   });
-  if (naturalnessReport.status === "blocked") {
+  if (naturalnessReport.status !== "passed") {
     return {
       ...gate,
       passed: false,
