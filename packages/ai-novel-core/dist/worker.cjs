@@ -18858,6 +18858,18 @@ async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   const status = await getNovelAutopilotWorkerStatus(flags.rootDir);
   console.log(`Provider: ${status.llm.modelName || "not configured"} (${status.llm.apiMode}, ${status.llm.source})`);
 }
+var invokedFile = process.argv[1] ? import_node_path13.default.resolve(process.argv[1]) : null;
+var invokedPackageDir = invokedFile ? import_node_path13.default.basename(import_node_path13.default.dirname(import_node_path13.default.dirname(invokedFile))) : null;
+var isDirectWorkerEntry = Boolean(
+  invokedFile && invokedPackageDir === "ai-novel-core" && (import_node_path13.default.basename(invokedFile) === "worker.js" || import_node_path13.default.basename(invokedFile) === "worker.ts")
+);
+if (isDirectWorkerEntry) {
+  runNovelAutopilotWorkerCli(process.argv.slice(2)).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exitCode = 1;
+  });
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   createWorkerWorkspacePayload,

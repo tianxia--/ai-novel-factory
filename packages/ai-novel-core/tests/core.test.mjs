@@ -5,12 +5,14 @@ import http from "node:http"
 import { createHash } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
+import { spawn } from "node:child_process"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const testFilePath = fileURLToPath(import.meta.url)
 const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const coreEntry = path.join(packageRoot, "dist", "index.js")
 const studioServerEntry = path.join(packageRoot, "dist", "studio-server.js")
+const workerEntry = path.join(packageRoot, "dist", "worker.js")
 const autopilotWorkerSource = path.join(packageRoot, "src", "autopilot-worker.ts")
 const managedProjectsSegment = `${path.sep}.ai-novel-projects${path.sep}`
 
@@ -3643,6 +3645,42 @@ test("autopilot worker status and once modes expose operational state", async ()
       process.env.AI_NOVEL_TEST_MODE = previousTestMode
     }
   }
+})
+
+test("autopilot worker dist entrypoint prints status json", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-worker-entry-"))
+  const { createManagedAutonomousProject } = await loadCore()
+  await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A scribe restores kingdoms from rain ledgers",
+    totalChapters: 5,
+    chapterWordTarget: 2500,
+  })
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [workerEntry, "--status", "--root-dir", tempDir], {
+      env: { ...process.env, AI_NOVEL_TEST_MODE: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk)
+    })
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk)
+    })
+    child.on("error", reject)
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr })
+    })
+  })
+
+  assert.equal(result.code, 0, result.stderr)
+  const status = JSON.parse(result.stdout)
+  assert.equal(status.service, "ai-novel-worker")
+  assert.equal(status.rootDir, tempDir)
+  assert.equal(status.ok, true)
 })
 
 test("autopilot worker treats provider network failures as resumable retries", async () => {

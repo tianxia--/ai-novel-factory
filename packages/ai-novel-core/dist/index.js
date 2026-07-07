@@ -4,7 +4,7 @@ import {
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-XPWEYKWQ.js";
+} from "./chunk-5AGIFHQB.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage

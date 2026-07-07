@@ -127,3 +127,19 @@ export async function runNovelAutopilotWorkerCli(args = process.argv.slice(2)) {
   const status = await getNovelAutopilotWorkerStatus(flags.rootDir)
   console.log(`Provider: ${status.llm.modelName || "not configured"} (${status.llm.apiMode}, ${status.llm.source})`)
 }
+
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null
+const invokedPackageDir = invokedFile ? path.basename(path.dirname(path.dirname(invokedFile))) : null
+const isDirectWorkerEntry = Boolean(
+  invokedFile
+    && invokedPackageDir === "ai-novel-core"
+    && (path.basename(invokedFile) === "worker.js" || path.basename(invokedFile) === "worker.ts"),
+)
+
+if (isDirectWorkerEntry) {
+  runNovelAutopilotWorkerCli(process.argv.slice(2)).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(message)
+    process.exitCode = 1
+  })
+}
