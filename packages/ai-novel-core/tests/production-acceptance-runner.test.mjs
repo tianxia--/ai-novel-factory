@@ -440,6 +440,18 @@ test("production acceptance runner merges provider health targets for shared rou
   assert.equal(targets[0].config.id, "shared-config")
 })
 
+test("production acceptance runner enables automatic AIGC refinement settings", async () => {
+  const { buildAcceptanceWritingSettings } = await loadRunner()
+
+  const defaultSettings = buildAcceptanceWritingSettings({ provider: "local-heuristic" })
+  assert.equal(defaultSettings.autoAigcRefinement, true)
+  assert.deepEqual(defaultSettings.aigcDetector, { provider: "local-heuristic" })
+
+  const savedOnlySettings = buildAcceptanceWritingSettings({})
+  assert.equal(savedOnlySettings.autoAigcRefinement, true)
+  assert.equal("aigcDetector" in savedOnlySettings, false)
+})
+
 test("production acceptance runner rejects thin foundations and dry repeated prose", async () => {
   const {
     auditStoryFoundationForAcceptance,

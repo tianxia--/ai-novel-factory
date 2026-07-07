@@ -457,6 +457,16 @@ function detectorReady(settingsPayload) {
   return Boolean(String(detector.url || "").trim())
 }
 
+export function buildAcceptanceWritingSettings(aigcDetectorOptions = {}) {
+  const settings = {
+    autoAigcRefinement: true,
+  }
+  if (hasExplicitAigcDetectorSettings(aigcDetectorOptions)) {
+    settings.aigcDetector = normalizeAigcDetectorSettings(aigcDetectorOptions)
+  }
+  return settings
+}
+
 function getObjectPath(value, pathExpression) {
   return String(pathExpression || "")
     .split(".")
@@ -2945,21 +2955,25 @@ function buildStyleIterationFeedback(candidate, status) {
 }
 
 async function configureAigcDetector(api, options, report) {
-  if (hasExplicitAigcDetectorSettings(options.aigcDetector)) {
-    const settings = normalizeAigcDetectorSettings(options.aigcDetector)
-    await api("POST", "/api/settings/writing", {
-      settings: {
-        aigcDetector: settings,
-      },
-    })
-    report.steps.push({
-      step: "aigc_detector_config_saved",
-      status: "completed",
-      at: now(),
-      settings: redactAigcDetectorOptions(settings),
-    })
-    log("Saved AIGC detector settings through Studio API.", redactAigcDetectorOptions(settings))
-  }
+  const writingSettings = buildAcceptanceWritingSettings(options.aigcDetector)
+  await api("POST", "/api/settings/writing", {
+    settings: writingSettings,
+  })
+  report.steps.push({
+    step: "acceptance_writing_settings_saved",
+    status: "completed",
+    at: now(),
+    autoAigcRefinement: writingSettings.autoAigcRefinement === true,
+    aigcDetector: writingSettings.aigcDetector
+      ? redactAigcDetectorOptions(writingSettings.aigcDetector)
+      : null,
+  })
+  log("Saved acceptance writing settings through Studio API.", {
+    autoAigcRefinement: writingSettings.autoAigcRefinement === true,
+    aigcDetector: writingSettings.aigcDetector
+      ? redactAigcDetectorOptions(writingSettings.aigcDetector)
+      : null,
+  })
 
   const settingsPayload = await api("GET", "/api/settings/writing")
   const detector = settingsPayload.settings?.aigcDetector || {}
@@ -2971,6 +2985,7 @@ async function configureAigcDetector(api, options, report) {
     urlConfigured: Boolean(detector.url),
     tokenConfigured: detector.tokenConfigured === true,
     threshold: detector.threshold,
+    autoAigcRefinement: settingsPayload.settings?.autoAigcRefinement === true,
   })
   if (!detectorReady(settingsPayload)) {
     throw new AcceptanceError("AIGC detector is not configured. Configure it in app settings or pass --aigc-detector-provider and --aigc-detector-url.", {
