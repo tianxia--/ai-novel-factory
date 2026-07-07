@@ -3909,13 +3909,19 @@ function buildStyleIterationFeedback(candidate, status) {
   return parts.join("\n")
 }
 
-async function configureAigcDetector(api, options, report) {
+export async function configureAigcDetector(api, options, report, { dryRun = false } = {}) {
   const writingSettings = buildAcceptanceWritingSettings(options.aigcDetector)
-  await api("POST", "/api/settings/writing", {
-    settings: writingSettings,
-  })
+  let settingsPayload
+  if (dryRun) {
+    settingsPayload = { settings: writingSettings }
+  } else {
+    await api("POST", "/api/settings/writing", {
+      settings: writingSettings,
+    })
+    settingsPayload = await api("GET", "/api/settings/writing")
+  }
   report.steps.push({
-    step: "acceptance_writing_settings_saved",
+    step: dryRun ? "acceptance_writing_settings_planned" : "acceptance_writing_settings_saved",
     status: "completed",
     at: now(),
     autoAigcRefinement: writingSettings.autoAigcRefinement === true,
@@ -3923,15 +3929,19 @@ async function configureAigcDetector(api, options, report) {
       ? redactAigcDetectorOptions(writingSettings.aigcDetector)
       : null,
   })
-  log("Saved acceptance writing settings through Studio API.", {
+  log(dryRun
+    ? "Planned acceptance writing settings without modifying Studio API settings."
+    : "Saved acceptance writing settings through Studio API.", {
     autoAigcRefinement: writingSettings.autoAigcRefinement === true,
     aigcDetector: writingSettings.aigcDetector
       ? redactAigcDetectorOptions(writingSettings.aigcDetector)
       : null,
   })
 
-  const settingsPayload = await api("GET", "/api/settings/writing")
-  const detector = settingsPayload.settings?.aigcDetector || {}
+  const rawDetector = settingsPayload.settings?.aigcDetector || {}
+  const detector = dryRun && rawDetector.token
+    ? { ...rawDetector, token: undefined, tokenConfigured: true }
+    : rawDetector
   report.steps.push({
     step: "aigc_detector_config",
     status: detectorReady(settingsPayload) ? "passed" : "blocked",
@@ -4678,7 +4688,7 @@ async function main() {
     await checkpoint("llm_config_ready")
     await assertProviderHealth(api, modelInfo, report, options.resumeProjectId || null, options.providerHealthCheck)
     await checkpoint("provider_health_checked")
-    const detectorSettings = await configureAigcDetector(api, options, report)
+    const detectorSettings = await configureAigcDetector(api, options, report, { dryRun: options.planOnly })
     await checkpoint("aigc_detector_ready", { provider: detectorSettings.provider })
 
     log("Acceptance plan is valid.", {

@@ -507,6 +507,32 @@ test("production acceptance runner enables automatic AIGC refinement settings", 
   assert.equal("aigcDetector" in savedOnlySettings, false)
 })
 
+test("production acceptance runner plan-only does not persist AIGC settings", async () => {
+  const { configureAigcDetector } = await loadRunner()
+  const calls = []
+  const api = async (method, url, payload) => {
+    calls.push({ method, url, payload })
+    throw new Error(`Unexpected API call during plan-only detector configuration: ${method} ${url}`)
+  }
+  const report = { steps: [] }
+
+  const detector = await configureAigcDetector(api, {
+    aigcDetector: {
+      provider: "local-heuristic",
+      token: "secret-token",
+    },
+  }, report, { dryRun: true })
+
+  assert.equal(calls.length, 0)
+  assert.equal(detector.provider, "local-heuristic")
+  assert.equal(detector.token, undefined)
+  assert.equal(detector.tokenConfigured, true)
+  assert.equal(report.steps[0].step, "acceptance_writing_settings_planned")
+  assert.equal(report.steps[0].aigcDetector.token, "[configured]")
+  assert.equal(report.steps[1].step, "aigc_detector_config")
+  assert.equal(report.steps[1].status, "passed")
+})
+
 test("production acceptance runner rejects thin foundations and dry repeated prose", async () => {
   const {
     auditStoryFoundationForAcceptance,
