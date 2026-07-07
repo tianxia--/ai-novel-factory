@@ -248,13 +248,37 @@ function quoteCommandArg(value) {
 function buildAcceptanceResumeCommand(options = {}, projectId = "") {
   if (!projectId) return null
   const args = ["rtk", "node", "scripts/run-production-acceptance.mjs"]
-  if (options.rootDir && path.resolve(options.rootDir) !== WORKSPACE_ROOT) {
-    args.push("--root-dir", path.resolve(options.rootDir))
+  const addValue = (flag, value) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      args.push(flag, String(value))
+    }
   }
-  args.push("--resume-project-id", projectId)
+  if (options.rootDir && path.resolve(options.rootDir) !== WORKSPACE_ROOT) {
+    addValue("--root-dir", path.resolve(options.rootDir))
+  }
+  addValue("--resume-project-id", projectId)
+  addValue("--chapters", options.chapters)
+  addValue("--chapter-words", options.chapterWords)
+  addValue("--min-total-words", options.minTotalWords)
+  addValue("--max-total-words", options.maxTotalWords)
+  addValue("--style-prompt", options.stylePrompt)
+  addValue("--style-iterations", options.styleIterations)
+  addValue("--style-max-requests", options.styleMaxRequests)
+  addValue("--style-candidates", options.styleCandidates)
+  if (options.aigcDetector && typeof options.aigcDetector === "object") {
+    addValue("--aigc-detector-provider", options.aigcDetector.provider)
+    addValue("--aigc-detector-url", options.aigcDetector.url)
+    addValue("--aigc-detector-threshold", options.aigcDetector.threshold)
+    addValue("--aigc-detector-timeout-ms", options.aigcDetector.timeoutMs)
+  }
   if (options.autoApproveStyle) args.push("--auto-approve-style")
   if (options.autoApproveFoundation) args.push("--auto-approve-foundation")
+  if (options.autoRepairStoryAssets === false) args.push("--no-story-repair")
   if (options.providerHealthCheck === false) args.push("--skip-provider-health-check")
+  if (options.stopAfterStyle) args.push("--stop-after-style")
+  if (options.stopAfterFoundation) args.push("--stop-after-foundation")
+  addValue("--max-advance-steps", options.maxAdvanceSteps)
+  addValue("--max-stale-steps", options.maxStaleSteps)
   return args.map(quoteCommandArg).join(" ")
 }
 
@@ -272,12 +296,14 @@ export function buildAcceptanceFailureRecovery(report = {}, options = {}, errorS
     lastSuccessfulPhase: lastSuccessfulCheckpoint?.phase || null,
     lastProgress,
     nextAction: details.nextAction || details.nextCommand || "Fix the reported acceptance issue, then rerun the acceptance command.",
-    resumeCommand: details.nextCommand || buildAcceptanceResumeCommand(options, projectId),
+    resumeCommand: buildAcceptanceResumeCommand(options, projectId),
+    sourceNextCommand: details.nextCommand || null,
+    secretReentryRequired: options.aigcDetector?.token ? ["aigc-detector-token"] : [],
   }
 }
 
 function acceptanceAuditPassed(audit) {
-  return audit?.passed === true
+  return audit?.passed === true && audit?.summary?.skipped !== true
 }
 
 function acceptanceRequirement(id, label, passed, audits, evidence) {

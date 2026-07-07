@@ -364,6 +364,8 @@ test("production acceptance runner audits story foundation and narrative quality
 
   const structuralProgressionAudit = auditStructuralProgressionForAcceptance(structuralSnapshot(true), { chapters: 8, chapterWords: 2500 })
   assert.equal(structuralProgressionAudit.passed, true)
+  const longPlotNoveltyAudit = auditPlotNoveltyForAcceptance(structuralSnapshot(true), { chapters: 8, chapterWords: 2500 })
+  assert.equal(longPlotNoveltyAudit.passed, true)
 
   const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(narrativeAudit.passed, true)
@@ -379,6 +381,9 @@ test("production acceptance runner audits story foundation and narrative quality
   const languageCraftAudit = auditLanguageCraftForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(languageCraftAudit.passed, true)
   assert.equal(languageCraftAudit.summary.skipped, true)
+  const longSnapshot = variedLongSnapshot()
+  const longLanguageCraftAudit = auditLanguageCraftForAcceptance(longSnapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(longLanguageCraftAudit.passed, true)
 
   const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(sceneCompletenessAudit.passed, true)
@@ -393,6 +398,8 @@ test("production acceptance runner audits story foundation and narrative quality
   const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(variationAudit.passed, true)
   assert.equal(variationAudit.summary.skipped, true)
+  const longVariationAudit = auditCrossChapterVariationForAcceptance(longSnapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(longVariationAudit.passed, true)
 
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, true)
@@ -417,6 +424,8 @@ test("production acceptance runner audits story foundation and narrative quality
   const finalResolutionAudit = auditFinalResolutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(finalResolutionAudit.passed, true)
   assert.equal(finalResolutionAudit.summary.skipped, true)
+  const longFinalResolutionAudit = auditFinalResolutionForAcceptance(longSnapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(longFinalResolutionAudit.passed, true)
 
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, true)
@@ -430,18 +439,18 @@ test("production acceptance runner audits story foundation and narrative quality
     worldbuilding: worldbuildingAudit,
     structuralProgression: structuralProgressionAudit,
     plotExecution: plotExecutionAudit,
-    plotNovelty: plotNoveltyAudit,
+    plotNovelty: longPlotNoveltyAudit,
     narrative: narrativeAudit,
     proseTexture: proseTextureAudit,
-    languageCraft: languageCraftAudit,
+    languageCraft: longLanguageCraftAudit,
     sceneCompleteness: sceneCompletenessAudit,
     sceneCardCharacter: sceneCardCharacterAudit,
-    crossChapterVariation: variationAudit,
+    crossChapterVariation: longVariationAudit,
     characterVoice: characterVoiceAudit,
     characterArc: characterArcAudit,
     relationshipArc: relationshipArcAudit,
     foreshadowing: foreshadowingAudit,
-    finalResolution: finalResolutionAudit,
+    finalResolution: longFinalResolutionAudit,
     continuity: continuityAudit,
   }, {
     minTotalWords: 3000,
@@ -463,6 +472,43 @@ test("production acceptance runner audits story foundation and narrative quality
     "cross_chapter_coherence",
   ])
   assert.equal(requirementCoverage.requirements.every((requirement) => requirement.audits.length > 0), true)
+})
+
+test("production acceptance runner rejects skipped audits in requirement coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const passedAudit = (summary = {}) => ({ passed: true, summary })
+  const coverage = buildAcceptanceRequirementCoverage({
+    readerWordCount: passedAudit({ actualTotalWords: 120000, chapters: 40 }),
+    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
+    readerPurity: passedAudit({ cleanChapters: 40 }),
+    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
+    worldbuilding: passedAudit({ anchoredChapters: 40, texturedChapters: 40, ruleDrivenChapters: 40 }),
+    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
+    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
+    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
+    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
+    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
+    languageCraft: passedAudit({ skipped: true }),
+    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
+    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
+    crossChapterVariation: passedAudit({ skipped: true }),
+    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
+    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
+    relationshipArc: passedAudit({ activeRelationships: 2, evolvingRelationships: 2 }),
+    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
+    finalResolution: passedAudit({ skipped: true }),
+    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds.sort(), [
+    "cross_chapter_coherence",
+    "foreshadowing_and_payoff",
+    "literary_natural_prose",
+  ].sort())
 })
 
 test("production acceptance runner resolves provider health targets from capability routes", async () => {
@@ -1277,4 +1323,65 @@ test("production acceptance runner writes resumable checkpoint reports", async (
   assert.equal(failedSaved.recovery.failedPhase, "drafting_progress")
   assert.match(failedSaved.recovery.resumeCommand, /--resume-project-id project-123/)
   assert.match(failedSaved.recovery.resumeCommand, /--auto-approve-style/)
+})
+
+test("production acceptance runner preserves long-run options in recovery command", async () => {
+  const { buildAcceptanceFailureRecovery } = await loadRunner()
+  const report = {
+    projectId: "project 123; echo nope",
+    checkpoints: [
+      { phase: "drafting_progress", status: "running", projectId: "project 123; echo nope" },
+    ],
+    progress: [{ step: 9, complete: 4, total: 40 }],
+  }
+  const recovery = buildAcceptanceFailureRecovery(report, {
+    rootDir: "/tmp/ai novel acceptance",
+    chapters: 40,
+    chapterWords: 3000,
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+    stylePrompt: "短句、冷感、动作先行",
+    styleIterations: 4,
+    styleMaxRequests: 9,
+    styleCandidates: 3,
+    aigcDetector: {
+      provider: "generic-json",
+      url: "https://detector.example/check",
+      token: "do-not-print",
+      threshold: "0.72",
+      timeoutMs: "45000",
+    },
+    autoApproveStyle: true,
+    autoApproveFoundation: true,
+    autoRepairStoryAssets: false,
+    providerHealthCheck: false,
+    maxAdvanceSteps: 333,
+    maxStaleSteps: 17,
+  }, {
+    details: {
+      nextCommand: "rtk node scripts/run-production-acceptance.mjs --resume-project-id short",
+    },
+  })
+
+  assert.equal(recovery.sourceNextCommand, "rtk node scripts/run-production-acceptance.mjs --resume-project-id short")
+  assert.match(recovery.resumeCommand, /--root-dir '\/tmp\/ai novel acceptance'/)
+  assert.match(recovery.resumeCommand, /--resume-project-id 'project 123; echo nope'/)
+  assert.match(recovery.resumeCommand, /--chapters 40/)
+  assert.match(recovery.resumeCommand, /--chapter-words 3000/)
+  assert.match(recovery.resumeCommand, /--min-total-words 100000/)
+  assert.match(recovery.resumeCommand, /--max-total-words 300000/)
+  assert.match(recovery.resumeCommand, /--style-prompt '短句、冷感、动作先行'/)
+  assert.match(recovery.resumeCommand, /--style-iterations 4/)
+  assert.match(recovery.resumeCommand, /--style-max-requests 9/)
+  assert.match(recovery.resumeCommand, /--style-candidates 3/)
+  assert.match(recovery.resumeCommand, /--aigc-detector-provider generic-json/)
+  assert.match(recovery.resumeCommand, /--aigc-detector-url https:\/\/detector\.example\/check/)
+  assert.match(recovery.resumeCommand, /--aigc-detector-threshold 0\.72/)
+  assert.match(recovery.resumeCommand, /--aigc-detector-timeout-ms 45000/)
+  assert.match(recovery.resumeCommand, /--no-story-repair/)
+  assert.match(recovery.resumeCommand, /--skip-provider-health-check/)
+  assert.match(recovery.resumeCommand, /--max-advance-steps 333/)
+  assert.match(recovery.resumeCommand, /--max-stale-steps 17/)
+  assert.doesNotMatch(recovery.resumeCommand, /do-not-print/)
+  assert.deepEqual(recovery.secretReentryRequired, ["aigc-detector-token"])
 })
