@@ -15,7 +15,7 @@ async function loadRunner() {
 
 function richBody(chapterNumber) {
   return [
-    `雨声贴着窗纸往下滑。沈砚把第 ${chapterNumber} 册账本推到灯下，指腹按住纸边，又把旧印扣在桌角。老周站在门槛外，袖口湿了一线，鞋尖向后退。`,
+    `雨声贴着窗纸往下滑。沈砚把第 ${chapterNumber} 册账本缺页推到灯下，指腹按住纸边，又把旧印扣在桌角。老周站在门槛外，袖口湿了一线，鞋尖向后退。`,
     `“谁动过这一页？”沈砚问。门外脚步停住，灯火压低，墨味从账册线里泛出来。他伸手合上账册，决定先留下缺页，不把证据交出去。`,
     `老周低声道：“少尹的人在外头。”权力追索已经压到门口。他抬眼看沈砚，手指攥紧袖口，像旧债还没清，又欠了一句话。沈砚听见雨打在门槛上，冷意从掌心爬上来。`,
     `他把印章推回灯下，拦住老周伸来的手。这个选择让关系裂开，也把风险留在屋里。章末只剩那道脚步声，谁会先来拿走缺页？`,
@@ -89,12 +89,13 @@ function chapterBlueprintFixture(chapterNumber, requiredCharacters = ["沈砚", 
     sceneCards: [
       {
         index: 1,
-        goal: "让账册异常进入现场压力。",
+        goal: "让账本缺页进入现场压力。",
         requiredCharacters,
+        requiredFacts: ["账本缺页"],
       },
       {
         index: 2,
-        goal: "让关系压力通过对白和动作显形。",
+        goal: "",
         requiredCharacters,
       },
     ],
@@ -1050,6 +1051,90 @@ test("production acceptance runner rejects missing scene-card required character
   const sceneCardCharacterAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(sceneCardCharacterAudit.passed, false)
   assert.match(sceneCardCharacterAudit.issues.join("\n"), /chapter 1.*老周/)
+})
+
+test("production acceptance runner rejects scene-card missing required facts", async () => {
+  const { auditSceneCardCharacterObligationsForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapterBlueprints[0].sceneCards = [
+    {
+      index: 1,
+      goal: "沈砚发现账本缺页。",
+      conflict: "老周否认经手账本。",
+      turn: "门外传来敲门暗号。",
+      endHook: "少尹的人停在账房门口。",
+      requiredCharacters: ["沈砚", "老周"],
+      requiredFacts: ["账本缺页", "旧印章。"],
+    },
+  ]
+  snapshot.chapters[0].body = [
+    "雨声贴着窗纸往下滑。沈砚把账本缺页推到灯下，指腹按住纸边。",
+    "老周攥紧袖口，低声否认经手账本。",
+    "门外传来三短一长的敲门暗号，少尹的人停在账房门口。",
+    "沈砚合上账本，决定先把证据留在账房里。",
+  ].join("\n\n")
+
+  const sceneCardAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  const firstCard = sceneCardAudit.chapters[0].cardAudits[0]
+  assert.equal(sceneCardAudit.passed, false)
+  assert.deepEqual(firstCard.missingFacts, ["旧印章"])
+  assert.match(sceneCardAudit.issues.join("\n"), /missing facts.*旧印章/)
+})
+
+test("production acceptance runner rejects scene-card missing turn execution", async () => {
+  const { auditSceneCardCharacterObligationsForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapterBlueprints[0].sceneCards = [
+    {
+      index: 1,
+      goal: "沈砚发现账本缺页。",
+      conflict: "老周否认经手账本。",
+      turn: "旧印章遇水显出第二层纹路。",
+      endHook: "门外传来敲门暗号。",
+      requiredCharacters: ["沈砚", "老周"],
+      requiredFacts: ["账本缺页", "旧印章"],
+    },
+  ]
+  snapshot.chapters[0].body = [
+    "雨声贴着窗纸往下滑。沈砚把账本缺页推到灯下，指腹按住纸边，又把旧印章扣在桌角。",
+    "老周攥紧袖口，低声否认经手账本。",
+    "门外传来三短一长的敲门暗号。",
+    "沈砚合上账本，决定先把证据留在账房里，等少尹的人再来。",
+  ].join("\n\n")
+
+  const sceneCardAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  const firstCard = sceneCardAudit.chapters[0].cardAudits[0]
+  assert.equal(sceneCardAudit.passed, false)
+  assert.ok(firstCard.missingExecution.includes("turn"))
+  assert.match(sceneCardAudit.issues.join("\n"), /missing execution.*turn/)
+})
+
+test("production acceptance runner rejects scene-card missing hook execution", async () => {
+  const { auditSceneCardCharacterObligationsForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapterBlueprints[0].sceneCards = [
+    {
+      index: 1,
+      goal: "沈砚发现账本缺页。",
+      conflict: "老周否认经手账本。",
+      turn: "旧印章遇水显出第二层纹路。",
+      endHook: "门外传来敲门暗号。",
+      requiredCharacters: ["沈砚", "老周"],
+      requiredFacts: ["账本缺页", "旧印章"],
+    },
+  ]
+  snapshot.chapters[0].body = [
+    "雨声贴着窗纸往下滑。沈砚把账本缺页推到灯下，指腹按住纸边，又把旧印章扣在桌角。",
+    "老周攥紧袖口，低声否认经手账本。",
+    "沈砚把旧印章移到雨水下，印面显出第二层纹路，正好贴着缺页的裁口。",
+    "沈砚合上账本，决定先把证据留在账房里，等少尹的人再来。",
+  ].join("\n\n")
+
+  const sceneCardAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  const firstCard = sceneCardAudit.chapters[0].cardAudits[0]
+  assert.equal(sceneCardAudit.passed, false)
+  assert.ok(firstCard.missingExecution.includes("hook"))
+  assert.match(sceneCardAudit.issues.join("\n"), /missing execution.*hook/)
 })
 
 test("production acceptance runner writes resumable checkpoint reports", async () => {

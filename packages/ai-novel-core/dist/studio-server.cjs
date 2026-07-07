@@ -9420,17 +9420,6 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       targetWords
     };
   }
-  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract);
-  if (sceneCharacterObligations.status === "quarantined") {
-    return {
-      ...gate,
-      passed: false,
-      status: "blocked",
-      reason: sceneCharacterObligations.reason,
-      wordCount: finalWordCount,
-      targetWords
-    };
-  }
   const plotContinuity = evaluatePlotContinuityBridge(finalDraft, task, continuityContract);
   if (plotContinuity.status === "quarantined") {
     return {
@@ -9498,6 +9487,17 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       passed: false,
       status: "blocked",
       reason: naturalnessReport.reason,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract);
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords
     };
@@ -11625,36 +11625,258 @@ function isConcreteSceneCharacterName(name = "") {
   if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false;
   return true;
 }
+var GENERIC_SCENE_EXECUTION_TERMS = /* @__PURE__ */ new Set([
+  "\u76EE\u6807",
+  "\u51B2\u7A81",
+  "\u8F6C\u6298",
+  "\u94A9\u5B50",
+  "\u573A\u666F",
+  "\u60C5\u8282",
+  "\u5267\u60C5",
+  "\u7AE0\u8282",
+  "\u672C\u7AE0",
+  "\u4E0B\u4E00\u7AE0",
+  "\u8BFB\u8005",
+  "\u95EE\u9898",
+  "\u4E8B\u4EF6",
+  "\u538B\u529B",
+  "\u5173\u7CFB",
+  "\u53D8\u5316",
+  "\u72B6\u6001",
+  "\u4E8B\u5B9E",
+  "\u7EBF\u7D22",
+  "\u4F0F\u7B14",
+  "\u4E3B\u7EBF",
+  "\u6B63\u6587",
+  "\u5FC5\u987B",
+  "\u81F3\u5C11",
+  "\u5177\u4F53",
+  "\u660E\u786E",
+  "\u5C40\u9762",
+  "\u73B0\u573A",
+  "\u540E\u7EED",
+  "\u98CE\u9669",
+  "\u4EE3\u4EF7",
+  "\u8EAB\u4EFD",
+  "\u552F\u4E00",
+  "\u6838\u5FC3",
+  "\u7F3A\u53E3",
+  "\u4E3B\u89D2",
+  "\u4E3B\u7EBF",
+  "\u552F\u4E00\u8EAB\u4EFD",
+  "\u6838\u5FC3\u7F3A\u53E3",
+  "\u4E3B\u7EBF\u7EBF\u7D22",
+  "\u7B2C\u4E00\u679A\u4E3B\u7EBF\u7EBF\u7D22",
+  "\u4E3B\u89D2\u552F\u4E00\u8EAB\u4EFD",
+  "\u5177\u4F53\u5F02\u5E38",
+  "\u5C40\u90E8\u95EE\u9898",
+  "\u539F\u59CB\u521B\u4F5C\u76EE\u6807",
+  "\u8BBE\u5B9A\u51BB\u7ED3\u7ED3\u8BBA",
+  "\u73B0\u573A\u538B\u529B",
+  "\u5173\u7CFB\u538B\u529B",
+  "\u4E0D\u53EF\u9006\u53D8\u5316",
+  "\u8EAB\u4EFD\u98CE\u9669",
+  "\u8D44\u6E90\u635F\u5931",
+  "\u6743\u529B\u538B\u529B",
+  "\u4E16\u754C\u89C4\u5219\u540E\u679C",
+  "\u5173\u7CFB\u88C2\u7F1D",
+  "\u7AE0\u672B\u671F\u5F85",
+  "\u662F\u4EC0\u4E48",
+  "\u4EC0\u4E48",
+  "\u8BC1\u636E",
+  "\u65B0\u8BC1\u636E",
+  "\u65B0\u963B\u529B",
+  "\u65B0\u4EE3\u4EF7",
+  "\u9009\u62E9\u70B9",
+  "\u4EA4\u68D2",
+  "\u4F59\u6CE2",
+  "\u672C\u7AE0\u76EE\u6807",
+  "\u672C\u7AE0\u95EE\u9898",
+  "\u5177\u4F53\u63A8\u8FDB",
+  "\u5C40\u90E8\u7ED3\u679C"
+]);
+var WEAK_SCENE_EXECUTION_TERMS = /* @__PURE__ */ new Set([
+  "\u53D1\u73B0",
+  "\u5426\u8BA4",
+  "\u7ECF\u624B",
+  "\u4F20\u6765",
+  "\u663E\u51FA",
+  "\u51FA\u73B0",
+  "\u8FDB\u5165",
+  "\u6210\u4E3A",
+  "\u6253\u5F00",
+  "\u5904\u7406",
+  "\u7559\u4E0B",
+  "\u8BFB\u8005",
+  "\u77E5\u9053",
+  "\u95E8\u5916",
+  "\u5C4B\u91CC",
+  "\u8D26\u623F",
+  "\u96E8\u58F0",
+  "\u662F\u4EC0\u4E48"
+]);
+function cleanSceneExecutionTerm(value) {
+  return value.replace(/^[,;；，。！？!?:："'“”‘’（）()\[\]【】《》\s、/|\\.]+|[,;；，。！？!?:："'“”‘’（）()\[\]【】《》\s、/|\\.]+$/gu, "").replace(/^(?:用|让|把|与|和|在|从|向|因|围绕|承接|推进|完成|处理|留下|进入|成为|服务|必须|至少|出现|建立|新增|回收)/u, "").replace(/(?:进入正文|成为事实|发生变化|继续处理|可追踪|局部问题)$/u, "").trim();
+}
+function isScaffoldSceneExecutionField(value) {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return /^(?:用具体异常打开本章问题|推进本章目标|把主角选择写成行动|让不可逆变化成为事实|完成下一章交棒)[:：]/u.test(normalized) || /^(?:至少让锚点进入事件|角色状态发生变化|伏笔操作进入正文)[:：]/u.test(normalized) || /^出现新证据、新阻力或新代价/u.test(normalized) || [
+    "\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u73B0\u573A\u538B\u529B\u6216\u5173\u7CFB\u538B\u529B\u3002",
+    "\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB\uFF0C\u81F3\u5C11\u4E00\u540D\u914D\u89D2\u66B4\u9732\u7ACB\u573A\u6216\u5229\u76CA\u3002",
+    "\u9009\u62E9\u5FC5\u987B\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u80FD\u529B\u8FB9\u754C\u6216\u4EF7\u503C\u53D6\u820D\u3002",
+    "\u963B\u529B\u5151\u73B0\uFF0C\u5C40\u9762\u4E0D\u80FD\u65E0\u635F\u56DE\u5230\u5F00\u573A\u72B6\u6001\u3002",
+    "\u4F59\u6CE2\u4E0D\u80FD\u7528\u603B\u7ED3\u4EE3\u66FF\uFF0C\u5FC5\u987B\u6709\u73B0\u573A\u52A8\u4F5C\u6216\u5BF9\u767D\u3002",
+    "\u8BFB\u8005\u660E\u786E\u77E5\u9053\u672C\u7AE0\u5C40\u90E8\u95EE\u9898\u662F\u4EC0\u4E48\u3002",
+    "\u4E3B\u89D2\u88AB\u8FEB\u63A5\u8FD1\u9009\u62E9\u70B9\u3002",
+    "\u9009\u62E9\u5E26\u6765\u7684\u4EE3\u4EF7\u5F00\u59CB\u663E\u5F62\u3002",
+    "\u7559\u4E0B\u53EF\u88AB\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u753B\u9762\u3001\u7269\u4EF6\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u538B\u529B\u3002",
+    "\u672C\u7AE0\u5C40\u90E8\u7ED3\u679C\u843D\u5B9A\uFF0C\u540C\u65F6\u4EA7\u751F\u4E0B\u4E00\u7AE0\u65E0\u6CD5\u7ED5\u5F00\u7684\u538B\u529B\u3002"
+  ].includes(normalized);
+}
+function isConcreteSceneExecutionTerm(value) {
+  const normalized = cleanSceneExecutionTerm(value);
+  if (normalized.length < 2 || normalized.length > 10) return false;
+  if (GENERIC_SCENE_EXECUTION_TERMS.has(normalized)) return false;
+  if (WEAK_SCENE_EXECUTION_TERMS.has(normalized)) return false;
+  if (/^[0-9０-９零〇一二三四五六七八九十百千万第章节回卷册部年月日号]+$/u.test(normalized)) return false;
+  if (/^(?:是什么|什么|谁|何人|何物|何处|哪里|如何|为何|怎么)$/u.test(normalized)) return false;
+  if (/pending|待定|未命名|任意|任何|未来|幕后|未登场|未冻结|章节|章末|读者|场景|情节|正文|素材|蓝图/iu.test(normalized)) {
+    return false;
+  }
+  if (/主角|唯一身份|核心缺口|主线线索|局部问题|具体异常|异常|原始创作目标|设定|冻结|承接|无关剧情|无法回避|现场压力|关系压力|压力|不可逆变化|身份风险|资源损失|权力压力|世界规则|角色状态|读者明确|读者|锚点|本弧线|上一弧|章节任务|后续章节|本章|下一章|剧情|目标|代价|风险|关系|状态|身份|资源|权力|世界|规则|后果|伏笔|操作|主线|角色|人物|选择|阻力|局面|开场|外部|配角|立场|利益|新证据|新阻力|新代价|追踪|画面|物件|线索暴露|选择点|交棒|余波|具体推进|局部结果|是什么/u.test(normalized)) {
+    return false;
+  }
+  return /[\u4e00-\u9fff]/u.test(normalized);
+}
+function isExcludedSceneExecutionTerm(term, excludedTerms) {
+  if (excludedTerms.has(term)) return true;
+  for (const excluded of excludedTerms) {
+    if (excluded.length >= 3 && excluded.includes(term)) return true;
+    if (term.length >= 3 && term.includes(excluded)) return true;
+  }
+  return false;
+}
+function extractSceneExecutionTerms(value, excludedTerms = []) {
+  const source = (Array.isArray(value) ? value : [value]).join("\n");
+  if (isScaffoldSceneExecutionField(source)) return [];
+  const excluded = new Set(excludedTerms.map((term) => cleanSceneExecutionTerm(term)).filter(Boolean));
+  const terms = [];
+  const addTerm = (term) => {
+    const cleaned = cleanSceneExecutionTerm(term);
+    if (cleaned.length >= 3 && !isExcludedSceneExecutionTerm(cleaned, excluded) && isConcreteSceneExecutionTerm(cleaned)) {
+      terms.push(cleaned);
+    }
+  };
+  for (const keyword of extractKeywords(source)) {
+    addTerm(keyword);
+  }
+  const splitPattern = /发现|否认|打开|进入|成为|传来|显出|压出|露出|浮出|映出|亮出|亮起|翻转|裂开|响起|落下|留下|处理|推进|承接|完成|围绕|必须|至少|让|把|与|和|或|在|中|里|的|了|不该|出现|突然|具体|现场|压力|关系|事件|本章|下一章|读者|明确|知道|局部|问题|发生|改变|转化|暴露|选择|决定|交给|收束|服务|继续|回收|埋设|新增|可追踪|是什么|什么/u;
+  for (const sequence of source.match(/[\u4e00-\u9fff]{2,}/gu) || []) {
+    if (sequence.length <= 10) addTerm(sequence);
+    for (const piece of sequence.split(splitPattern)) {
+      addTerm(piece);
+    }
+  }
+  return uniqueStrings(terms).slice(0, 18);
+}
+function findSceneExecutionEvidenceWindows(body, terms, radius = 90) {
+  const windows = [];
+  for (const rawTerm of terms) {
+    const term = rawTerm.trim();
+    if (!term) continue;
+    let index = body.indexOf(term);
+    while (index >= 0) {
+      windows.push({
+        term,
+        text: body.slice(Math.max(0, index - radius), Math.min(body.length, index + term.length + radius))
+      });
+      index = body.indexOf(term, index + term.length);
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return windows.filter((window) => {
+    const key = `${window.term}:${window.text}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function evaluateSceneExecutionDimension(body, label, value, excludedTerms = []) {
+  const terms = extractSceneExecutionTerms(value, excludedTerms);
+  const windows = findSceneExecutionEvidenceWindows(body, terms);
+  const hasDrivenEvidence = windows.some(
+    (window) => /「|」|“|”|说|问|道|低声|喊|答|站|走|退|停|伸手|攥|按|推|拿|递|藏|拦|抬|看|听|合上|扣住|压住|交出|留下|决定|选择|拒绝|不能|只好|必须|发现|显出|传来|敲门|脚步|风险|代价|后果|裂|欠|信任|怀疑|追索|压力/u.test(window.text)
+  );
+  return {
+    label,
+    terms,
+    matchedTerms: uniqueStrings(windows.map((window) => window.term)),
+    hasEvidence: terms.length === 0 || hasDrivenEvidence
+  };
+}
 function evaluateSceneCardCharacterObligations(draft, blueprint = "", continuityContract) {
   const sceneCards = extractSceneCardsFromBlueprint(blueprint);
   const body = extractNarrativeBody(draft);
   const lockedProtagonist = continuityContract?.lockedProtagonistName || "";
   const cardAudits = sceneCards.map((card) => {
     const requiredCharacters = uniqueStrings(card.requiredCharacters).filter((name) => name !== lockedProtagonist).filter(isConcreteSceneCharacterName);
+    const requiredFacts = uniqueStrings(card.requiredFacts.map((fact) => cleanSceneExecutionTerm(fact))).filter(isConcreteSceneExecutionTerm);
+    const excludedExecutionTerms = uniqueStrings([
+      lockedProtagonist,
+      ...card.requiredCharacters,
+      ...requiredFacts
+    ]).filter(Boolean);
     return {
       index: card.index,
       requiredCharacters,
-      missingCharacters: requiredCharacters.filter((name) => !body.includes(name))
+      missingCharacters: requiredCharacters.filter((name) => !body.includes(name)),
+      requiredFacts,
+      missingFacts: requiredFacts.filter((fact) => !body.includes(fact)),
+      executionAudits: [
+        evaluateSceneExecutionDimension(body, "\u76EE\u6807", card.goal, excludedExecutionTerms),
+        evaluateSceneExecutionDimension(body, "\u51B2\u7A81", card.conflict, excludedExecutionTerms),
+        evaluateSceneExecutionDimension(body, "\u8F6C\u6298", card.turn, excludedExecutionTerms),
+        evaluateSceneExecutionDimension(body, "\u94A9\u5B50", card.endHook, excludedExecutionTerms)
+      ].filter((audit) => audit.terms.length > 0)
     };
-  }).filter((card) => card.requiredCharacters.length > 0);
+  }).filter((card) => card.requiredCharacters.length > 0 || card.requiredFacts.length > 0 || card.executionAudits.length > 0);
   if (cardAudits.length === 0) {
     return {
       status: "eligible",
-      reason: "\u573A\u666F\u5361\u6CA1\u6709\u9700\u8981\u786C\u6821\u9A8C\u7684\u5177\u4F53\u89D2\u8272\u4E49\u52A1\u3002",
+      reason: "\u573A\u666F\u5361\u6CA1\u6709\u9700\u8981\u786C\u6821\u9A8C\u7684\u5177\u4F53\u6267\u884C\u4E49\u52A1\u3002",
       cardAudits
     };
   }
-  const missing = cardAudits.filter((card) => card.missingCharacters.length > 0);
+  const missing = cardAudits.map((card) => {
+    const missingExecution = card.executionAudits.filter((audit) => !audit.hasEvidence);
+    const evidencedExecutionCount = card.executionAudits.filter((audit) => audit.hasEvidence).length;
+    const weakExecution = card.executionAudits.length >= 2 && evidencedExecutionCount < 2;
+    return {
+      ...card,
+      missingExecution,
+      weakExecution
+    };
+  }).filter(
+    (card) => card.missingCharacters.length > 0 || card.missingFacts.length > 0 || card.missingExecution.length > 0 || card.weakExecution
+  );
   if (missing.length > 0) {
     return {
       status: "quarantined",
-      reason: `\u573A\u666F\u5361\u89D2\u8272\u786C\u95E8\u69DB\u5931\u8D25\uFF1A${missing.slice(0, 4).map((card) => `\u573A\u666F\u5361 ${card.index} \u7F3A\u5C11\u300C${card.missingCharacters.join("\u3001")}\u300D`).join("\uFF1B")}\u3002`,
+      reason: `\u573A\u666F\u5361\u6267\u884C\u786C\u95E8\u69DB\u5931\u8D25\uFF1A${missing.slice(0, 4).map((card) => {
+        const parts = [];
+        if (card.missingCharacters.length) parts.push(`\u7F3A\u5C11\u89D2\u8272\u300C${card.missingCharacters.join("\u3001")}\u300D`);
+        if (card.missingFacts.length) parts.push(`\u7F3A\u5C11\u4E8B\u5B9E\u300C${card.missingFacts.join("\u3001")}\u300D`);
+        if (card.missingExecution.length) parts.push(`\u7F3A\u5C11${card.missingExecution.map((audit) => audit.label).join("\u3001")}\u6267\u884C\u8BC1\u636E`);
+        if (card.weakExecution && !card.missingExecution.length) parts.push("\u573A\u666F\u76EE\u6807/\u51B2\u7A81/\u8F6C\u6298/\u94A9\u5B50\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3");
+        return `\u573A\u666F\u5361 ${card.index} ${parts.join("\uFF0C")}`;
+      }).join("\uFF1B")}\u3002`,
       cardAudits
     };
   }
   return {
     status: "eligible",
-    reason: `\u573A\u666F\u5361\u89D2\u8272\u4E49\u52A1\u901A\u8FC7\uFF1A${cardAudits.length} \u5F20\u573A\u666F\u5361\u7684\u5177\u4F53\u89D2\u8272\u5747\u8FDB\u5165\u6B63\u6587\u3002`,
+    reason: `\u573A\u666F\u5361\u6267\u884C\u4E49\u52A1\u901A\u8FC7\uFF1A${cardAudits.length} \u5F20\u573A\u666F\u5361\u7684\u89D2\u8272\u3001\u4E8B\u5B9E\u4E0E\u76EE\u6807/\u51B2\u7A81/\u8F6C\u6298/\u94A9\u5B50\u5747\u8FDB\u5165\u6B63\u6587\u3002`,
     cardAudits
   };
 }
@@ -13745,7 +13967,7 @@ function extractSceneCardsFromBlueprint(blueprint) {
       const conflict = String(rawCard.conflict || "").trim();
       const turn = String(rawCard.turn || "").trim();
       const endHook = String(rawCard.endHook || "").trim();
-      if (!goal && !conflict && !turn && !endHook) return null;
+      if (!goal && !conflict && !turn && !endHook && requiredCharacters.length === 0 && requiredFacts.length === 0) return null;
       return {
         index: Number(rawCard.index) || cardIndex + 1,
         goal,

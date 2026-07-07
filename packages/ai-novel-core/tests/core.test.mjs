@@ -9353,13 +9353,235 @@ test("chapter final gate blocks polished drafts that drop scene-card required ch
 
     assert.ok(receivedBodies.some((body) => /自然化/u.test(JSON.stringify(body))))
     assert.equal(result.qualityGate.status, "blocked")
-    assert.match(result.qualityGate.reason, /场景卡角色硬门槛失败|老周/)
+    assert.match(result.qualityGate.reason, /场景卡执行硬门槛失败|老周/)
     assert.ok(progressEvents.some((event) =>
       event.step === "naturalness_completed" && event.status === "blocked"
     ))
     const chapterManifest = JSON.parse(await fs.readFile(path.join(paths.chaptersDir, "chapter-001.versions.json"), "utf8"))
     assert.equal(chapterManifest.qualityGate.status, "blocked")
     assert.match(chapterManifest.qualityGate.reason, /老周/)
+    assert.equal(chapterManifest.locked, false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+    if (previousWritingMode === undefined) {
+      delete process.env.AI_NOVEL_WRITING_MODE
+    } else {
+      process.env.AI_NOVEL_WRITING_MODE = previousWritingMode
+    }
+  }
+})
+
+test("chapter final gate blocks polished drafts that drop scene-card turn and hook execution", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-scene-execution-final-gate-"))
+  const {
+    createManagedAutonomousProject,
+    runChapterProductionPipeline,
+    withFactoryDb,
+  } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  const previousWritingMode = process.env.AI_NOVEL_WRITING_MODE
+  const receivedBodies = []
+  const progressEvents = []
+  const draftWithSceneExecution = [
+    "# 第一章 缺页账本",
+    "",
+    "## Draft Body",
+    "",
+    "雨水沿窗纸往下走，沈砚把账本缺页推到灯下，旧印章扣在纸边。",
+    "老周站在门边，低声道：「沈大人，我没经手这本账。」",
+    "沈砚把旧印章移到雨水下，印面显出第二层纹路，正好贴着缺页的裁口。",
+    "门外忽然传来三短一长的敲门暗号，老周的手从门栓上缩了回去。",
+    "沈砚决定先扣住旧印章，不把账本缺页交出去。",
+  ].join("\n")
+  const finalWithoutSceneTurn = [
+    "# 第一章 缺页账本",
+    "",
+    "## Final Body",
+    "",
+    "雨声压住账房的窗纸，沈砚把账本缺页推到灯下，指腹停在那道齐整的纸边。",
+    "旧印章扣在桌角，印泥还湿，沈砚没有让它沾雨。",
+    "老周站在门边，低声道：「沈大人，我没经手这本账。」",
+    "沈砚合上账本再开口：「谁动过这一页？」",
+    "他把铜尺推到纸边，低声补了一句：「你欠我的，是把门外的人拖住。」",
+    "他想要查清账本缺页，却不能把旧印章交出去，只好用铜尺压住纸边，决定先把证据留在账房里。",
+    "老周握住门栓，替他拦了半步：「少尹的人来了，我先答一句。」",
+    "沈砚与压力方对峙，低声说：「我去，你守着这页。」",
+    "灯芯亮了一点，墙上的影子矮下去，门外脚步停住，没有人再敲门。",
+  ].join("\n")
+  const passingQualityReport = [
+    "# Chapter Quality Report",
+    "",
+    "## Scores",
+    "",
+    "| Dimension | Score | Notes |",
+    "|---|---:|---|",
+    "| 字数完成度 | 9/10 | 当前估算 280，目标 80。 |",
+    "| 情节推进 | 8/10 | 包含冲突、压力或选择。 |",
+    "| 章末钩子 | 8/10 | 包含钩子或后续期待。 |",
+    "| 蓝图执行 | 8/10 | 基于详细章节蓝图执行。 |",
+    "| 综合评分 | 8/10 | 可进入润色。 |",
+    "",
+    "WORD_COUNT_CHECK: 280/80",
+    "QUALITY_GATE: passed",
+    "",
+    "## Required Fixes",
+    "- 暂无阻塞性问题；润色时继续压低 AI 模板句。",
+  ].join("\n")
+  const server = http.createServer((request, response) => {
+    let rawBody = ""
+    request.on("data", (chunk) => { rawBody += chunk })
+    request.on("end", () => {
+      if (request.url !== "/responses") {
+        response.writeHead(404).end()
+        return
+      }
+      const receivedBody = JSON.parse(rawBody)
+      receivedBodies.push(receivedBody)
+      const requestText = JSON.stringify(receivedBody)
+      const outputText = /请根据质量报告自然化以下章节/u.test(requestText)
+        ? finalWithoutSceneTurn
+        : /请审核以下章节草稿/u.test(requestText)
+          ? passingQualityReport
+          : draftWithSceneExecution
+      if (receivedBody.stream) {
+        response.writeHead(200, { "content-type": "text/event-stream" })
+        response.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: outputText })}\n\n`)
+        response.write("data: [DONE]\n\n")
+        response.end()
+      } else {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({ output_text: outputText }))
+      }
+    })
+  })
+
+  delete process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_WRITING_MODE = "quality"
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.listen(0, "127.0.0.1", resolve)
+      server.once("error", reject)
+    })
+    const address = server.address()
+    assert.ok(address && typeof address === "object")
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+    await approveProductionReadinessForTest(created.project.projectRoot, created.state, {
+      projectTitle: "雨账",
+      idea: "一名审雨官发现降雨记录被篡改",
+    })
+    await withFactoryDb(tempDir, async (db) => {
+      db.addLlmConfig({
+        name: "Scene Execution Final Gate Test",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        apiKey: "test-key",
+        modelName: "draft-model",
+        apiMode: "responses",
+        timeoutMs: 2000,
+        isActive: true,
+      })
+    })
+
+    const projectRoot = created.project.projectRoot
+    const workspaceDir = path.join(projectRoot, ".ai-novel")
+    const paths = {
+      workspaceDir,
+      plansDir: path.join(workspaceDir, "plans"),
+      reportsDir: path.join(workspaceDir, "reports"),
+      chaptersDir: path.join(workspaceDir, "chapters"),
+      memoryDir: path.join(workspaceDir, "memory"),
+      styleDir: path.join(workspaceDir, "style"),
+      styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+      styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+      styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+      styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+      consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+      protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+      relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+      characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+      characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+      masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+      chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+    }
+    await fs.mkdir(paths.chapterBlueprintsDir, { recursive: true })
+    await fs.writeFile(path.join(paths.chapterBlueprintsDir, "chapter-001.md"), [
+      "# Detailed Chapter Blueprint",
+      "",
+      "## Chapter Execution Contract",
+      "```json",
+      JSON.stringify({
+        version: 1,
+        chapterNumber: 1,
+        sceneCards: [
+          {
+            index: 1,
+            goal: "沈砚发现账本缺页。",
+            conflict: "老周否认经手账本。",
+            turn: "旧印章遇水显出第二层纹路。",
+            endHook: "门外传来敲门暗号。",
+            requiredCharacters: ["沈砚", "老周"],
+            requiredFacts: ["账本缺页", "旧印章"],
+            forbiddenFacts: ["幕后主使身份"],
+          },
+        ],
+      }, null, 2),
+      "```",
+      "",
+      "## Previous Inputs",
+      "承接：原始创作目标和设定冻结结论。",
+      "## Causal Objective",
+      "推进：围绕审雨官发现降雨记录被篡改完成一次具体推进。",
+      "## Irreversible Change",
+      "旧印章和门外脚步成为不可逆压力。",
+      "## Character State Delta",
+      "沈砚与老周之间的旧债压力发生变化。",
+      "## Required Continuity Anchors",
+      "- 账本缺页",
+      "- 旧印章",
+      "## Next Chapter Handoff",
+      "下一章必须处理门外脚步、旧印章和那本账本缺页。",
+    ].join("\n"))
+    const task = {
+      ...created.state.plan.chapterTasks[0],
+      title: "第一章 缺页账本",
+      targetWords: 80,
+      causalPlan: {
+        ...created.state.plan.chapterTasks[0].causalPlan,
+        requiredContinuityAnchors: ["账本缺页", "旧印章"],
+        nextHandoff: "下一章必须处理门外脚步、旧印章和那本账本缺页。",
+      },
+    }
+
+    const result = await runChapterProductionPipeline(projectRoot, paths, created.state, task, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      writingMode: "quality",
+      bypassAigcGate: true,
+      maxRevisionAttempts: 0,
+      onProgress: (event) => progressEvents.push(event),
+    })
+
+    assert.ok(receivedBodies.some((body) => /自然化/u.test(JSON.stringify(body))))
+    assert.equal(result.qualityGate.status, "blocked")
+    assert.match(result.qualityGate.reason, /场景卡执行硬门槛失败/)
+    assert.match(result.qualityGate.reason, /转折|钩子|执行证据/)
+    assert.ok(progressEvents.some((event) =>
+      event.step === "naturalness_completed" && event.status === "blocked"
+    ))
+    const chapterManifest = JSON.parse(await fs.readFile(path.join(paths.chaptersDir, "chapter-001.versions.json"), "utf8"))
+    assert.equal(chapterManifest.qualityGate.status, "blocked")
+    assert.match(chapterManifest.qualityGate.reason, /场景卡执行硬门槛失败/)
     assert.equal(chapterManifest.locked, false)
   } finally {
     await new Promise((resolve) => server.close(resolve))

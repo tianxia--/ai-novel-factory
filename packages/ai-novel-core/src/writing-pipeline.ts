@@ -1681,17 +1681,6 @@ function enforceFinalDraftQualityGate(
       targetWords,
     }
   }
-  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract)
-  if (sceneCharacterObligations.status === "quarantined") {
-    return {
-      ...gate,
-      passed: false,
-      status: "blocked" as const,
-      reason: sceneCharacterObligations.reason,
-      wordCount: finalWordCount,
-      targetWords,
-    }
-  }
   const plotContinuity = evaluatePlotContinuityBridge(finalDraft, task, continuityContract)
   if (plotContinuity.status === "quarantined") {
     return {
@@ -1759,6 +1748,17 @@ function enforceFinalDraftQualityGate(
       passed: false,
       status: "blocked" as const,
       reason: naturalnessReport.reason,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract)
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords,
     }
@@ -4409,6 +4409,212 @@ function isConcreteSceneCharacterName(name = "") {
   return true
 }
 
+const GENERIC_SCENE_EXECUTION_TERMS = new Set([
+  "目标",
+  "冲突",
+  "转折",
+  "钩子",
+  "场景",
+  "情节",
+  "剧情",
+  "章节",
+  "本章",
+  "下一章",
+  "读者",
+  "问题",
+  "事件",
+  "压力",
+  "关系",
+  "变化",
+  "状态",
+  "事实",
+  "线索",
+  "伏笔",
+  "主线",
+  "正文",
+  "必须",
+  "至少",
+  "具体",
+  "明确",
+  "局面",
+  "现场",
+  "后续",
+  "风险",
+  "代价",
+  "身份",
+  "唯一",
+  "核心",
+  "缺口",
+  "主角",
+  "主线",
+  "唯一身份",
+  "核心缺口",
+  "主线线索",
+  "第一枚主线线索",
+  "主角唯一身份",
+  "具体异常",
+  "局部问题",
+  "原始创作目标",
+  "设定冻结结论",
+  "现场压力",
+  "关系压力",
+  "不可逆变化",
+  "身份风险",
+  "资源损失",
+  "权力压力",
+  "世界规则后果",
+  "关系裂缝",
+  "章末期待",
+  "是什么",
+  "什么",
+  "证据",
+  "新证据",
+  "新阻力",
+  "新代价",
+  "选择点",
+  "交棒",
+  "余波",
+  "本章目标",
+  "本章问题",
+  "具体推进",
+  "局部结果",
+])
+
+const WEAK_SCENE_EXECUTION_TERMS = new Set([
+  "发现",
+  "否认",
+  "经手",
+  "传来",
+  "显出",
+  "出现",
+  "进入",
+  "成为",
+  "打开",
+  "处理",
+  "留下",
+  "读者",
+  "知道",
+  "门外",
+  "屋里",
+  "账房",
+  "雨声",
+  "是什么",
+])
+
+function cleanSceneExecutionTerm(value: string) {
+  return value
+    .replace(/^[,;；，。！？!?:："'“”‘’（）()\[\]【】《》\s、/|\\.]+|[,;；，。！？!?:："'“”‘’（）()\[\]【】《》\s、/|\\.]+$/gu, "")
+    .replace(/^(?:用|让|把|与|和|在|从|向|因|围绕|承接|推进|完成|处理|留下|进入|成为|服务|必须|至少|出现|建立|新增|回收)/u, "")
+    .replace(/(?:进入正文|成为事实|发生变化|继续处理|可追踪|局部问题)$/u, "")
+    .trim()
+}
+
+function isScaffoldSceneExecutionField(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return false
+  return /^(?:用具体异常打开本章问题|推进本章目标|把主角选择写成行动|让不可逆变化成为事实|完成下一章交棒)[:：]/u.test(normalized)
+    || /^(?:至少让锚点进入事件|角色状态发生变化|伏笔操作进入正文)[:：]/u.test(normalized)
+    || /^出现新证据、新阻力或新代价/u.test(normalized)
+    || [
+      "主角遇到无法回避的现场压力或关系压力。",
+      "外部压力进入人物关系，至少一名配角暴露立场或利益。",
+      "选择必须暴露欲望、短板、能力边界或价值取舍。",
+      "阻力兑现，局面不能无损回到开场状态。",
+      "余波不能用总结代替，必须有现场动作或对白。",
+      "读者明确知道本章局部问题是什么。",
+      "主角被迫接近选择点。",
+      "选择带来的代价开始显形。",
+      "留下可被下一章追踪的画面、物件、线索或关系压力。",
+      "本章局部结果落定，同时产生下一章无法绕开的压力。",
+    ].includes(normalized)
+}
+
+function isConcreteSceneExecutionTerm(value: string) {
+  const normalized = cleanSceneExecutionTerm(value)
+  if (normalized.length < 2 || normalized.length > 10) return false
+  if (GENERIC_SCENE_EXECUTION_TERMS.has(normalized)) return false
+  if (WEAK_SCENE_EXECUTION_TERMS.has(normalized)) return false
+  if (/^[0-9０-９零〇一二三四五六七八九十百千万第章节回卷册部年月日号]+$/u.test(normalized)) return false
+  if (/^(?:是什么|什么|谁|何人|何物|何处|哪里|如何|为何|怎么)$/u.test(normalized)) return false
+  if (/pending|待定|未命名|任意|任何|未来|幕后|未登场|未冻结|章节|章末|读者|场景|情节|正文|素材|蓝图/iu.test(normalized)) {
+    return false
+  }
+  if (/主角|唯一身份|核心缺口|主线线索|局部问题|具体异常|异常|原始创作目标|设定|冻结|承接|无关剧情|无法回避|现场压力|关系压力|压力|不可逆变化|身份风险|资源损失|权力压力|世界规则|角色状态|读者明确|读者|锚点|本弧线|上一弧|章节任务|后续章节|本章|下一章|剧情|目标|代价|风险|关系|状态|身份|资源|权力|世界|规则|后果|伏笔|操作|主线|角色|人物|选择|阻力|局面|开场|外部|配角|立场|利益|新证据|新阻力|新代价|追踪|画面|物件|线索暴露|选择点|交棒|余波|具体推进|局部结果|是什么/u.test(normalized)) {
+    return false
+  }
+  return /[\u4e00-\u9fff]/u.test(normalized)
+}
+
+function isExcludedSceneExecutionTerm(term: string, excludedTerms: Set<string>) {
+  if (excludedTerms.has(term)) return true
+  for (const excluded of excludedTerms) {
+    if (excluded.length >= 3 && excluded.includes(term)) return true
+    if (term.length >= 3 && term.includes(excluded)) return true
+  }
+  return false
+}
+
+function extractSceneExecutionTerms(value: string | string[], excludedTerms: string[] = []) {
+  const source = (Array.isArray(value) ? value : [value]).join("\n")
+  if (isScaffoldSceneExecutionField(source)) return []
+  const excluded = new Set(excludedTerms.map((term) => cleanSceneExecutionTerm(term)).filter(Boolean))
+  const terms: string[] = []
+  const addTerm = (term: string) => {
+    const cleaned = cleanSceneExecutionTerm(term)
+    if (cleaned.length >= 3 && !isExcludedSceneExecutionTerm(cleaned, excluded) && isConcreteSceneExecutionTerm(cleaned)) {
+      terms.push(cleaned)
+    }
+  }
+  for (const keyword of extractKeywords(source)) {
+    addTerm(keyword)
+  }
+  const splitPattern = /发现|否认|打开|进入|成为|传来|显出|压出|露出|浮出|映出|亮出|亮起|翻转|裂开|响起|落下|留下|处理|推进|承接|完成|围绕|必须|至少|让|把|与|和|或|在|中|里|的|了|不该|出现|突然|具体|现场|压力|关系|事件|本章|下一章|读者|明确|知道|局部|问题|发生|改变|转化|暴露|选择|决定|交给|收束|服务|继续|回收|埋设|新增|可追踪|是什么|什么/u
+  for (const sequence of source.match(/[\u4e00-\u9fff]{2,}/gu) || []) {
+    if (sequence.length <= 10) addTerm(sequence)
+    for (const piece of sequence.split(splitPattern)) {
+      addTerm(piece)
+    }
+  }
+  return uniqueStrings(terms).slice(0, 18)
+}
+
+function findSceneExecutionEvidenceWindows(body: string, terms: string[], radius = 90) {
+  const windows: Array<{ term: string; text: string }> = []
+  for (const rawTerm of terms) {
+    const term = rawTerm.trim()
+    if (!term) continue
+    let index = body.indexOf(term)
+    while (index >= 0) {
+      windows.push({
+        term,
+        text: body.slice(Math.max(0, index - radius), Math.min(body.length, index + term.length + radius)),
+      })
+      index = body.indexOf(term, index + term.length)
+    }
+  }
+  const seen = new Set<string>()
+  return windows.filter((window) => {
+    const key = `${window.term}:${window.text}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function evaluateSceneExecutionDimension(body: string, label: string, value: string | string[], excludedTerms: string[] = []) {
+  const terms = extractSceneExecutionTerms(value, excludedTerms)
+  const windows = findSceneExecutionEvidenceWindows(body, terms)
+  const hasDrivenEvidence = windows.some((window) =>
+    /「|」|“|”|说|问|道|低声|喊|答|站|走|退|停|伸手|攥|按|推|拿|递|藏|拦|抬|看|听|合上|扣住|压住|交出|留下|决定|选择|拒绝|不能|只好|必须|发现|显出|传来|敲门|脚步|风险|代价|后果|裂|欠|信任|怀疑|追索|压力/u.test(window.text)
+  )
+  return {
+    label,
+    terms,
+    matchedTerms: uniqueStrings(windows.map((window) => window.term)),
+    hasEvidence: terms.length === 0 || hasDrivenEvidence,
+  }
+}
+
 function evaluateSceneCardCharacterObligations(
   draft: string,
   blueprint = "",
@@ -4422,31 +4628,69 @@ function evaluateSceneCardCharacterObligations(
       const requiredCharacters = uniqueStrings(card.requiredCharacters)
         .filter((name) => name !== lockedProtagonist)
         .filter(isConcreteSceneCharacterName)
+      const requiredFacts = uniqueStrings(card.requiredFacts.map((fact) => cleanSceneExecutionTerm(fact)))
+        .filter(isConcreteSceneExecutionTerm)
+      const excludedExecutionTerms = uniqueStrings([
+        lockedProtagonist,
+        ...card.requiredCharacters,
+        ...requiredFacts,
+      ]).filter(Boolean)
       return {
         index: card.index,
         requiredCharacters,
         missingCharacters: requiredCharacters.filter((name) => !body.includes(name)),
+        requiredFacts,
+        missingFacts: requiredFacts.filter((fact) => !body.includes(fact)),
+        executionAudits: [
+          evaluateSceneExecutionDimension(body, "目标", card.goal, excludedExecutionTerms),
+          evaluateSceneExecutionDimension(body, "冲突", card.conflict, excludedExecutionTerms),
+          evaluateSceneExecutionDimension(body, "转折", card.turn, excludedExecutionTerms),
+          evaluateSceneExecutionDimension(body, "钩子", card.endHook, excludedExecutionTerms),
+        ].filter((audit) => audit.terms.length > 0),
       }
     })
-    .filter((card) => card.requiredCharacters.length > 0)
+    .filter((card) => card.requiredCharacters.length > 0 || card.requiredFacts.length > 0 || card.executionAudits.length > 0)
   if (cardAudits.length === 0) {
     return {
       status: "eligible" as const,
-      reason: "场景卡没有需要硬校验的具体角色义务。",
+      reason: "场景卡没有需要硬校验的具体执行义务。",
       cardAudits,
     }
   }
-  const missing = cardAudits.filter((card) => card.missingCharacters.length > 0)
+  const missing = cardAudits
+    .map((card) => {
+      const missingExecution = card.executionAudits.filter((audit) => !audit.hasEvidence)
+      const evidencedExecutionCount = card.executionAudits.filter((audit) => audit.hasEvidence).length
+      const weakExecution = card.executionAudits.length >= 2 && evidencedExecutionCount < 2
+      return {
+        ...card,
+        missingExecution,
+        weakExecution,
+      }
+    })
+    .filter((card) =>
+      card.missingCharacters.length > 0
+      || card.missingFacts.length > 0
+      || card.missingExecution.length > 0
+      || card.weakExecution
+    )
   if (missing.length > 0) {
     return {
       status: "quarantined" as const,
-      reason: `场景卡角色硬门槛失败：${missing.slice(0, 4).map((card) => `场景卡 ${card.index} 缺少「${card.missingCharacters.join("、")}」`).join("；")}。`,
+      reason: `场景卡执行硬门槛失败：${missing.slice(0, 4).map((card) => {
+        const parts: string[] = []
+        if (card.missingCharacters.length) parts.push(`缺少角色「${card.missingCharacters.join("、")}」`)
+        if (card.missingFacts.length) parts.push(`缺少事实「${card.missingFacts.join("、")}」`)
+        if (card.missingExecution.length) parts.push(`缺少${card.missingExecution.map((audit) => audit.label).join("、")}执行证据`)
+        if (card.weakExecution && !card.missingExecution.length) parts.push("场景目标/冲突/转折/钩子执行证据不足")
+        return `场景卡 ${card.index} ${parts.join("，")}`
+      }).join("；")}。`,
       cardAudits,
     }
   }
   return {
     status: "eligible" as const,
-    reason: `场景卡角色义务通过：${cardAudits.length} 张场景卡的具体角色均进入正文。`,
+    reason: `场景卡执行义务通过：${cardAudits.length} 张场景卡的角色、事实与目标/冲突/转折/钩子均进入正文。`,
     cardAudits,
   }
 }
@@ -6857,7 +7101,7 @@ function extractSceneCardsFromBlueprint(blueprint: string): DraftSceneCard[] {
         const conflict = String(rawCard.conflict || "").trim()
         const turn = String(rawCard.turn || "").trim()
         const endHook = String(rawCard.endHook || "").trim()
-        if (!goal && !conflict && !turn && !endHook) return null
+        if (!goal && !conflict && !turn && !endHook && requiredCharacters.length === 0 && requiredFacts.length === 0) return null
         return {
           index: Number(rawCard.index) || cardIndex + 1,
           goal,
