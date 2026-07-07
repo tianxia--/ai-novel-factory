@@ -626,6 +626,41 @@ test("production acceptance runner plan-only does not persist AIGC settings", as
   assert.equal(report.steps[1].status, "passed")
 })
 
+test("production acceptance runner rejects stale core dist runtime", async () => {
+  const { assertAcceptanceRuntimeFreshness } = await loadRunner()
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-acceptance-runtime-"))
+  const srcDir = path.join(root, "packages", "ai-novel-core", "src")
+  const distDir = path.join(root, "packages", "ai-novel-core", "dist")
+  await fs.mkdir(srcDir, { recursive: true })
+  await fs.mkdir(distDir, { recursive: true })
+  const sourceFile = path.join(srcDir, "studio-server.ts")
+  const distStudio = path.join(distDir, "studio-server.js")
+  const distIndex = path.join(distDir, "index.js")
+  await fs.writeFile(sourceFile, "export const source = true\n")
+  await fs.writeFile(distStudio, "export const studio = true\n")
+  await fs.writeFile(distIndex, "export const index = true\n")
+  const oldTime = new Date("2026-01-01T00:00:00.000Z")
+  const newTime = new Date("2026-01-01T00:01:00.000Z")
+  await fs.utimes(distStudio, oldTime, oldTime)
+  await fs.utimes(distIndex, oldTime, oldTime)
+  await fs.utimes(sourceFile, newTime, newTime)
+
+  await assert.rejects(
+    () => assertAcceptanceRuntimeFreshness({ workspaceRoot: root }),
+    /dist is older/,
+  )
+
+  const newerDist = new Date("2026-01-01T00:02:00.000Z")
+  await fs.utimes(distStudio, newerDist, newerDist)
+  await fs.utimes(distIndex, newerDist, newerDist)
+  const fresh = await assertAcceptanceRuntimeFreshness({ workspaceRoot: root })
+  assert.equal(fresh.stale, false)
+  assert.equal(fresh.skipped, false)
+
+  const skipped = await assertAcceptanceRuntimeFreshness({ workspaceRoot: root, runtimeFreshnessCheck: false })
+  assert.equal(skipped.skipped, true)
+})
+
 test("production acceptance runner rejects thin foundations and dry repeated prose", async () => {
   const {
     auditStoryFoundationForAcceptance,
@@ -1354,6 +1389,7 @@ test("production acceptance runner preserves long-run options in recovery comman
     autoApproveStyle: true,
     autoApproveFoundation: true,
     autoRepairStoryAssets: false,
+    runtimeFreshnessCheck: false,
     providerHealthCheck: false,
     maxAdvanceSteps: 333,
     maxStaleSteps: 17,
@@ -1379,6 +1415,7 @@ test("production acceptance runner preserves long-run options in recovery comman
   assert.match(recovery.resumeCommand, /--aigc-detector-threshold 0\.72/)
   assert.match(recovery.resumeCommand, /--aigc-detector-timeout-ms 45000/)
   assert.match(recovery.resumeCommand, /--no-story-repair/)
+  assert.match(recovery.resumeCommand, /--skip-runtime-freshness-check/)
   assert.match(recovery.resumeCommand, /--skip-provider-health-check/)
   assert.match(recovery.resumeCommand, /--max-advance-steps 333/)
   assert.match(recovery.resumeCommand, /--max-stale-steps 17/)

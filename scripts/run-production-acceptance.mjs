@@ -66,6 +66,7 @@ function usage() {
     "  --auto-approve-style           Explicitly approve the generated style candidate.",
     "  --auto-approve-foundation      Explicitly approve story foundation after planning.",
     "  --no-story-repair              Do not call story asset repair if planning assets are weak.",
+    "  --skip-runtime-freshness-check Skip dist-vs-source freshness preflight.",
     "  --skip-provider-health-check   Skip the lightweight real LLM connectivity check.",
     "  --plan-only                    Only validate config and print the intended flow.",
     "  --stop-after-style             Stop after Style Evolution gate.",
@@ -110,6 +111,7 @@ function parseArgs(argv) {
     autoApproveStyle: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_STYLE),
     autoApproveFoundation: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_FOUNDATION),
     autoRepairStoryAssets: true,
+    runtimeFreshnessCheck: !readBoolean(process.env.AI_NOVEL_ACCEPTANCE_SKIP_RUNTIME_FRESHNESS_CHECK),
     providerHealthCheck: !readBoolean(process.env.AI_NOVEL_ACCEPTANCE_SKIP_PROVIDER_HEALTH_CHECK),
     planOnly: false,
     stopAfterStyle: false,
@@ -172,6 +174,8 @@ function parseArgs(argv) {
       options.autoApproveFoundation = true
     } else if (arg === "--no-story-repair") {
       options.autoRepairStoryAssets = false
+    } else if (arg === "--skip-runtime-freshness-check") {
+      options.runtimeFreshnessCheck = false
     } else if (arg === "--skip-provider-health-check") {
       options.providerHealthCheck = false
     } else if (arg === "--plan-only") {
@@ -274,6 +278,7 @@ function buildAcceptanceResumeCommand(options = {}, projectId = "") {
   if (options.autoApproveStyle) args.push("--auto-approve-style")
   if (options.autoApproveFoundation) args.push("--auto-approve-foundation")
   if (options.autoRepairStoryAssets === false) args.push("--no-story-repair")
+  if (options.runtimeFreshnessCheck === false) args.push("--skip-runtime-freshness-check")
   if (options.providerHealthCheck === false) args.push("--skip-provider-health-check")
   if (options.stopAfterStyle) args.push("--stop-after-style")
   if (options.stopAfterFoundation) args.push("--stop-after-foundation")
@@ -475,6 +480,71 @@ function assertLongFormTarget(options) {
       maxTotalWords: options.maxTotalWords,
     })
   }
+}
+
+async function latestFileStat(rootDir, predicate) {
+  let latest = null
+  async function visit(dir) {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        await visit(fullPath)
+      } else if (entry.isFile() && predicate(fullPath)) {
+        const stat = await fs.stat(fullPath)
+        if (!latest || stat.mtimeMs > latest.mtimeMs) {
+          latest = { path: fullPath, mtimeMs: stat.mtimeMs }
+        }
+      }
+    }
+  }
+  await visit(rootDir)
+  return latest
+}
+
+export async function assertAcceptanceRuntimeFreshness(options = {}) {
+  if (options.runtimeFreshnessCheck === false) {
+    return { skipped: true, reason: "disabled_by_flag" }
+  }
+  const workspaceRoot = path.resolve(options.workspaceRoot || WORKSPACE_ROOT)
+  const coreRoot = path.join(workspaceRoot, "packages", "ai-novel-core")
+  const srcRoot = path.join(coreRoot, "src")
+  const distEntries = [
+    path.join(coreRoot, "dist", "studio-server.js"),
+    path.join(coreRoot, "dist", "index.js"),
+  ]
+  const source = await latestFileStat(srcRoot, (filePath) => filePath.endsWith(".ts"))
+  const distStats = []
+  for (const entry of distEntries) {
+    const stat = await fs.stat(entry).catch(() => null)
+    if (!stat) {
+      throw new AcceptanceError("Acceptance runtime dist files are missing.", {
+        missing: entry,
+        buildCommand: "rtk npm --prefix packages/ai-novel-core run build",
+        nextAction: "Build ai-novel-core before running real production acceptance.",
+      })
+    }
+    distStats.push({ path: entry, mtimeMs: stat.mtimeMs })
+  }
+  const oldestDist = distStats.reduce((oldest, current) => current.mtimeMs < oldest.mtimeMs ? current : oldest)
+  const stale = Boolean(source && source.mtimeMs > oldestDist.mtimeMs + 1000)
+  const result = {
+    skipped: false,
+    stale,
+    latestSourcePath: source?.path || null,
+    latestSourceMtimeMs: source?.mtimeMs || null,
+    oldestDistPath: oldestDist.path,
+    oldestDistMtimeMs: oldestDist.mtimeMs,
+    checkedDistEntries: distStats,
+  }
+  if (stale) {
+    throw new AcceptanceError("Acceptance runtime dist is older than ai-novel-core source.", {
+      ...result,
+      buildCommand: "rtk npm --prefix packages/ai-novel-core run build",
+      nextAction: "Build ai-novel-core so production acceptance runs against the current core engine.",
+    })
+  }
+  return result
 }
 
 async function loadStudioApi() {
@@ -4949,6 +5019,14 @@ async function main() {
 
   try {
     assertLongFormTarget(options)
+    const runtimeFreshness = await assertAcceptanceRuntimeFreshness(options)
+    report.steps.push({
+      step: "runtime_freshness",
+      status: runtimeFreshness.skipped ? "skipped" : "passed",
+      at: now(),
+      ...runtimeFreshness,
+    })
+    await checkpoint("runtime_freshness_checked", { runtimeFreshness })
     const handleNovelStudioApi = await loadStudioApi()
     const api = createApi(options.rootDir, handleNovelStudioApi, report)
 
