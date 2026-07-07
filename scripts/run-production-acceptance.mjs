@@ -311,6 +311,19 @@ function acceptanceAuditPassed(audit) {
   return audit?.passed === true && audit?.summary?.skipped !== true
 }
 
+function acceptanceNumberInRange(value, min, max) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return false
+  if (Number.isFinite(Number(min)) && number < Number(min)) return false
+  if (Number.isFinite(Number(max)) && number > Number(max)) return false
+  return true
+}
+
+function acceptancePositiveNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0
+}
+
 function acceptanceRequirement(id, label, passed, audits, evidence) {
   return {
     id,
@@ -326,7 +339,13 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
     acceptanceRequirement(
       "long_form_word_count",
       "自动化完成 10-30 万字长篇正文",
-      acceptanceAuditPassed(audits.readerWordCount),
+      acceptanceAuditPassed(audits.readerWordCount)
+        && acceptanceNumberInRange(
+          audits.readerWordCount?.summary?.actualTotalWords,
+          options.minTotalWords,
+          options.maxTotalWords,
+        )
+        && acceptancePositiveNumber(audits.readerWordCount?.summary?.chapters),
       ["readerWordCount"],
       {
         targetRange: [options.minTotalWords, options.maxTotalWords],
