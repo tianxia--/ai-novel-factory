@@ -4202,6 +4202,136 @@ function hasCausalBlueprint(blueprint = "") {
     && blueprint.includes("## Next Chapter Handoff")
 }
 
+const GENERIC_FORESHADOWING_OPERATION_TERMS = new Set([
+  "新增",
+  "推进",
+  "回收",
+  "埋设",
+  "铺设",
+  "设置",
+  "揭示",
+  "明确",
+  "一个",
+  "一条",
+  "一枚",
+  "可追踪",
+  "伏笔",
+  "主线",
+  "角色",
+  "伤口",
+  "关系",
+  "关联",
+  "正文",
+  "本章",
+  "下一章",
+  "必须",
+  "处理",
+])
+
+const FORESHADOWING_OPERATION_SPLIT_PATTERN = /(?:新增|推进|回收|埋设|铺设|设置|揭示|明确|可追踪|伏笔|一个|一条|一枚|以及|并且|并|或者|或|与|和|会|将|在|把|让|被|从|到|成为|进入|正文|事实|关系|关联|主线|角色|伤口|本章|下一章|必须|处理|完成|建立|发现|留下|这个|那个|它)/u
+
+const FORESHADOWING_EVIDENCE_CUE_PATTERN = /显纹|显出|纹路|裂纹|暗纹|水纹|雨水|遇水|潮|湿|反应|发烫|发冷|变色|亮|编号|对不上|暗号|不该|异常|痕|印记|标记|露出|留下|未解|旧案/u
+
+function normalizeForeshadowingOperationTerm(value = "") {
+  return value
+    .replace(/[^\p{Script=Han}A-Za-z0-9·]/gu, "")
+    .trim()
+}
+
+function extractForeshadowingOperationTerms(
+  operation = "",
+  task?: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract?: ContinuityContract,
+) {
+  const protagonist = continuityContract?.lockedProtagonistName || ""
+  const operationText = operation.trim()
+  if (!operationText) return []
+  const anchorTerms = uniqueStrings([
+    ...(task?.causalPlan?.requiredContinuityAnchors || []),
+    ...(continuityContract?.continuityAnchors || []),
+  ])
+    .filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist))
+    .filter((anchor) => operationText.includes(anchor))
+  const splitTerms = operationText
+    .replace(/[，。！？；：:,.!?;()\[\]【】「」『』"']/gu, " ")
+    .split(/\s+/u)
+    .flatMap((chunk) => chunk.split(FORESHADOWING_OPERATION_SPLIT_PATTERN))
+    .map(normalizeForeshadowingOperationTerm)
+    .filter((term) => term.length >= 2 && term.length <= 16)
+    .filter((term) => !GENERIC_FORESHADOWING_OPERATION_TERMS.has(term))
+    .filter((term) => !CONTINUITY_ANCHOR_STOPWORDS.has(term))
+    .filter((term) => term !== protagonist)
+  return uniqueStrings([...anchorTerms, ...splitTerms]).slice(0, 8)
+}
+
+function foreshadowingTermMatchesBody(term: string, body: string) {
+  if (!term) return false
+  if (body.includes(term)) return true
+  if (/遇水|水/u.test(term) && /雨水|水|潮|湿/u.test(body) && /显|纹|痕|变色/u.test(body)) {
+    return true
+  }
+  if (/显纹|纹路|裂纹|暗纹|痕/u.test(term) && /显|纹|裂|痕/u.test(body)) {
+    return true
+  }
+  const chars = uniqueStrings([...term].filter((char) =>
+    /[\p{Script=Han}]/u.test(char) && !/[的与和或及在会将把让被从到]/u.test(char)
+  ))
+  if (chars.length < 4) return false
+  const hits = chars.filter((char) => body.includes(char)).length
+  return hits >= Math.min(4, chars.length) && hits / chars.length >= 0.75
+}
+
+function extractForeshadowingEvidenceWindows(body: string, terms: string[]) {
+  const windows: string[] = []
+  for (const term of terms) {
+    let index = body.indexOf(term)
+    while (index >= 0 && windows.length < 8) {
+      const start = Math.max(0, index - 80)
+      const end = Math.min(body.length, index + term.length + 80)
+      windows.push(body.slice(start, end))
+      index = body.indexOf(term, index + term.length)
+    }
+  }
+  return uniqueStrings(windows)
+}
+
+function evaluateForeshadowingOperationEvidence(
+  body: string,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract?: ContinuityContract,
+) {
+  const operation = task.causalPlan?.foreshadowingOperation?.trim() || ""
+  const requiredTerms = extractForeshadowingOperationTerms(operation, task, continuityContract)
+  if (!operation || requiredTerms.length === 0) {
+    return {
+      status: "eligible" as const,
+      required: false,
+      operation,
+      requiredTerms,
+      matchedTerms: [],
+      hasCue: true,
+      reason: "伏笔操作为泛化占位，跳过硬校验。",
+    }
+  }
+  const matchedTerms = requiredTerms.filter((term) => foreshadowingTermMatchesBody(term, body))
+  const evidenceWindows = extractForeshadowingEvidenceWindows(body, matchedTerms)
+  const cueText = evidenceWindows.join("\n") || body
+  const hasCue = FORESHADOWING_EVIDENCE_CUE_PATTERN.test(cueText)
+  const requiredMatchCount = Math.min(2, requiredTerms.length)
+  const hasConcreteOperation = matchedTerms.length >= requiredMatchCount && (matchedTerms.length >= 2 || hasCue)
+  return {
+    status: hasConcreteOperation ? ("eligible" as const) : ("quarantined" as const),
+    required: true,
+    operation,
+    requiredTerms,
+    matchedTerms,
+    hasCue,
+    reason: hasConcreteOperation
+      ? `伏笔操作已进入正文：要求「${operation}」，命中=${matchedTerms.slice(0, 4).join("、") || "隐性证据"}；异常/反应信号=${hasCue ? "有" : "弱"}。`
+      : `伏笔操作证据不足：要求「${operation}」，命中=${matchedTerms.slice(0, 4).join("、") || "无"}；异常/反应信号=${hasCue ? "有" : "弱"}。`,
+  }
+}
+
 function evaluateCausalExecutionEvidence(
   draft: string,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -4222,17 +4352,21 @@ function evaluateCausalExecutionEvidence(
   const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body)
   const ending = body.slice(Math.max(0, body.length - 700))
   const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending)
+  const foreshadowingEvidence = evaluateForeshadowingOperationEvidence(body, task, continuityContract)
   const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length
+  const hasForeshadowingExecution = foreshadowingEvidence.status === "eligible"
+  const passed = score >= 3 && hasForeshadowingExecution
   return {
-    status: score >= 3 ? ("eligible" as const) : ("quarantined" as const),
+    status: passed ? ("eligible" as const) : ("quarantined" as const),
     score,
     matchedAnchors,
     hasVisibleDecision,
     hasConsequence,
     hasHandoff,
-    reason: score >= 3
-      ? `正文以可见事件执行因果合同：锚点=${matchedAnchors.slice(0, 4).join("、") || "隐性承接"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`
-      : `因果执行证据不足：锚点=${matchedAnchors.slice(0, 4).join("、") || "无"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`,
+    foreshadowingEvidence,
+    reason: passed
+      ? `正文以可见事件执行因果合同：锚点=${matchedAnchors.slice(0, 4).join("、") || "隐性承接"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}；${foreshadowingEvidence.reason}`
+      : `因果执行证据不足：锚点=${matchedAnchors.slice(0, 4).join("、") || "无"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}；${foreshadowingEvidence.reason}`,
   }
 }
 

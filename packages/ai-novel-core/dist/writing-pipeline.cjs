@@ -8895,6 +8895,106 @@ async function writeProductionWritingPlan(projectRoot, paths, state, options = {
 function hasCausalBlueprint(blueprint = "") {
   return blueprint.includes("# Detailed Chapter Blueprint") && blueprint.includes("## Previous Inputs") && blueprint.includes("## Causal Objective") && blueprint.includes("## Irreversible Change") && blueprint.includes("## Character State Delta") && blueprint.includes("## Required Continuity Anchors") && blueprint.includes("## Next Chapter Handoff");
 }
+var GENERIC_FORESHADOWING_OPERATION_TERMS = /* @__PURE__ */ new Set([
+  "\u65B0\u589E",
+  "\u63A8\u8FDB",
+  "\u56DE\u6536",
+  "\u57CB\u8BBE",
+  "\u94FA\u8BBE",
+  "\u8BBE\u7F6E",
+  "\u63ED\u793A",
+  "\u660E\u786E",
+  "\u4E00\u4E2A",
+  "\u4E00\u6761",
+  "\u4E00\u679A",
+  "\u53EF\u8FFD\u8E2A",
+  "\u4F0F\u7B14",
+  "\u4E3B\u7EBF",
+  "\u89D2\u8272",
+  "\u4F24\u53E3",
+  "\u5173\u7CFB",
+  "\u5173\u8054",
+  "\u6B63\u6587",
+  "\u672C\u7AE0",
+  "\u4E0B\u4E00\u7AE0",
+  "\u5FC5\u987B",
+  "\u5904\u7406"
+]);
+var FORESHADOWING_OPERATION_SPLIT_PATTERN = /(?:新增|推进|回收|埋设|铺设|设置|揭示|明确|可追踪|伏笔|一个|一条|一枚|以及|并且|并|或者|或|与|和|会|将|在|把|让|被|从|到|成为|进入|正文|事实|关系|关联|主线|角色|伤口|本章|下一章|必须|处理|完成|建立|发现|留下|这个|那个|它)/u;
+var FORESHADOWING_EVIDENCE_CUE_PATTERN = /显纹|显出|纹路|裂纹|暗纹|水纹|雨水|遇水|潮|湿|反应|发烫|发冷|变色|亮|编号|对不上|暗号|不该|异常|痕|印记|标记|露出|留下|未解|旧案/u;
+function normalizeForeshadowingOperationTerm(value = "") {
+  return value.replace(/[^\p{Script=Han}A-Za-z0-9·]/gu, "").trim();
+}
+function extractForeshadowingOperationTerms(operation = "", task, continuityContract) {
+  const protagonist = continuityContract?.lockedProtagonistName || "";
+  const operationText = operation.trim();
+  if (!operationText) return [];
+  const anchorTerms = uniqueStrings([
+    ...task?.causalPlan?.requiredContinuityAnchors || [],
+    ...continuityContract?.continuityAnchors || []
+  ]).filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist)).filter((anchor) => operationText.includes(anchor));
+  const splitTerms = operationText.replace(/[，。！？；：:,.!?;()\[\]【】「」『』"']/gu, " ").split(/\s+/u).flatMap((chunk) => chunk.split(FORESHADOWING_OPERATION_SPLIT_PATTERN)).map(normalizeForeshadowingOperationTerm).filter((term) => term.length >= 2 && term.length <= 16).filter((term) => !GENERIC_FORESHADOWING_OPERATION_TERMS.has(term)).filter((term) => !CONTINUITY_ANCHOR_STOPWORDS.has(term)).filter((term) => term !== protagonist);
+  return uniqueStrings([...anchorTerms, ...splitTerms]).slice(0, 8);
+}
+function foreshadowingTermMatchesBody(term, body) {
+  if (!term) return false;
+  if (body.includes(term)) return true;
+  if (/遇水|水/u.test(term) && /雨水|水|潮|湿/u.test(body) && /显|纹|痕|变色/u.test(body)) {
+    return true;
+  }
+  if (/显纹|纹路|裂纹|暗纹|痕/u.test(term) && /显|纹|裂|痕/u.test(body)) {
+    return true;
+  }
+  const chars = uniqueStrings([...term].filter(
+    (char) => /[\p{Script=Han}]/u.test(char) && !/[的与和或及在会将把让被从到]/u.test(char)
+  ));
+  if (chars.length < 4) return false;
+  const hits = chars.filter((char) => body.includes(char)).length;
+  return hits >= Math.min(4, chars.length) && hits / chars.length >= 0.75;
+}
+function extractForeshadowingEvidenceWindows(body, terms) {
+  const windows = [];
+  for (const term of terms) {
+    let index = body.indexOf(term);
+    while (index >= 0 && windows.length < 8) {
+      const start = Math.max(0, index - 80);
+      const end = Math.min(body.length, index + term.length + 80);
+      windows.push(body.slice(start, end));
+      index = body.indexOf(term, index + term.length);
+    }
+  }
+  return uniqueStrings(windows);
+}
+function evaluateForeshadowingOperationEvidence(body, task, continuityContract) {
+  const operation = task.causalPlan?.foreshadowingOperation?.trim() || "";
+  const requiredTerms = extractForeshadowingOperationTerms(operation, task, continuityContract);
+  if (!operation || requiredTerms.length === 0) {
+    return {
+      status: "eligible",
+      required: false,
+      operation,
+      requiredTerms,
+      matchedTerms: [],
+      hasCue: true,
+      reason: "\u4F0F\u7B14\u64CD\u4F5C\u4E3A\u6CDB\u5316\u5360\u4F4D\uFF0C\u8DF3\u8FC7\u786C\u6821\u9A8C\u3002"
+    };
+  }
+  const matchedTerms = requiredTerms.filter((term) => foreshadowingTermMatchesBody(term, body));
+  const evidenceWindows = extractForeshadowingEvidenceWindows(body, matchedTerms);
+  const cueText = evidenceWindows.join("\n") || body;
+  const hasCue = FORESHADOWING_EVIDENCE_CUE_PATTERN.test(cueText);
+  const requiredMatchCount = Math.min(2, requiredTerms.length);
+  const hasConcreteOperation = matchedTerms.length >= requiredMatchCount && (matchedTerms.length >= 2 || hasCue);
+  return {
+    status: hasConcreteOperation ? "eligible" : "quarantined",
+    required: true,
+    operation,
+    requiredTerms,
+    matchedTerms,
+    hasCue,
+    reason: hasConcreteOperation ? `\u4F0F\u7B14\u64CD\u4F5C\u5DF2\u8FDB\u5165\u6B63\u6587\uFF1A\u8981\u6C42\u300C${operation}\u300D\uFF0C\u547D\u4E2D=${matchedTerms.slice(0, 4).join("\u3001") || "\u9690\u6027\u8BC1\u636E"}\uFF1B\u5F02\u5E38/\u53CD\u5E94\u4FE1\u53F7=${hasCue ? "\u6709" : "\u5F31"}\u3002` : `\u4F0F\u7B14\u64CD\u4F5C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u8981\u6C42\u300C${operation}\u300D\uFF0C\u547D\u4E2D=${matchedTerms.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u5F02\u5E38/\u53CD\u5E94\u4FE1\u53F7=${hasCue ? "\u6709" : "\u5F31"}\u3002`
+  };
+}
 function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
   const body = extractNarrativeBody(draft);
   const protagonist = continuityContract?.lockedProtagonistName || "";
@@ -8908,15 +9008,19 @@ function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
   const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body);
   const ending = body.slice(Math.max(0, body.length - 700));
   const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending);
+  const foreshadowingEvidence = evaluateForeshadowingOperationEvidence(body, task, continuityContract);
   const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length;
+  const hasForeshadowingExecution = foreshadowingEvidence.status === "eligible";
+  const passed = score >= 3 && hasForeshadowingExecution;
   return {
-    status: score >= 3 ? "eligible" : "quarantined",
+    status: passed ? "eligible" : "quarantined",
     score,
     matchedAnchors,
     hasVisibleDecision,
     hasConsequence,
     hasHandoff,
-    reason: score >= 3 ? `\u6B63\u6587\u4EE5\u53EF\u89C1\u4E8B\u4EF6\u6267\u884C\u56E0\u679C\u5408\u540C\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u9690\u6027\u627F\u63A5"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002` : `\u56E0\u679C\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002`
+    foreshadowingEvidence,
+    reason: passed ? `\u6B63\u6587\u4EE5\u53EF\u89C1\u4E8B\u4EF6\u6267\u884C\u56E0\u679C\u5408\u540C\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u9690\u6027\u627F\u63A5"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\uFF1B${foreshadowingEvidence.reason}` : `\u56E0\u679C\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\uFF1B${foreshadowingEvidence.reason}`
   };
 }
 var GENERIC_SCENE_CHARACTER_TERMS = [

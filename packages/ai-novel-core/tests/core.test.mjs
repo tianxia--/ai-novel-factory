@@ -8974,6 +8974,189 @@ test("chapter final gate blocks polished drafts that drop causal execution", asy
   }
 })
 
+test("chapter final gate blocks polished drafts that drop specific foreshadowing operations", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-foreshadow-final-gate-"))
+  const {
+    createManagedAutonomousProject,
+    runChapterProductionPipeline,
+    withFactoryDb,
+  } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  const previousWritingMode = process.env.AI_NOVEL_WRITING_MODE
+  const receivedBodies = []
+  const progressEvents = []
+  const draftWithForeshadowing = [
+    "# 第一章 缺页账本",
+    "",
+    "## Draft Body",
+    "",
+    "雨水沿窗纸往下走，沈砚把缺页账册推到灯下，旧印章扣在纸边。",
+    "他决定先扣住旧印章，不能把缺页交出去，否则少尹的人明日就会来问。",
+    "雨水滴在旧印章边，印面显出第二层细纹，正好贴着缺页的裁口。",
+    "老周站在门边，低声道：「沈大人，谁动过这一页？」",
+    "沈砚收起半页湿纸：「你欠我的，是把门外脚步拦住。」",
+    "这一扣之后，下一章必须处理门外脚步、旧印章和那本缺页账册。",
+  ].join("\n")
+  const finalWithoutForeshadowing = [
+    "# 第一章 缺页账本",
+    "",
+    "## Final Body",
+    "",
+    "夜风压住账房的窗纸，沈砚把缺页账册推到灯下，旧印章扣在纸边。",
+    "他决定先扣住旧印章，不能把缺页交出去，否则少尹的人明日就会来问。",
+    "老周站在门边，低声道：「沈大人，谁动过这一页？」",
+    "沈砚收起半页纸：「你欠我的，是把门外脚步拦住。」",
+    "灯芯亮了一点，墙上的影子矮下去。",
+    "这一扣之后，下一章必须处理门外脚步、旧印章和那本缺页账册。",
+  ].join("\n")
+  const passingQualityReport = [
+    "# Chapter Quality Report",
+    "",
+    "## Scores",
+    "",
+    "| Dimension | Score | Notes |",
+    "|---|---:|---|",
+    "| 字数完成度 | 9/10 | 当前估算 320，目标 80。 |",
+    "| 情节推进 | 8/10 | 包含冲突、压力或选择。 |",
+    "| 章末钩子 | 8/10 | 包含钩子或后续期待。 |",
+    "| 蓝图执行 | 8/10 | 基于详细章节蓝图执行。 |",
+    "| 综合评分 | 8/10 | 可进入润色。 |",
+    "",
+    "WORD_COUNT_CHECK: 320/80",
+    "QUALITY_GATE: passed",
+    "",
+    "## Required Fixes",
+    "- 暂无阻塞性问题；润色时继续压低 AI 模板句。",
+  ].join("\n")
+  const server = http.createServer((request, response) => {
+    let rawBody = ""
+    request.on("data", (chunk) => { rawBody += chunk })
+    request.on("end", () => {
+      if (request.url !== "/responses") {
+        response.writeHead(404).end()
+        return
+      }
+      const receivedBody = JSON.parse(rawBody)
+      receivedBodies.push(receivedBody)
+      const requestText = JSON.stringify(receivedBody)
+      const outputText = /请根据质量报告自然化以下章节/u.test(requestText)
+        ? finalWithoutForeshadowing
+        : /请审核以下章节草稿/u.test(requestText)
+          ? passingQualityReport
+          : draftWithForeshadowing
+      if (receivedBody.stream) {
+        response.writeHead(200, { "content-type": "text/event-stream" })
+        response.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: outputText })}\n\n`)
+        response.write("data: [DONE]\n\n")
+        response.end()
+      } else {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({ output_text: outputText }))
+      }
+    })
+  })
+
+  delete process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_WRITING_MODE = "quality"
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.listen(0, "127.0.0.1", resolve)
+      server.once("error", reject)
+    })
+    const address = server.address()
+    assert.ok(address && typeof address === "object")
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+    await approveProductionReadinessForTest(created.project.projectRoot, created.state, {
+      projectTitle: "雨账",
+      idea: "一名审雨官发现降雨记录被篡改",
+    })
+    await withFactoryDb(tempDir, async (db) => {
+      db.addLlmConfig({
+        name: "Foreshadow Final Gate Test",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        apiKey: "test-key",
+        modelName: "draft-model",
+        apiMode: "responses",
+        timeoutMs: 2000,
+        isActive: true,
+      })
+    })
+
+    const projectRoot = created.project.projectRoot
+    const workspaceDir = path.join(projectRoot, ".ai-novel")
+    const paths = {
+      workspaceDir,
+      plansDir: path.join(workspaceDir, "plans"),
+      reportsDir: path.join(workspaceDir, "reports"),
+      chaptersDir: path.join(workspaceDir, "chapters"),
+      memoryDir: path.join(workspaceDir, "memory"),
+      styleDir: path.join(workspaceDir, "style"),
+      styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+      styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+      styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+      styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+      consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+      protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+      relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+      characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+      characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+      masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+      chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+    }
+    const task = {
+      ...created.state.plan.chapterTasks[0],
+      title: "第一章 缺页账本",
+      targetWords: 80,
+      causalPlan: {
+        ...created.state.plan.chapterTasks[0].causalPlan,
+        requiredContinuityAnchors: ["缺页账册", "旧印章"],
+        foreshadowingOperation: "埋设旧印章会遇水显纹。",
+        nextHandoff: "下一章必须处理门外脚步、旧印章和那本缺页账册。",
+      },
+    }
+
+    const result = await runChapterProductionPipeline(projectRoot, paths, created.state, task, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      writingMode: "quality",
+      bypassAigcGate: true,
+      maxRevisionAttempts: 0,
+      onProgress: (event) => progressEvents.push(event),
+    })
+
+    assert.ok(receivedBodies.some((body) => /自然化/u.test(JSON.stringify(body))))
+    assert.equal(result.qualityGate.status, "blocked")
+    assert.match(result.qualityGate.reason, /最终稿因果执行硬门槛失败/)
+    assert.match(result.qualityGate.reason, /伏笔操作证据不足|遇水显纹/)
+    assert.ok(progressEvents.some((event) =>
+      event.step === "naturalness_completed" && event.status === "blocked"
+    ))
+    const chapterManifest = JSON.parse(await fs.readFile(path.join(paths.chaptersDir, "chapter-001.versions.json"), "utf8"))
+    assert.equal(chapterManifest.qualityGate.status, "blocked")
+    assert.match(chapterManifest.qualityGate.reason, /伏笔操作证据不足|遇水显纹/)
+    assert.equal(chapterManifest.locked, false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+    if (previousWritingMode === undefined) {
+      delete process.env.AI_NOVEL_WRITING_MODE
+    } else {
+      process.env.AI_NOVEL_WRITING_MODE = previousWritingMode
+    }
+  }
+})
+
 test("chapter final gate blocks polished drafts that drop scene-card required characters", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-scene-character-final-gate-"))
   const {
@@ -10369,6 +10552,74 @@ test("quality report accepts causal execution shown through concrete scene evide
   const report = createQualityReport(state, task, draft, blueprint)
   assert.match(report, /因果合同执行 \| 8\/10/)
   assert.doesNotMatch(report, /正文没有清晰执行承接-选择-代价-交棒/)
+})
+
+test("quality report blocks specific foreshadowing operations missing from prose", async () => {
+  const { createQualityReport } = await loadCore()
+  const task = {
+    chapterNumber: 1,
+    title: "缺页账本",
+    targetWords: 120,
+    causalPlan: {
+      previousInput: "承接审雨官制度与雨册异常。",
+      sceneObjective: "沈砚发现账本被人动过。",
+      protagonistDecision: "沈砚选择扣下旧印章。",
+      irreversibleConsequence: "少尹的人明日来问，旧印章不能再交出去。",
+      nextHandoff: "下一章必须处理门外脚步、旧印章和缺页账册。",
+      requiredContinuityAnchors: ["缺页账册", "旧印章", "门外脚步"],
+      characterStateDelta: "沈砚与老周的信任出现裂缝。",
+      foreshadowingOperation: "埋设旧印章会遇水显纹。",
+    },
+  }
+  const state = {
+    project: { title: "雨账", idea: "一名审雨官发现降雨记录被篡改" },
+    runtime: { stage: "drafting" },
+    plan: { totalChapters: 12, chapterTasks: [task] },
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "## Previous Inputs",
+    "承接审雨官制度与雨册异常。",
+    "## Causal Objective",
+    "沈砚发现账本被人动过。",
+    "## Irreversible Change",
+    "少尹的人明日来问，旧印章不能再交出去。",
+    "## Character State Delta",
+    "沈砚与老周的信任出现裂缝。",
+    "## Required Continuity Anchors",
+    "- 缺页账册",
+    "- 旧印章",
+    "- 门外脚步",
+    "## Next Chapter Handoff",
+    "下一章必须处理门外脚步、旧印章和缺页账册。",
+    "Event Sequence",
+  ].join("\n")
+  const draftWithoutForeshadowing = [
+    "## Final Body",
+    "沈砚把缺页账册推到灯下，旧印章扣在纸边。",
+    "他决定先扣住旧印章，不能把缺页交出去，否则少尹的人明日就会来问。",
+    "老周站在门边，低声道：「沈大人，谁动过这一页？」",
+    "沈砚收起半页纸：「你欠我的，是把门外脚步拦住。」",
+    "这一扣之后，下一章必须处理门外脚步、旧印章和那本缺页账册。",
+  ].join("\n")
+  const draftWithForeshadowing = [
+    "## Final Body",
+    "雨水沿窗纸往下走，沈砚把缺页账册推到灯下，旧印章扣在纸边。",
+    "他决定先扣住旧印章，不能把缺页交出去，否则少尹的人明日就会来问。",
+    "雨水滴在旧印章边，印面显出第二层细纹，正好贴着缺页的裁口。",
+    "老周站在门边，低声道：「沈大人，谁动过这一页？」",
+    "沈砚收起半页湿纸：「你欠我的，是把门外脚步拦住。」",
+    "这一扣之后，下一章必须处理门外脚步、旧印章和那本缺页账册。",
+  ].join("\n")
+
+  const blockedReport = createQualityReport(state, task, draftWithoutForeshadowing, blueprint)
+  assert.match(blockedReport, /因果合同执行 \| 4\/10/)
+  assert.match(blockedReport, /伏笔操作证据不足/)
+  assert.match(blockedReport, /综合评分 \| 5\/10/)
+
+  const passingReport = createQualityReport(state, task, draftWithForeshadowing, blueprint)
+  assert.match(passingReport, /因果合同执行 \| 8\/10/)
+  assert.match(passingReport, /伏笔操作已进入正文/)
 })
 
 test("character profile gate requires per-character evidence windows", async () => {
