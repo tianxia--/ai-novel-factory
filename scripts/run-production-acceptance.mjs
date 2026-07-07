@@ -324,6 +324,12 @@ function acceptancePositiveNumber(value) {
   return Number.isFinite(number) && number > 0
 }
 
+function acceptanceNumberAtLeast(value, min) {
+  const number = Number(value)
+  const minimum = Number(min)
+  return Number.isFinite(number) && Number.isFinite(minimum) && number >= minimum
+}
+
 function acceptanceRequirement(id, label, passed, audits, evidence) {
   return {
     id,
@@ -376,7 +382,20 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
     acceptanceRequirement(
       "relationship_arcs",
       "人物关系有压力、变化和跨章推进",
-      acceptanceAuditPassed(audits.relationshipArc),
+      acceptanceAuditPassed(audits.relationshipArc)
+        && acceptancePositiveNumber(audits.relationshipArc?.summary?.relationshipEntries)
+        && acceptanceNumberAtLeast(
+          audits.relationshipArc?.summary?.activeRelationships,
+          audits.relationshipArc?.summary?.requiredRelationships,
+        )
+        && acceptanceNumberAtLeast(
+          audits.relationshipArc?.summary?.evolvingRelationships,
+          audits.relationshipArc?.summary?.requiredRelationships,
+        )
+        && acceptanceNumberAtLeast(
+          audits.relationshipArc?.summary?.chaptersWithRelationshipPressure,
+          audits.relationshipArc?.summary?.requiredCoverage,
+        ),
       ["relationshipArc"],
       audits.relationshipArc?.summary,
     ),
