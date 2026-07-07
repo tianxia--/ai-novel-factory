@@ -2232,6 +2232,149 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
   }
 }
 
+function countLanguageClicheSignals(body) {
+  return countMatches(
+    body,
+    /命运安排|命运.*齿轮|空气.*凝固|眼神.*复杂|微微一愣|心中一紧|脸色一变|沉默良久|内心深处|无法言说|难以形容|说不清|一切都不简单|某种.*情绪|复杂.*情绪|仿佛.*世界|这一刻.*知道|他知道.*必须|她知道.*必须|事情.*严重|未来.*危险|更加复杂|更加危险|陷入沉思|充满疑惑|感到震惊|深深地|终于意识到/gu,
+  )
+}
+
+function countAbstractLanguageSignals(body) {
+  return countMatches(
+    body,
+    /感到|觉得|意识到|明白|知道|复杂|严重|危险|未来|命运|内心|情绪|疑惑|震惊|不安|恐惧|痛苦|悲伤|愤怒|沉重|孤独|迷茫|无法|仿佛|某种/gu,
+  )
+}
+
+function countConcreteCraftSignals(body) {
+  const text = String(body || "")
+  return countCharacterActionSignals(text)
+    + countCharacterPressureSignals(text)
+    + countMatches(text, /雨|风|声|灯|冷|热|湿|血|灰|墨|纸|门|窗|脚步|气味|疼|汗|光|影|呼吸|触感|指腹|掌心|袖口|鞋尖|水声|火星/gu)
+    + countMatches(text, /账本|账册|缺页|信纸|印章|官印|钥匙|地图|旧账|证据|线索|门槛|窗纸|灯火|袖口|鞋尖|纸边|墨味|铜牌|玻璃|伞柄|木匣|水缸|供桌/gu)
+}
+
+function characterBigramDiversity(value) {
+  const chars = Array.from(normalizeAuditText(value))
+  if (chars.length < 2) return 1
+  const bigrams = []
+  for (let index = 0; index < chars.length - 1; index += 1) {
+    bigrams.push(`${chars[index]}${chars[index + 1]}`)
+  }
+  return bigrams.length ? new Set(bigrams).size / bigrams.length : 1
+}
+
+export function auditLanguageCraftForAcceptance(snapshot, options = {}) {
+  const chapters = (Array.isArray(snapshot?.chapters) ? snapshot.chapters : [])
+    .map((chapter) => ({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      body: String(chapter?.body || ""),
+    }))
+    .filter((chapter) => chapter.chapterNumber > 0)
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const totalChapters = Number(snapshot?.project?.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+
+  if (totalChapters < 6 || chapters.length < 6) {
+    return {
+      passed: true,
+      issues: [],
+      summary: {
+        totalChapters,
+        readableChapters: chapters.length,
+        skipped: true,
+        reason: "short-form sample below language craft threshold",
+      },
+      chapters: [],
+    }
+  }
+
+  const chapterAudits = []
+  let craftedChapters = 0
+  let totalClicheSignals = 0
+  let totalAbstractSignals = 0
+  let totalConcreteSignals = 0
+
+  for (const chapter of chapters) {
+    const body = chapter.body
+    const normalizedLength = normalizeAuditText(body).length
+    const denominator = Math.max(1, normalizedLength / 1000)
+    const clicheSignals = countLanguageClicheSignals(body)
+    const abstractSignals = countAbstractLanguageSignals(body)
+    const concreteSignals = countConcreteCraftSignals(body)
+    const clicheDensity = clicheSignals / denominator
+    const abstractDensity = abstractSignals / denominator
+    const concreteDensity = concreteSignals / denominator
+    const bigramDiversity = characterBigramDiversity(body)
+    const allowedClicheSignals = Math.max(2, Math.floor(normalizedLength / 600))
+    const issuesForChapter = []
+
+    if (clicheSignals > allowedClicheSignals) {
+      issuesForChapter.push(`cliche/template phrasing ${clicheSignals}/${allowedClicheSignals}`)
+    }
+    if (abstractDensity > Math.max(14, concreteDensity * 1.3)) {
+      issuesForChapter.push(`abstract emotion density ${abstractDensity.toFixed(1)} exceeds concrete craft density ${concreteDensity.toFixed(1)}`)
+    }
+    if (normalizedLength >= 180 && bigramDiversity < 0.5) {
+      issuesForChapter.push(`low language diversity ${bigramDiversity.toFixed(2)}`)
+    }
+    if (normalizedLength >= 80 && concreteSignals < 3) {
+      issuesForChapter.push(`weak concrete craft signals ${concreteSignals}`)
+    }
+
+    const crafted = issuesForChapter.length === 0
+    if (crafted) craftedChapters += 1
+    totalClicheSignals += clicheSignals
+    totalAbstractSignals += abstractSignals
+    totalConcreteSignals += concreteSignals
+    if (!crafted) {
+      issues.push(`chapter ${chapter.chapterNumber}: ${issuesForChapter.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: chapter.chapterNumber,
+      title: chapter.title,
+      normalizedLength,
+      clicheSignals,
+      allowedClicheSignals,
+      abstractSignals,
+      concreteSignals,
+      clicheDensity,
+      abstractDensity,
+      concreteDensity,
+      bigramDiversity,
+      crafted,
+      issues: issuesForChapter,
+    })
+  }
+
+  const requiredCraftedChapters = Math.ceil(chapters.length * 0.8)
+  const allowedTotalCliches = Math.max(8, Math.ceil(chapters.length * 1.5))
+  if (craftedChapters < requiredCraftedChapters) {
+    issues.push(`language craft chapter coverage ${craftedChapters}/${chapters.length} below required ${requiredCraftedChapters}`)
+  }
+  if (totalClicheSignals > allowedTotalCliches) {
+    issues.push(`cliche/template language signals ${totalClicheSignals} exceed allowed ${allowedTotalCliches}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      readableChapters: chapters.length,
+      craftedChapters,
+      requiredCraftedChapters,
+      totalClicheSignals,
+      allowedTotalCliches,
+      totalAbstractSignals,
+      totalConcreteSignals,
+      skipped: false,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function countDialogueQuotes(text) {
   return countMatches(text, /[「“][^」”]{2,160}[」”]/gu)
 }
@@ -3099,6 +3242,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       chapters: proseTextureAudit.chapters.slice(0, 8),
     })
   }
+  const languageCraftAudit = auditLanguageCraftForAcceptance(auditSnapshot, options)
+  if (!languageCraftAudit.passed) {
+    throw new AcceptanceError("Language craft acceptance audit failed.", {
+      issues: languageCraftAudit.issues.slice(0, 30),
+      summary: languageCraftAudit.summary,
+      chapters: languageCraftAudit.chapters.filter((chapter) => !chapter.crafted).slice(0, 8),
+    })
+  }
   const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(auditSnapshot, options)
   if (!sceneCompletenessAudit.passed) {
     throw new AcceptanceError("Scene completeness acceptance audit failed.", {
@@ -3175,6 +3326,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
+  report.finalLanguageCraftAudit = languageCraftAudit
   report.finalSceneCompletenessAudit = sceneCompletenessAudit
   report.finalCrossChapterVariationAudit = crossChapterVariationAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
@@ -3196,6 +3348,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    languageCraft: languageCraftAudit.summary,
     sceneCompleteness: sceneCompletenessAudit.summary,
     crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
@@ -3221,6 +3374,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    languageCraft: languageCraftAudit.summary,
     sceneCompleteness: sceneCompletenessAudit.summary,
     crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
@@ -3276,6 +3430,7 @@ async function main() {
     finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
+    finalLanguageCraftAudit: null,
     finalSceneCompletenessAudit: null,
     finalCrossChapterVariationAudit: null,
     finalCharacterVoiceAudit: null,

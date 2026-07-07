@@ -274,6 +274,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
+    auditLanguageCraftForAcceptance,
     auditSceneCompletenessForAcceptance,
     auditCrossChapterVariationForAcceptance,
     auditCharacterVoiceForAcceptance,
@@ -318,6 +319,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(proseTextureAudit.passed, true)
   assert.equal(proseTextureAudit.summary.sceneRichChapters, 4)
   assert.equal(proseTextureAudit.summary.variedRhythmChapters, 4)
+
+  const languageCraftAudit = auditLanguageCraftForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(languageCraftAudit.passed, true)
+  assert.equal(languageCraftAudit.summary.skipped, true)
 
   const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(sceneCompletenessAudit.passed, true)
@@ -533,6 +538,16 @@ test("production acceptance runner audits cross-chapter variation", async () => 
   assert.equal(variationAudit.summary.distinctEndings, 8)
 })
 
+test("production acceptance runner audits long-form language craft", async () => {
+  const { auditLanguageCraftForAcceptance } = await loadRunner()
+  const snapshot = variedLongSnapshot()
+
+  const languageCraftAudit = auditLanguageCraftForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(languageCraftAudit.passed, true)
+  assert.equal(languageCraftAudit.summary.craftedChapters, 8)
+  assert.equal(languageCraftAudit.summary.totalClicheSignals <= languageCraftAudit.summary.allowedTotalCliches, true)
+})
+
 test("production acceptance runner rejects repeated chapter templates", async () => {
   const { auditCrossChapterVariationForAcceptance } = await loadRunner()
   const snapshot = structuralSnapshot(false)
@@ -647,6 +662,23 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner rejects cliche-heavy long-form language", async () => {
+  const { auditLanguageCraftForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(true)
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "这一刻，沈砚终于意识到事情非常严重，空气仿佛凝固，命运的齿轮开始转动。",
+      "老周眼神复杂，内心深处有一种无法言说的情绪，少尹也感到震惊，未来只会更加危险。",
+      "所有人都陷入沉思，复杂的情绪在每个人心里蔓延，他们知道一切都不简单。",
+      "这一刻，沈砚终于意识到事情非常严重，空气仿佛凝固，命运的齿轮开始转动。",
+    ].join("\n\n")
+  }
+
+  const languageCraftAudit = auditLanguageCraftForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(languageCraftAudit.passed, false)
+  assert.match(languageCraftAudit.issues.join("\n"), /cliche|abstract emotion|language craft/)
 })
 
 test("production acceptance runner rejects non-novel reader metadata leaks", async () => {
