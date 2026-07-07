@@ -1633,6 +1633,7 @@ function enforceFinalDraftQualityGate(
   protagonistProfile = "",
   continuityContract = createContinuityContract({ state, task, protagonistProfile }),
   characterDossiers?: CharacterDossier[],
+  blueprint = "",
 ) {
   const finalWordCount = wordCount(finalDraft)
   const targetWords = task.targetWords
@@ -1676,6 +1677,17 @@ function enforceFinalDraftQualityGate(
       passed: false,
       status: "blocked" as const,
       reason: `Canon 连续性硬门槛失败：正文未出现必需人物「${missingRequiredName}」。`,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract)
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords,
     }
@@ -1754,7 +1766,7 @@ function enforceFinalDraftQualityGate(
   return {
     ...gate,
     reason: gate.passed || gate.status === "passed"
-      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "该风格问题已作为后续润色建议记录，不阻断章节推进。" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
+      ? `${gate.reason} ${consistency.reason} ${sceneCharacterObligations.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "该风格问题已作为后续润色建议记录，不阻断章节推进。" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
       : gate.reason,
     wordCount: finalWordCount,
     targetWords,
@@ -4221,6 +4233,87 @@ function evaluateCausalExecutionEvidence(
     reason: score >= 3
       ? `正文以可见事件执行因果合同：锚点=${matchedAnchors.slice(0, 4).join("、") || "隐性承接"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`
       : `因果执行证据不足：锚点=${matchedAnchors.slice(0, 4).join("、") || "无"}；主动选择=${hasVisibleDecision ? "有" : "弱"}；后果=${hasConsequence ? "有" : "弱"}；交棒=${hasHandoff ? "有" : "弱"}。`,
+  }
+}
+
+const GENERIC_SCENE_CHARACTER_TERMS = [
+  "主角",
+  "主人公",
+  "任何主角",
+  "对抗力量",
+  "关键关系对象",
+  "服务首章事件的关系角色",
+  "关系角色",
+  "配角",
+  "人物",
+  "角色",
+  "关系",
+  "关系裂缝",
+  "关系网络",
+  "章末期待",
+  "章节桥接",
+  "上章承接",
+  "章末钩子",
+  "沿用",
+  "高潮",
+  "章节",
+  "章事件",
+  "章局部",
+  "景描写",
+  "成语",
+  "对话",
+  "旁白",
+]
+
+function isConcreteSceneCharacterName(name = "") {
+  const normalized = name.trim()
+  if (!normalized || GENERIC_SCENE_CHARACTER_TERMS.includes(normalized)) return false
+  if (/pending|待定|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
+    return false
+  }
+  if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false
+  return true
+}
+
+function evaluateSceneCardCharacterObligations(
+  draft: string,
+  blueprint = "",
+  continuityContract?: ContinuityContract,
+) {
+  const sceneCards = extractSceneCardsFromBlueprint(blueprint)
+  const body = extractNarrativeBody(draft)
+  const lockedProtagonist = continuityContract?.lockedProtagonistName || ""
+  const cardAudits = sceneCards
+    .map((card) => {
+      const requiredCharacters = uniqueStrings(card.requiredCharacters)
+        .filter((name) => name !== lockedProtagonist)
+        .filter(isConcreteSceneCharacterName)
+      return {
+        index: card.index,
+        requiredCharacters,
+        missingCharacters: requiredCharacters.filter((name) => !body.includes(name)),
+      }
+    })
+    .filter((card) => card.requiredCharacters.length > 0)
+  if (cardAudits.length === 0) {
+    return {
+      status: "eligible" as const,
+      reason: "场景卡没有需要硬校验的具体角色义务。",
+      cardAudits,
+    }
+  }
+  const missing = cardAudits.filter((card) => card.missingCharacters.length > 0)
+  if (missing.length > 0) {
+    return {
+      status: "quarantined" as const,
+      reason: `场景卡角色硬门槛失败：${missing.slice(0, 4).map((card) => `场景卡 ${card.index} 缺少「${card.missingCharacters.join("、")}」`).join("；")}。`,
+      cardAudits,
+    }
+  }
+  return {
+    status: "eligible" as const,
+    reason: `场景卡角色义务通过：${cardAudits.length} 张场景卡的具体角色均进入正文。`,
+    cardAudits,
   }
 }
 
@@ -9838,7 +9931,7 @@ export async function runChapterProductionPipeline(
       wordCount: wordCount(finalDraft),
     })
   }
-  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers)
+  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint)
   let finalGate = (aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed)
     ? {
         ...baseFinalGate,

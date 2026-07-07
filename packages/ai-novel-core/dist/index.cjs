@@ -9977,7 +9977,7 @@ function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
     targetWords
   };
 }
-function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile = "", continuityContract = createContinuityContract({ state, task, protagonistProfile }), characterDossiers) {
+function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile = "", continuityContract = createContinuityContract({ state, task, protagonistProfile }), characterDossiers, blueprint = "") {
   const finalWordCount = wordCount(finalDraft);
   const targetWords = task.targetWords;
   const minimumPassWords = Math.floor(targetWords * 0.8);
@@ -10016,6 +10016,17 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       passed: false,
       status: "blocked",
       reason: `Canon \u8FDE\u7EED\u6027\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u6B63\u6587\u672A\u51FA\u73B0\u5FC5\u9700\u4EBA\u7269\u300C${missingRequiredName}\u300D\u3002`,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract);
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords
     };
@@ -10093,7 +10104,7 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
   }
   return {
     ...gate,
-    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "\u8BE5\u98CE\u683C\u95EE\u9898\u5DF2\u4F5C\u4E3A\u540E\u7EED\u6DA6\u8272\u5EFA\u8BAE\u8BB0\u5F55\uFF0C\u4E0D\u963B\u65AD\u7AE0\u8282\u63A8\u8FDB\u3002" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
+    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${sceneCharacterObligations.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "\u8BE5\u98CE\u683C\u95EE\u9898\u5DF2\u4F5C\u4E3A\u540E\u7EED\u6DA6\u8272\u5EFA\u8BAE\u8BB0\u5F55\uFF0C\u4E0D\u963B\u65AD\u7AE0\u8282\u63A8\u8FDB\u3002" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
     wordCount: finalWordCount,
     targetWords
   };
@@ -12075,6 +12086,76 @@ function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
     hasConsequence,
     hasHandoff,
     reason: score >= 3 ? `\u6B63\u6587\u4EE5\u53EF\u89C1\u4E8B\u4EF6\u6267\u884C\u56E0\u679C\u5408\u540C\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u9690\u6027\u627F\u63A5"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002` : `\u56E0\u679C\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\u3002`
+  };
+}
+var GENERIC_SCENE_CHARACTER_TERMS = [
+  "\u4E3B\u89D2",
+  "\u4E3B\u4EBA\u516C",
+  "\u4EFB\u4F55\u4E3B\u89D2",
+  "\u5BF9\u6297\u529B\u91CF",
+  "\u5173\u952E\u5173\u7CFB\u5BF9\u8C61",
+  "\u670D\u52A1\u9996\u7AE0\u4E8B\u4EF6\u7684\u5173\u7CFB\u89D2\u8272",
+  "\u5173\u7CFB\u89D2\u8272",
+  "\u914D\u89D2",
+  "\u4EBA\u7269",
+  "\u89D2\u8272",
+  "\u5173\u7CFB",
+  "\u5173\u7CFB\u88C2\u7F1D",
+  "\u5173\u7CFB\u7F51\u7EDC",
+  "\u7AE0\u672B\u671F\u5F85",
+  "\u7AE0\u8282\u6865\u63A5",
+  "\u4E0A\u7AE0\u627F\u63A5",
+  "\u7AE0\u672B\u94A9\u5B50",
+  "\u6CBF\u7528",
+  "\u9AD8\u6F6E",
+  "\u7AE0\u8282",
+  "\u7AE0\u4E8B\u4EF6",
+  "\u7AE0\u5C40\u90E8",
+  "\u666F\u63CF\u5199",
+  "\u6210\u8BED",
+  "\u5BF9\u8BDD",
+  "\u65C1\u767D"
+];
+function isConcreteSceneCharacterName(name = "") {
+  const normalized = name.trim();
+  if (!normalized || GENERIC_SCENE_CHARACTER_TERMS.includes(normalized)) return false;
+  if (/pending|待定|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
+    return false;
+  }
+  if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false;
+  return true;
+}
+function evaluateSceneCardCharacterObligations(draft, blueprint = "", continuityContract) {
+  const sceneCards = extractSceneCardsFromBlueprint(blueprint);
+  const body = extractNarrativeBody(draft);
+  const lockedProtagonist = continuityContract?.lockedProtagonistName || "";
+  const cardAudits = sceneCards.map((card) => {
+    const requiredCharacters = uniqueStrings(card.requiredCharacters).filter((name) => name !== lockedProtagonist).filter(isConcreteSceneCharacterName);
+    return {
+      index: card.index,
+      requiredCharacters,
+      missingCharacters: requiredCharacters.filter((name) => !body.includes(name))
+    };
+  }).filter((card) => card.requiredCharacters.length > 0);
+  if (cardAudits.length === 0) {
+    return {
+      status: "eligible",
+      reason: "\u573A\u666F\u5361\u6CA1\u6709\u9700\u8981\u786C\u6821\u9A8C\u7684\u5177\u4F53\u89D2\u8272\u4E49\u52A1\u3002",
+      cardAudits
+    };
+  }
+  const missing = cardAudits.filter((card) => card.missingCharacters.length > 0);
+  if (missing.length > 0) {
+    return {
+      status: "quarantined",
+      reason: `\u573A\u666F\u5361\u89D2\u8272\u786C\u95E8\u69DB\u5931\u8D25\uFF1A${missing.slice(0, 4).map((card) => `\u573A\u666F\u5361 ${card.index} \u7F3A\u5C11\u300C${card.missingCharacters.join("\u3001")}\u300D`).join("\uFF1B")}\u3002`,
+      cardAudits
+    };
+  }
+  return {
+    status: "eligible",
+    reason: `\u573A\u666F\u5361\u89D2\u8272\u4E49\u52A1\u901A\u8FC7\uFF1A${cardAudits.length} \u5F20\u573A\u666F\u5361\u7684\u5177\u4F53\u89D2\u8272\u5747\u8FDB\u5165\u6B63\u6587\u3002`,
+    cardAudits
   };
 }
 function uniqueStrings(values) {
@@ -16828,7 +16909,7 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       wordCount: wordCount(finalDraft)
     });
   }
-  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers);
+  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint);
   let finalGate = aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed ? {
     ...baseFinalGate,
     passed: false,

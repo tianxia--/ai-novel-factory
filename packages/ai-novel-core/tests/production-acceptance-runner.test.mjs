@@ -82,6 +82,25 @@ function productionValidationFixture(chapterNumber) {
   }
 }
 
+function chapterBlueprintFixture(chapterNumber, requiredCharacters = ["沈砚", "老周"]) {
+  return {
+    chapterNumber,
+    path: `.ai-novel/plans/chapter-blueprints/chapter-${String(chapterNumber).padStart(3, "0")}.md`,
+    sceneCards: [
+      {
+        index: 1,
+        goal: "让账册异常进入现场压力。",
+        requiredCharacters,
+      },
+      {
+        index: 2,
+        goal: "让关系压力通过对白和动作显形。",
+        requiredCharacters,
+      },
+    ],
+  }
+}
+
 function richSnapshot() {
   const totalChapters = 4
   const chapters = Array.from({ length: totalChapters }, (_, index) => ({
@@ -115,6 +134,7 @@ function richSnapshot() {
     { from: "沈砚", to: "老周", pressure: "旧债隐瞒与欠话未清" },
     { from: "沈砚", to: "少尹", pressure: "少尹的人带来权力追索" },
   ]
+  const chapterBlueprints = chapters.map((chapter) => chapterBlueprintFixture(chapter.chapterNumber))
   return {
     project: {
       title: "税册风声",
@@ -123,6 +143,7 @@ function richSnapshot() {
       chapterWordTarget: 2500,
     },
     chapters,
+    chapterBlueprints,
     lore: {
       storyFoundation: {
         contract: {
@@ -279,6 +300,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditProseTextureForAcceptance,
     auditLanguageCraftForAcceptance,
     auditSceneCompletenessForAcceptance,
+    auditSceneCardCharacterObligationsForAcceptance,
     auditCrossChapterVariationForAcceptance,
     auditCharacterVoiceForAcceptance,
     auditCharacterArcForAcceptance,
@@ -332,6 +354,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(sceneCompletenessAudit.passed, true)
   assert.equal(sceneCompletenessAudit.summary.sceneCompleteChapters, 4)
   assert.equal(sceneCompletenessAudit.summary.interactionParagraphsTotal >= 4, true)
+
+  const sceneCardCharacterAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(sceneCardCharacterAudit.passed, true)
+  assert.equal(sceneCardCharacterAudit.summary.auditedChapters, 4)
+  assert.equal(sceneCardCharacterAudit.summary.requiredCharactersTotal >= 8, true)
 
   const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(variationAudit.passed, true)
@@ -944,6 +971,21 @@ test("production acceptance runner rejects chapters without complete scene beats
   const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(sceneCompletenessAudit.passed, false)
   assert.match(sceneCompletenessAudit.issues.join("\n"), /complete scene paragraphs|character interaction|decision\/consequence|scene-complete/)
+})
+
+test("production acceptance runner rejects missing scene-card required characters", async () => {
+  const { auditSceneCardCharacterObligationsForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[0].body = [
+    "雨声贴着窗纸往下滑。沈砚把第一册账本推到灯下，指腹按住纸边，又把旧印扣在桌角。",
+    "“谁动过这一页？”沈砚问。门外脚步停住，灯火压低，墨味从账册线里泛出来。他伸手合上账册，决定先留下缺页，不把证据交出去。",
+    "少尹的人在外头。权力追索已经压到门口。沈砚听见雨打在门槛上，冷意从掌心爬上来。",
+    "他把印章推回灯下，拦住门外伸来的手。这个选择让关系裂开，也把风险留在屋里。章末只剩那道脚步声，谁会先来拿走缺页？",
+  ].join("\n\n")
+
+  const sceneCardCharacterAudit = auditSceneCardCharacterObligationsForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(sceneCardCharacterAudit.passed, false)
+  assert.match(sceneCardCharacterAudit.issues.join("\n"), /chapter 1.*老周/)
 })
 
 test("production acceptance runner writes resumable checkpoint reports", async () => {

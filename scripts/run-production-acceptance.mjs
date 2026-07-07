@@ -281,6 +281,42 @@ async function loadStudioApi() {
   return module.handleNovelStudioApi
 }
 
+async function loadCoreIndexForAcceptance() {
+  const entry = path.join(WORKSPACE_ROOT, "packages", "ai-novel-core", "dist", "index.js")
+  return import(`${pathToFileURL(entry).href}?acceptanceCore=${Date.now()}`)
+}
+
+async function loadChapterBlueprintsForAcceptance(rootDir, projectId, totalChapters) {
+  if (!projectId || !totalChapters) return []
+  let projectRoot = ""
+  try {
+    if (projectId === "legacy-root-workspace") {
+      projectRoot = rootDir
+    } else {
+      const core = await loadCoreIndexForAcceptance()
+      if (typeof core.resolveManagedProjectRoot !== "function") return []
+      projectRoot = await core.resolveManagedProjectRoot(rootDir, projectId)
+    }
+  } catch {
+    return []
+  }
+  const blueprints = []
+  for (let chapterNumber = 1; chapterNumber <= totalChapters; chapterNumber += 1) {
+    const chapterId = `chapter-${String(chapterNumber).padStart(3, "0")}`
+    const blueprintPath = path.join(projectRoot, ".ai-novel", "plans", "chapter-blueprints", `${chapterId}.md`)
+    const content = await fs.readFile(blueprintPath, "utf8").catch(() => "")
+    if (content.trim()) {
+      blueprints.push({
+        chapterNumber,
+        path: `.ai-novel/plans/chapter-blueprints/${chapterId}.md`,
+        content,
+        sceneCards: extractSceneCardsFromBlueprintForAcceptance(content),
+      })
+    }
+  }
+  return blueprints
+}
+
 function createApi(rootDir, handleNovelStudioApi, report) {
   return async function api(method, pathname, body = {}, projectId = undefined) {
     const startedAt = Date.now()
@@ -551,6 +587,200 @@ function extractKnownCastNames(snapshot) {
     if (name) names.push(name)
   }
   return [...new Set(names.filter((name) => name.length >= 2 && !/^(主角|配角|对抗力量|关键关系对象)$/u.test(name)))]
+}
+
+const GENERIC_SCENE_CARD_CHARACTER_TERMS = new Set([
+  "主角",
+  "主人公",
+  "任何主角",
+  "配角",
+  "人物",
+  "角色",
+  "对抗力量",
+  "关键关系对象",
+  "服务首章事件的关系角色",
+  "关系角色",
+  "关系裂缝",
+  "关系网络",
+  "章末期待",
+  "章节桥接",
+  "上章承接",
+  "章末钩子",
+  "沿用",
+  "高潮",
+  "章节",
+  "章事件",
+  "章局部",
+  "景描写",
+  "成语",
+  "对话",
+  "旁白",
+])
+
+function isConcreteSceneCardCharacterName(value) {
+  const name = String(value || "").trim()
+  if (!name || GENERIC_SCENE_CARD_CHARACTER_TERMS.has(name)) return false
+  if (/pending|待定|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(name)) {
+    return false
+  }
+  return /^[\u4e00-\u9fff·]{2,8}$/u.test(name)
+}
+
+function extractJsonArrayAfterKeyForAcceptance(text, key) {
+  const marker = `"${key}"`
+  const markerIndex = String(text || "").indexOf(marker)
+  if (markerIndex < 0) return ""
+  const start = String(text || "").indexOf("[", markerIndex)
+  if (start < 0) return ""
+  let depth = 0
+  let inString = false
+  let escaped = false
+  const source = String(text || "")
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === "\\") {
+        escaped = true
+      } else if (char === "\"") {
+        inString = false
+      }
+      continue
+    }
+    if (char === "\"") {
+      inString = true
+      continue
+    }
+    if (char === "[") {
+      depth += 1
+    } else if (char === "]") {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index + 1)
+    }
+  }
+  return ""
+}
+
+function extractSceneCardsFromBlueprintForAcceptance(blueprintText) {
+  const sceneCardsJson = extractJsonArrayAfterKeyForAcceptance(blueprintText, "sceneCards")
+  if (!sceneCardsJson) return []
+  try {
+    const parsed = JSON.parse(sceneCardsJson)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((card, index) => ({
+        index: Number(card?.index || index + 1),
+        goal: String(card?.goal || "").trim(),
+        requiredCharacters: Array.isArray(card?.requiredCharacters)
+          ? card.requiredCharacters.map((name) => String(name || "").trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((card) => card.goal || card.requiredCharacters.length)
+  } catch {
+    return []
+  }
+}
+
+function normalizeChapterBlueprintsForAcceptance(snapshot) {
+  const candidates = [
+    snapshot?.chapterBlueprints,
+    snapshot?.lore?.chapterBlueprints,
+  ].find(Array.isArray) || []
+  return candidates
+    .map((entry) => {
+      const chapterNumber = Number(entry?.chapterNumber || entry?.chapter || 0)
+      const content = String(entry?.content || entry?.blueprint || "")
+      const sceneCards = Array.isArray(entry?.sceneCards)
+        ? entry.sceneCards
+        : extractSceneCardsFromBlueprintForAcceptance(content)
+      return {
+        chapterNumber,
+        path: String(entry?.path || ""),
+        sceneCards: sceneCards.map((card, index) => ({
+          index: Number(card?.index || index + 1),
+          requiredCharacters: Array.isArray(card?.requiredCharacters)
+            ? card.requiredCharacters.map((name) => String(name || "").trim()).filter(Boolean)
+            : [],
+        })),
+      }
+    })
+    .filter((entry) => Number.isFinite(entry.chapterNumber) && entry.chapterNumber > 0 && entry.sceneCards.length)
+}
+
+function hasSceneCharacterEvidence(body, name) {
+  const windows = evidenceWindowsAroundTerms(body, [name], 90)
+  if (!windows.length) return false
+  return windows.some((window) =>
+    /「|」|说|问|道|低声|站|走|退|停|伸手|攥|按|推|拿|递|藏|拦|抬|看|听|合上|扣住|选择|决定|拒绝|债|信任|压力|风险|追索|欠/u.test(window.text)
+  )
+}
+
+export function auditSceneCardCharacterObligationsForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const blueprints = normalizeChapterBlueprintsForAcceptance(snapshot)
+  const blueprintByChapter = new Map(blueprints.map((entry) => [entry.chapterNumber, entry]))
+  const issues = []
+  const chapterAudits = []
+  let auditedChapters = 0
+  let passedChapters = 0
+  let requiredCharactersTotal = 0
+
+  for (const chapter of chapters) {
+    const chapterNumber = Number(chapter?.chapterNumber || 0)
+    const blueprint = blueprintByChapter.get(chapterNumber)
+    if (!blueprint) continue
+    const body = String(chapter?.body || "")
+    const cardAudits = blueprint.sceneCards
+      .map((card) => {
+        const requiredCharacters = [...new Set((card.requiredCharacters || []).filter(isConcreteSceneCardCharacterName))]
+        const missingCharacters = requiredCharacters.filter((name) => !body.includes(name))
+        const thinEvidenceCharacters = requiredCharacters
+          .filter((name) => body.includes(name))
+          .filter((name) => !hasSceneCharacterEvidence(body, name))
+        return {
+          index: Number(card.index || 0),
+          requiredCharacters,
+          missingCharacters,
+          thinEvidenceCharacters,
+        }
+      })
+      .filter((card) => card.requiredCharacters.length)
+    if (!cardAudits.length) continue
+    auditedChapters += 1
+    requiredCharactersTotal += cardAudits.reduce((sum, card) => sum + card.requiredCharacters.length, 0)
+    const missingCards = cardAudits.filter((card) => card.missingCharacters.length || card.thinEvidenceCharacters.length)
+    if (!missingCards.length) {
+      passedChapters += 1
+    } else {
+      issues.push(`chapter ${chapterNumber}: scene-card required characters missing or thin evidence: ${missingCards.map((card) => {
+        const parts = []
+        if (card.missingCharacters.length) parts.push(`card ${card.index} missing ${card.missingCharacters.join("、")}`)
+        if (card.thinEvidenceCharacters.length) parts.push(`card ${card.index} thin ${card.thinEvidenceCharacters.join("、")}`)
+        return parts.join("; ")
+      }).join(" | ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber,
+      title: chapter?.title || "",
+      cardAudits,
+      passed: missingCards.length === 0,
+    })
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues,
+    summary: {
+      skipped: auditedChapters === 0,
+      auditedChapters,
+      passedChapters,
+      totalBlueprints: blueprints.length,
+      requiredCharactersTotal,
+      expectedChapters: Number(options.chapters || snapshot?.project?.totalChapters || chapters.length || 0),
+    },
+    chapters: chapterAudits,
+  }
 }
 
 function extractAcceptanceCharacterDossiers(snapshot) {
@@ -3724,9 +3954,11 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     })
   }
 
+  const chapterBlueprints = await loadChapterBlueprintsForAcceptance(options.rootDir, projectId, totalChapters)
   const auditSnapshot = {
     ...snapshot,
     chapters: chapterBodies,
+    chapterBlueprints: chapterBlueprints.length ? chapterBlueprints : snapshot.chapterBlueprints,
   }
   const storyFoundationAudit = auditStoryFoundationForAcceptance(auditSnapshot, options)
   if (!storyFoundationAudit.passed) {
@@ -3808,6 +4040,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       chapters: sceneCompletenessAudit.chapters.slice(0, 8),
     })
   }
+  const sceneCardCharacterAudit = auditSceneCardCharacterObligationsForAcceptance(auditSnapshot, options)
+  if (!sceneCardCharacterAudit.passed) {
+    throw new AcceptanceError("Scene-card character obligation acceptance audit failed.", {
+      issues: sceneCardCharacterAudit.issues.slice(0, 30),
+      summary: sceneCardCharacterAudit.summary,
+      chapters: sceneCardCharacterAudit.chapters.slice(0, 8),
+    })
+  }
   const crossChapterVariationAudit = auditCrossChapterVariationForAcceptance(auditSnapshot, options)
   if (!crossChapterVariationAudit.passed) {
     throw new AcceptanceError("Cross-chapter variation acceptance audit failed.", {
@@ -3887,6 +4127,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalProseTextureAudit = proseTextureAudit
   report.finalLanguageCraftAudit = languageCraftAudit
   report.finalSceneCompletenessAudit = sceneCompletenessAudit
+  report.finalSceneCardCharacterAudit = sceneCardCharacterAudit
   report.finalCrossChapterVariationAudit = crossChapterVariationAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
   report.finalCharacterArcAudit = characterArcAudit
@@ -3910,6 +4151,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     proseTexture: proseTextureAudit.summary,
     languageCraft: languageCraftAudit.summary,
     sceneCompleteness: sceneCompletenessAudit.summary,
+    sceneCardCharacters: sceneCardCharacterAudit.summary,
     crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     characterArc: characterArcAudit.summary,
