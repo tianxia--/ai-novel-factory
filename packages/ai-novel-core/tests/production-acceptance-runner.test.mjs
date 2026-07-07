@@ -22,6 +22,66 @@ function richBody(chapterNumber) {
   ].join("\n\n")
 }
 
+function productionValidationFixture(chapterNumber) {
+  const qualityGate = { status: "passed", passed: true, score: 8.8, attempts: 1, reason: "fixture production quality passed" }
+  const aigcDetection = { status: "passed", score: 0.12, threshold: 0.8, highRiskSegments: [], highRiskCount: 0, reason: "fixture AIGC passed" }
+  const styleConformanceDrift = {
+    status: "conformant",
+    conformanceScore: 8.6,
+    driftScore: 1.2,
+    reason: "fixture style remains conformant",
+    evidence: ["短对白、动作先行和物件压力保持稳定。"],
+    risks: [],
+    metrics: { forbiddenHitCount: 0 },
+  }
+  const styleInheritanceVerification = {
+    status: "ready",
+    summary: "fixture chapter inherits frozen style contract",
+    chapterNumber,
+    contractVersion: 1,
+    contractApproved: true,
+    inheritanceStatus: "enforced",
+    chapterInheritanceAdapter: { status: "ready", contractVersion: 1 },
+    adapterReady: true,
+    freezerVerdict: "ready",
+    publishBaseReady: true,
+    publishBaseMissing: [],
+    qualityGateStatus: "passed",
+    aigc: { status: "passed", score: 0.12, threshold: 0.8, highRiskCount: 0, reason: "fixture AIGC passed" },
+    verificationStatus: "passed",
+    styleConformanceDrift,
+    styleDrift: { status: "conformant", conformanceScore: 86, driftScore: 12, threshold: 72 },
+    evidence: ["质量门已通过。", "AIGC 检测已通过。", "章节继承链已标记为 enforced。"],
+    risks: [],
+  }
+  const publishReadiness = {
+    ready: true,
+    status: "ready",
+    missing: [],
+    checks: [
+      { id: "quality_gate", label: "质量门禁", passed: true, detail: "passed" },
+      { id: "style_generation_verification", label: "写法生成验证", passed: true, detail: "passed" },
+      { id: "style_contract_alignment", label: "写法继承验证", passed: true, detail: "ready" },
+      { id: "aigc_gate", label: "AIGC 检测", passed: true, detail: "passed" },
+    ],
+    styleInheritanceVerification,
+  }
+  return {
+    qualityGate,
+    aigcDetection,
+    styleConformanceDrift,
+    styleInheritanceVerification,
+    publishReadiness,
+    versionManifest: {
+      qualityGate,
+      aigcDetection,
+      styleConformanceDrift,
+      styleInheritanceVerification,
+      publishReadiness,
+    },
+  }
+}
+
 function richSnapshot() {
   const totalChapters = 4
   const chapters = Array.from({ length: totalChapters }, (_, index) => ({
@@ -29,7 +89,7 @@ function richSnapshot() {
     title: `第 ${index + 1} 章`,
     wordCount: 2500,
     body: richBody(index + 1),
-    publishReadiness: { ready: true },
+    ...productionValidationFixture(index + 1),
   }))
   const plotChapters = chapters.map((chapter) => ({
     chapterNumber: chapter.chapterNumber,
@@ -139,7 +199,7 @@ function structuralSnapshot(withMarkers = true) {
       title: `第 ${chapterNumber} 章`,
       wordCount: 2500,
       body: `${richBody(chapterNumber)}\n\n${marker}`,
-      publishReadiness: { ready: true },
+      ...productionValidationFixture(chapterNumber),
     }
   })
   const plotChapters = snapshot.chapters.map((chapter, index) => ({
@@ -200,7 +260,7 @@ function variedLongSnapshot() {
     title: `第 ${index + 1} 章`,
     wordCount: 2500,
     body: [opening, middles[index], endings[index]].join("\n\n"),
-    publishReadiness: { ready: true },
+    ...productionValidationFixture(index + 1),
   }))
   return snapshot
 }
@@ -208,6 +268,7 @@ function variedLongSnapshot() {
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
+    auditProductionValidationForAcceptance,
     auditWorldbuildingIntegrationForAcceptance,
     auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
@@ -226,6 +287,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(foundationAudit.passed, true)
   assert.equal(foundationAudit.counts.plotChapters, 4)
   assert.equal(foundationAudit.counts.foreshadowingEntries, 4)
+
+  const productionValidationAudit = auditProductionValidationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(productionValidationAudit.passed, true)
+  assert.equal(productionValidationAudit.summary.validatedChapters, 4)
+  assert.equal(productionValidationAudit.summary.aigcPassedChapters, 4)
 
   const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(worldbuildingAudit.passed, true)
@@ -576,6 +642,25 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner rejects missing production validation evidence", async () => {
+  const { auditProductionValidationForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[0].aigcDetection = { status: "skipped", reason: "AIGC detector is not configured." }
+  snapshot.chapters[0].versionManifest.aigcDetection = snapshot.chapters[0].aigcDetection
+  snapshot.chapters[0].publishReadiness = {
+    ...snapshot.chapters[0].publishReadiness,
+    ready: false,
+    missing: [{ id: "aigc_gate", label: "AIGC 检测", detail: "skipped" }],
+    checks: snapshot.chapters[0].publishReadiness.checks.map((check) =>
+      check.id === "aigc_gate" ? { ...check, passed: false, detail: "skipped" } : check,
+    ),
+  }
+
+  const productionValidationAudit = auditProductionValidationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(productionValidationAudit.passed, false)
+  assert.match(productionValidationAudit.issues.join("\n"), /AIGC gate|publish readiness|production validation/)
 })
 
 test("production acceptance runner rejects chapters without complete scene beats", async () => {

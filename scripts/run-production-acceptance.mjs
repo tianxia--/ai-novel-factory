@@ -1319,6 +1319,159 @@ export function auditStoryFoundationForAcceptance(snapshot, options = {}) {
   }
 }
 
+function isPassedGate(value) {
+  if (!value || typeof value !== "object") return false
+  const status = String(value.status || "").toLowerCase()
+  return value.passed === true || status === "passed" || status === "pass" || status === "approved"
+}
+
+function productionCheckPassed(publishReadiness, checkId) {
+  const checks = Array.isArray(publishReadiness?.checks) ? publishReadiness.checks : []
+  const check = checks.find((entry) => entry?.id === checkId)
+  return check ? check.passed === true : false
+}
+
+function chapterProductionValidationEvidence(chapter) {
+  const versionManifest = chapter?.versionManifest && typeof chapter.versionManifest === "object"
+    ? chapter.versionManifest
+    : {}
+  const publishReadiness = chapter?.publishReadiness && typeof chapter.publishReadiness === "object"
+    ? chapter.publishReadiness
+    : {}
+  const styleInheritanceVerification = chapter?.styleInheritanceVerification
+    || publishReadiness.styleInheritanceVerification
+    || versionManifest.styleInheritanceVerification
+    || null
+  const aigcDetection = chapter?.aigcDetection
+    || versionManifest.aigcDetection
+    || styleInheritanceVerification?.aigc
+    || null
+  const qualityGate = chapter?.qualityGate
+    || versionManifest.qualityGate
+    || (styleInheritanceVerification?.qualityGateStatus ? { status: styleInheritanceVerification.qualityGateStatus } : null)
+  const styleConformanceDrift = chapter?.styleConformanceDrift
+    || versionManifest.styleConformanceDrift
+    || styleInheritanceVerification?.styleConformanceDrift
+    || styleInheritanceVerification?.styleDrift
+    || null
+  const publishReady = publishReadiness.ready === true
+  const qualityPassed = isPassedGate(qualityGate) || productionCheckPassed(publishReadiness, "quality_gate")
+  const highRiskSegments = Array.isArray(aigcDetection?.highRiskSegments) ? aigcDetection.highRiskSegments : []
+  const aigcPassed = String(aigcDetection?.status || "").toLowerCase() === "passed"
+    && Number(aigcDetection?.highRiskCount || highRiskSegments.length || 0) === 0
+  const styleReady = String(styleInheritanceVerification?.status || "").toLowerCase() === "ready"
+    || productionCheckPassed(publishReadiness, "style_contract_alignment")
+  const styleGenerationPassed = String(styleInheritanceVerification?.verificationStatus || "").toLowerCase() === "passed"
+    || productionCheckPassed(publishReadiness, "style_generation_verification")
+  const adapterReady = styleInheritanceVerification?.adapterReady === true
+    || styleInheritanceVerification?.chapterInheritanceAdapter?.status === "ready"
+  const freezerReady = String(styleInheritanceVerification?.freezerVerdict || "").toLowerCase() === "ready"
+  const publishBaseReady = styleInheritanceVerification?.publishBaseReady !== false
+    && (!Array.isArray(styleInheritanceVerification?.publishBaseMissing) || styleInheritanceVerification.publishBaseMissing.length === 0)
+  const styleDriftStatus = String(styleConformanceDrift?.status || styleInheritanceVerification?.styleDrift?.status || "").toLowerCase()
+  const styleConformant = styleDriftStatus === "conformant"
+  const evidenceItems = Array.isArray(styleInheritanceVerification?.evidence)
+    ? styleInheritanceVerification.evidence
+    : []
+  const risks = [
+    ...(Array.isArray(styleInheritanceVerification?.risks) ? styleInheritanceVerification.risks : []),
+    ...(Array.isArray(styleConformanceDrift?.risks) ? styleConformanceDrift.risks : []),
+  ].filter(Boolean)
+  const checks = {
+    publishReady,
+    qualityPassed,
+    aigcPassed,
+    styleReady,
+    styleGenerationPassed,
+    adapterReady,
+    freezerReady,
+    publishBaseReady,
+    styleConformant,
+    hasEvidence: evidenceItems.length > 0,
+    noRisks: risks.length === 0,
+  }
+  return {
+    publishReadiness,
+    qualityGate,
+    aigcDetection,
+    styleInheritanceVerification,
+    styleConformanceDrift,
+    checks,
+    passed: Object.values(checks).every(Boolean),
+    risks,
+  }
+}
+
+export function auditProductionValidationForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const issues = []
+  const chapterAudits = []
+  let validatedChapters = 0
+  let aigcPassedChapters = 0
+  let styleReadyChapters = 0
+  let qualityPassedChapters = 0
+
+  for (const chapter of chapters) {
+    const evidence = chapterProductionValidationEvidence(chapter)
+    const chapterNumber = Number(chapter?.chapterNumber || 0)
+    const chapterIssues = []
+    if (!evidence.checks.publishReady) chapterIssues.push("publish readiness is not ready")
+    if (!evidence.checks.qualityPassed) chapterIssues.push("quality gate is not passed")
+    if (!evidence.checks.aigcPassed) chapterIssues.push("AIGC gate is not passed")
+    if (!evidence.checks.styleReady) chapterIssues.push("style inheritance is not ready")
+    if (!evidence.checks.styleGenerationPassed) chapterIssues.push("style generation verification is not passed")
+    if (!evidence.checks.adapterReady) chapterIssues.push("chapter inheritance adapter is not ready")
+    if (!evidence.checks.freezerReady) chapterIssues.push("style freezer is not ready")
+    if (!evidence.checks.publishBaseReady) chapterIssues.push("publish base evidence is incomplete")
+    if (!evidence.checks.styleConformant) chapterIssues.push("style conformance drift is not conformant")
+    if (!evidence.checks.hasEvidence) chapterIssues.push("production validation evidence is missing")
+    if (!evidence.checks.noRisks) chapterIssues.push("production validation risks are still present")
+
+    if (evidence.passed) validatedChapters += 1
+    if (evidence.checks.aigcPassed) aigcPassedChapters += 1
+    if (evidence.checks.styleReady) styleReadyChapters += 1
+    if (evidence.checks.qualityPassed) qualityPassedChapters += 1
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber,
+      title: chapter?.title || "",
+      passed: evidence.passed,
+      checks: evidence.checks,
+      qualityGateStatus: String(evidence.qualityGate?.status || ""),
+      aigcStatus: String(evidence.aigcDetection?.status || ""),
+      styleStatus: String(evidence.styleInheritanceVerification?.status || ""),
+      styleDriftStatus: String(evidence.styleConformanceDrift?.status || evidence.styleInheritanceVerification?.styleDrift?.status || ""),
+      riskCount: evidence.risks.length,
+      issues: chapterIssues,
+    })
+  }
+
+  const totalChapters = Number(snapshot?.project?.totalChapters || options.chapters || chapters.length || 0)
+  if (chapters.length === 0) issues.push("no readable chapters available for production validation audit")
+  if (totalChapters > 0 && chapters.length < totalChapters) {
+    issues.push(`production validation readable chapters ${chapters.length} below total chapters ${totalChapters}`)
+  }
+  if (validatedChapters < chapters.length) {
+    issues.push(`production validation chapter coverage ${validatedChapters}/${chapters.length} below required ${chapters.length}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      readableChapters: chapters.length,
+      validatedChapters,
+      aigcPassedChapters,
+      styleReadyChapters,
+      qualityPassedChapters,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function collectAcceptanceStrings(value, depth = 0) {
   if (depth > 4 || value === null || value === undefined) return []
   if (typeof value === "string" || typeof value === "number") return [String(value)]
@@ -2807,7 +2960,12 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       title: chapter.title || "",
       wordCount: Number(chapter.wordCount || 0),
       body,
+      qualityGate: chapter.qualityGate || null,
+      aigcDetection: chapter.aigcDetection || null,
+      styleInheritanceVerification: chapter.styleInheritanceVerification || null,
+      styleConformanceDrift: chapter.styleConformanceDrift || chapter.versionManifest?.styleConformanceDrift || null,
       publishReadiness: chapter.publishReadiness || null,
+      versionManifest: chapter.versionManifest || null,
     })
     chapterChecks.push({
       chapterNumber,
@@ -2833,6 +2991,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     throw new AcceptanceError("Story foundation acceptance audit failed.", {
       issues: storyFoundationAudit.issues.slice(0, 20),
       counts: storyFoundationAudit.counts,
+    })
+  }
+  const productionValidationAudit = auditProductionValidationForAcceptance(auditSnapshot, options)
+  if (!productionValidationAudit.passed) {
+    throw new AcceptanceError("Production validation acceptance audit failed.", {
+      issues: productionValidationAudit.issues.slice(0, 30),
+      summary: productionValidationAudit.summary,
+      chapters: productionValidationAudit.chapters.slice(0, 8),
     })
   }
   const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(auditSnapshot, options)
@@ -2945,6 +3111,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     chapterChecks,
   }
   report.finalStoryFoundationAudit = storyFoundationAudit
+  report.finalProductionValidationAudit = productionValidationAudit
   report.finalWorldbuildingAudit = worldbuildingAudit
   report.finalStructuralProgressionAudit = structuralProgressionAudit
   report.finalPlotExecutionAudit = plotExecutionAudit
@@ -2964,6 +3131,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalWords,
     readableChapters,
     storyFoundation: storyFoundationAudit.counts,
+    productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
@@ -2987,6 +3155,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     readableChapters,
     totalChapters,
     storyFoundation: storyFoundationAudit.counts,
+    productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
@@ -3040,6 +3209,7 @@ async function main() {
     progress: [],
     finalReader: null,
     finalStoryFoundationAudit: null,
+    finalProductionValidationAudit: null,
     finalWorldbuildingAudit: null,
     finalStructuralProgressionAudit: null,
     finalPlotExecutionAudit: null,
