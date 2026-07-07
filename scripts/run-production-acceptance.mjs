@@ -2197,6 +2197,35 @@ export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
   }
 }
 
+function auditChapterTailHook(tail, knownCast = []) {
+  const text = String(tail || "")
+  const hookCue = /[？?]|谁|却|忽然|门外|脚步|信|账|印|刀|血|名字|明日|只剩|没有答|裂缝|代价|风险|线索|仍/u.test(text)
+  const genericHookSignals = countMatches(
+    text,
+    /下一章|后续|未来.*危险|更加危险|更加复杂|一切都不简单|故事.*继续|伏笔.*推进|悬念|钩子|谜团.*加深|没有答案/gu,
+  )
+  const concreteSignals = countMatches(
+    text,
+    /账本|账册|缺页|信纸|印章|官印|钥匙|地图|脚步|旧账|证据|线索|门槛|窗纸|灯火|袖口|鞋尖|纸边|墨味|铜牌|玻璃|伞柄|木匣|水缸|供桌|血|刀|门外/gu,
+  )
+  const causalSignals = countMatches(
+    text,
+    /决定|选择|不肯|留下|藏|交出|拦住|推回|合上|按住|追问|拒绝|答应|转身|伸手|扣住|递出|收回|让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系|不能回头|不可逆|拿走|夺回|保住|追索/gu,
+  )
+  const castSignals = knownCast.filter((name) => text.includes(name)).length
+  const anchored = concreteSignals > 0 || castSignals > 0
+  const ready = hookCue && anchored && causalSignals > 0 && genericHookSignals <= 1
+  return {
+    ready,
+    hookCue,
+    genericHookSignals,
+    concreteSignals,
+    causalSignals,
+    castSignals,
+    anchored,
+  }
+}
+
 export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const project = snapshot?.project || {}
@@ -2237,7 +2266,8 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
     const objectSignals = countMatches(body, /账|册|信|印|刀|门|灯|纸|袖|钥|血|雨|窗|碑|牌|盒|卷|碗|杯|伞|鞋|衣|墨|火/gu)
     const pressureSignals = countMatches(body, /必须|不能|决定|选择|代价|风险|欠|债|怕|查清|追问|交出|保住|隐瞒|裂缝|怀疑|逼|拦|失去|暴露/gu)
     const tail = body.slice(-700)
-    const hasHook = /[？?]|谁|却|忽然|门外|脚步|信|账|印|刀|血|名字|下一|明日|只剩|没有答|裂缝|代价|风险|线索|仍/u.test(tail)
+    const tailHook = auditChapterTailHook(tail, knownCast)
+    const hasHook = tailHook.ready
     const castMentions = knownCast.filter((name) => body.includes(name))
     for (const name of castMentions) mentionedCast.add(name)
 
@@ -2257,7 +2287,7 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
     if (sensorySignals < 4) chapterIssues.push(`weak sensory/object scene grounding ${sensorySignals}`)
     if (objectSignals < 4) chapterIssues.push(`weak concrete object grounding ${objectSignals}`)
     if (pressureSignals < 3) chapterIssues.push(`weak relationship/choice pressure ${pressureSignals}`)
-    if (!hasHook) chapterIssues.push("missing chapter tail hook")
+    if (!hasHook) chapterIssues.push("missing causal concrete chapter tail hook")
     if (castMentions.length === 0 && knownCast.length > 0) chapterIssues.push("no known cast mention")
     if (chapterIssues.length) {
       issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
@@ -2272,6 +2302,7 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
       objectSignals,
       pressureSignals,
       hookReady: hasHook,
+      tailHook,
       castMentions,
       repeatedParagraphs: repeatedParagraphs.slice(0, 3),
       issues: chapterIssues,
@@ -2341,18 +2372,50 @@ function countGenericSummarySignals(body) {
   )
 }
 
+function paragraphCraftChainEvidence(paragraph, knownCast = []) {
+  const text = String(paragraph || "")
+  const castSignals = knownCast.filter((name) => text.includes(name)).length
+  const dialogueSignals = countMatches(text, /[「“][^」”]{2,120}[」”]/gu)
+  const actionSignals = countMatches(text, /走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|握|松|皱眉|沉默|合上|推开|退|挡|攥|盯|避开|吹|夹|藏住/gu)
+  const sensorySignals = countMatches(text, /雨|风|声|灯|冷|热|湿|血|灰|墨|纸|门|窗|脚步|气味|疼|汗|光|影|呼吸|触感|指腹|掌心|袖口/gu)
+  const objectSignals = countMatches(text, /账本|账册|缺页|信纸|印章|官印|钥匙|地图|脚步|旧账|证据|线索|门槛|窗纸|灯火|袖口|鞋尖|纸边|墨味/gu)
+  const consequenceSignals = countMatches(text, /决定|选择|不肯|留下|藏|交出|拦住|拒绝|答应|让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系/gu)
+  const summarySignals = countGenericSummarySignals(text)
+    + countDryInstructionSignals(text)
+    + countMatches(text, /整体|局势|形成|场景感|剧情|继续|推进|所有人物|人物都|关系发生|风险继续|更加/u)
+  const complete = (castSignals > 0 || dialogueSignals > 0)
+    && actionSignals > 0
+    && (sensorySignals > 0 || objectSignals > 0)
+    && consequenceSignals > 0
+    && summarySignals <= 1
+  return {
+    complete,
+    castSignals,
+    dialogueSignals,
+    actionSignals,
+    sensorySignals,
+    objectSignals,
+    consequenceSignals,
+    summarySignals,
+  }
+}
+
 export function auditProseTextureForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const knownCast = extractKnownCastNames(snapshot)
   const issues = []
   const chapterAudits = []
   let dryInstructionSignals = 0
   let genericSummarySignals = 0
   let sceneRichChapters = 0
   let variedRhythmChapters = 0
+  let craftChainChapters = 0
 
   for (const chapter of chapters) {
     const body = String(chapter?.body || "")
     const paragraphs = splitBodyParagraphs(body)
+    const paragraphChainAudits = paragraphs.map((paragraph) => paragraphCraftChainEvidence(paragraph, knownCast))
+    const completeCraftParagraphs = paragraphChainAudits.filter((audit) => audit.complete).length
     const sentences = splitAuditSentences(body)
     const sentenceLengths = sentences.map((sentence) => normalizeAuditText(sentence).length).filter((length) => length > 0)
     const averageSentenceLength = averageValue(sentenceLengths)
@@ -2375,12 +2438,15 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
       ? (drySignals + genericSignals) / Math.max(1, body.length / 500)
       : 0
     const sceneRich = concreteDensity >= 8 && sensorySignals >= 4 && concreteObjectSignals >= 3
+    const requiredCraftParagraphs = paragraphs.length >= 4 ? 2 : Math.min(1, paragraphs.length)
+    const craftChainReady = completeCraftParagraphs >= requiredCraftParagraphs
     const variedRhythm = sentenceLengths.length >= 4
       && uniqueSentenceLengthCount >= 3
       && averageSentenceLength >= 8
       && shortSentenceRatio <= 0.35
       && longSentenceRatio <= 0.45
     if (sceneRich) sceneRichChapters += 1
+    if (craftChainReady) craftChainChapters += 1
     if (variedRhythm) variedRhythmChapters += 1
     dryInstructionSignals += drySignals
     genericSummarySignals += genericSignals
@@ -2388,6 +2454,7 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
     const chapterIssues = []
     if (paragraphs.length < 3) chapterIssues.push(`too few prose paragraphs ${paragraphs.length}`)
     if (!sceneRich) chapterIssues.push(`thin scene texture density ${concreteDensity.toFixed(1)}`)
+    if (!craftChainReady) chapterIssues.push(`weak paragraph-level craft chain ${completeCraftParagraphs}/${requiredCraftParagraphs}`)
     if (!variedRhythm) chapterIssues.push("stiff sentence rhythm")
     if (dryDensity > 5) chapterIssues.push(`dry outline/instruction density ${dryDensity.toFixed(1)}`)
     if (genericSignals >= 3) chapterIssues.push(`generic summary phrasing ${genericSignals}`)
@@ -2411,6 +2478,10 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
       genericSignals,
       dryDensity,
       sceneRich,
+      completeCraftParagraphs,
+      requiredCraftParagraphs,
+      craftChainReady,
+      paragraphChainAudits: paragraphChainAudits.slice(0, 5),
       variedRhythm,
       issues: chapterIssues,
     })
@@ -2425,6 +2496,9 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
   if (variedRhythmChapters < requiredTextureChapters) {
     issues.push(`varied rhythm chapter coverage ${variedRhythmChapters}/${totalChapters} below required ${requiredTextureChapters}`)
   }
+  if (craftChainChapters < requiredTextureChapters) {
+    issues.push(`paragraph craft chain chapter coverage ${craftChainChapters}/${totalChapters} below required ${requiredTextureChapters}`)
+  }
   if (dryInstructionSignals > Math.max(6, totalChapters * 3)) {
     issues.push(`dry outline/instruction signals ${dryInstructionSignals} exceed allowed ${Math.max(6, totalChapters * 3)}`)
   }
@@ -2438,6 +2512,7 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
     summary: {
       totalChapters,
       sceneRichChapters,
+      craftChainChapters,
       variedRhythmChapters,
       requiredTextureChapters,
       dryInstructionSignals,

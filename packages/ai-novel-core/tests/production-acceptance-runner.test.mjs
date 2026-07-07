@@ -748,6 +748,23 @@ test("production acceptance runner rejects foreshadowing anchors without causal 
   assert.match(foreshadowingAudit.issues.join("\n"), /advance\/payoff evidence|payoff/)
 })
 
+test("production acceptance runner rejects template-only chapter tail hooks", async () => {
+  const { auditNarrativeQualityForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "雨声贴着窗纸往下滑。沈砚把缺页账册推到灯下，伸手按住纸边，老周站在门槛外攥紧袖口。",
+      "“谁动过这一页？”沈砚问。老周低声道：“少尹的人在外头。”灯火压低，墨味从账册线里泛出来。",
+      "沈砚决定先留下缺页，不把证据交出去。这个选择让关系裂开，也把风险留在屋里。",
+      "章末，门外有脚步声。下一章会更加危险吗？",
+    ].join("\n\n")
+  }
+
+  const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(narrativeAudit.passed, false)
+  assert.match(narrativeAudit.issues.join("\n"), /causal concrete chapter tail hook|chapter hook coverage/)
+})
+
 test("production acceptance runner rejects dry outline-like prose", async () => {
   const { auditProseTextureForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
@@ -763,6 +780,23 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner rejects signal-stuffed prose without paragraph craft chains", async () => {
+  const { auditProseTextureForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "沈砚看见雨、灯、门、账册、印章、袖口，整体局势因此更加复杂，关系发生变化。",
+      "老周站在窗边，脚步、墨味、纸边、缺页、官印都出现了，风险继续增加，于是所有人物都进入压力状态。",
+      "少尹伸手按住账册，冷光、湿气、门槛、鞋尖形成场景感，剧情继续推进，线索也因此更加清楚。",
+      "沈砚选择留下线索。所有人物都感到压力。未来仍然危险，但文本只是把信号词依次摆出来。",
+    ].join("\n\n")
+  }
+
+  const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(proseTextureAudit.passed, false)
+  assert.match(proseTextureAudit.issues.join("\n"), /paragraph-level craft chain|paragraph craft chain/)
 })
 
 test("production acceptance runner rejects cliche-heavy long-form language", async () => {
