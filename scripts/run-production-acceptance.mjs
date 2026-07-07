@@ -1335,6 +1335,24 @@ function isPassedGate(value) {
   return value.passed === true || status === "passed" || status === "pass" || status === "approved"
 }
 
+const MIN_ACCEPTANCE_QUALITY_SCORE = 8
+const MIN_ACCEPTANCE_STYLE_CONFORMANCE_SCORE = 7.2
+
+function normalizeAcceptanceScore(value) {
+  if (value === null || value === undefined || value === "") return null
+  const score = Number(value)
+  if (!Number.isFinite(score)) return null
+  return score > 10 ? Math.min(10, score / 10) : score
+}
+
+function firstNormalizedAcceptanceScore(...values) {
+  for (const value of values) {
+    const score = normalizeAcceptanceScore(value)
+    if (score !== null) return score
+  }
+  return null
+}
+
 function productionCheckPassed(publishReadiness, checkId) {
   const checks = Array.isArray(publishReadiness?.checks) ? publishReadiness.checks : []
   const check = checks.find((entry) => entry?.id === checkId)
@@ -1365,7 +1383,15 @@ function chapterProductionValidationEvidence(chapter) {
     || styleInheritanceVerification?.styleDrift
     || null
   const publishReady = publishReadiness.ready === true
-  const qualityPassed = isPassedGate(qualityGate) || productionCheckPassed(publishReadiness, "quality_gate")
+  const qualityScore = firstNormalizedAcceptanceScore(
+    qualityGate?.score,
+    qualityGate?.overallScore,
+    qualityGate?.summaryScore,
+    versionManifest.qualityGate?.score,
+  )
+  const qualityStatusPassed = isPassedGate(qualityGate) || productionCheckPassed(publishReadiness, "quality_gate")
+  const qualityScorePassed = qualityScore !== null && qualityScore >= MIN_ACCEPTANCE_QUALITY_SCORE
+  const qualityPassed = qualityStatusPassed && qualityScorePassed
   const highRiskSegments = Array.isArray(aigcDetection?.highRiskSegments) ? aigcDetection.highRiskSegments : []
   const aigcPassed = String(aigcDetection?.status || "").toLowerCase() === "passed"
     && Number(aigcDetection?.highRiskCount || highRiskSegments.length || 0) === 0
@@ -1379,7 +1405,15 @@ function chapterProductionValidationEvidence(chapter) {
   const publishBaseReady = styleInheritanceVerification?.publishBaseReady !== false
     && (!Array.isArray(styleInheritanceVerification?.publishBaseMissing) || styleInheritanceVerification.publishBaseMissing.length === 0)
   const styleDriftStatus = String(styleConformanceDrift?.status || styleInheritanceVerification?.styleDrift?.status || "").toLowerCase()
-  const styleConformant = styleDriftStatus === "conformant"
+  const styleConformanceScore = firstNormalizedAcceptanceScore(
+    styleConformanceDrift?.conformanceScore,
+    styleConformanceDrift?.score,
+    styleInheritanceVerification?.styleDrift?.rawConformanceScore,
+    styleInheritanceVerification?.styleDrift?.conformanceScore,
+  )
+  const styleScorePassed = styleConformanceScore !== null
+    && styleConformanceScore >= MIN_ACCEPTANCE_STYLE_CONFORMANCE_SCORE
+  const styleConformant = styleDriftStatus === "conformant" && styleScorePassed
   const evidenceItems = Array.isArray(styleInheritanceVerification?.evidence)
     ? styleInheritanceVerification.evidence
     : []
@@ -1406,6 +1440,8 @@ function chapterProductionValidationEvidence(chapter) {
     aigcDetection,
     styleInheritanceVerification,
     styleConformanceDrift,
+    qualityScore,
+    styleConformanceScore,
     checks,
     passed: Object.values(checks).every(Boolean),
     risks,
@@ -1426,14 +1462,18 @@ export function auditProductionValidationForAcceptance(snapshot, options = {}) {
     const chapterNumber = Number(chapter?.chapterNumber || 0)
     const chapterIssues = []
     if (!evidence.checks.publishReady) chapterIssues.push("publish readiness is not ready")
-    if (!evidence.checks.qualityPassed) chapterIssues.push("quality gate is not passed")
+    if (!evidence.checks.qualityPassed) {
+      chapterIssues.push(`quality gate score ${evidence.qualityScore ?? "missing"} below required ${MIN_ACCEPTANCE_QUALITY_SCORE}`)
+    }
     if (!evidence.checks.aigcPassed) chapterIssues.push("AIGC gate is not passed")
     if (!evidence.checks.styleReady) chapterIssues.push("style inheritance is not ready")
     if (!evidence.checks.styleGenerationPassed) chapterIssues.push("style generation verification is not passed")
     if (!evidence.checks.adapterReady) chapterIssues.push("chapter inheritance adapter is not ready")
     if (!evidence.checks.freezerReady) chapterIssues.push("style freezer is not ready")
     if (!evidence.checks.publishBaseReady) chapterIssues.push("publish base evidence is incomplete")
-    if (!evidence.checks.styleConformant) chapterIssues.push("style conformance drift is not conformant")
+    if (!evidence.checks.styleConformant) {
+      chapterIssues.push(`style conformance score ${evidence.styleConformanceScore ?? "missing"} below required ${MIN_ACCEPTANCE_STYLE_CONFORMANCE_SCORE}`)
+    }
     if (!evidence.checks.hasEvidence) chapterIssues.push("production validation evidence is missing")
     if (!evidence.checks.noRisks) chapterIssues.push("production validation risks are still present")
 
@@ -1450,9 +1490,11 @@ export function auditProductionValidationForAcceptance(snapshot, options = {}) {
       passed: evidence.passed,
       checks: evidence.checks,
       qualityGateStatus: String(evidence.qualityGate?.status || ""),
+      qualityScore: evidence.qualityScore,
       aigcStatus: String(evidence.aigcDetection?.status || ""),
       styleStatus: String(evidence.styleInheritanceVerification?.status || ""),
       styleDriftStatus: String(evidence.styleConformanceDrift?.status || evidence.styleInheritanceVerification?.styleDrift?.status || ""),
+      styleConformanceScore: evidence.styleConformanceScore,
       riskCount: evidence.risks.length,
       issues: chapterIssues,
     })

@@ -762,6 +762,40 @@ test("production acceptance runner rejects missing production validation evidenc
   assert.match(productionValidationAudit.issues.join("\n"), /AIGC gate|publish readiness|production validation/)
 })
 
+test("production acceptance runner rejects low-scored production validation evidence", async () => {
+  const { auditProductionValidationForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.chapters[0].qualityGate = {
+    ...snapshot.chapters[0].qualityGate,
+    status: "passed",
+    passed: true,
+    score: 7.4,
+  }
+  snapshot.chapters[0].versionManifest.qualityGate = snapshot.chapters[0].qualityGate
+  snapshot.chapters[1].styleConformanceDrift = {
+    ...snapshot.chapters[1].styleConformanceDrift,
+    status: "conformant",
+    conformanceScore: 6.8,
+    driftScore: 3.2,
+    risks: [],
+  }
+  snapshot.chapters[1].styleInheritanceVerification = {
+    ...snapshot.chapters[1].styleInheritanceVerification,
+    styleConformanceDrift: snapshot.chapters[1].styleConformanceDrift,
+    styleDrift: { status: "conformant", conformanceScore: 68, driftScore: 32, threshold: 72 },
+  }
+  snapshot.chapters[1].versionManifest.styleConformanceDrift = snapshot.chapters[1].styleConformanceDrift
+  snapshot.chapters[1].versionManifest.styleInheritanceVerification = snapshot.chapters[1].styleInheritanceVerification
+  snapshot.chapters[1].publishReadiness = {
+    ...snapshot.chapters[1].publishReadiness,
+    styleInheritanceVerification: snapshot.chapters[1].styleInheritanceVerification,
+  }
+
+  const productionValidationAudit = auditProductionValidationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(productionValidationAudit.passed, false)
+  assert.match(productionValidationAudit.issues.join("\n"), /quality gate score|style conformance score/)
+})
+
 test("production acceptance runner rejects chapters without complete scene beats", async () => {
   const { auditSceneCompletenessForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
