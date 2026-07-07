@@ -1836,13 +1836,71 @@ function countWorldTextureSignals(body) {
   )
 }
 
+function worldbuildingEvidenceWindows(body, anchors) {
+  const paragraphs = splitBodyParagraphs(body)
+  const sources = paragraphs.length > 0 ? paragraphs : [String(body || "")]
+  const windows = []
+  for (const source of sources) {
+    for (const anchor of anchors) {
+      for (const rawTerm of anchor.variants || []) {
+        const term = String(rawTerm || "").trim()
+        if (term.length < 2 || !source.includes(term)) continue
+        windows.push({
+          anchor: anchor.label,
+          term,
+          text: source,
+        })
+      }
+    }
+  }
+  const seen = new Set()
+  return windows.filter((window) => {
+    const key = `${window.anchor}:${window.term}:${window.text}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function countWorldRulePressureSignals(text) {
+  return countMatches(
+    text,
+    /因|因而|因此|于是|导致|迫使|逼|不许|禁止|必须|不能|只准|规矩|律令|禁令|契约|税|债|户籍|官印|官府|衙门|朝廷|规则|制度|代价|风险|惩罚|追索|清算|身份|资格|通行|配额|账目|盐价|潮汐|交换/gu,
+  )
+}
+
+function worldRulePressureEvidence(window, knownCast = []) {
+  const text = String(window?.text || "")
+  const castSignals = knownCast.filter((name) => text.includes(name)).length
+  const actionSignals = countCharacterActionSignals(text)
+  const decisionSignals = countMatches(text, /决定|选择|不肯|留下|藏|交出|拦住|推回|合上|按住|追问|承认|拒绝|答应|转身|伸手|扣住|递出|收回/gu)
+  const consequenceSignals = countMatches(text, /让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|留下|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系|不可逆/gu)
+  const rulePressureSignals = countWorldRulePressureSignals(text)
+  const complete = rulePressureSignals > 0
+    && (castSignals > 0 || actionSignals > 0)
+    && (decisionSignals > 0 || consequenceSignals > 0)
+  return {
+    anchor: window.anchor,
+    term: window.term,
+    complete,
+    castSignals,
+    actionSignals,
+    decisionSignals,
+    consequenceSignals,
+    rulePressureSignals,
+    excerpt: firstTextSlice(text.replace(/\s+/gu, " "), 140),
+  }
+}
+
 export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const anchors = extractWorldbuildingAnchors(snapshot)
+  const knownCast = extractKnownCastNames(snapshot)
   const issues = []
   const chapterAudits = []
   let anchoredChapters = 0
   let texturedChapters = 0
+  let ruleDrivenChapters = 0
   const matchedTerms = new Set()
 
   if (anchors.length === 0) {
@@ -1859,11 +1917,17 @@ export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {
     const requiredMatches = anchors.length >= 3 ? 2 : Math.min(1, anchors.length)
     const anchored = requiredMatches > 0 && matches.length >= requiredMatches
     const textured = textureSignals >= 4
+    const ruleEvidence = worldbuildingEvidenceWindows(body, anchors)
+      .map((window) => worldRulePressureEvidence(window, knownCast))
+    const completeRuleEvidence = ruleEvidence.filter((evidence) => evidence.complete)
+    const ruleDriven = completeRuleEvidence.length > 0
     if (anchored) anchoredChapters += 1
     if (textured) texturedChapters += 1
+    if (ruleDriven) ruleDrivenChapters += 1
     const chapterIssues = []
     if (!anchored) chapterIssues.push(`world anchor matches ${matches.length}/${requiredMatches}`)
     if (!textured) chapterIssues.push(`weak world texture signals ${textureSignals}`)
+    if (!ruleDriven) chapterIssues.push("missing local world-rule pressure tied to character choice/consequence")
     if (chapterIssues.length) {
       issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
     }
@@ -1874,12 +1938,15 @@ export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {
       textureSignals,
       anchored,
       textured,
+      ruleDriven,
+      ruleEvidence: completeRuleEvidence.slice(0, 3),
       issues: chapterIssues,
     })
   }
 
   const requiredAnchoredChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.75) : chapters.length
   const requiredTexturedChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.75) : chapters.length
+  const requiredRuleDrivenChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.75) : chapters.length
   const requiredDistinctTerms = anchors.length >= 4 ? Math.min(4, Math.ceil(anchors.length * 0.4)) : anchors.length
   if (chapters.length === 0) {
     issues.push("no readable chapters available for worldbuilding integration audit")
@@ -1889,6 +1956,9 @@ export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {
   }
   if (texturedChapters < requiredTexturedChapters) {
     issues.push(`worldbuilding texture chapter coverage ${texturedChapters}/${chapters.length} below required ${requiredTexturedChapters}`)
+  }
+  if (ruleDrivenChapters < requiredRuleDrivenChapters) {
+    issues.push(`worldbuilding rule-pressure chapter coverage ${ruleDrivenChapters}/${chapters.length} below required ${requiredRuleDrivenChapters}`)
   }
   if (anchors.length > 0 && matchedTerms.size < requiredDistinctTerms) {
     issues.push(`distinct worldbuilding anchors used ${matchedTerms.size}/${anchors.length} below required ${requiredDistinctTerms}`)
@@ -1905,6 +1975,8 @@ export function auditWorldbuildingIntegrationForAcceptance(snapshot, options = {
       requiredAnchoredChapters,
       texturedChapters,
       requiredTexturedChapters,
+      ruleDrivenChapters,
+      requiredRuleDrivenChapters,
       requiredDistinctTerms,
     },
     anchors: anchors.map((anchor) => anchor.label).slice(0, 20),

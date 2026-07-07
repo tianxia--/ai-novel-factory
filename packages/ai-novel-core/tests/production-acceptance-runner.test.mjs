@@ -546,6 +546,32 @@ test("production acceptance runner rejects missing worldbuilding anchors in pros
   assert.match(worldbuildingAudit.issues.join("\n"), /world anchor|worldbuilding anchor chapter coverage|distinct worldbuilding anchors/)
 })
 
+test("production acceptance runner rejects worldbuilding anchors that do not drive character choices", async () => {
+  const { auditWorldbuildingIntegrationForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.lore.storyFoundation.worldMatrix = {
+    rules: ["蓝色玻璃控制南方盐价，码头商队按潮汐契约交换身份。"],
+    continuityAnchors: ["蓝色玻璃", "南方盐价", "码头商队", "潮汐契约"],
+  }
+  snapshot.lore.storyFoundation.storyBible.readerPromise = "蓝色玻璃和南方盐价必须成为每章可见的世界规则压力。"
+  snapshot.lore.storyFoundation.contract.genre.readerPromise = "蓝色玻璃、南方盐价、码头商队共同驱动世界观。"
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "蓝色玻璃、南方盐价、码头商队、潮汐契约都陈列在港口告示牌上。",
+      "官府、衙门、税册、账本、官印、契约、城门、码头、盐商、户籍都说明这个世界规则很多。",
+      "沈砚站在屋里看雨，老周也看雨，少尹没有逼问任何人。",
+      "这些世界观锚点只是被依次摆出来，没有让人物做出选择，也没有造成代价或后果。",
+    ].join("\n\n")
+  }
+
+  const worldbuildingAudit = auditWorldbuildingIntegrationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(worldbuildingAudit.passed, false)
+  assert.equal(worldbuildingAudit.summary.anchoredChapters, 4)
+  assert.equal(worldbuildingAudit.summary.texturedChapters, 4)
+  assert.equal(worldbuildingAudit.summary.ruleDrivenChapters, 0)
+  assert.match(worldbuildingAudit.issues.join("\n"), /world-rule pressure|rule-pressure chapter coverage/)
+})
+
 test("production acceptance runner audits long-form structural progression", async () => {
   const { auditStructuralProgressionForAcceptance } = await loadRunner()
   const snapshot = structuralSnapshot(true)
