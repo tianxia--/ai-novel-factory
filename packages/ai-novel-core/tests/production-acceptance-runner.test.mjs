@@ -297,6 +297,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditReaderPurityForAcceptance,
     auditProductionValidationForAcceptance,
     auditWorldbuildingIntegrationForAcceptance,
+    auditStructuralProgressionForAcceptance,
     auditPlotExecutionForAcceptance,
     auditPlotNoveltyForAcceptance,
     auditNarrativeQualityForAcceptance,
@@ -311,6 +312,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditForeshadowingPayoffForAcceptance,
     auditFinalResolutionForAcceptance,
     auditContinuityForAcceptance,
+    buildAcceptanceRequirementCoverage,
   } = await loadRunner()
   const snapshot = richSnapshot()
 
@@ -359,6 +361,9 @@ test("production acceptance runner audits story foundation and narrative quality
   const plotNoveltyAudit = auditPlotNoveltyForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(plotNoveltyAudit.passed, true)
   assert.equal(plotNoveltyAudit.summary.skipped, true)
+
+  const structuralProgressionAudit = auditStructuralProgressionForAcceptance(structuralSnapshot(true), { chapters: 8, chapterWords: 2500 })
+  assert.equal(structuralProgressionAudit.passed, true)
 
   const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(narrativeAudit.passed, true)
@@ -416,6 +421,48 @@ test("production acceptance runner audits story foundation and narrative quality
   const continuityAudit = auditContinuityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(continuityAudit.passed, true)
   assert.equal(continuityAudit.summary.bridgedPairs, 3)
+
+  const requirementCoverage = buildAcceptanceRequirementCoverage({
+    readerWordCount: wordCountAudit,
+    storyFoundation: foundationAudit,
+    readerPurity: readerPurityAudit,
+    productionValidation: productionValidationAudit,
+    worldbuilding: worldbuildingAudit,
+    structuralProgression: structuralProgressionAudit,
+    plotExecution: plotExecutionAudit,
+    plotNovelty: plotNoveltyAudit,
+    narrative: narrativeAudit,
+    proseTexture: proseTextureAudit,
+    languageCraft: languageCraftAudit,
+    sceneCompleteness: sceneCompletenessAudit,
+    sceneCardCharacter: sceneCardCharacterAudit,
+    crossChapterVariation: variationAudit,
+    characterVoice: characterVoiceAudit,
+    characterArc: characterArcAudit,
+    relationshipArc: relationshipArcAudit,
+    foreshadowing: foreshadowingAudit,
+    finalResolution: finalResolutionAudit,
+    continuity: continuityAudit,
+  }, {
+    minTotalWords: 3000,
+    maxTotalWords: 6000,
+  })
+  assert.equal(requirementCoverage.passed, true)
+  assert.equal(requirementCoverage.summary.totalRequirements, 10)
+  assert.equal(requirementCoverage.summary.failedRequirements, 0)
+  assert.deepEqual(requirementCoverage.requirements.map((requirement) => requirement.id), [
+    "long_form_word_count",
+    "worldbuilding_integration",
+    "character_cast_and_arcs",
+    "relationship_arcs",
+    "plot_mainline_development",
+    "foreshadowing_and_payoff",
+    "hooks_and_scene_execution",
+    "character_personalization",
+    "literary_natural_prose",
+    "cross_chapter_coherence",
+  ])
+  assert.equal(requirementCoverage.requirements.every((requirement) => requirement.audits.length > 0), true)
 })
 
 test("production acceptance runner resolves provider health targets from capability routes", async () => {

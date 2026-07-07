@@ -276,6 +276,147 @@ export function buildAcceptanceFailureRecovery(report = {}, options = {}, errorS
   }
 }
 
+function acceptanceAuditPassed(audit) {
+  return audit?.passed === true
+}
+
+function acceptanceRequirement(id, label, passed, audits, evidence) {
+  return {
+    id,
+    label,
+    passed: passed === true,
+    audits,
+    evidence,
+  }
+}
+
+export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
+  const requirements = [
+    acceptanceRequirement(
+      "long_form_word_count",
+      "自动化完成 10-30 万字长篇正文",
+      acceptanceAuditPassed(audits.readerWordCount),
+      ["readerWordCount"],
+      {
+        targetRange: [options.minTotalWords, options.maxTotalWords],
+        actualTotalWords: audits.readerWordCount?.summary?.actualTotalWords,
+        chapters: audits.readerWordCount?.summary?.chapters,
+      },
+    ),
+    acceptanceRequirement(
+      "worldbuilding_integration",
+      "世界观构建进入正文并驱动人物选择",
+      acceptanceAuditPassed(audits.storyFoundation) && acceptanceAuditPassed(audits.worldbuilding),
+      ["storyFoundation", "worldbuilding"],
+      {
+        assets: audits.storyFoundation?.counts,
+        worldbuilding: audits.worldbuilding?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "character_cast_and_arcs",
+      "主角、配角和人物弧线持续可追踪",
+      acceptanceAuditPassed(audits.characterArc) && acceptanceAuditPassed(audits.characterVoice),
+      ["characterArc", "characterVoice"],
+      {
+        characterArc: audits.characterArc?.summary,
+        characterVoice: audits.characterVoice?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "relationship_arcs",
+      "人物关系有压力、变化和跨章推进",
+      acceptanceAuditPassed(audits.relationshipArc),
+      ["relationshipArc"],
+      audits.relationshipArc?.summary,
+    ),
+    acceptanceRequirement(
+      "plot_mainline_development",
+      "情节发展、主线推进和长篇结构不停滞",
+      acceptanceAuditPassed(audits.structuralProgression)
+        && acceptanceAuditPassed(audits.plotExecution)
+        && acceptanceAuditPassed(audits.plotNovelty),
+      ["structuralProgression", "plotExecution", "plotNovelty"],
+      {
+        structuralProgression: audits.structuralProgression?.summary,
+        plotExecution: audits.plotExecution?.summary,
+        plotNovelty: audits.plotNovelty?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "foreshadowing_and_payoff",
+      "伏笔能埋设、推进并在后段回收",
+      acceptanceAuditPassed(audits.foreshadowing) && acceptanceAuditPassed(audits.finalResolution),
+      ["foreshadowing", "finalResolution"],
+      {
+        foreshadowing: audits.foreshadowing?.summary,
+        finalResolution: audits.finalResolution?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "hooks_and_scene_execution",
+      "章节钩子、场景卡和场景完整度落到正文",
+      acceptanceAuditPassed(audits.narrative)
+        && acceptanceAuditPassed(audits.sceneCompleteness)
+        && acceptanceAuditPassed(audits.sceneCardCharacter),
+      ["narrative", "sceneCompleteness", "sceneCardCharacter"],
+      {
+        narrative: audits.narrative?.summary,
+        sceneCompleteness: audits.sceneCompleteness?.summary,
+        sceneCardCharacter: audits.sceneCardCharacter?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "character_personalization",
+      "不同人物有个性化说话、动作或身体/物件锚点",
+      acceptanceAuditPassed(audits.characterVoice)
+        && Number(audits.characterVoice?.summary?.missingPersonalizationContract || 0) === 0
+        && Number(audits.characterVoice?.summary?.missingDistinctiveEvidence || 0) === 0,
+      ["characterVoice"],
+      audits.characterVoice?.summary,
+    ),
+    acceptanceRequirement(
+      "literary_natural_prose",
+      "正文不干、不生硬，并具备可检查的文学质感",
+      acceptanceAuditPassed(audits.readerPurity)
+        && acceptanceAuditPassed(audits.productionValidation)
+        && acceptanceAuditPassed(audits.proseTexture)
+        && acceptanceAuditPassed(audits.languageCraft),
+      ["readerPurity", "productionValidation", "proseTexture", "languageCraft"],
+      {
+        readerPurity: audits.readerPurity?.summary,
+        productionValidation: audits.productionValidation?.summary,
+        proseTexture: audits.proseTexture?.summary,
+        languageCraft: audits.languageCraft?.summary,
+      },
+    ),
+    acceptanceRequirement(
+      "cross_chapter_coherence",
+      "跨章承接、变体和结局收束保持连贯",
+      acceptanceAuditPassed(audits.continuity)
+        && acceptanceAuditPassed(audits.crossChapterVariation)
+        && acceptanceAuditPassed(audits.finalResolution),
+      ["continuity", "crossChapterVariation", "finalResolution"],
+      {
+        continuity: audits.continuity?.summary,
+        crossChapterVariation: audits.crossChapterVariation?.summary,
+        finalResolution: audits.finalResolution?.summary,
+      },
+    ),
+  ]
+  const failedRequirements = requirements.filter((requirement) => !requirement.passed)
+  return {
+    passed: failedRequirements.length === 0,
+    summary: {
+      totalRequirements: requirements.length,
+      passedRequirements: requirements.length - failedRequirements.length,
+      failedRequirements: failedRequirements.length,
+    },
+    failedRequirementIds: failedRequirements.map((requirement) => requirement.id),
+    requirements,
+  }
+}
+
 function redactAcceptanceOptions(options) {
   return {
     ...options,
@@ -4614,6 +4755,36 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalForeshadowingAudit = foreshadowingAudit
   report.finalResolutionAudit = finalResolutionAudit
   report.finalContinuityAudit = continuityAudit
+  const requirementCoverage = buildAcceptanceRequirementCoverage({
+    readerWordCount: readerWordCountAudit,
+    storyFoundation: storyFoundationAudit,
+    readerPurity: readerPurityAudit,
+    productionValidation: productionValidationAudit,
+    worldbuilding: worldbuildingAudit,
+    structuralProgression: structuralProgressionAudit,
+    plotExecution: plotExecutionAudit,
+    plotNovelty: plotNoveltyAudit,
+    narrative: narrativeAudit,
+    proseTexture: proseTextureAudit,
+    languageCraft: languageCraftAudit,
+    sceneCompleteness: sceneCompletenessAudit,
+    sceneCardCharacter: sceneCardCharacterAudit,
+    crossChapterVariation: crossChapterVariationAudit,
+    characterVoice: characterVoiceAudit,
+    characterArc: characterArcAudit,
+    relationshipArc: relationshipArcAudit,
+    foreshadowing: foreshadowingAudit,
+    finalResolution: finalResolutionAudit,
+    continuity: continuityAudit,
+  }, options)
+  if (!requirementCoverage.passed) {
+    throw new AcceptanceError("Requirement coverage acceptance audit failed.", {
+      summary: requirementCoverage.summary,
+      failedRequirementIds: requirementCoverage.failedRequirementIds,
+      requirements: requirementCoverage.requirements.filter((requirement) => !requirement.passed),
+    })
+  }
+  report.finalRequirementCoverage = requirementCoverage
   report.steps.push({
     step: "reader_acceptance",
     status: "passed",
@@ -4641,6 +4812,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     foreshadowing: foreshadowingAudit.summary,
     finalResolution: finalResolutionAudit.summary,
     continuity: continuityAudit.summary,
+    requirementCoverage: requirementCoverage.summary,
   })
   await maybeWriteCheckpoint(checkpoint, "reader_acceptance_passed", {
     totalWords,
@@ -4671,6 +4843,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     foreshadowing: foreshadowingAudit.summary,
     finalResolution: finalResolutionAudit.summary,
     continuity: continuityAudit.summary,
+    requirementCoverage: requirementCoverage.summary,
   })
   return snapshot
 }
@@ -4726,6 +4899,7 @@ async function main() {
     finalProseTextureAudit: null,
     finalLanguageCraftAudit: null,
     finalSceneCompletenessAudit: null,
+    finalSceneCardCharacterAudit: null,
     finalCrossChapterVariationAudit: null,
     finalCharacterVoiceAudit: null,
     finalCharacterArcAudit: null,
@@ -4733,6 +4907,7 @@ async function main() {
     finalForeshadowingAudit: null,
     finalResolutionAudit: null,
     finalContinuityAudit: null,
+    finalRequirementCoverage: null,
     checkpoints: [],
     lastCheckpoint: null,
     lastSuccessfulCheckpoint: null,
