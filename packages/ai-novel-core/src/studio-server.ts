@@ -92,6 +92,9 @@ import {
   type StyleEvolutionContract,
 } from "./production-contracts"
 
+const PRODUCTION_DEFAULT_TOTAL_CHAPTERS = 40
+const PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET = 3000
+
 function getPublicProjectEnvStatus(rootDir = process.cwd()) {
   const status = getRawPublicEnvStatus(rootDir)
   const activeLlm = getCachedActiveLlmConfig()
@@ -5209,8 +5212,8 @@ export async function handleNovelStudioApi(
 
   if (method === "POST" && requestPathname === "/api/projects") {
     const idea = String(body.idea || "").trim()
-    const totalChapters = Number.parseInt(String(body.chapters || "24"), 10)
-    const chapterWordTarget = Number.parseInt(String(body.chapterWords || "2500"), 10)
+    const totalChapters = Number.parseInt(String(body.chapters || PRODUCTION_DEFAULT_TOTAL_CHAPTERS), 10)
+    const chapterWordTarget = Number.parseInt(String(body.chapterWords || PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET), 10)
 
     if (!idea) {
       return { status: 400, payload: { error: "idea_required" } }
@@ -6084,8 +6087,8 @@ export async function handleNovelStudioApi(
 
   if (method === "POST" && requestPathname === "/api/init") {
     const idea = String(body.idea || "").trim()
-    const totalChapters = Number.parseInt(String(body.chapters || "24"), 10)
-    const chapterWordTarget = Number.parseInt(String(body.chapterWords || "2500"), 10)
+    const totalChapters = Number.parseInt(String(body.chapters || PRODUCTION_DEFAULT_TOTAL_CHAPTERS), 10)
+    const chapterWordTarget = Number.parseInt(String(body.chapterWords || PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET), 10)
 
     if (!idea) {
       return { status: 400, payload: { error: "idea_required" } }

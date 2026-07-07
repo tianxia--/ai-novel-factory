@@ -4024,6 +4024,29 @@ test("provider test keeps generation fallback error when models endpoint is unsu
   }
 })
 
+test("project creation defaults to production long-form targets while preserving explicit overrides", async () => {
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-project-defaults-"))
+
+  const defaultResponse = await handleNovelStudioApi(tempDir, "POST", "/api/projects", {
+    title: "Default Length",
+    idea: "一个税册小吏追查王朝旧案",
+  })
+  assert.equal(defaultResponse.status, 201)
+  assert.equal(defaultResponse.payload.state.plan.totalChapters, 40)
+  assert.equal(defaultResponse.payload.state.plan.chapterWordTarget, 3000)
+
+  const explicitResponse = await handleNovelStudioApi(tempDir, "POST", "/api/projects", {
+    title: "Explicit Length",
+    idea: "一个短篇测试项目",
+    chapters: 3,
+    chapterWords: 2500,
+  })
+  assert.equal(explicitResponse.status, 201)
+  assert.equal(explicitResponse.payload.state.plan.totalChapters, 3)
+  assert.equal(explicitResponse.payload.state.plan.chapterWordTarget, 2500)
+})
+
 test("chat stream continue routes to autopilot instead of discussion", async () => {
   const { handleNovelStudioApi } = await loadStudioServer()
   const { createManagedAutonomousProject, withFactoryDb } = await loadCore()

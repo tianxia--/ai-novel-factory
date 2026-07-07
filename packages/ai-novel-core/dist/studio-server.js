@@ -99,6 +99,8 @@ import fs from "fs/promises";
 import path from "path";
 import http from "http";
 import { createHash } from "crypto";
+var PRODUCTION_DEFAULT_TOTAL_CHAPTERS = 40;
+var PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET = 3e3;
 function getPublicProjectEnvStatus2(rootDir = process.cwd()) {
   const status = getPublicProjectEnvStatus(rootDir);
   const activeLlm = getCachedActiveLlmConfig();
@@ -4253,8 +4255,8 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
   }
   if (method === "POST" && requestPathname === "/api/projects") {
     const idea = String(body.idea || "").trim();
-    const totalChapters = Number.parseInt(String(body.chapters || "24"), 10);
-    const chapterWordTarget = Number.parseInt(String(body.chapterWords || "2500"), 10);
+    const totalChapters = Number.parseInt(String(body.chapters || PRODUCTION_DEFAULT_TOTAL_CHAPTERS), 10);
+    const chapterWordTarget = Number.parseInt(String(body.chapterWords || PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET), 10);
     if (!idea) {
       return { status: 400, payload: { error: "idea_required" } };
     }
@@ -5065,8 +5067,8 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
   }
   if (method === "POST" && requestPathname === "/api/init") {
     const idea = String(body.idea || "").trim();
-    const totalChapters = Number.parseInt(String(body.chapters || "24"), 10);
-    const chapterWordTarget = Number.parseInt(String(body.chapterWords || "2500"), 10);
+    const totalChapters = Number.parseInt(String(body.chapters || PRODUCTION_DEFAULT_TOTAL_CHAPTERS), 10);
+    const chapterWordTarget = Number.parseInt(String(body.chapterWords || PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET), 10);
     if (!idea) {
       return { status: 400, payload: { error: "idea_required" } };
     }

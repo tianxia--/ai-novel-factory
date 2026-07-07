@@ -143,6 +143,8 @@ const NETWORK_RETRY_BASE_MS = 3000
 const NETWORK_RETRY_MAX_MS = 30000
 const STARTUP_LOADING_MASK_FALLBACK_MS = 8000
 const DISCUSSION_PAGE_SIZE = 20
+const PRODUCTION_DEFAULT_TOTAL_CHAPTERS = 40
+const PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET = 3000
 
 // Project wizard state and DOM references
 let currentCreateStep = 1;
@@ -10794,8 +10796,8 @@ async function initializeWorkspace() {
   await createProjectFromModal({
     title: initIdeaInput.value.trim(),
     idea: initIdeaInput.value.trim(),
-    chapters: Number.parseInt(initChaptersInput.value || "24", 10),
-    chapterWords: Number.parseInt(initWordsInput.value || "2500", 10),
+    chapters: Number.parseInt(initChaptersInput.value || String(PRODUCTION_DEFAULT_TOTAL_CHAPTERS), 10),
+    chapterWords: Number.parseInt(initWordsInput.value || String(PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET), 10),
   })
 }
 
@@ -11625,11 +11627,11 @@ async function runComposerAction(action) {
     }
     let chapters = Number.parseInt(projectCreateChaptersInput.value, 10);
     if (Number.isNaN(chapters) || chapters < 1) {
-      chapters = 24;
+      chapters = PRODUCTION_DEFAULT_TOTAL_CHAPTERS;
     }
     let chapterWords = Number.parseInt(projectCreateWordsInput.value, 10);
     if (Number.isNaN(chapterWords) || chapterWords < 1000) {
-      chapterWords = 2500;
+      chapterWords = PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET;
     }
     createProjectFromModal({
       title: projectCreateTitleInput.value.trim(),
@@ -11652,11 +11654,11 @@ async function runComposerAction(action) {
   projectCreateSubmitButton.addEventListener("click", () => {
     let chapters = Number.parseInt(projectCreateChaptersInput.value, 10);
     if (Number.isNaN(chapters) || chapters < 1) {
-      chapters = 24;
+      chapters = PRODUCTION_DEFAULT_TOTAL_CHAPTERS;
     }
     let chapterWords = Number.parseInt(projectCreateWordsInput.value, 10);
     if (Number.isNaN(chapterWords) || chapterWords < 1000) {
-      chapterWords = 2500;
+      chapterWords = PRODUCTION_DEFAULT_CHAPTER_WORD_TARGET;
     }
     createProjectFromModal({
       title: projectCreateTitleInput.value.trim(),
