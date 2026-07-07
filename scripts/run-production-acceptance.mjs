@@ -2013,6 +2013,150 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
   }
 }
 
+function normalizeVariationFingerprint(value, maxLength = 180) {
+  return normalizeAuditText(value)
+    .replace(/[0-9０-９零〇一二三四五六七八九十百千万第章节回卷册部年月日号]/gu, "")
+    .slice(0, maxLength)
+}
+
+function firstMeaningfulSentence(body) {
+  return splitAuditSentences(body).find((sentence) => normalizeAuditText(sentence).length >= 8) || firstTextSlice(body, 180)
+}
+
+function lastMeaningfulSentence(body) {
+  const sentences = splitAuditSentences(body).filter((sentence) => normalizeAuditText(sentence).length >= 8)
+  return sentences.at(-1) || lastTextSlice(body, 180)
+}
+
+function duplicateChapterFingerprints(chapters, getText, options = {}) {
+  const minLength = Number(options.minLength || 24)
+  const minCount = Number(options.minCount || 3)
+  const maxLength = Number(options.maxLength || 180)
+  const groups = new Map()
+  for (const chapter of chapters) {
+    const chapterNumber = Number(chapter?.chapterNumber || 0)
+    const fingerprint = normalizeVariationFingerprint(getText(chapter), maxLength)
+    if (fingerprint.length < minLength) continue
+    const entry = groups.get(fingerprint) || { fingerprint, chapters: [] }
+    entry.chapters.push(chapterNumber)
+    groups.set(fingerprint, entry)
+  }
+  return Array.from(groups.values())
+    .filter((entry) => entry.chapters.length >= minCount)
+    .map((entry) => ({ ...entry, sample: entry.fingerprint.slice(0, 80) }))
+}
+
+function duplicateParagraphFingerprints(chapters) {
+  const groups = new Map()
+  for (const chapter of chapters) {
+    const chapterNumber = Number(chapter?.chapterNumber || 0)
+    const seenInChapter = new Set()
+    for (const paragraph of splitBodyParagraphs(chapter?.body || "")) {
+      const fingerprint = normalizeVariationFingerprint(paragraph, 220)
+      if (fingerprint.length < 60 || seenInChapter.has(fingerprint)) continue
+      seenInChapter.add(fingerprint)
+      const entry = groups.get(fingerprint) || { fingerprint, chapters: [] }
+      entry.chapters.push(chapterNumber)
+      groups.set(fingerprint, entry)
+    }
+  }
+  return Array.from(groups.values())
+    .filter((entry) => entry.chapters.length >= 3)
+    .map((entry) => ({ ...entry, sample: entry.fingerprint.slice(0, 100) }))
+}
+
+export function auditCrossChapterVariationForAcceptance(snapshot, options = {}) {
+  const chapters = (Array.isArray(snapshot?.chapters) ? snapshot.chapters : [])
+    .map((chapter) => ({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      body: String(chapter?.body || ""),
+    }))
+    .filter((chapter) => chapter.chapterNumber > 0)
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+
+  if (totalChapters < 6 || chapters.length < 6) {
+    return {
+      passed: true,
+      issues: [],
+      summary: {
+        totalChapters,
+        readableChapters: chapters.length,
+        skipped: true,
+        reason: "short-form sample below cross-chapter variation threshold",
+      },
+      repeatedOpenings: [],
+      repeatedEndings: [],
+      repeatedParagraphs: [],
+    }
+  }
+
+  const openingFingerprints = chapters
+    .map((chapter) => normalizeVariationFingerprint(firstMeaningfulSentence(chapter.body), 140))
+    .filter((fingerprint) => fingerprint.length >= 18)
+  const endingFingerprints = chapters
+    .map((chapter) => normalizeVariationFingerprint(lastMeaningfulSentence(chapter.body), 140))
+    .filter((fingerprint) => fingerprint.length >= 18)
+  const distinctOpenings = new Set(openingFingerprints).size
+  const distinctEndings = new Set(endingFingerprints).size
+  const requiredDistinctOpenings = Math.ceil(chapters.length * 0.75)
+  const requiredDistinctEndings = Math.ceil(chapters.length * 0.7)
+  const repeatedOpenings = duplicateChapterFingerprints(chapters, (chapter) => firstMeaningfulSentence(chapter.body), {
+    minLength: 18,
+    minCount: 3,
+    maxLength: 140,
+  })
+  const repeatedEndings = duplicateChapterFingerprints(chapters, (chapter) => lastMeaningfulSentence(chapter.body), {
+    minLength: 18,
+    minCount: 3,
+    maxLength: 140,
+  })
+  const repeatedParagraphs = duplicateParagraphFingerprints(chapters)
+  const repeatedParagraphChapters = new Set(repeatedParagraphs.flatMap((entry) => entry.chapters))
+  const allowedRepeatedParagraphChapters = Math.max(2, Math.floor(chapters.length * 0.25))
+
+  if (distinctOpenings < requiredDistinctOpenings) {
+    issues.push(`distinct chapter openings ${distinctOpenings}/${chapters.length} below required ${requiredDistinctOpenings}`)
+  }
+  if (distinctEndings < requiredDistinctEndings) {
+    issues.push(`distinct chapter endings ${distinctEndings}/${chapters.length} below required ${requiredDistinctEndings}`)
+  }
+  if (repeatedOpenings.length > 0) {
+    issues.push(`repeated chapter opening template across chapters ${repeatedOpenings[0].chapters.join(",")}`)
+  }
+  if (repeatedEndings.length > 0) {
+    issues.push(`repeated chapter ending template across chapters ${repeatedEndings[0].chapters.join(",")}`)
+  }
+  if (repeatedParagraphChapters.size > allowedRepeatedParagraphChapters) {
+    issues.push(`repeated long prose paragraphs affect ${repeatedParagraphChapters.size}/${chapters.length} chapters, above allowed ${allowedRepeatedParagraphChapters}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      readableChapters: chapters.length,
+      distinctOpenings,
+      requiredDistinctOpenings,
+      distinctEndings,
+      requiredDistinctEndings,
+      repeatedOpeningGroups: repeatedOpenings.length,
+      repeatedEndingGroups: repeatedEndings.length,
+      repeatedParagraphGroups: repeatedParagraphs.length,
+      repeatedParagraphChapters: repeatedParagraphChapters.size,
+      allowedRepeatedParagraphChapters,
+      skipped: false,
+    },
+    repeatedOpenings: repeatedOpenings.slice(0, 5),
+    repeatedEndings: repeatedEndings.slice(0, 5),
+    repeatedParagraphs: repeatedParagraphs.slice(0, 8),
+  }
+}
+
 function collectStyleFallbackSignals(payload) {
   const signals = []
   const inspectCandidate = (candidate, label) => {
@@ -2579,6 +2723,16 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       chapters: proseTextureAudit.chapters.slice(0, 8),
     })
   }
+  const crossChapterVariationAudit = auditCrossChapterVariationForAcceptance(auditSnapshot, options)
+  if (!crossChapterVariationAudit.passed) {
+    throw new AcceptanceError("Cross-chapter variation acceptance audit failed.", {
+      issues: crossChapterVariationAudit.issues.slice(0, 30),
+      summary: crossChapterVariationAudit.summary,
+      repeatedOpenings: crossChapterVariationAudit.repeatedOpenings,
+      repeatedEndings: crossChapterVariationAudit.repeatedEndings,
+      repeatedParagraphs: crossChapterVariationAudit.repeatedParagraphs,
+    })
+  }
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(auditSnapshot, options)
   if (!characterVoiceAudit.passed) {
     throw new AcceptanceError("Character voice acceptance audit failed.", {
@@ -2635,6 +2789,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
+  report.finalCrossChapterVariationAudit = crossChapterVariationAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
   report.finalCharacterArcAudit = characterArcAudit
   report.finalRelationshipArcAudit = relationshipArcAudit
@@ -2652,6 +2807,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
@@ -2673,6 +2829,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     characterArc: characterArcAudit.summary,
     relationshipArc: relationshipArcAudit.summary,
@@ -2724,6 +2881,7 @@ async function main() {
     finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
+    finalCrossChapterVariationAudit: null,
     finalCharacterVoiceAudit: null,
     finalCharacterArcAudit: null,
     finalRelationshipArcAudit: null,

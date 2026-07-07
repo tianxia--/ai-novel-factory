@@ -162,6 +162,49 @@ function structuralSnapshot(withMarkers = true) {
   return snapshot
 }
 
+function variedLongSnapshot() {
+  const snapshot = structuralSnapshot(true)
+  const openings = [
+    "清晨的仓曹院先响起木鱼声，沈砚把缺页账册压在袖下，看见老周从廊柱后退了一步。",
+    "西市的盐车堵住坊门，少尹的差役翻检货牌，沈砚听见老周在人群里咳了一声。",
+    "午后的档库热得发闷，沈砚拆开旧印泥盒，里面压着一枚不该存在的户籍铜牌。",
+    "雨停后，城门沟里浮出蓝色玻璃，沈砚第一次意识到税册缺页牵着另一条命案。",
+    "夜审开在废庙里，老周把袖口摊开，少尹的人却先把灯吹灭了一半。",
+    "南仓失火时，沈砚没有去救整本账册，只把夹在封皮里的空白页抽出来。",
+    "鼓楼三更，少尹亲自站到门外，沈砚终于把旧印章扣在供桌中央。",
+    "天亮以前，老周把伞留在桥头，沈砚看见伞柄上多了一道新刻的债字。",
+  ]
+  const middles = [
+    "他选择先问人，不问账。这个选择让老周欠下第二次沉默，也让少尹知道缺页没有交出去。",
+    "沈砚把盐价旧账递给摊主，只收回半句证词。人群散开时，账面上的潮痕已经变成新的线索。",
+    "他按住铜牌边缘，决定把身份风险留在自己名下。老周看见了，却没有替他辩一句。",
+    "玻璃边缘割破掌心，沈砚没有松手。那点血让账册里的空白变得像一份供词。",
+    "庙门外脚步声一停，沈砚让老周先走。留下的人反而成了少尹必须追问的证人。",
+    "火星落上纸边，沈砚把空白页藏进水缸，代价是整仓旧账再也不能复原。",
+    "他拒绝交出旧印，转身把少尹逼到灯下。关系在这一刻翻面，谁欠谁已经说不清。",
+    "桥下水声很低，沈砚收起那把伞，知道下一卷要追的不是账，而是留下伞的人。",
+  ]
+  const endings = [
+    "章末，院门外有人轻轻敲了三下，敲的不是门，是账册木匣。",
+    "结尾时，盐车忽然空了一辆，车辙却朝档库去了。",
+    "最后，铜牌背面露出沈砚父亲的旧名，他没有立刻合上盒盖。",
+    "章末的玻璃被雨水冲亮，里面映出的不是城门，而是一间废庙。",
+    "尾声里，老周走出三步又停住，像终于想起自己还欠沈砚一条命。",
+    "火灭以后，水缸里浮出一行浅墨：少尹只要活口。",
+    "最后一盏灯灭前，旧印章自己裂开，裂纹正好穿过少尹二字。",
+    "卷尾只剩桥头那把伞，伞面朝下，像替谁盖住了还没说出口的供词。",
+  ]
+  snapshot.project.totalChapters = openings.length
+  snapshot.chapters = openings.map((opening, index) => ({
+    chapterNumber: index + 1,
+    title: `第 ${index + 1} 章`,
+    wordCount: 2500,
+    body: [opening, middles[index], endings[index]].join("\n\n"),
+    publishReadiness: { ready: true },
+  }))
+  return snapshot
+}
+
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
     auditStoryFoundationForAcceptance,
@@ -169,6 +212,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
+    auditCrossChapterVariationForAcceptance,
     auditCharacterVoiceForAcceptance,
     auditCharacterArcForAcceptance,
     auditRelationshipArcForAcceptance,
@@ -202,6 +246,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(proseTextureAudit.passed, true)
   assert.equal(proseTextureAudit.summary.sceneRichChapters, 4)
   assert.equal(proseTextureAudit.summary.variedRhythmChapters, 4)
+
+  const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(variationAudit.passed, true)
+  assert.equal(variationAudit.summary.skipped, true)
 
   const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(characterVoiceAudit.passed, true)
@@ -396,6 +444,25 @@ test("production acceptance runner rejects missing long-form structural progress
   const structuralAudit = auditStructuralProgressionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
   assert.equal(structuralAudit.passed, false)
   assert.match(structuralAudit.issues.join("\n"), /structural phase|long-form structural progression/)
+})
+
+test("production acceptance runner audits cross-chapter variation", async () => {
+  const { auditCrossChapterVariationForAcceptance } = await loadRunner()
+  const snapshot = variedLongSnapshot()
+
+  const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(variationAudit.passed, true)
+  assert.equal(variationAudit.summary.distinctOpenings, 8)
+  assert.equal(variationAudit.summary.distinctEndings, 8)
+})
+
+test("production acceptance runner rejects repeated chapter templates", async () => {
+  const { auditCrossChapterVariationForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(false)
+
+  const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(variationAudit.passed, false)
+  assert.match(variationAudit.issues.join("\n"), /repeated chapter opening|repeated chapter ending|repeated long prose|distinct chapter/)
 })
 
 test("production acceptance runner rejects same-voice character dialogue", async () => {
