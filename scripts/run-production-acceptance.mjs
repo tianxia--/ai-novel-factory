@@ -2013,6 +2013,159 @@ export function auditProseTextureForAcceptance(snapshot, options = {}) {
   }
 }
 
+function countDialogueQuotes(text) {
+  return countMatches(text, /[「“][^」”]{2,160}[」”]/gu)
+}
+
+function paragraphSceneEvidence(paragraph, knownCast) {
+  const text = String(paragraph || "")
+  const normalizedLength = normalizeAuditText(text).length
+  const castMentions = knownCast.filter((name) => text.includes(name))
+  const dialogueCount = countDialogueQuotes(text)
+  const actionSignals = countCharacterActionSignals(text)
+  const sensorySignals = countMatches(text, /雨|风|声|灯|冷|热|湿|血|灰|墨|纸|门|窗|脚步|气味|疼|汗|光|影|呼吸|触感|指腹|掌心|袖口|鞋尖/gu)
+  const objectSignals = countMatches(text, /账本|账册|缺页|信纸|印章|官印|钥匙|地图|旧账|证据|线索|门槛|窗纸|灯火|袖口|鞋尖|纸边|墨味|铜牌|玻璃|伞柄|木匣/gu)
+  const pressureSignals = countCharacterPressureSignals(text)
+  const consequenceSignals = countMatches(text, /导致|因此|于是|代价|风险|裂|暴露|失去|改变|留下|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系|不能回头|不可逆/gu)
+  const evidenceScore = [
+    castMentions.length > 0,
+    dialogueCount > 0,
+    actionSignals > 0,
+    sensorySignals > 0,
+    objectSignals > 0,
+    pressureSignals > 0 || consequenceSignals > 0,
+  ].filter(Boolean).length
+  const sceneLike = normalizedLength >= 35
+    && evidenceScore >= 3
+    && (actionSignals > 0 || dialogueCount > 0)
+    && (castMentions.length > 0 || dialogueCount > 0)
+  return {
+    normalizedLength,
+    castMentions,
+    dialogueCount,
+    actionSignals,
+    sensorySignals,
+    objectSignals,
+    pressureSignals,
+    consequenceSignals,
+    evidenceScore,
+    sceneLike,
+    interactionLike: sceneLike && (dialogueCount > 0 || castMentions.length >= 2) && (actionSignals > 0 || pressureSignals > 0),
+    consequenceLike: sceneLike && (pressureSignals > 0 || consequenceSignals > 0),
+    expositionOnly: normalizedLength >= 45
+      && actionSignals === 0
+      && dialogueCount === 0
+      && sensorySignals === 0
+      && objectSignals === 0
+      && pressureSignals === 0
+      && consequenceSignals === 0,
+  }
+}
+
+export function auditSceneCompletenessForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const knownCast = extractKnownCastNames(snapshot)
+  const issues = []
+  const chapterAudits = []
+  let sceneCompleteChapters = 0
+  let sceneParagraphsTotal = 0
+  let interactionParagraphsTotal = 0
+  let consequenceParagraphsTotal = 0
+  let expositionOnlyParagraphsTotal = 0
+
+  for (const chapter of chapters) {
+    const paragraphs = splitBodyParagraphs(chapter?.body || "")
+    const paragraphAudits = paragraphs.map((paragraph, index) => ({
+      index: index + 1,
+      sample: compactText(paragraph, 90),
+      ...paragraphSceneEvidence(paragraph, knownCast),
+    }))
+    const sceneParagraphs = paragraphAudits.filter((paragraph) => paragraph.sceneLike)
+    const interactionParagraphs = paragraphAudits.filter((paragraph) => paragraph.interactionLike)
+    const consequenceParagraphs = paragraphAudits.filter((paragraph) => paragraph.consequenceLike)
+    const expositionOnlyParagraphs = paragraphAudits.filter((paragraph) => paragraph.expositionOnly)
+    const requiredSceneParagraphs = paragraphs.length >= 5 ? 3 : Math.min(2, paragraphs.length)
+    const allowedExpositionOnlyParagraphs = Math.max(1, Math.floor(paragraphs.length * 0.35))
+    const complete = sceneParagraphs.length >= requiredSceneParagraphs
+      && interactionParagraphs.length >= 1
+      && consequenceParagraphs.length >= 1
+      && expositionOnlyParagraphs.length <= allowedExpositionOnlyParagraphs
+
+    if (complete) sceneCompleteChapters += 1
+    sceneParagraphsTotal += sceneParagraphs.length
+    interactionParagraphsTotal += interactionParagraphs.length
+    consequenceParagraphsTotal += consequenceParagraphs.length
+    expositionOnlyParagraphsTotal += expositionOnlyParagraphs.length
+
+    const chapterIssues = []
+    if (paragraphs.length < 3) chapterIssues.push(`too few scene paragraphs ${paragraphs.length}`)
+    if (sceneParagraphs.length < requiredSceneParagraphs) {
+      chapterIssues.push(`complete scene paragraphs ${sceneParagraphs.length}/${requiredSceneParagraphs}`)
+    }
+    if (interactionParagraphs.length < 1) chapterIssues.push("missing character interaction scene")
+    if (consequenceParagraphs.length < 1) chapterIssues.push("missing decision/consequence scene beat")
+    if (expositionOnlyParagraphs.length > allowedExpositionOnlyParagraphs) {
+      chapterIssues.push(`exposition-only paragraphs ${expositionOnlyParagraphs.length} above allowed ${allowedExpositionOnlyParagraphs}`)
+    }
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      paragraphCount: paragraphs.length,
+      sceneParagraphs: sceneParagraphs.length,
+      requiredSceneParagraphs,
+      interactionParagraphs: interactionParagraphs.length,
+      consequenceParagraphs: consequenceParagraphs.length,
+      expositionOnlyParagraphs: expositionOnlyParagraphs.length,
+      allowedExpositionOnlyParagraphs,
+      complete,
+      paragraphs: paragraphAudits.map((paragraph) => ({
+        index: paragraph.index,
+        sample: paragraph.sample,
+        normalizedLength: paragraph.normalizedLength,
+        castMentions: paragraph.castMentions,
+        dialogueCount: paragraph.dialogueCount,
+        actionSignals: paragraph.actionSignals,
+        sensorySignals: paragraph.sensorySignals,
+        objectSignals: paragraph.objectSignals,
+        pressureSignals: paragraph.pressureSignals,
+        consequenceSignals: paragraph.consequenceSignals,
+        evidenceScore: paragraph.evidenceScore,
+        sceneLike: paragraph.sceneLike,
+        interactionLike: paragraph.interactionLike,
+        consequenceLike: paragraph.consequenceLike,
+        expositionOnly: paragraph.expositionOnly,
+      })).slice(0, 8),
+      issues: chapterIssues,
+    })
+  }
+
+  const totalChapters = chapters.length
+  const requiredCompleteChapters = totalChapters >= 3 ? Math.ceil(totalChapters * 0.85) : totalChapters
+  if (totalChapters === 0) issues.push("no readable chapters available for scene completeness audit")
+  if (sceneCompleteChapters < requiredCompleteChapters) {
+    issues.push(`scene-complete chapter coverage ${sceneCompleteChapters}/${totalChapters} below required ${requiredCompleteChapters}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      sceneCompleteChapters,
+      requiredCompleteChapters,
+      sceneParagraphsTotal,
+      interactionParagraphsTotal,
+      consequenceParagraphsTotal,
+      expositionOnlyParagraphsTotal,
+      knownCast: knownCast.length,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function normalizeVariationFingerprint(value, maxLength = 180) {
   return normalizeAuditText(value)
     .replace(/[0-9０-９零〇一二三四五六七八九十百千万第章节回卷册部年月日号]/gu, "")
@@ -2723,6 +2876,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       chapters: proseTextureAudit.chapters.slice(0, 8),
     })
   }
+  const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(auditSnapshot, options)
+  if (!sceneCompletenessAudit.passed) {
+    throw new AcceptanceError("Scene completeness acceptance audit failed.", {
+      issues: sceneCompletenessAudit.issues.slice(0, 30),
+      summary: sceneCompletenessAudit.summary,
+      chapters: sceneCompletenessAudit.chapters.slice(0, 8),
+    })
+  }
   const crossChapterVariationAudit = auditCrossChapterVariationForAcceptance(auditSnapshot, options)
   if (!crossChapterVariationAudit.passed) {
     throw new AcceptanceError("Cross-chapter variation acceptance audit failed.", {
@@ -2789,6 +2950,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
   report.finalPlotExecutionAudit = plotExecutionAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
+  report.finalSceneCompletenessAudit = sceneCompletenessAudit
   report.finalCrossChapterVariationAudit = crossChapterVariationAudit
   report.finalCharacterVoiceAudit = characterVoiceAudit
   report.finalCharacterArcAudit = characterArcAudit
@@ -2807,6 +2969,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    sceneCompleteness: sceneCompletenessAudit.summary,
     crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     characterArc: characterArcAudit.summary,
@@ -2829,6 +2992,7 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     plotExecution: plotExecutionAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
+    sceneCompleteness: sceneCompletenessAudit.summary,
     crossChapterVariation: crossChapterVariationAudit.summary,
     characterVoice: characterVoiceAudit.summary,
     characterArc: characterArcAudit.summary,
@@ -2881,6 +3045,7 @@ async function main() {
     finalPlotExecutionAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
+    finalSceneCompletenessAudit: null,
     finalCrossChapterVariationAudit: null,
     finalCharacterVoiceAudit: null,
     finalCharacterArcAudit: null,

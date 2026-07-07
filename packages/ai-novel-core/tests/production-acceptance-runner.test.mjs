@@ -212,6 +212,7 @@ test("production acceptance runner audits story foundation and narrative quality
     auditPlotExecutionForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
+    auditSceneCompletenessForAcceptance,
     auditCrossChapterVariationForAcceptance,
     auditCharacterVoiceForAcceptance,
     auditCharacterArcForAcceptance,
@@ -246,6 +247,11 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(proseTextureAudit.passed, true)
   assert.equal(proseTextureAudit.summary.sceneRichChapters, 4)
   assert.equal(proseTextureAudit.summary.variedRhythmChapters, 4)
+
+  const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(sceneCompletenessAudit.passed, true)
+  assert.equal(sceneCompletenessAudit.summary.sceneCompleteChapters, 4)
+  assert.equal(sceneCompletenessAudit.summary.interactionParagraphsTotal >= 4, true)
 
   const variationAudit = auditCrossChapterVariationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(variationAudit.passed, true)
@@ -570,6 +576,23 @@ test("production acceptance runner rejects dry outline-like prose", async () => 
   const proseTextureAudit = auditProseTextureForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(proseTextureAudit.passed, false)
   assert.match(proseTextureAudit.issues.join("\n"), /dry outline|generic summary|scene-rich/)
+})
+
+test("production acceptance runner rejects chapters without complete scene beats", async () => {
+  const { auditSceneCompletenessForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "本章的主要作用是让税册疑案继续推进，人物关系因此出现变化，世界观压力也被进一步展示。",
+      "沈砚需要面对更复杂的局面，老周的态度会影响后续选择，少尹的追索让风险持续增加。",
+      "这一段会保留伏笔和钩子，说明缺页账册、旧印章、门外脚步都将在后续章节继续发挥作用。",
+      "结尾需要让读者感到紧张，并意识到下一章会出现新的危机和更大的真相。",
+    ].join("\n\n")
+  }
+
+  const sceneCompletenessAudit = auditSceneCompletenessForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(sceneCompletenessAudit.passed, false)
+  assert.match(sceneCompletenessAudit.issues.join("\n"), /complete scene paragraphs|character interaction|decision\/consequence|scene-complete/)
 })
 
 test("production acceptance runner writes resumable checkpoint reports", async () => {
