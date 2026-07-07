@@ -291,11 +291,13 @@ function variedLongSnapshot() {
 
 test("production acceptance runner audits story foundation and narrative quality", async () => {
   const {
+    auditReaderWordCountsForAcceptance,
     auditStoryFoundationForAcceptance,
     auditReaderPurityForAcceptance,
     auditProductionValidationForAcceptance,
     auditWorldbuildingIntegrationForAcceptance,
     auditPlotExecutionForAcceptance,
+    auditPlotNoveltyForAcceptance,
     auditNarrativeQualityForAcceptance,
     auditProseTextureForAcceptance,
     auditLanguageCraftForAcceptance,
@@ -310,6 +312,24 @@ test("production acceptance runner audits story foundation and narrative quality
     auditContinuityForAcceptance,
   } = await loadRunner()
   const snapshot = richSnapshot()
+
+  const wordCountSnapshot = {
+    ...snapshot,
+    stats: { totalWords: 4000 },
+    chapters: snapshot.chapters.map((chapter) => ({
+      ...chapter,
+      body: "雨".repeat(1000),
+      wordCount: 1000,
+    })),
+  }
+  const wordCountAudit = auditReaderWordCountsForAcceptance(wordCountSnapshot, {
+    chapters: 4,
+    chapterWords: 1000,
+    minTotalWords: 3000,
+    maxTotalWords: 6000,
+  })
+  assert.equal(wordCountAudit.passed, true)
+  assert.equal(wordCountAudit.summary.actualTotalWords, 4000)
 
   const foundationAudit = auditStoryFoundationForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(foundationAudit.passed, true)
@@ -334,6 +354,10 @@ test("production acceptance runner audits story foundation and narrative quality
   assert.equal(plotExecutionAudit.passed, true)
   assert.equal(plotExecutionAudit.summary.executedChapters, 4)
   assert.equal(plotExecutionAudit.summary.anchoredChapters, 4)
+
+  const plotNoveltyAudit = auditPlotNoveltyForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(plotNoveltyAudit.passed, true)
+  assert.equal(plotNoveltyAudit.summary.skipped, true)
 
   const narrativeAudit = auditNarrativeQualityForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(narrativeAudit.passed, true)
@@ -507,6 +531,27 @@ test("production acceptance runner rejects thin foundations and dry repeated pro
   assert.match(narrativeAudit.issues.join("\n"), /repeated paragraph|weak action|word count/)
 })
 
+test("production acceptance runner rejects inflated metadata word counts", async () => {
+  const { auditReaderWordCountsForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  snapshot.stats = { totalWords: 10000 }
+  snapshot.chapters = snapshot.chapters.map((chapter) => ({
+    ...chapter,
+    body: "雨声贴着窗纸。沈砚把账本推到灯下。",
+    wordCount: 2500,
+  }))
+
+  const wordCountAudit = auditReaderWordCountsForAcceptance(snapshot, {
+    chapters: 4,
+    chapterWords: 2500,
+    minTotalWords: 8000,
+    maxTotalWords: 12000,
+  })
+
+  assert.equal(wordCountAudit.passed, false)
+  assert.match(wordCountAudit.issues.join("\n"), /actual body words|metadata wordCount|actual total body words|reader stats totalWords/)
+})
+
 test("production acceptance runner rejects broken cross-chapter handoffs", async () => {
   const { auditContinuityForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
@@ -616,6 +661,25 @@ test("production acceptance runner rejects missing long-form structural progress
   const structuralAudit = auditStructuralProgressionForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
   assert.equal(structuralAudit.passed, false)
   assert.match(structuralAudit.issues.join("\n"), /structural phase|long-form structural progression/)
+})
+
+test("production acceptance runner audits long-form plot novelty", async () => {
+  const { auditPlotNoveltyForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(true)
+
+  const noveltyAudit = auditPlotNoveltyForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(noveltyAudit.passed, true)
+  assert.equal(noveltyAudit.summary.bodyNovelChapters >= noveltyAudit.summary.requiredNovelBodyChapters, true)
+  assert.equal(noveltyAudit.summary.distinctBodyNoveltyTerms >= noveltyAudit.summary.requiredDistinctBodyTerms, true)
+})
+
+test("production acceptance runner rejects stagnant long-form plot repetition", async () => {
+  const { auditPlotNoveltyForAcceptance } = await loadRunner()
+  const snapshot = structuralSnapshot(false)
+
+  const noveltyAudit = auditPlotNoveltyForAcceptance(snapshot, { chapters: 8, chapterWords: 2500 })
+  assert.equal(noveltyAudit.passed, false)
+  assert.match(noveltyAudit.issues.join("\n"), /plot novelty|stagnant plot|new planned plot terms/)
 })
 
 test("production acceptance runner audits cross-chapter variation", async () => {

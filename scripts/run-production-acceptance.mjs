@@ -541,6 +541,16 @@ function splitBodyParagraphs(body) {
     .filter(Boolean)
 }
 
+export function countAcceptanceBodyWords(body) {
+  const text = String(body || "")
+    .replace(/```[\s\S]*?```/gu, "")
+    .replace(/^#+\s+.*$/gmu, "")
+    .replace(/\s+/gu, " ")
+  const cjkChars = text.match(/\p{Script=Han}/gu) || []
+  const latinTokens = text.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/gu) || []
+  return cjkChars.length + latinTokens.length
+}
+
 function countMatches(text, pattern) {
   return (String(text || "").match(pattern) || []).length
 }
@@ -1881,6 +1891,95 @@ export function auditProductionValidationForAcceptance(snapshot, options = {}) {
   }
 }
 
+export function auditReaderWordCountsForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const stats = snapshot?.stats || {}
+  const project = snapshot?.project || {}
+  const targetWords = Number(options.chapterWords || project.chapterWordTarget || 0)
+  const minChapterWords = targetWords > 0 ? Math.floor(targetWords * 0.8) : 0
+  const minTotalWords = Number(options.minTotalWords || 0)
+  const maxTotalWords = Number(options.maxTotalWords || Number.POSITIVE_INFINITY)
+  const metadataTotalWords = Number(stats.totalWords || 0)
+  const issues = []
+  const chapterAudits = []
+  let actualTotalWords = 0
+  let chapterWordsPassed = 0
+  let metadataConsistentChapters = 0
+
+  for (const chapter of chapters) {
+    const body = String(chapter?.body || "")
+    const actualWordCount = Number.isFinite(Number(chapter?.actualWordCount))
+      ? Number(chapter.actualWordCount)
+      : countAcceptanceBodyWords(body)
+    const metadataWordCount = Number(chapter?.wordCount || 0)
+    const metadataDelta = metadataWordCount > 0
+      ? Math.abs(metadataWordCount - actualWordCount)
+      : Number.POSITIVE_INFINITY
+    const metadataDeltaRatio = metadataWordCount > 0
+      ? metadataDelta / Math.max(actualWordCount, 1)
+      : Number.POSITIVE_INFINITY
+    const chapterIssues = []
+    actualTotalWords += actualWordCount
+    if (minChapterWords > 0 && actualWordCount < minChapterWords) {
+      chapterIssues.push(`actual body words ${actualWordCount} below 80% target ${minChapterWords}`)
+    } else {
+      chapterWordsPassed += 1
+    }
+    if (!metadataWordCount) {
+      chapterIssues.push("metadata wordCount missing")
+    } else if (metadataDeltaRatio > 0.25 && metadataDelta > 120) {
+      chapterIssues.push(`metadata wordCount ${metadataWordCount} differs from actual ${actualWordCount}`)
+    } else {
+      metadataConsistentChapters += 1
+    }
+    if (chapterIssues.length) {
+      issues.push(`chapter ${chapter?.chapterNumber || "?"}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: Number(chapter?.chapterNumber || 0),
+      title: chapter?.title || "",
+      metadataWordCount,
+      actualWordCount,
+      metadataDelta,
+      metadataDeltaRatio: Number.isFinite(metadataDeltaRatio) ? Number(metadataDeltaRatio.toFixed(3)) : null,
+      passed: chapterIssues.length === 0,
+      issues: chapterIssues,
+    })
+  }
+
+  if (chapters.length === 0) issues.push("no readable chapters available for actual word count audit")
+  if (minTotalWords > 0 && actualTotalWords < minTotalWords) {
+    issues.push(`actual total body words ${actualTotalWords} below required ${minTotalWords}`)
+  }
+  if (Number.isFinite(maxTotalWords) && actualTotalWords > maxTotalWords) {
+    issues.push(`actual total body words ${actualTotalWords} above allowed ${maxTotalWords}`)
+  }
+  if (metadataTotalWords > 0) {
+    const totalDelta = Math.abs(metadataTotalWords - actualTotalWords)
+    const totalDeltaRatio = totalDelta / Math.max(actualTotalWords, 1)
+    if (totalDeltaRatio > 0.25 && totalDelta > 500) {
+      issues.push(`reader stats totalWords ${metadataTotalWords} differs from actual total ${actualTotalWords}`)
+    }
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      chapters: chapters.length,
+      targetWords,
+      minChapterWords,
+      metadataTotalWords,
+      actualTotalWords,
+      minTotalWords,
+      maxTotalWords: Number.isFinite(maxTotalWords) ? maxTotalWords : null,
+      chapterWordsPassed,
+      metadataConsistentChapters,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 const READER_NON_NOVEL_PATTERNS = [
   ["quality gate heading", /(?:^|\n)#{1,6}\s*(?:Quality Gate|Chapter Quality Report|章节质量报告|质量报告|质量门禁)\b.*$/imu],
   ["naturalness report heading", /(?:^|\n)#{1,6}\s*(?:Naturalness Report|Naturalness Pass|自然度报告|自然度处理)\b.*$/imu],
@@ -1978,6 +2077,25 @@ function extractExecutionTerms(value) {
     }
   }
   return Array.from(terms).slice(0, 32)
+}
+
+function isGenericPlotNoveltyTerm(term, knownCast = []) {
+  const value = String(term || "").trim()
+  if (!value || /^[0-9０-９零〇一二三四五六七八九十百千万第章节回卷册部年月日号]+$/u.test(value)) return true
+  if (knownCast.includes(value)) return true
+  return /^(本章|章节|故事|情节|剧情|主线|推进|塑造|设定|世界观|写作|文本|读者|目标|变化|发生|后续|计划|蓝图|任务|场景|人物|角色|关系|状态|压力|风险|代价|选择|决定|继续|保持|事件|问题|线索|真相|chapter|title|objective)$/iu
+    .test(value)
+}
+
+function plotNoveltyTermsForEntry(entry, knownCast = []) {
+  return [...new Set([
+    ...(entry?.planTerms || []),
+    ...(entry?.stateDeltaTerms || []),
+  ])]
+    .map((term) => String(term || "").trim())
+    .filter((term) => term.length >= 2 && term.length <= 10)
+    .filter((term) => !isGenericPlotNoveltyTerm(term, knownCast))
+    .slice(0, 24)
 }
 
 function isGenericWorldbuildingTerm(term) {
@@ -2499,6 +2617,117 @@ export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
   }
 }
 
+export function auditPlotNoveltyForAcceptance(snapshot, options = {}) {
+  const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
+  const byChapter = chapterBodyByNumber(chapters)
+  const plannedChapters = plannedChaptersForAcceptance(snapshot)
+    .slice()
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const knownCast = extractKnownCastNames(snapshot)
+  const project = snapshot?.project || {}
+  const totalChapters = Number(project.totalChapters || options.chapters || chapters.length || 0)
+  const issues = []
+  const chapterAudits = []
+
+  if (totalChapters < 6 || plannedChapters.length < 6) {
+    return {
+      passed: true,
+      issues: [],
+      summary: {
+        totalChapters,
+        plannedChapters: plannedChapters.length,
+        skipped: true,
+        reason: "short-form sample below plot novelty threshold",
+      },
+      chapters: [],
+    }
+  }
+
+  const cumulativePlanTerms = new Set()
+  const bodyNovelTerms = new Set()
+  let plannedNovelChapters = 0
+  let bodyNovelChapters = 0
+  let stagnantRun = 0
+  let maxStagnantRun = 0
+
+  for (const entry of plannedChapters) {
+    const body = byChapter.get(entry.chapterNumber) || ""
+    const terms = plotNoveltyTermsForEntry(entry, knownCast)
+    const newPlanTerms = terms.filter((term) => !cumulativePlanTerms.has(term))
+    const matchedCurrentTerms = terms.filter((term) => body.includes(term))
+    const matchedNewTerms = newPlanTerms.filter((term) => body.includes(term))
+    const hasNewPlanTerms = newPlanTerms.length > 0
+    const hasNewBodyTerms = matchedNewTerms.length > 0
+
+    if (hasNewPlanTerms) plannedNovelChapters += 1
+    if (hasNewBodyTerms) {
+      bodyNovelChapters += 1
+      stagnantRun = 0
+      for (const term of matchedNewTerms) bodyNovelTerms.add(term)
+    } else {
+      stagnantRun += 1
+      maxStagnantRun = Math.max(maxStagnantRun, stagnantRun)
+    }
+
+    const chapterIssues = []
+    if (!hasNewPlanTerms) chapterIssues.push("no new planned plot terms beyond prior chapters")
+    if (hasNewPlanTerms && !hasNewBodyTerms) {
+      chapterIssues.push(`new planned plot terms not visible in prose: ${newPlanTerms.slice(0, 5).join("、")}`)
+    }
+    if (chapterIssues.length) {
+      issues.push(`chapter ${entry.chapterNumber}: ${chapterIssues.join("; ")}`)
+    }
+    chapterAudits.push({
+      chapterNumber: entry.chapterNumber,
+      plotTerms: terms.slice(0, 12),
+      newPlanTerms: newPlanTerms.slice(0, 12),
+      matchedCurrentTerms: matchedCurrentTerms.slice(0, 12),
+      matchedNewTerms: matchedNewTerms.slice(0, 12),
+      hasNewPlanTerms,
+      hasNewBodyTerms,
+      issues: chapterIssues,
+    })
+    for (const term of terms) cumulativePlanTerms.add(term)
+  }
+
+  const requiredNovelPlanChapters = Math.ceil(plannedChapters.length * 0.75)
+  const requiredNovelBodyChapters = Math.ceil(plannedChapters.length * 0.7)
+  const requiredDistinctBodyTerms = Math.min(20, Math.max(6, Math.ceil(plannedChapters.length * 1.25)))
+  const allowedStagnantRun = plannedChapters.length >= 10 ? 2 : 1
+
+  if (plannedNovelChapters < requiredNovelPlanChapters) {
+    issues.push(`planned plot novelty coverage ${plannedNovelChapters}/${plannedChapters.length} below required ${requiredNovelPlanChapters}`)
+  }
+  if (bodyNovelChapters < requiredNovelBodyChapters) {
+    issues.push(`prose plot novelty coverage ${bodyNovelChapters}/${plannedChapters.length} below required ${requiredNovelBodyChapters}`)
+  }
+  if (bodyNovelTerms.size < requiredDistinctBodyTerms) {
+    issues.push(`distinct prose plot novelty terms ${bodyNovelTerms.size} below required ${requiredDistinctBodyTerms}`)
+  }
+  if (maxStagnantRun > allowedStagnantRun) {
+    issues.push(`consecutive stagnant plot chapters ${maxStagnantRun} above allowed ${allowedStagnantRun}`)
+  }
+
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    summary: {
+      totalChapters,
+      plannedChapters: plannedChapters.length,
+      plannedNovelChapters,
+      requiredNovelPlanChapters,
+      bodyNovelChapters,
+      requiredNovelBodyChapters,
+      distinctBodyNoveltyTerms: bodyNovelTerms.size,
+      requiredDistinctBodyTerms,
+      maxStagnantRun,
+      allowedStagnantRun,
+      skipped: false,
+    },
+    chapters: chapterAudits,
+  }
+}
+
 function auditChapterTailHook(tail, knownCast = []) {
   const text = String(tail || "")
   const hookCue = /[？?]|谁|却|忽然|门外|脚步|信|账|印|刀|血|名字|明日|只剩|没有答|裂缝|代价|风险|线索|仍/u.test(text)
@@ -2545,7 +2774,8 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
 
   for (const chapter of chapters) {
     const body = String(chapter?.body || "")
-    const wordCount = Number(chapter?.wordCount || 0)
+    const wordCount = Number(chapter?.actualWordCount || chapter?.wordCount || 0)
+    const metadataWordCount = Number(chapter?.wordCount || 0)
     const paragraphs = splitBodyParagraphs(body)
     const paragraphCounts = new Map()
     for (const paragraph of paragraphs) {
@@ -2598,6 +2828,7 @@ export function auditNarrativeQualityForAcceptance(snapshot, options = {}) {
       chapterNumber: Number(chapter?.chapterNumber || 0),
       title: chapter?.title || "",
       wordCount,
+      metadataWordCount,
       dialogueCount: dialogues.length,
       actionSignals,
       sensorySignals,
@@ -3927,10 +4158,13 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     if (!body.trim()) {
       throw new AcceptanceError("Reader returned an empty chapter body.", { chapterNumber })
     }
+    const metadataWordCount = Number(chapter.wordCount || 0)
+    const actualWordCount = countAcceptanceBodyWords(body)
     chapterBodies.push({
       chapterNumber,
       title: chapter.title || "",
-      wordCount: Number(chapter.wordCount || 0),
+      wordCount: metadataWordCount,
+      actualWordCount,
       body,
       qualityGate: chapter.qualityGate || null,
       aigcDetection: chapter.aigcDetection || null,
@@ -3942,14 +4176,16 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     chapterChecks.push({
       chapterNumber,
       title: chapter.title || "",
-      wordCount: Number(chapter.wordCount || 0),
+      wordCount: metadataWordCount,
+      actualWordCount,
       publishReady: chapter.publishReadiness?.ready === true,
     })
     await maybeWriteCheckpoint(checkpoint, "reader_chapter_checked", {
       chapterNumber,
       checkedChapters: chapterChecks.length,
       totalChapters,
-      wordCount: Number(chapter.wordCount || 0),
+      wordCount: metadataWordCount,
+      actualWordCount,
       publishReady: chapter.publishReadiness?.ready === true,
     })
   }
@@ -3959,6 +4195,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     ...snapshot,
     chapters: chapterBodies,
     chapterBlueprints: chapterBlueprints.length ? chapterBlueprints : snapshot.chapterBlueprints,
+  }
+  const readerWordCountAudit = auditReaderWordCountsForAcceptance(auditSnapshot, options)
+  if (!readerWordCountAudit.passed) {
+    throw new AcceptanceError("Reader actual word count acceptance audit failed.", {
+      issues: readerWordCountAudit.issues.slice(0, 30),
+      summary: readerWordCountAudit.summary,
+      chapters: readerWordCountAudit.chapters.filter((chapter) => !chapter.passed).slice(0, 12),
+    })
   }
   const storyFoundationAudit = auditStoryFoundationForAcceptance(auditSnapshot, options)
   if (!storyFoundationAudit.passed) {
@@ -4006,6 +4250,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
       issues: plotExecutionAudit.issues.slice(0, 30),
       summary: plotExecutionAudit.summary,
       chapters: plotExecutionAudit.chapters.slice(0, 8),
+    })
+  }
+  const plotNoveltyAudit = auditPlotNoveltyForAcceptance(auditSnapshot, options)
+  if (!plotNoveltyAudit.passed) {
+    throw new AcceptanceError("Plot novelty acceptance audit failed.", {
+      issues: plotNoveltyAudit.issues.slice(0, 30),
+      summary: plotNoveltyAudit.summary,
+      chapters: plotNoveltyAudit.chapters.filter((chapter) => !chapter.hasNewBodyTerms).slice(0, 8),
     })
   }
   const narrativeAudit = auditNarrativeQualityForAcceptance(auditSnapshot, options)
@@ -4117,12 +4369,14 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalChapters,
     chapterChecks,
   }
+  report.finalReaderWordCountAudit = readerWordCountAudit
   report.finalStoryFoundationAudit = storyFoundationAudit
   report.finalReaderPurityAudit = readerPurityAudit
   report.finalProductionValidationAudit = productionValidationAudit
   report.finalWorldbuildingAudit = worldbuildingAudit
   report.finalStructuralProgressionAudit = structuralProgressionAudit
   report.finalPlotExecutionAudit = plotExecutionAudit
+  report.finalPlotNoveltyAudit = plotNoveltyAudit
   report.finalNarrativeAudit = narrativeAudit
   report.finalProseTextureAudit = proseTextureAudit
   report.finalLanguageCraftAudit = languageCraftAudit
@@ -4141,12 +4395,15 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     at: now(),
     totalWords,
     readableChapters,
+    actualTotalWords: readerWordCountAudit.summary.actualTotalWords,
+    readerWordCounts: readerWordCountAudit.summary,
     storyFoundation: storyFoundationAudit.counts,
     readerPurity: readerPurityAudit.summary,
     productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
+    plotNovelty: plotNoveltyAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     languageCraft: languageCraftAudit.summary,
@@ -4169,12 +4426,15 @@ async function verifyReader(api, projectId, options, report, checkpoint = null) 
     totalWords,
     readableChapters,
     totalChapters,
+    actualTotalWords: readerWordCountAudit.summary.actualTotalWords,
+    readerWordCounts: readerWordCountAudit.summary,
     storyFoundation: storyFoundationAudit.counts,
     readerPurity: readerPurityAudit.summary,
     productionValidation: productionValidationAudit.summary,
     worldbuilding: worldbuildingAudit.summary,
     structuralProgression: structuralProgressionAudit.summary,
     plotExecution: plotExecutionAudit.summary,
+    plotNovelty: plotNoveltyAudit.summary,
     narrative: narrativeAudit.summary,
     proseTexture: proseTextureAudit.summary,
     languageCraft: languageCraftAudit.summary,
@@ -4226,12 +4486,14 @@ async function main() {
     steps: [],
     progress: [],
     finalReader: null,
+    finalReaderWordCountAudit: null,
     finalStoryFoundationAudit: null,
     finalReaderPurityAudit: null,
     finalProductionValidationAudit: null,
     finalWorldbuildingAudit: null,
     finalStructuralProgressionAudit: null,
     finalPlotExecutionAudit: null,
+    finalPlotNoveltyAudit: null,
     finalNarrativeAudit: null,
     finalProseTextureAudit: null,
     finalLanguageCraftAudit: null,
