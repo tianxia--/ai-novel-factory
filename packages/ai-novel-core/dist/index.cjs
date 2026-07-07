@@ -10031,6 +10031,17 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       targetWords
     };
   }
+  const causalExecution = evaluateCausalExecutionEvidence(finalDraft, task, continuityContract);
+  if (causalExecution.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: `\u6700\u7EC8\u7A3F\u56E0\u679C\u6267\u884C\u786C\u95E8\u69DB\u5931\u8D25\uFF1A${causalExecution.reason}`,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
   const styleQuality = evaluateNarrativeStyleQuality(finalDraft);
   const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality);
   if (styleQuality.status === "quarantined" && !softStyleIssue) {
@@ -10082,7 +10093,7 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
   }
   return {
     ...gate,
-    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${softStyleIssue ? "\u8BE5\u98CE\u683C\u95EE\u9898\u5DF2\u4F5C\u4E3A\u540E\u7EED\u6DA6\u8272\u5EFA\u8BAE\u8BB0\u5F55\uFF0C\u4E0D\u963B\u65AD\u7AE0\u8282\u63A8\u8FDB\u3002" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
+    reason: gate.passed || gate.status === "passed" ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "\u8BE5\u98CE\u683C\u95EE\u9898\u5DF2\u4F5C\u4E3A\u540E\u7EED\u6DA6\u8272\u5EFA\u8BAE\u8BB0\u5F55\uFF0C\u4E0D\u963B\u65AD\u7AE0\u8282\u63A8\u8FDB\u3002" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim() : gate.reason,
     wordCount: finalWordCount,
     targetWords
   };

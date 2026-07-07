@@ -1691,6 +1691,17 @@ function enforceFinalDraftQualityGate(
       targetWords,
     }
   }
+  const causalExecution = evaluateCausalExecutionEvidence(finalDraft, task, continuityContract)
+  if (causalExecution.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: `最终稿因果执行硬门槛失败：${causalExecution.reason}`,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
   const styleQuality = evaluateNarrativeStyleQuality(finalDraft)
   const softStyleIssue = isSoftNarrativeStyleIssue(styleQuality)
   if (styleQuality.status === "quarantined" && !softStyleIssue) {
@@ -1743,7 +1754,7 @@ function enforceFinalDraftQualityGate(
   return {
     ...gate,
     reason: gate.passed || gate.status === "passed"
-      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${styleQuality.reason} ${softStyleIssue ? "该风格问题已作为后续润色建议记录，不阻断章节推进。" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
+      ? `${gate.reason} ${consistency.reason} ${plotContinuity.reason} ${causalExecution.reason} ${styleQuality.reason} ${softStyleIssue ? "该风格问题已作为后续润色建议记录，不阻断章节推进。" : ""} ${characterProfileQuality.reason} ${naturalnessReport.reason}`.trim()
       : gate.reason,
     wordCount: finalWordCount,
     targetWords,

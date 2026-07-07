@@ -8802,6 +8802,178 @@ test("chapter final gate blocks drafts that need naturalness revision", async ()
   }
 })
 
+test("chapter final gate blocks polished drafts that drop causal execution", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-causal-final-gate-"))
+  const {
+    createManagedAutonomousProject,
+    runChapterProductionPipeline,
+    withFactoryDb,
+  } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  const previousWritingMode = process.env.AI_NOVEL_WRITING_MODE
+  const receivedBodies = []
+  const progressEvents = []
+  const causalSegment = (index) => [
+    `雨声第 ${index} 次压住账房的窗纸，沈砚把缺页账册推到灯下，指腹停在那道齐整的纸边。`,
+    `他决定先扣住第 ${index} 枚旧印章，不能把缺页交出去，否则少尹的人明日就会来问。`,
+    `老周站在门边，低声道：「沈大人，谁动过这一页？」`,
+    `沈砚收起半页湿纸：「你欠我的，是把门外脚步拦住。」`,
+    `这一声之后，第 ${index} 个现场变化已经成了代价，下一章必须处理门外脚步、旧印章和那本缺页账册。`,
+  ].join("\n")
+  const causalDriftFinal = [
+    "# 第一章 缺页账本",
+    "",
+    "## Final Body",
+    "",
+    "沈砚低头把白绢铺平，袖口沾着冷水，指腹在细纹上停了一息。",
+    "他想要把今日异样看清，只好把铜尺收进袖底。",
+    "老周想要退开，却只好站在灯影外，湿衣贴在肩上，呼吸短了一截。",
+    "老周压着嗓子道：「不用等我。」",
+    "沈砚看向他：「先把灯挑亮。」",
+    "灯芯亮了一点，墙上的影子矮下去。",
+    "两人都没有再说多余的话，只听水声沿檐沟往下落。",
+  ].join("\n")
+  const passingQualityReport = [
+    "# Chapter Quality Report",
+    "",
+    "## Scores",
+    "",
+    "| Dimension | Score | Notes |",
+    "|---|---:|---|",
+    "| 字数完成度 | 9/10 | 当前估算 320，目标 80。 |",
+    "| 情节推进 | 8/10 | 包含冲突、压力或选择。 |",
+    "| 章末钩子 | 8/10 | 包含钩子或后续期待。 |",
+    "| 蓝图执行 | 8/10 | 基于详细章节蓝图执行。 |",
+    "| 综合评分 | 8/10 | 可进入润色。 |",
+    "",
+    "WORD_COUNT_CHECK: 320/80",
+    "QUALITY_GATE: passed",
+    "",
+    "## Required Fixes",
+    "- 暂无阻塞性问题；润色时继续压低 AI 模板句。",
+  ].join("\n")
+  const server = http.createServer((request, response) => {
+    let rawBody = ""
+    request.on("data", (chunk) => { rawBody += chunk })
+    request.on("end", () => {
+      if (request.url !== "/responses") {
+        response.writeHead(404).end()
+        return
+      }
+      const receivedBody = JSON.parse(rawBody)
+      receivedBodies.push(receivedBody)
+      const requestText = JSON.stringify(receivedBody)
+      const outputText = /请根据质量报告自然化以下章节/u.test(requestText)
+        ? causalDriftFinal
+        : /请审核以下章节草稿/u.test(requestText)
+          ? passingQualityReport
+          : causalSegment(receivedBodies.length)
+      if (receivedBody.stream) {
+        response.writeHead(200, { "content-type": "text/event-stream" })
+        response.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: outputText })}\n\n`)
+        response.write("data: [DONE]\n\n")
+        response.end()
+      } else {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({ output_text: outputText }))
+      }
+    })
+  })
+
+  delete process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_WRITING_MODE = "quality"
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.listen(0, "127.0.0.1", resolve)
+      server.once("error", reject)
+    })
+    const address = server.address()
+    assert.ok(address && typeof address === "object")
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+    })
+    await approveProductionReadinessForTest(created.project.projectRoot, created.state, {
+      projectTitle: "雨账",
+      idea: "一名审雨官发现降雨记录被篡改",
+    })
+    await withFactoryDb(tempDir, async (db) => {
+      db.addLlmConfig({
+        name: "Causal Final Gate Test",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        apiKey: "test-key",
+        modelName: "draft-model",
+        apiMode: "responses",
+        timeoutMs: 2000,
+        isActive: true,
+      })
+    })
+
+    const projectRoot = created.project.projectRoot
+    const workspaceDir = path.join(projectRoot, ".ai-novel")
+    const paths = {
+      workspaceDir,
+      plansDir: path.join(workspaceDir, "plans"),
+      reportsDir: path.join(workspaceDir, "reports"),
+      chaptersDir: path.join(workspaceDir, "chapters"),
+      memoryDir: path.join(workspaceDir, "memory"),
+      styleDir: path.join(workspaceDir, "style"),
+      styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+      styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+      styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+      styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+      consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+      protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+      relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+      characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+      characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+      masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+      chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+    }
+    const task = {
+      ...created.state.plan.chapterTasks[0],
+      title: "第一章 缺页账本",
+      targetWords: 80,
+    }
+
+    const result = await runChapterProductionPipeline(projectRoot, paths, created.state, task, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+      writingMode: "quality",
+      bypassAigcGate: true,
+      maxRevisionAttempts: 0,
+      onProgress: (event) => progressEvents.push(event),
+    })
+
+    assert.ok(receivedBodies.some((body) => /NaturalnessAgent|自然化/u.test(JSON.stringify(body))))
+    assert.equal(result.qualityGate.status, "blocked")
+    assert.match(result.qualityGate.reason, /最终稿因果执行硬门槛失败|因果执行证据不足/)
+    assert.ok(progressEvents.some((event) =>
+      event.step === "naturalness_completed" && event.status === "blocked"
+    ))
+    const chapterManifest = JSON.parse(await fs.readFile(path.join(paths.chaptersDir, "chapter-001.versions.json"), "utf8"))
+    assert.equal(chapterManifest.qualityGate.status, "blocked")
+    assert.match(chapterManifest.qualityGate.reason, /因果执行/)
+    assert.equal(chapterManifest.locked, false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+    if (previousWritingMode === undefined) {
+      delete process.env.AI_NOVEL_WRITING_MODE
+    } else {
+      process.env.AI_NOVEL_WRITING_MODE = previousWritingMode
+    }
+  }
+})
+
 test("chapter drafting can route selected segment materials through optional LLM subcalls", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-material-subcalls-"))
   const {
