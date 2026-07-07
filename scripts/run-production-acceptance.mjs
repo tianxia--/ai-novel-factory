@@ -615,6 +615,10 @@ function isTemplateDialogue(value) {
   return /这件事很重要|情况很复杂|未来.*危险|我们必须|必须继续|我知道了|我明白|你说得对|怎么办|没时间了|很严重|不能再等/u.test(String(value || ""))
 }
 
+function isCoreCharacterRole(role) {
+  return /protagonist|main|supporting|主角|核心|配角/iu.test(String(role || ""))
+}
+
 export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const dossiers = extractAcceptanceCharacterDossiers(snapshot)
@@ -648,13 +652,19 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
     templateDialogue += dialogueSamples.filter(isTemplateDialogue).length
     characterAudits.push({
       name: dossier.name,
+      role: dossier.role,
       mentionCount: bodyMentions,
       dialogueCount: dialogueSamples.length,
       uniqueDialogueCount: uniqueDialogue.length,
+      speechMarkerCount: dossier.speechMarkers.length,
+      behaviorHabitCount: dossier.behaviorHabits.length,
       actionSignals,
       pressureSignals,
       matchedSpeechMarkers,
       matchedBehaviorHabits,
+      distinctiveEvidenceMatched: matchedSpeechMarkers.length + matchedBehaviorHabits.length,
+      requiresDistinctiveEvidence: isCoreCharacterRole(dossier.role)
+        && (dossier.speechMarkers.length + dossier.behaviorHabits.length) > 0,
       active: bodyMentions > 0 && (dialogueSamples.length > 0 || actionSignals >= 3 || pressureSignals >= 2),
       voiced: dialogueSamples.length > 0,
       sampleDialogue: dialogueSamples.slice(0, 3),
@@ -683,6 +693,11 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
   if (totalAttributedDialogue >= Math.max(6, requiredVoicedCharacters * 3) && templateRatio > 0.45) {
     issues.push(`template dialogue ratio ${(templateRatio * 100).toFixed(1)}% is too high`)
   }
+  const missingDistinctiveEvidence = characterAudits
+    .filter((audit) => audit.voiced && audit.requiresDistinctiveEvidence && audit.distinctiveEvidenceMatched === 0)
+  if (missingDistinctiveEvidence.length > 0) {
+    issues.push(`core character dossier voice/habit evidence missing: ${missingDistinctiveEvidence.map((audit) => audit.name).join("、")}`)
+  }
 
   return {
     passed: issues.length === 0,
@@ -696,6 +711,8 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
       totalAttributedDialogue,
       templateDialogue,
       templateRatio,
+      distinctiveEvidenceCharacters: characterAudits.filter((audit) => audit.distinctiveEvidenceMatched > 0).length,
+      missingDistinctiveEvidence: missingDistinctiveEvidence.length,
     },
     repeatedAcrossSpeakers: repeatedAcrossSpeakers.slice(0, 5),
     characters: characterAudits,
@@ -1057,6 +1074,31 @@ function containsAnyTerm(text, terms) {
   return terms.some((term) => source.includes(String(term || "")))
 }
 
+const FORESHADOWING_ADVANCE_SIGNAL_PATTERN = /决定|选择|不肯|留下|藏|交出|拦住|推回|合上|按住|追问|拒绝|答应|转身|伸手|扣住|递出|收回|让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|只剩|再也|换来|逼得|牵出|发现|意识到|真相|回收|兑现|揭开|揭示|关系|不能回头|不可逆|拿走|夺回|保住|追索/gu
+
+function foreshadowingEvidenceWindows(text, terms, radius = 140) {
+  const source = String(text || "")
+  const windows = []
+  for (const rawTerm of terms) {
+    const term = String(rawTerm || "").trim()
+    if (term.length < 2) continue
+    let index = source.indexOf(term)
+    while (index >= 0) {
+      windows.push({
+        term,
+        text: source.slice(Math.max(0, index - radius), Math.min(source.length, index + term.length + radius)),
+      })
+      index = source.indexOf(term, index + term.length)
+    }
+  }
+  return windows
+}
+
+function hasForeshadowingCausalAdvancement(text, terms) {
+  return foreshadowingEvidenceWindows(text, terms)
+    .some((window) => countMatches(window.text, FORESHADOWING_ADVANCE_SIGNAL_PATTERN) > 0)
+}
+
 function laterChapterText(chapters, sourceChapter) {
   return chapters
     .filter((chapter) => Number(chapter?.chapterNumber || 0) > sourceChapter)
@@ -1090,7 +1132,10 @@ export function auditForeshadowingPayoffForAcceptance(snapshot, options = {}) {
     const sourceBody = byChapter.get(sourceChapter) || ""
     const laterBody = laterChapterText(chapters, sourceChapter)
     const seeded = anchors.length > 0 && containsAnyTerm(sourceBody, anchors)
-    const advanced = anchors.length > 0 && containsAnyTerm(laterBody, anchors)
+    const advanced = anchors.length > 0 && hasForeshadowingCausalAdvancement(laterBody, anchors)
+    const advancementEvidence = foreshadowingEvidenceWindows(laterBody, anchors)
+      .filter((window) => countMatches(window.text, FORESHADOWING_ADVANCE_SIGNAL_PATTERN) > 0)
+      .map((window) => ({ term: window.term, excerpt: firstTextSlice(window.text.replace(/\s+/gu, " "), 120) }))
     const payoffLike = /payoff|回收|兑现|resolved|closed|final|late/iu.test([
       payoffMode,
       entry?.operation,
@@ -1109,6 +1154,7 @@ export function auditForeshadowingPayoffForAcceptance(snapshot, options = {}) {
       anchors: anchors.slice(0, 8),
       seeded,
       advanced,
+      advancementEvidence: advancementEvidence.slice(0, 3),
       payoffLike,
     })
   }

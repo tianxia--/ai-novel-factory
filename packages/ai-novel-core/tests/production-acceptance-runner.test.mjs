@@ -602,6 +602,23 @@ test("production acceptance runner rejects same-voice character dialogue", async
   assert.match(characterVoiceAudit.issues.join("\n"), /same dialogue used across speakers|template dialogue ratio/)
 })
 
+test("production acceptance runner rejects core characters without dossier voice or habit evidence", async () => {
+  const { auditCharacterVoiceForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "雨声贴着窗纸往下滑。沈砚把缺页账本推到灯下，老周站在门槛外，少尹站在廊下拦住去路。",
+      "沈砚道：“这页账不该留在库里。”他伸手把纸册推向灯边，决定先藏住缺页。",
+      "老周低声道：“外头已经有人查到仓曹院。”他退了一步，把湿袖压在身侧。",
+      "少尹看着两人，扣住官印，逼他们交出旧账。这个选择让关系裂开，也把风险留在屋里。",
+    ].join("\n\n")
+  }
+
+  const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterVoiceAudit.passed, false)
+  assert.match(characterVoiceAudit.issues.join("\n"), /dossier voice\/habit evidence missing/)
+})
+
 test("production acceptance runner rejects missing protagonist arc and supporting cast usage", async () => {
   const { auditCharacterArcForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
@@ -673,6 +690,25 @@ test("production acceptance runner rejects foreshadowing that never reaches the 
   const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(foreshadowingAudit.passed, false)
   assert.match(foreshadowingAudit.issues.join("\n"), /seed evidence|advance\/payoff evidence|payoff/)
+})
+
+test("production acceptance runner rejects foreshadowing anchors without causal advancement", async () => {
+  const { auditForeshadowingPayoffForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "雨声停在窗外。缺页账册、印章和脚步被旁白反复提到。",
+      "缺页账册仍是缺页账册，印章仍是印章，脚步仍在门外。",
+      "这些线索以后还会出现，但眼下只是被摆在句子里。",
+      "结尾继续保留缺页账册、印章和脚步。",
+    ].join("\n\n")
+  }
+
+  const foreshadowingAudit = auditForeshadowingPayoffForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(foreshadowingAudit.passed, false)
+  assert.equal(foreshadowingAudit.summary.seededEntries >= 3, true)
+  assert.equal(foreshadowingAudit.summary.advancedEntries, 0)
+  assert.match(foreshadowingAudit.issues.join("\n"), /advance\/payoff evidence|payoff/)
 })
 
 test("production acceptance runner rejects dry outline-like prose", async () => {
