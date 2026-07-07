@@ -52,7 +52,7 @@ Removed legacy tools and flows must not be reintroduced as active workflow state
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ai-novel-factory** (3106 symbols, 7227 relationships, 268 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ai-novel-factory** (3131 symbols, 7314 relationships, 270 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
