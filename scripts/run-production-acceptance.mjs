@@ -509,6 +509,30 @@ function countMatches(text, pattern) {
   return (String(text || "").match(pattern) || []).length
 }
 
+function evidenceWindowsAroundTerms(text, terms, radius = 160) {
+  const source = String(text || "")
+  const windows = []
+  for (const rawTerm of terms) {
+    const term = String(rawTerm || "").trim()
+    if (term.length < 2) continue
+    let index = source.indexOf(term)
+    while (index >= 0) {
+      windows.push({
+        term,
+        text: source.slice(Math.max(0, index - radius), Math.min(source.length, index + term.length + radius)),
+      })
+      index = source.indexOf(term, index + term.length)
+    }
+  }
+  const seen = new Set()
+  return windows.filter((window) => {
+    const key = `${window.term}:${window.text}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function extractKnownCastNames(snapshot) {
   const dossiers = Array.isArray(snapshot?.characters?.dossiers) ? snapshot.characters.dossiers : []
   const names = []
@@ -544,6 +568,8 @@ function extractAcceptanceCharacterDossiers(snapshot) {
       aliases: (Array.isArray(dossier?.aliases) ? dossier.aliases : []).map((alias) => String(alias || "").trim()).filter(Boolean),
       speechMarkers: (Array.isArray(dossier?.speechMarkers) ? dossier.speechMarkers : []).map((item) => String(item || "").trim()).filter(Boolean),
       behaviorHabits: (Array.isArray(dossier?.behaviorHabits) ? dossier.behaviorHabits : []).map((item) => String(item || "").trim()).filter(Boolean),
+      relationshipState: String(dossier?.relationshipState || "").trim(),
+      relationshipTerms: extractExecutionTerms(dossier?.relationshipState),
       profileTerms: collectAcceptanceStrings([
         dossier?.identityAndRole,
         dossier?.coreDesire,
@@ -561,7 +587,18 @@ function extractAcceptanceCharacterDossiers(snapshot) {
   }
   for (const name of knownNames) {
     if (!byName.has(name)) {
-      byName.set(name, { id: "", name, role: "", coreDesire: "", aliases: [], speechMarkers: [], behaviorHabits: [], profileTerms: [] })
+      byName.set(name, {
+        id: "",
+        name,
+        role: "",
+        coreDesire: "",
+        aliases: [],
+        speechMarkers: [],
+        behaviorHabits: [],
+        relationshipState: "",
+        relationshipTerms: [],
+        profileTerms: [],
+      })
     }
   }
   return Array.from(byName.values())
@@ -911,9 +948,34 @@ function relationshipPressureSignalCount(text) {
   )
 }
 
+function isGenericRelationshipTerm(term) {
+  return /^(关系|状态|变化|改变|风险|代价|选择|决定|信任|秘密|压力|人物|角色|当前|本章|章节|发生|推动|必须|不能|交出|保住)$/u
+    .test(String(term || "").trim())
+}
+
+function specificRelationshipTerms(terms, excludedTerms = []) {
+  const excluded = new Set(excludedTerms.map((term) => String(term || "").trim()).filter(Boolean))
+  return [...new Set((Array.isArray(terms) ? terms : [])
+    .map((term) => String(term || "").trim())
+    .filter((term) => term.length >= 2 && !excluded.has(term) && !isGenericRelationshipTerm(term)))]
+}
+
+function relationshipCoPresenceWindows(text, left, right, radius = 220) {
+  const windows = evidenceWindowsAroundTerms(text, [left, right], radius)
+    .filter((window) => window.text.includes(left) && window.text.includes(right))
+  const seen = new Set()
+  return windows.filter((window) => {
+    if (seen.has(window.text)) return false
+    seen.add(window.text)
+    return true
+  })
+}
+
 export function auditRelationshipArcForAcceptance(snapshot, options = {}) {
   const chapters = Array.isArray(snapshot?.chapters) ? snapshot.chapters : []
   const knownCast = extractKnownCastNames(snapshot)
+  const dossiers = extractAcceptanceCharacterDossiers(snapshot)
+  const dossiersByName = new Map(dossiers.map((dossier) => [dossier.name, dossier]))
   const rawEntries = extractRelationshipEntriesForAcceptance(snapshot)
     .map((entry, index) => normalizeRelationshipEntryForAcceptance(entry, knownCast, index))
     .filter((entry) => entry.from && entry.to && entry.from !== entry.to)
@@ -927,7 +989,18 @@ export function auditRelationshipArcForAcceptance(snapshot, options = {}) {
       byPair.set(key, { ...entry, pressureTerms: [...entry.pressureTerms] })
     }
   }
-  const entries = Array.from(byPair.values())
+  const entries = Array.from(byPair.values()).map((entry) => {
+    const leftDossier = dossiersByName.get(entry.from)
+    const rightDossier = dossiersByName.get(entry.to)
+    return {
+      ...entry,
+      pressureTerms: specificRelationshipTerms([
+        ...entry.pressureTerms,
+        ...(leftDossier?.relationshipTerms || []),
+        ...(rightDossier?.relationshipTerms || []),
+      ], knownCast),
+    }
+  })
   const issues = []
   const relationshipAudits = []
   const chaptersWithRelationshipPressure = new Set()
@@ -946,10 +1019,17 @@ export function auditRelationshipArcForAcceptance(snapshot, options = {}) {
     for (const chapter of chapters) {
       const body = String(chapter?.body || "")
       const hasBothCharacters = body.includes(entry.from) && body.includes(entry.to)
-      const matchedPressureTerms = entry.pressureTerms.filter((term) => body.includes(term)).slice(0, 8)
-      const pressureSignals = relationshipPressureSignalCount(body)
-      const pressureVisible = hasBothCharacters && (pressureSignals > 0 || matchedPressureTerms.length > 0)
-      const stateChangeVisible = hasBothCharacters && relationshipPressureSignalCount(body) >= 2
+      const coPresenceWindows = hasBothCharacters ? relationshipCoPresenceWindows(body, entry.from, entry.to) : []
+      const matchedPressureTerms = entry.pressureTerms
+        .filter((term) => coPresenceWindows.some((window) => window.text.includes(term)))
+        .slice(0, 8)
+      const pressureSignals = coPresenceWindows.reduce((sum, window) => sum + relationshipPressureSignalCount(window.text), 0)
+      const pressureVisible = coPresenceWindows.length > 0 && (pressureSignals > 0 || matchedPressureTerms.length > 0)
+      const stateChangeVisible = coPresenceWindows.some((window) => {
+        const windowSignals = relationshipPressureSignalCount(window.text)
+        const windowMatchesPressureTerm = entry.pressureTerms.some((term) => window.text.includes(term))
+        return windowSignals >= 1 && windowMatchesPressureTerm
+      })
       if (hasBothCharacters) evidenceChapters += 1
       if (pressureVisible) {
         pressureChapters += 1
@@ -963,6 +1043,7 @@ export function auditRelationshipArcForAcceptance(snapshot, options = {}) {
         stateChangeVisible,
         pressureSignals,
         matchedPressureTerms,
+        coPresenceWindows: coPresenceWindows.length,
       })
     }
     const requiredPairChapters = chapters.length >= 3 ? Math.ceil(chapters.length * 0.4) : Math.min(1, chapters.length)
@@ -2011,18 +2092,49 @@ export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
     issues.push(`planned chapter entries ${plannedChapters.length} below total chapters ${totalChapters}`)
   }
 
+  const decisionPattern = /决定|选择|不肯|必须|不能|留下|藏|交出|拦住|推回|合上|按住|追问|承认|拒绝|答应|转身|伸手|扣住|递出|收回/gu
+  const consequencePattern = /让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|留下|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系/gu
+
   for (const entry of plannedChapters) {
     const body = byChapter.get(entry.chapterNumber) || ""
     const terms = [...new Set([...entry.planTerms, ...entry.stateDeltaTerms])]
     const matchedTerms = terms.filter((term) => body.includes(term))
     const requiredTermMatches = terms.length >= 3 ? 2 : Math.min(1, terms.length)
     const objectiveAnchored = requiredTermMatches > 0 && matchedTerms.length >= requiredTermMatches
-    const decisionSignals = countMatches(body, /决定|选择|不肯|必须|不能|留下|藏|交出|拦住|推回|合上|按住|追问|承认|拒绝|答应|转身|伸手|扣住|递出|收回/gu)
-    const consequenceSignals = countMatches(body, /让|导致|因此|于是|代价|风险|裂|暴露|失去|改变|留下|只剩|再也|换来|逼得|牵出|发现|意识到|真相|关系/gu)
+    const decisionSignals = countMatches(body, decisionPattern)
+    const consequenceSignals = countMatches(body, consequencePattern)
     const stateDeltaMatched = entry.stateDeltaTerms.length === 0 || entry.stateDeltaTerms.some((term) => body.includes(term))
     const agencyVisible = decisionSignals > 0
     const consequenceVisible = consequenceSignals > 0
-    const executed = objectiveAnchored && agencyVisible && consequenceVisible && stateDeltaMatched
+    const paragraphs = splitBodyParagraphs(body)
+    const localWindows = []
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      localWindows.push(paragraphs[index])
+      if (index < paragraphs.length - 1) localWindows.push(`${paragraphs[index]}\n\n${paragraphs[index + 1]}`)
+    }
+    if (paragraphs.length === 0 && body.trim()) localWindows.push(body)
+    const localExecutionEvidence = localWindows.map((window) => {
+      const localMatchedTerms = terms.filter((term) => window.includes(term))
+      const localStateDeltaMatched = entry.stateDeltaTerms.length === 0
+        || entry.stateDeltaTerms.some((term) => window.includes(term))
+      const localDecisionSignals = countMatches(window, decisionPattern)
+      const localConsequenceSignals = countMatches(window, consequencePattern)
+      const localObjectiveAnchored = requiredTermMatches > 0 && localMatchedTerms.length >= requiredTermMatches
+      const localExecuted = localObjectiveAnchored
+        && localDecisionSignals > 0
+        && localConsequenceSignals > 0
+        && localStateDeltaMatched
+      return {
+        matchedTerms: localMatchedTerms.slice(0, 8),
+        decisionSignals: localDecisionSignals,
+        consequenceSignals: localConsequenceSignals,
+        stateDeltaMatched: localStateDeltaMatched,
+        executed: localExecuted,
+        excerpt: firstTextSlice(window.replace(/\s+/gu, " "), 140),
+      }
+    })
+    const localExecuted = localExecutionEvidence.some((evidence) => evidence.executed)
+    const executed = objectiveAnchored && agencyVisible && consequenceVisible && stateDeltaMatched && localExecuted
 
     if (objectiveAnchored) anchoredChapters += 1
     if (agencyVisible) agencyChapters += 1
@@ -2036,6 +2148,9 @@ export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
     if (!agencyVisible) chapterIssues.push("missing visible character decision/agency")
     if (!consequenceVisible) chapterIssues.push("missing visible consequence/state change")
     if (!stateDeltaMatched) chapterIssues.push("missing planned character state delta anchor")
+    if (objectiveAnchored && agencyVisible && consequenceVisible && stateDeltaMatched && !localExecuted) {
+      chapterIssues.push("missing local plot execution evidence tying objective, decision, consequence, and state delta")
+    }
     if (chapterIssues.length) {
       issues.push(`chapter ${entry.chapterNumber}: ${chapterIssues.join("; ")}`)
     }
@@ -2051,6 +2166,8 @@ export function auditPlotExecutionForAcceptance(snapshot, options = {}) {
       agencyVisible,
       consequenceVisible,
       stateDeltaMatched,
+      localExecuted,
+      localExecutionEvidence: localExecutionEvidence.filter((evidence) => evidence.executed).slice(0, 3),
       executed,
       issues: chapterIssues,
     })

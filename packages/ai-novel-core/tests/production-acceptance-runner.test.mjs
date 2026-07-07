@@ -17,7 +17,7 @@ function richBody(chapterNumber) {
   return [
     `雨声贴着窗纸往下滑。沈砚把第 ${chapterNumber} 册账本推到灯下，指腹按住纸边，又把旧印扣在桌角。老周站在门槛外，袖口湿了一线，鞋尖向后退。`,
     `“谁动过这一页？”沈砚问。门外脚步停住，灯火压低，墨味从账册线里泛出来。他伸手合上账册，决定先留下缺页，不把证据交出去。`,
-    `老周低声道：“少尹的人在外头。”他抬眼看沈砚，手指攥紧袖口，像欠了一句话。沈砚听见雨打在门槛上，冷意从掌心爬上来。`,
+    `老周低声道：“少尹的人在外头。”权力追索已经压到门口。他抬眼看沈砚，手指攥紧袖口，像旧债还没清，又欠了一句话。沈砚听见雨打在门槛上，冷意从掌心爬上来。`,
     `他把印章推回灯下，拦住老周伸来的手。这个选择让关系裂开，也把风险留在屋里。章末只剩那道脚步声，谁会先来拿走缺页？`,
   ].join("\n\n")
 }
@@ -112,8 +112,8 @@ function richSnapshot() {
     payoff: "后续章节推进或回收缺页账册、印章和脚步声。",
   }))
   const relationshipEntries = [
-    { from: "沈砚", to: "老周", pressure: "债务与隐瞒" },
-    { from: "沈砚", to: "少尹", pressure: "权力追索" },
+    { from: "沈砚", to: "老周", pressure: "旧债隐瞒与欠话未清" },
+    { from: "沈砚", to: "少尹", pressure: "少尹的人带来权力追索" },
   ]
   return {
     project: {
@@ -151,6 +151,7 @@ function richSnapshot() {
           aliases: [],
           speechMarkers: ["谁动过"],
           behaviorHabits: ["按住纸边", "合上账册"],
+          relationshipState: "与老周有旧债隐瞒，与少尹处于权力追索压力。",
         },
         {
           canonicalName: "老周",
@@ -159,6 +160,7 @@ function richSnapshot() {
           aliases: [],
           speechMarkers: ["少尹的人"],
           behaviorHabits: ["攥紧袖口"],
+          relationshipState: "对沈砚欠话未清，靠旧债隐瞒维持摇晃信任。",
         },
         {
           canonicalName: "少尹",
@@ -167,6 +169,7 @@ function richSnapshot() {
           aliases: [],
           speechMarkers: [],
           behaviorHabits: ["派人守在门外"],
+          relationshipState: "通过少尹的人和权力追索逼沈砚交出缺页账册。",
         },
       ],
       relationshipGraph: {
@@ -511,6 +514,23 @@ test("production acceptance runner rejects chapters that ignore the planned plot
   assert.match(plotExecutionAudit.issues.join("\n"), /planned objective anchors|state delta|plot execution coverage/)
 })
 
+test("production acceptance runner rejects split plot evidence without local causal execution", async () => {
+  const { auditPlotExecutionForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "账册疑案、不可逆压力、信任债务身份都写在墙上的旧纸里。",
+      "沈砚决定先把纸灯挪开，选择站到窗边。",
+      "这让屋里更冷，因此留下灰尘，所有人意识到真相。",
+      "雨滴继续落下，屋外没有新的动作。",
+    ].join("\n\n")
+  }
+
+  const plotExecutionAudit = auditPlotExecutionForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(plotExecutionAudit.passed, false)
+  assert.match(plotExecutionAudit.issues.join("\n"), /local plot execution evidence|plot execution coverage/)
+})
+
 test("production acceptance runner rejects missing worldbuilding anchors in prose", async () => {
   const { auditWorldbuildingIntegrationForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
@@ -655,6 +675,23 @@ test("production acceptance runner rejects missing relationship arc pressure", a
   const relationshipArcAudit = auditRelationshipArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
   assert.equal(relationshipArcAudit.passed, false)
   assert.match(relationshipArcAudit.issues.join("\n"), /active relationship arcs|relationship pressure coverage|co-presence/)
+})
+
+test("production acceptance runner rejects generic relationship pressure without concrete state anchors", async () => {
+  const { auditRelationshipArcForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const chapter of snapshot.chapters) {
+    chapter.body = [
+      "沈砚和老周站在屋里，信任出现裂缝，风险越来越近。",
+      "少尹也走进来，三个人都做了选择，关系开始改变。",
+      "他们互相看着，谁也没有提那些真正牵住他们的具体旧事。",
+      "门外的雨还在落，屋里只剩泛泛的压力。",
+    ].join("\n\n")
+  }
+
+  const relationshipArcAudit = auditRelationshipArcForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(relationshipArcAudit.passed, false)
+  assert.match(relationshipArcAudit.issues.join("\n"), /state-change|evolving relationship arcs/)
 })
 
 test("production acceptance runner rejects foreshadowing that never reaches the prose", async () => {
