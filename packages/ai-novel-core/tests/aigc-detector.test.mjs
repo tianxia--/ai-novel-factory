@@ -79,6 +79,26 @@ test("local heuristic detector passes concrete scene prose", async () => {
   assert.ok(Number(result.score) < 0.3)
 })
 
+test("local heuristic detector flags signal-stuffed summary prose", async () => {
+  const { detectAigcText } = await loadCore()
+  const result = await detectAigcText(
+    [
+      "沈砚看见雨、灯、门槛、账册、袖口，整体局势因此更加复杂，关系发生变化。",
+      "老周站在窗边，脚步、纸边、缺页、官印都出现了，风险继续增加，于是所有人物都进入压力状态。",
+      "少尹伸手按住账册，冷光和湿气形成场景感，剧情继续推进，线索也因此更加清楚。",
+      "文本只是把信号词依次摆出来，未来仍然危险。",
+    ].join("\n\n"),
+    { provider: "local-heuristic", threshold: 0.8 },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(result.provider, "local-heuristic")
+  assert.equal(result.status, "ai_likely")
+  assert.ok(Number(result.score) >= 0.8)
+  assert.ok(Array.isArray(result.raw.summaryRiskHits))
+  assert.ok(result.raw.summaryRiskHits.length >= 2)
+})
+
 test("aigc detector reads system settings and overrides process env", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-aigc-settings-"))
   const previousThreshold = process.env.AIGC_DETECTOR_THRESHOLD

@@ -13,7 +13,7 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-AQVNGRJS.js";
+} from "./chunk-JHKX7HDS.js";
 import "./chunk-UIQAXZB3.js";
 import "./chunk-SDIPDDNZ.js";
 import {
@@ -33,7 +33,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-5YN4OAQB.js";
+} from "./chunk-7KELXKQG.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -73,12 +73,12 @@ import {
   requestLlmTextCompletion,
   testProviderConnectivity,
   writeProductionStoryBibleAssets
-} from "./chunk-NF3AIGVF.js";
+} from "./chunk-7LIKAHTP.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-VL6XPQ5B.js";
+} from "./chunk-QJPQANB5.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge

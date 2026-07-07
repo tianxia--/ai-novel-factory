@@ -1,7 +1,7 @@
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-VL6XPQ5B.js";
+} from "./chunk-QJPQANB5.js";
 import {
   formatKnowledgeForPrompt,
   ingestProjectArtifact,

@@ -4036,6 +4036,11 @@ var LOCAL_HEURISTIC_RISK_PATTERNS = [
   /宏大叙事|命运的齿轮|这才明白|由此可见|总而言之|综上所述/u,
   /内心十分|非常震惊|无法形容|某种意义上|复杂的情绪/u
 ];
+var LOCAL_HEURISTIC_SUMMARY_RISK_PATTERNS = [
+  /整体(?:局势|氛围|情节)|形成场景感|剧情继续推进|关系发生变化|风险继续(?:增加|升级)/u,
+  /所有人物|未来仍然危险|更加复杂|更加危险|一切都不简单|信号词|依次摆出来/u,
+  /这说明|由此可见|意味着.*(?:关系|风险|局势|真相)|文本只是|只是把/u
+];
 var LOCAL_HEURISTIC_HUMAN_PATTERNS = [
   /[“”"'][^“”"']{1,36}[”"']/u,
   /雨|灯|门槛|袖口|鞋尖|账册|纸边|青苔|瓦檐|指腹|脚步|铜钱|泥腥/u,
@@ -4144,6 +4149,7 @@ function detectWithLocalHeuristic(text, config) {
   const normalizedText = text.replace(/\s+/g, "");
   const charCount = Array.from(normalizedText).length;
   const riskHits = LOCAL_HEURISTIC_RISK_PATTERNS.filter((pattern) => pattern.test(text)).map((pattern) => pattern.source);
+  const summaryRiskHits = LOCAL_HEURISTIC_SUMMARY_RISK_PATTERNS.filter((pattern) => pattern.test(text)).map((pattern) => pattern.source);
   const humanSignals = LOCAL_HEURISTIC_HUMAN_PATTERNS.filter((pattern) => pattern.test(text)).length;
   const quoteCount = (text.match(/[“”"']/g) || []).length;
   const punctuationCount = (text.match(/[。！？!?；;，,]/g) || []).length;
@@ -4151,22 +4157,29 @@ function detectWithLocalHeuristic(text, config) {
   const paragraphCount = Math.max(1, text.split(/\n\s*\n/u).filter((item) => item.trim()).length);
   const averageParagraphChars = charCount / paragraphCount;
   const abstractionPenalty = /情绪|命运|世界|复杂|震惊|恐惧|愤怒|绝望/u.test(text) && humanSignals === 0 ? 0.12 : 0;
+  const signalStuffingPenalty = summaryRiskHits.length > 0 && humanSignals >= 2 ? 0.16 : 0;
   const lengthPenalty = averageParagraphChars > 360 ? 0.08 : 0;
-  const quoteBonus = quoteCount >= 2 ? 0.05 : 0;
-  const sceneBonus = Math.min(0.18, humanSignals * 0.045);
-  const punctuationBonus = punctuationDensity >= 0.035 && punctuationDensity <= 0.14 ? 0.04 : 0;
-  const riskScore = Math.min(0.98, 0.22 + riskHits.length * 0.21 + abstractionPenalty + lengthPenalty);
+  const quoteBonus = quoteCount >= 2 && summaryRiskHits.length === 0 ? 0.05 : 0;
+  const sceneBonusUnit = summaryRiskHits.length > 0 ? 0.015 : 0.045;
+  const sceneBonus = Math.min(0.18, humanSignals * sceneBonusUnit);
+  const punctuationBonus = punctuationDensity >= 0.035 && punctuationDensity <= 0.14 && summaryRiskHits.length <= 1 ? 0.04 : 0;
+  const riskScore = Math.min(
+    0.98,
+    0.22 + riskHits.length * 0.21 + summaryRiskHits.length * 0.24 + abstractionPenalty + signalStuffingPenalty + lengthPenalty
+  );
   const humanScore = Math.min(0.32, sceneBonus + quoteBonus + punctuationBonus);
   const score = Math.max(0.04, Math.min(0.96, riskScore - humanScore));
   const threshold = config.threshold ?? DEFAULT_THRESHOLD;
-  const status = riskHits.length >= 3 || score >= threshold ? "ai_likely" : scoreToStatus(score, threshold);
+  const status = riskHits.length + summaryRiskHits.length >= 3 || score >= threshold ? "ai_likely" : scoreToStatus(score, threshold);
   const raw = {
     detector: "local-heuristic",
     riskHits,
+    summaryRiskHits,
     humanSignals,
     quoteCount,
     punctuationDensity,
-    averageParagraphChars
+    averageParagraphChars,
+    signalStuffingPenalty
   };
   return {
     ok: true,
