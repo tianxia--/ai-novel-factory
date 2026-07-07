@@ -362,7 +362,25 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
     acceptanceRequirement(
       "worldbuilding_integration",
       "世界观构建进入正文并驱动人物选择",
-      acceptanceAuditPassed(audits.storyFoundation) && acceptanceAuditPassed(audits.worldbuilding),
+      acceptanceAuditPassed(audits.storyFoundation)
+        && acceptanceAuditPassed(audits.worldbuilding)
+        && acceptancePositiveNumber(audits.worldbuilding?.summary?.worldbuildingAnchors)
+        && acceptanceNumberAtLeast(
+          audits.worldbuilding?.summary?.distinctMatchedAnchors,
+          audits.worldbuilding?.summary?.requiredDistinctTerms,
+        )
+        && acceptanceNumberAtLeast(
+          audits.worldbuilding?.summary?.anchoredChapters,
+          audits.worldbuilding?.summary?.requiredAnchoredChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.worldbuilding?.summary?.texturedChapters,
+          audits.worldbuilding?.summary?.requiredTexturedChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.worldbuilding?.summary?.ruleDrivenChapters,
+          audits.worldbuilding?.summary?.requiredRuleDrivenChapters,
+        ),
       ["storyFoundation", "worldbuilding"],
       {
         assets: audits.storyFoundation?.counts,

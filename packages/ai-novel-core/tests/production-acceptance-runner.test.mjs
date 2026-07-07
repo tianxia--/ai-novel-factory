@@ -482,7 +482,17 @@ test("production acceptance runner rejects skipped audits in requirement coverag
     storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
     readerPurity: passedAudit({ cleanChapters: 40 }),
     productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({ anchoredChapters: 40, texturedChapters: 40, ruleDrivenChapters: 40 }),
+    worldbuilding: passedAudit({
+      worldbuildingAnchors: 8,
+      distinctMatchedAnchors: 6,
+      requiredDistinctTerms: 4,
+      anchoredChapters: 40,
+      requiredAnchoredChapters: 30,
+      texturedChapters: 40,
+      requiredTexturedChapters: 30,
+      ruleDrivenChapters: 40,
+      requiredRuleDrivenChapters: 30,
+    }),
     structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
     plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
     plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
@@ -526,7 +536,17 @@ test("production acceptance runner requires concrete long-form word-count eviden
     storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
     readerPurity: passedAudit({ cleanChapters: 40 }),
     productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({ anchoredChapters: 40, texturedChapters: 40, ruleDrivenChapters: 40 }),
+    worldbuilding: passedAudit({
+      worldbuildingAnchors: 8,
+      distinctMatchedAnchors: 6,
+      requiredDistinctTerms: 4,
+      anchoredChapters: 40,
+      requiredAnchoredChapters: 30,
+      texturedChapters: 40,
+      requiredTexturedChapters: 30,
+      ruleDrivenChapters: 40,
+      requiredRuleDrivenChapters: 30,
+    }),
     structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
     plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
     plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
@@ -566,7 +586,17 @@ test("production acceptance runner requires concrete relationship evidence in co
     storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
     readerPurity: passedAudit({ cleanChapters: 40 }),
     productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({ anchoredChapters: 40, texturedChapters: 40, ruleDrivenChapters: 40 }),
+    worldbuilding: passedAudit({
+      worldbuildingAnchors: 8,
+      distinctMatchedAnchors: 6,
+      requiredDistinctTerms: 4,
+      anchoredChapters: 40,
+      requiredAnchoredChapters: 30,
+      texturedChapters: 40,
+      requiredTexturedChapters: 30,
+      ruleDrivenChapters: 40,
+      requiredRuleDrivenChapters: 30,
+    }),
     structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
     plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
     plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
@@ -596,6 +626,56 @@ test("production acceptance runner requires concrete relationship evidence in co
 
   assert.equal(coverage.passed, false)
   assert.deepEqual(coverage.failedRequirementIds, ["relationship_arcs"])
+})
+
+test("production acceptance runner requires concrete worldbuilding evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const passedAudit = (summary = {}) => ({ passed: true, summary })
+  const coverage = buildAcceptanceRequirementCoverage({
+    readerWordCount: passedAudit({ actualTotalWords: 120000, chapters: 40 }),
+    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
+    readerPurity: passedAudit({ cleanChapters: 40 }),
+    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
+    worldbuilding: passedAudit({
+      worldbuildingAnchors: 8,
+      distinctMatchedAnchors: 1,
+      requiredDistinctTerms: 4,
+      anchoredChapters: 40,
+      requiredAnchoredChapters: 30,
+      texturedChapters: 40,
+      requiredTexturedChapters: 30,
+      ruleDrivenChapters: 4,
+      requiredRuleDrivenChapters: 30,
+    }),
+    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
+    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
+    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
+    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
+    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
+    languageCraft: passedAudit({ craftedChapters: 40 }),
+    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
+    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
+    crossChapterVariation: passedAudit({ distinctOpenings: 40, distinctEndings: 40 }),
+    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
+    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
+    relationshipArc: passedAudit({
+      relationshipEntries: 2,
+      activeRelationships: 2,
+      evolvingRelationships: 2,
+      requiredRelationships: 2,
+      chaptersWithRelationshipPressure: 40,
+      requiredCoverage: 24,
+    }),
+    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
+    finalResolution: passedAudit({ resolvedFinalChapters: 4, finalChapterResolved: true }),
+    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["worldbuilding_integration"])
 })
 
 test("production acceptance runner resolves provider health targets from capability routes", async () => {
