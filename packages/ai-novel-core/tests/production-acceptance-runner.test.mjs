@@ -783,6 +783,23 @@ test("production acceptance runner rejects core characters without dossier voice
   assert.match(characterVoiceAudit.issues.join("\n"), /dossier voice\/habit evidence missing/)
 })
 
+test("production acceptance runner rejects core characters without personalization contract", async () => {
+  const { auditCharacterVoiceForAcceptance } = await loadRunner()
+  const snapshot = richSnapshot()
+  for (const dossier of snapshot.characters.dossiers) {
+    if (dossier.role === "protagonist" || dossier.role === "supporting") {
+      dossier.speechMarkers = []
+      dossier.behaviorHabits = []
+      dossier.appearanceAndBody = ""
+    }
+  }
+
+  const characterVoiceAudit = auditCharacterVoiceForAcceptance(snapshot, { chapters: 4, chapterWords: 2500 })
+  assert.equal(characterVoiceAudit.passed, false)
+  assert.equal(characterVoiceAudit.summary.missingPersonalizationContract, 2)
+  assert.match(characterVoiceAudit.issues.join("\n"), /personalization contract missing.*沈砚.*老周/)
+})
+
 test("production acceptance runner rejects missing protagonist arc and supporting cast usage", async () => {
   const { auditCharacterArcForAcceptance } = await loadRunner()
   const snapshot = richSnapshot()
@@ -1164,7 +1181,7 @@ test("production acceptance runner rejects scene-card missing hook execution", a
 })
 
 test("production acceptance runner writes resumable checkpoint reports", async () => {
-  const { writeAcceptanceCheckpoint } = await loadRunner()
+  const { buildAcceptanceFailureRecovery, writeAcceptanceCheckpoint } = await loadRunner()
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-acceptance-"))
   const reportPath = path.join(dir, "report.json")
   const report = {
@@ -1184,7 +1201,33 @@ test("production acceptance runner writes resumable checkpoint reports", async (
 
   assert.equal(checkpoint.phase, "drafting_progress")
   assert.equal(saved.lastCheckpoint.phase, "drafting_progress")
+  assert.equal(saved.lastSuccessfulCheckpoint.phase, "drafting_progress")
   assert.equal(saved.lastCheckpoint.projectId, "project-123")
   assert.equal(saved.checkpoints.length, 1)
   assert.deepEqual(saved.checkpoints[0].progress, { complete: 2, total: 40 })
+
+  report.status = "failed"
+  report.error = {
+    name: "AcceptanceError",
+    message: "fixture failure",
+    details: { nextAction: "Fix the stalled chapter and resume." },
+  }
+  report.lastProgress = report.progress.at(-1)
+  report.recovery = buildAcceptanceFailureRecovery(report, {
+    autoApproveStyle: true,
+    autoApproveFoundation: true,
+  }, report.error)
+  await writeAcceptanceCheckpoint(reportPath, report, {
+    phase: "failed",
+    error: report.error,
+    recovery: report.recovery,
+  })
+  const failedSaved = JSON.parse(await fs.readFile(reportPath, "utf8"))
+
+  assert.equal(failedSaved.lastCheckpoint.phase, "failed")
+  assert.equal(failedSaved.lastSuccessfulCheckpoint.phase, "drafting_progress")
+  assert.deepEqual(failedSaved.lastProgress, { step: 3, complete: 2, total: 40 })
+  assert.equal(failedSaved.recovery.failedPhase, "drafting_progress")
+  assert.match(failedSaved.recovery.resumeCommand, /--resume-project-id project-123/)
+  assert.match(failedSaved.recovery.resumeCommand, /--auto-approve-style/)
 })

@@ -238,6 +238,44 @@ function summarizeError(error) {
   return { name: "Error", message: String(error) }
 }
 
+function quoteCommandArg(value) {
+  const text = String(value || "")
+  return /^[A-Za-z0-9_./:=@-]+$/u.test(text)
+    ? text
+    : `'${text.replace(/'/g, "'\\''")}'`
+}
+
+function buildAcceptanceResumeCommand(options = {}, projectId = "") {
+  if (!projectId) return null
+  const args = ["rtk", "node", "scripts/run-production-acceptance.mjs"]
+  if (options.rootDir && path.resolve(options.rootDir) !== WORKSPACE_ROOT) {
+    args.push("--root-dir", path.resolve(options.rootDir))
+  }
+  args.push("--resume-project-id", projectId)
+  if (options.autoApproveStyle) args.push("--auto-approve-style")
+  if (options.autoApproveFoundation) args.push("--auto-approve-foundation")
+  if (options.providerHealthCheck === false) args.push("--skip-provider-health-check")
+  return args.map(quoteCommandArg).join(" ")
+}
+
+export function buildAcceptanceFailureRecovery(report = {}, options = {}, errorSummary = {}) {
+  const checkpoints = Array.isArray(report.checkpoints) ? report.checkpoints : []
+  const lastSuccessfulCheckpoint = report.lastSuccessfulCheckpoint
+    || checkpoints.filter((checkpoint) => checkpoint?.phase !== "failed" && checkpoint?.status !== "failed").at(-1)
+    || null
+  const lastProgress = Array.isArray(report.progress) ? report.progress.at(-1) || null : null
+  const details = errorSummary?.details && typeof errorSummary.details === "object" ? errorSummary.details : {}
+  const projectId = report.projectId || options.resumeProjectId || lastSuccessfulCheckpoint?.projectId || null
+  return {
+    projectId,
+    failedPhase: lastSuccessfulCheckpoint?.phase || "preflight",
+    lastSuccessfulPhase: lastSuccessfulCheckpoint?.phase || null,
+    lastProgress,
+    nextAction: details.nextAction || details.nextCommand || "Fix the reported acceptance issue, then rerun the acceptance command.",
+    resumeCommand: details.nextCommand || buildAcceptanceResumeCommand(options, projectId),
+  }
+}
+
 function redactAcceptanceOptions(options) {
   return {
     ...options,
@@ -941,14 +979,33 @@ function extractAcceptanceCharacterDossiers(snapshot) {
   for (const dossier of dossiers) {
     const canonicalName = String(dossier?.canonicalName || dossier?.name || "").trim()
     if (!canonicalName) continue
+    const speechMarkers = (Array.isArray(dossier?.speechMarkers) ? dossier.speechMarkers : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+    const behaviorHabits = (Array.isArray(dossier?.behaviorHabits) ? dossier.behaviorHabits : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+    const personalizationTerms = [...new Set(collectAcceptanceStrings([
+      speechMarkers,
+      behaviorHabits,
+      dossier?.appearanceAndBody,
+      dossier?.physicalMarkers,
+      dossier?.signatureObject,
+      dossier?.signatureObjects,
+      dossier?.mannerisms,
+      dossier?.voice,
+      dossier?.dialogueStyle,
+      dossier?.speechStyle,
+    ]).map((item) => String(item || "").trim()).filter((item) => item.length >= 2))]
     byName.set(canonicalName, {
       id: String(dossier?.id || "").trim(),
       name: canonicalName,
       role: String(dossier?.role || dossier?.type || "").trim(),
       coreDesire: String(dossier?.coreDesire || dossier?.desire || dossier?.goal || "").trim(),
       aliases: (Array.isArray(dossier?.aliases) ? dossier.aliases : []).map((alias) => String(alias || "").trim()).filter(Boolean),
-      speechMarkers: (Array.isArray(dossier?.speechMarkers) ? dossier.speechMarkers : []).map((item) => String(item || "").trim()).filter(Boolean),
-      behaviorHabits: (Array.isArray(dossier?.behaviorHabits) ? dossier.behaviorHabits : []).map((item) => String(item || "").trim()).filter(Boolean),
+      speechMarkers,
+      behaviorHabits,
+      personalizationTerms,
       relationshipState: String(dossier?.relationshipState || "").trim(),
       relationshipTerms: extractExecutionTerms(dossier?.relationshipState),
       profileTerms: collectAcceptanceStrings([
@@ -976,6 +1033,7 @@ function extractAcceptanceCharacterDossiers(snapshot) {
         aliases: [],
         speechMarkers: [],
         behaviorHabits: [],
+        personalizationTerms: [],
         relationshipState: "",
         relationshipTerms: [],
         profileTerms: [],
@@ -1059,6 +1117,13 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
     const pressureSignals = countMatches(joinedWindows, /必须|不能|决定|选择|代价|风险|欠|债|怕|查清|追问|交出|保住|隐瞒|裂缝|怀疑|逼|拦|失去|暴露|不肯|犹豫/gu)
     const matchedSpeechMarkers = dossier.speechMarkers.filter((marker) => marker.length >= 2 && joinedWindows.includes(marker)).slice(0, 5)
     const matchedBehaviorHabits = dossier.behaviorHabits.filter((habit) => habit.length >= 2 && joinedWindows.includes(habit)).slice(0, 5)
+    const matchedPersonalizationTerms = dossier.personalizationTerms.filter((term) => term.length >= 2 && joinedWindows.includes(term)).slice(0, 5)
+    const distinctiveEvidenceMatched = new Set([
+      ...matchedSpeechMarkers,
+      ...matchedBehaviorHabits,
+      ...matchedPersonalizationTerms,
+    ]).size
+    const coreCharacter = isCoreCharacterRole(dossier.role)
     for (const sample of uniqueDialogue) {
       if (sample.length >= 8) {
         const owners = dialogueOwners.get(sample) || new Set()
@@ -1076,13 +1141,15 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
       uniqueDialogueCount: uniqueDialogue.length,
       speechMarkerCount: dossier.speechMarkers.length,
       behaviorHabitCount: dossier.behaviorHabits.length,
+      personalizationTermCount: dossier.personalizationTerms.length,
       actionSignals,
       pressureSignals,
       matchedSpeechMarkers,
       matchedBehaviorHabits,
-      distinctiveEvidenceMatched: matchedSpeechMarkers.length + matchedBehaviorHabits.length,
-      requiresDistinctiveEvidence: isCoreCharacterRole(dossier.role)
-        && (dossier.speechMarkers.length + dossier.behaviorHabits.length) > 0,
+      matchedPersonalizationTerms,
+      distinctiveEvidenceMatched,
+      personalizationContractMissing: coreCharacter && dossier.personalizationTerms.length === 0,
+      requiresDistinctiveEvidence: coreCharacter && dossier.personalizationTerms.length > 0,
       active: bodyMentions > 0 && (dialogueSamples.length > 0 || actionSignals >= 3 || pressureSignals >= 2),
       voiced: dialogueSamples.length > 0,
       sampleDialogue: dialogueSamples.slice(0, 3),
@@ -1111,6 +1178,11 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
   if (totalAttributedDialogue >= Math.max(6, requiredVoicedCharacters * 3) && templateRatio > 0.45) {
     issues.push(`template dialogue ratio ${(templateRatio * 100).toFixed(1)}% is too high`)
   }
+  const missingPersonalizationContract = characterAudits
+    .filter((audit) => audit.voiced && audit.personalizationContractMissing)
+  if (missingPersonalizationContract.length > 0) {
+    issues.push(`core character personalization contract missing: ${missingPersonalizationContract.map((audit) => audit.name).join("、")}`)
+  }
   const missingDistinctiveEvidence = characterAudits
     .filter((audit) => audit.voiced && audit.requiresDistinctiveEvidence && audit.distinctiveEvidenceMatched === 0)
   if (missingDistinctiveEvidence.length > 0) {
@@ -1130,6 +1202,7 @@ export function auditCharacterVoiceForAcceptance(snapshot, options = {}) {
       templateDialogue,
       templateRatio,
       distinctiveEvidenceCharacters: characterAudits.filter((audit) => audit.distinctiveEvidenceMatched > 0).length,
+      missingPersonalizationContract: missingPersonalizationContract.length,
       missingDistinctiveEvidence: missingDistinctiveEvidence.length,
     },
     repeatedAcrossSpeakers: repeatedAcrossSpeakers.slice(0, 5),
@@ -4620,6 +4693,9 @@ export async function writeAcceptanceCheckpoint(reportPath, report, checkpoint =
   }
   report.checkpoints.push(entry)
   report.lastCheckpoint = entry
+  if (entry.phase !== "failed" && entry.status !== "failed") {
+    report.lastSuccessfulCheckpoint = entry
+  }
   await writeReport(reportPath, report)
   return entry
 }
@@ -4659,6 +4735,9 @@ async function main() {
     finalContinuityAudit: null,
     checkpoints: [],
     lastCheckpoint: null,
+    lastSuccessfulCheckpoint: null,
+    lastProgress: null,
+    recovery: null,
     error: null,
   }
   const checkpoint = async (phase, details = {}) => writeAcceptanceCheckpoint(options.reportPath, report, {
@@ -4770,7 +4849,9 @@ async function main() {
     report.status = "failed"
     report.completedAt = now()
     report.error = summarizeError(error)
-    await checkpoint("failed", { error: report.error }).catch((writeError) => {
+    report.lastProgress = Array.isArray(report.progress) ? report.progress.at(-1) || null : null
+    report.recovery = buildAcceptanceFailureRecovery(report, options, report.error)
+    await checkpoint("failed", { error: report.error, recovery: report.recovery }).catch((writeError) => {
       console.error("Failed to write acceptance report:", writeError)
     })
     console.error(`[${now()}] REAL PRODUCTION ACCEPTANCE FAILED.`)
