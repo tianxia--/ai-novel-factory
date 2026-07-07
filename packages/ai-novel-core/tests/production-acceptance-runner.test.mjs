@@ -201,6 +201,204 @@ function richSnapshot() {
   }
 }
 
+function passedCoverageAudit(summary = {}) {
+  return { passed: true, summary }
+}
+
+function fullAcceptanceCoverageAudits(overrides = {}) {
+  const audits = {
+    readerWordCount: passedCoverageAudit({ actualTotalWords: 120000, chapters: 40 }),
+    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
+    readerPurity: passedCoverageAudit({ totalChapters: 40, readableChapters: 40, cleanChapters: 40, leakedChapters: 0 }),
+    productionValidation: passedCoverageAudit({
+      totalChapters: 40,
+      readableChapters: 40,
+      validatedChapters: 40,
+      aigcPassedChapters: 40,
+      styleReadyChapters: 40,
+      qualityPassedChapters: 40,
+    }),
+    worldbuilding: passedCoverageAudit({
+      worldbuildingAnchors: 8,
+      distinctMatchedAnchors: 6,
+      requiredDistinctTerms: 4,
+      anchoredChapters: 40,
+      requiredAnchoredChapters: 30,
+      texturedChapters: 40,
+      requiredTexturedChapters: 30,
+      ruleDrivenChapters: 40,
+      requiredRuleDrivenChapters: 30,
+    }),
+    structuralProgression: passedCoverageAudit({
+      totalChapters: 40,
+      plannedChapters: 40,
+      readableChapters: 40,
+      passedPhases: 4,
+      requiredPhases: 4,
+      skipped: false,
+    }),
+    plotExecution: passedCoverageAudit({
+      totalChapters: 40,
+      plannedChapters: 40,
+      executedChapters: 40,
+      requiredExecutedChapters: 32,
+      anchoredChapters: 40,
+      agencyChapters: 40,
+      consequenceChapters: 40,
+      stateDeltaChapters: 40,
+    }),
+    plotNovelty: passedCoverageAudit({
+      totalChapters: 40,
+      plannedChapters: 40,
+      plannedNovelChapters: 40,
+      requiredNovelPlanChapters: 30,
+      bodyNovelChapters: 40,
+      requiredNovelBodyChapters: 28,
+      distinctBodyNoveltyTerms: 60,
+      requiredDistinctBodyTerms: 20,
+      maxStagnantRun: 0,
+      allowedStagnantRun: 2,
+      skipped: false,
+    }),
+    narrative: passedCoverageAudit({
+      totalChapters: 40,
+      totalDialogue: 80,
+      requiredDialogue: 60,
+      knownCast: 3,
+      mentionedCast: 3,
+      hookReadyChapters: 40,
+      totalActionSignals: 400,
+      totalSensorySignals: 200,
+      totalObjectSignals: 200,
+    }),
+    proseTexture: passedCoverageAudit({
+      totalChapters: 40,
+      sceneRichChapters: 40,
+      craftChainChapters: 40,
+      variedRhythmChapters: 40,
+      requiredTextureChapters: 32,
+      dryInstructionSignals: 0,
+      genericSummarySignals: 0,
+    }),
+    languageCraft: passedCoverageAudit({
+      totalChapters: 40,
+      readableChapters: 40,
+      craftedChapters: 40,
+      requiredCraftedChapters: 32,
+      totalClicheSignals: 0,
+      allowedTotalCliches: 60,
+      totalAbstractSignals: 40,
+      totalConcreteSignals: 120,
+      skipped: false,
+    }),
+    sceneCompleteness: passedCoverageAudit({
+      totalChapters: 40,
+      sceneCompleteChapters: 40,
+      requiredCompleteChapters: 34,
+      sceneParagraphsTotal: 160,
+      interactionParagraphsTotal: 80,
+      consequenceParagraphsTotal: 80,
+      expositionOnlyParagraphsTotal: 0,
+      knownCast: 3,
+    }),
+    sceneCardCharacter: passedCoverageAudit({
+      skipped: false,
+      auditedChapters: 40,
+      passedChapters: 40,
+      totalBlueprints: 40,
+      requiredCharactersTotal: 80,
+      expectedChapters: 40,
+    }),
+    crossChapterVariation: passedCoverageAudit({
+      totalChapters: 40,
+      readableChapters: 40,
+      distinctOpenings: 40,
+      requiredDistinctOpenings: 30,
+      distinctEndings: 40,
+      requiredDistinctEndings: 28,
+      repeatedOpeningGroups: 0,
+      repeatedEndingGroups: 0,
+      repeatedParagraphGroups: 0,
+      repeatedParagraphChapters: 0,
+      allowedRepeatedParagraphChapters: 10,
+      skipped: false,
+    }),
+    characterVoice: passedCoverageAudit({
+      knownCast: 3,
+      activeCharacters: 3,
+      requiredCharacters: 3,
+      voicedCharacters: 3,
+      requiredVoicedCharacters: 2,
+      totalAttributedDialogue: 80,
+      templateDialogue: 0,
+      templateRatio: 0,
+      distinctiveEvidenceCharacters: 3,
+      missingPersonalizationContract: 0,
+      missingDistinctiveEvidence: 0,
+    }),
+    characterArc: passedCoverageAudit({
+      totalChapters: 40,
+      knownCast: 3,
+      protagonist: "沈砚",
+      protagonistMentionChapters: 40,
+      requiredProtagonistChapters: 32,
+      protagonistAgencyChapters: 40,
+      requiredAgencyChapters: 26,
+      protagonistPressureChapters: 40,
+      requiredPressureChapters: 24,
+      activeSupporting: 2,
+      requiredSupportingCharacters: 2,
+      supportingCoverageChapters: 40,
+      requiredSupportingCoverage: 24,
+    }),
+    relationshipArc: passedCoverageAudit({
+      relationshipEntries: 2,
+      activeRelationships: 2,
+      evolvingRelationships: 2,
+      requiredRelationships: 2,
+      chaptersWithRelationshipPressure: 40,
+      requiredCoverage: 24,
+    }),
+    foreshadowing: passedCoverageAudit({
+      totalChapters: 40,
+      entries: 10,
+      expectedEntries: 10,
+      concreteEntries: 10,
+      seededEntries: 10,
+      advancedEntries: 8,
+      payoffEntries: 2,
+      requiredAdvanced: 6,
+    }),
+    finalResolution: passedCoverageAudit({
+      totalChapters: 40,
+      readableChapters: 40,
+      finalWindowSize: 10,
+      resolvedFinalChapters: 10,
+      requiredResolvedFinalChapters: 8,
+      protagonistFinalChapters: 10,
+      requiredProtagonistFinalChapters: 10,
+      relationshipFinalChapters: 6,
+      requiredRelationshipFinalChapters: 5,
+      payoffAnchors: 2,
+      requiredPayoffAnchors: 1,
+      finalResolutionSignals: 40,
+      finalConsequenceSignals: 30,
+      finalOpenEndedSignals: 0,
+      allowedOpenEndedSignals: 15,
+      finalChapterResolved: true,
+      skipped: false,
+    }),
+    continuity: passedCoverageAudit({
+      totalChapters: 40,
+      transitionPairs: 39,
+      bridgedPairs: 39,
+      requiredBridgedPairs: 32,
+      knownCast: 3,
+    }),
+  }
+  return { ...audits, ...overrides }
+}
+
 function structuralSnapshot(withMarkers = true) {
   const snapshot = richSnapshot()
   const totalChapters = 8
@@ -476,46 +674,11 @@ test("production acceptance runner audits story foundation and narrative quality
 
 test("production acceptance runner rejects skipped audits in requirement coverage", async () => {
   const { buildAcceptanceRequirementCoverage } = await loadRunner()
-  const passedAudit = (summary = {}) => ({ passed: true, summary })
-  const coverage = buildAcceptanceRequirementCoverage({
-    readerWordCount: passedAudit({ actualTotalWords: 120000, chapters: 40 }),
-    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
-    readerPurity: passedAudit({ cleanChapters: 40 }),
-    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({
-      worldbuildingAnchors: 8,
-      distinctMatchedAnchors: 6,
-      requiredDistinctTerms: 4,
-      anchoredChapters: 40,
-      requiredAnchoredChapters: 30,
-      texturedChapters: 40,
-      requiredTexturedChapters: 30,
-      ruleDrivenChapters: 40,
-      requiredRuleDrivenChapters: 30,
-    }),
-    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
-    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
-    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
-    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
-    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
-    languageCraft: passedAudit({ skipped: true }),
-    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
-    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
-    crossChapterVariation: passedAudit({ skipped: true }),
-    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
-    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
-    relationshipArc: passedAudit({
-      relationshipEntries: 2,
-      activeRelationships: 2,
-      evolvingRelationships: 2,
-      requiredRelationships: 2,
-      chaptersWithRelationshipPressure: 40,
-      requiredCoverage: 24,
-    }),
-    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
-    finalResolution: passedAudit({ skipped: true }),
-    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
-  }, {
+  const coverage = buildAcceptanceRequirementCoverage(fullAcceptanceCoverageAudits({
+    languageCraft: passedCoverageAudit({ skipped: true }),
+    crossChapterVariation: passedCoverageAudit({ skipped: true }),
+    finalResolution: passedCoverageAudit({ skipped: true }),
+  }), {
     minTotalWords: 100000,
     maxTotalWords: 300000,
   })
@@ -530,46 +693,9 @@ test("production acceptance runner rejects skipped audits in requirement coverag
 
 test("production acceptance runner requires concrete long-form word-count evidence in coverage", async () => {
   const { buildAcceptanceRequirementCoverage } = await loadRunner()
-  const passedAudit = (summary = {}) => ({ passed: true, summary })
-  const coverage = buildAcceptanceRequirementCoverage({
-    readerWordCount: passedAudit({ actualTotalWords: 90000, chapters: 40 }),
-    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
-    readerPurity: passedAudit({ cleanChapters: 40 }),
-    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({
-      worldbuildingAnchors: 8,
-      distinctMatchedAnchors: 6,
-      requiredDistinctTerms: 4,
-      anchoredChapters: 40,
-      requiredAnchoredChapters: 30,
-      texturedChapters: 40,
-      requiredTexturedChapters: 30,
-      ruleDrivenChapters: 40,
-      requiredRuleDrivenChapters: 30,
-    }),
-    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
-    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
-    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
-    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
-    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
-    languageCraft: passedAudit({ craftedChapters: 40 }),
-    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
-    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
-    crossChapterVariation: passedAudit({ distinctOpenings: 40, distinctEndings: 40 }),
-    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
-    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
-    relationshipArc: passedAudit({
-      relationshipEntries: 2,
-      activeRelationships: 2,
-      evolvingRelationships: 2,
-      requiredRelationships: 2,
-      chaptersWithRelationshipPressure: 40,
-      requiredCoverage: 24,
-    }),
-    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
-    finalResolution: passedAudit({ resolvedFinalChapters: 4, finalChapterResolved: true }),
-    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
-  }, {
+  const coverage = buildAcceptanceRequirementCoverage(fullAcceptanceCoverageAudits({
+    readerWordCount: passedCoverageAudit({ actualTotalWords: 90000, chapters: 40 }),
+  }), {
     minTotalWords: 100000,
     maxTotalWords: 300000,
   })
@@ -580,35 +706,8 @@ test("production acceptance runner requires concrete long-form word-count eviden
 
 test("production acceptance runner requires concrete relationship evidence in coverage", async () => {
   const { buildAcceptanceRequirementCoverage } = await loadRunner()
-  const passedAudit = (summary = {}) => ({ passed: true, summary })
-  const coverage = buildAcceptanceRequirementCoverage({
-    readerWordCount: passedAudit({ actualTotalWords: 120000, chapters: 40 }),
-    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
-    readerPurity: passedAudit({ cleanChapters: 40 }),
-    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({
-      worldbuildingAnchors: 8,
-      distinctMatchedAnchors: 6,
-      requiredDistinctTerms: 4,
-      anchoredChapters: 40,
-      requiredAnchoredChapters: 30,
-      texturedChapters: 40,
-      requiredTexturedChapters: 30,
-      ruleDrivenChapters: 40,
-      requiredRuleDrivenChapters: 30,
-    }),
-    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
-    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
-    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
-    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
-    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
-    languageCraft: passedAudit({ craftedChapters: 40 }),
-    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
-    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
-    crossChapterVariation: passedAudit({ distinctOpenings: 40, distinctEndings: 40 }),
-    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
-    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
-    relationshipArc: passedAudit({
+  const coverage = buildAcceptanceRequirementCoverage(fullAcceptanceCoverageAudits({
+    relationshipArc: passedCoverageAudit({
       relationshipEntries: 2,
       activeRelationships: 1,
       evolvingRelationships: 1,
@@ -616,10 +715,7 @@ test("production acceptance runner requires concrete relationship evidence in co
       chaptersWithRelationshipPressure: 10,
       requiredCoverage: 24,
     }),
-    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
-    finalResolution: passedAudit({ resolvedFinalChapters: 4, finalChapterResolved: true }),
-    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
-  }, {
+  }), {
     minTotalWords: 100000,
     maxTotalWords: 300000,
   })
@@ -630,13 +726,8 @@ test("production acceptance runner requires concrete relationship evidence in co
 
 test("production acceptance runner requires concrete worldbuilding evidence in coverage", async () => {
   const { buildAcceptanceRequirementCoverage } = await loadRunner()
-  const passedAudit = (summary = {}) => ({ passed: true, summary })
-  const coverage = buildAcceptanceRequirementCoverage({
-    readerWordCount: passedAudit({ actualTotalWords: 120000, chapters: 40 }),
-    storyFoundation: { passed: true, counts: { plotChapters: 40, foreshadowingEntries: 10 } },
-    readerPurity: passedAudit({ cleanChapters: 40 }),
-    productionValidation: passedAudit({ validatedChapters: 40, aigcPassedChapters: 40, styleReadyChapters: 40, qualityPassedChapters: 40 }),
-    worldbuilding: passedAudit({
+  const coverage = buildAcceptanceRequirementCoverage(fullAcceptanceCoverageAudits({
+    worldbuilding: passedCoverageAudit({
       worldbuildingAnchors: 8,
       distinctMatchedAnchors: 1,
       requiredDistinctTerms: 4,
@@ -647,35 +738,121 @@ test("production acceptance runner requires concrete worldbuilding evidence in c
       ruleDrivenChapters: 4,
       requiredRuleDrivenChapters: 30,
     }),
-    structuralProgression: passedAudit({ passedPhases: 4, requiredPhases: 4 }),
-    plotExecution: passedAudit({ executedChapters: 40, requiredExecutedChapters: 40 }),
-    plotNovelty: passedAudit({ bodyNovelChapters: 40, requiredNovelBodyChapters: 30 }),
-    narrative: passedAudit({ hookReadyChapters: 40, totalChapters: 40 }),
-    proseTexture: passedAudit({ sceneRichChapters: 40, variedRhythmChapters: 40 }),
-    languageCraft: passedAudit({ craftedChapters: 40 }),
-    sceneCompleteness: passedAudit({ sceneCompleteChapters: 40 }),
-    sceneCardCharacter: passedAudit({ auditedChapters: 40 }),
-    crossChapterVariation: passedAudit({ distinctOpenings: 40, distinctEndings: 40 }),
-    characterVoice: passedAudit({ missingPersonalizationContract: 0, missingDistinctiveEvidence: 0 }),
-    characterArc: passedAudit({ protagonistMentionChapters: 40 }),
-    relationshipArc: passedAudit({
-      relationshipEntries: 2,
-      activeRelationships: 2,
-      evolvingRelationships: 2,
-      requiredRelationships: 2,
-      chaptersWithRelationshipPressure: 40,
-      requiredCoverage: 24,
-    }),
-    foreshadowing: passedAudit({ seededEntries: 8, advancedEntries: 6 }),
-    finalResolution: passedAudit({ resolvedFinalChapters: 4, finalChapterResolved: true }),
-    continuity: passedAudit({ bridgedPairs: 39, requiredBridgedPairs: 32 }),
-  }, {
+  }), {
     minTotalWords: 100000,
     maxTotalWords: 300000,
   })
 
   assert.equal(coverage.passed, false)
   assert.deepEqual(coverage.failedRequirementIds, ["worldbuilding_integration"])
+})
+
+test("production acceptance runner requires concrete character arc evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    characterArc: passedCoverageAudit({
+      ...base.characterArc.summary,
+      protagonistAgencyChapters: 8,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["character_cast_and_arcs"])
+})
+
+test("production acceptance runner requires concrete plot development evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    plotNovelty: passedCoverageAudit({
+      ...base.plotNovelty.summary,
+      maxStagnantRun: 5,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["plot_mainline_development"])
+})
+
+test("production acceptance runner requires concrete foreshadowing payoff evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    foreshadowing: passedCoverageAudit({
+      ...base.foreshadowing.summary,
+      payoffEntries: 0,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["foreshadowing_and_payoff"])
+})
+
+test("production acceptance runner requires concrete hook and scene execution evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    narrative: passedCoverageAudit({
+      ...base.narrative.summary,
+      hookReadyChapters: 10,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["hooks_and_scene_execution"])
+})
+
+test("production acceptance runner requires concrete literary prose evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    productionValidation: passedCoverageAudit({
+      ...base.productionValidation.summary,
+      aigcPassedChapters: 20,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["literary_natural_prose"])
+})
+
+test("production acceptance runner requires concrete cross-chapter coherence evidence in coverage", async () => {
+  const { buildAcceptanceRequirementCoverage } = await loadRunner()
+  const base = fullAcceptanceCoverageAudits()
+  const coverage = buildAcceptanceRequirementCoverage({
+    ...base,
+    crossChapterVariation: passedCoverageAudit({
+      ...base.crossChapterVariation.summary,
+      repeatedOpeningGroups: 1,
+    }),
+  }, {
+    minTotalWords: 100000,
+    maxTotalWords: 300000,
+  })
+
+  assert.equal(coverage.passed, false)
+  assert.deepEqual(coverage.failedRequirementIds, ["cross_chapter_coherence"])
 })
 
 test("production acceptance runner resolves provider health targets from capability routes", async () => {

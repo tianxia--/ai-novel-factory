@@ -330,6 +330,12 @@ function acceptanceNumberAtLeast(value, min) {
   return Number.isFinite(number) && Number.isFinite(minimum) && number >= minimum
 }
 
+function acceptanceNumberAtMost(value, max) {
+  const number = Number(value)
+  const maximum = Number(max)
+  return Number.isFinite(number) && Number.isFinite(maximum) && number <= maximum
+}
+
 function acceptanceRequirement(id, label, passed, audits, evidence) {
   return {
     id,
@@ -390,7 +396,36 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
     acceptanceRequirement(
       "character_cast_and_arcs",
       "主角、配角和人物弧线持续可追踪",
-      acceptanceAuditPassed(audits.characterArc) && acceptanceAuditPassed(audits.characterVoice),
+      acceptanceAuditPassed(audits.characterArc)
+        && acceptanceAuditPassed(audits.characterVoice)
+        && acceptanceNumberAtLeast(
+          audits.characterArc?.summary?.protagonistMentionChapters,
+          audits.characterArc?.summary?.requiredProtagonistChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterArc?.summary?.protagonistAgencyChapters,
+          audits.characterArc?.summary?.requiredAgencyChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterArc?.summary?.protagonistPressureChapters,
+          audits.characterArc?.summary?.requiredPressureChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterArc?.summary?.activeSupporting,
+          audits.characterArc?.summary?.requiredSupportingCharacters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterArc?.summary?.supportingCoverageChapters,
+          audits.characterArc?.summary?.requiredSupportingCoverage,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterVoice?.summary?.activeCharacters,
+          audits.characterVoice?.summary?.requiredCharacters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.characterVoice?.summary?.voicedCharacters,
+          audits.characterVoice?.summary?.requiredVoicedCharacters,
+        ),
       ["characterArc", "characterVoice"],
       {
         characterArc: audits.characterArc?.summary,
@@ -422,7 +457,31 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
       "情节发展、主线推进和长篇结构不停滞",
       acceptanceAuditPassed(audits.structuralProgression)
         && acceptanceAuditPassed(audits.plotExecution)
-        && acceptanceAuditPassed(audits.plotNovelty),
+        && acceptanceAuditPassed(audits.plotNovelty)
+        && acceptanceNumberAtLeast(
+          audits.structuralProgression?.summary?.passedPhases,
+          audits.structuralProgression?.summary?.requiredPhases,
+        )
+        && acceptanceNumberAtLeast(
+          audits.plotExecution?.summary?.executedChapters,
+          audits.plotExecution?.summary?.requiredExecutedChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.plotNovelty?.summary?.plannedNovelChapters,
+          audits.plotNovelty?.summary?.requiredNovelPlanChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.plotNovelty?.summary?.bodyNovelChapters,
+          audits.plotNovelty?.summary?.requiredNovelBodyChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.plotNovelty?.summary?.distinctBodyNoveltyTerms,
+          audits.plotNovelty?.summary?.requiredDistinctBodyTerms,
+        )
+        && acceptanceNumberAtMost(
+          audits.plotNovelty?.summary?.maxStagnantRun,
+          audits.plotNovelty?.summary?.allowedStagnantRun,
+        ),
       ["structuralProgression", "plotExecution", "plotNovelty"],
       {
         structuralProgression: audits.structuralProgression?.summary,
@@ -433,7 +492,30 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
     acceptanceRequirement(
       "foreshadowing_and_payoff",
       "伏笔能埋设、推进并在后段回收",
-      acceptanceAuditPassed(audits.foreshadowing) && acceptanceAuditPassed(audits.finalResolution),
+      acceptanceAuditPassed(audits.foreshadowing)
+        && acceptanceAuditPassed(audits.finalResolution)
+        && acceptanceNumberAtLeast(
+          audits.foreshadowing?.summary?.entries,
+          audits.foreshadowing?.summary?.expectedEntries,
+        )
+        && acceptanceNumberAtLeast(
+          audits.foreshadowing?.summary?.concreteEntries,
+          audits.foreshadowing?.summary?.expectedEntries,
+        )
+        && acceptanceNumberAtLeast(
+          audits.foreshadowing?.summary?.advancedEntries,
+          audits.foreshadowing?.summary?.requiredAdvanced,
+        )
+        && acceptancePositiveNumber(audits.foreshadowing?.summary?.payoffEntries)
+        && acceptanceNumberAtLeast(
+          audits.finalResolution?.summary?.resolvedFinalChapters,
+          audits.finalResolution?.summary?.requiredResolvedFinalChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.finalResolution?.summary?.payoffAnchors,
+          audits.finalResolution?.summary?.requiredPayoffAnchors,
+        )
+        && audits.finalResolution?.summary?.finalChapterResolved === true,
       ["foreshadowing", "finalResolution"],
       {
         foreshadowing: audits.foreshadowing?.summary,
@@ -445,7 +527,31 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
       "章节钩子、场景卡和场景完整度落到正文",
       acceptanceAuditPassed(audits.narrative)
         && acceptanceAuditPassed(audits.sceneCompleteness)
-        && acceptanceAuditPassed(audits.sceneCardCharacter),
+        && acceptanceAuditPassed(audits.sceneCardCharacter)
+        && acceptanceNumberAtLeast(
+          audits.narrative?.summary?.totalDialogue,
+          audits.narrative?.summary?.requiredDialogue,
+        )
+        && acceptanceNumberAtLeast(
+          audits.narrative?.summary?.hookReadyChapters,
+          Math.ceil(Number(audits.narrative?.summary?.totalChapters || 0) * 0.8),
+        )
+        && (
+          Number(audits.narrative?.summary?.knownCast || 0) < 2
+          || acceptanceNumberAtLeast(audits.narrative?.summary?.mentionedCast, 2)
+        )
+        && acceptanceNumberAtLeast(
+          audits.sceneCompleteness?.summary?.sceneCompleteChapters,
+          audits.sceneCompleteness?.summary?.requiredCompleteChapters,
+        )
+        && acceptancePositiveNumber(audits.sceneCompleteness?.summary?.interactionParagraphsTotal)
+        && acceptancePositiveNumber(audits.sceneCompleteness?.summary?.consequenceParagraphsTotal)
+        && acceptancePositiveNumber(audits.sceneCardCharacter?.summary?.auditedChapters)
+        && acceptanceNumberAtLeast(
+          audits.sceneCardCharacter?.summary?.passedChapters,
+          audits.sceneCardCharacter?.summary?.auditedChapters,
+        )
+        && acceptancePositiveNumber(audits.sceneCardCharacter?.summary?.requiredCharactersTotal),
       ["narrative", "sceneCompleteness", "sceneCardCharacter"],
       {
         narrative: audits.narrative?.summary,
@@ -468,7 +574,49 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
       acceptanceAuditPassed(audits.readerPurity)
         && acceptanceAuditPassed(audits.productionValidation)
         && acceptanceAuditPassed(audits.proseTexture)
-        && acceptanceAuditPassed(audits.languageCraft),
+        && acceptanceAuditPassed(audits.languageCraft)
+        && acceptancePositiveNumber(audits.readerPurity?.summary?.readableChapters)
+        && acceptanceNumberAtLeast(
+          audits.readerPurity?.summary?.cleanChapters,
+          audits.readerPurity?.summary?.readableChapters,
+        )
+        && acceptancePositiveNumber(audits.productionValidation?.summary?.readableChapters)
+        && acceptanceNumberAtLeast(
+          audits.productionValidation?.summary?.validatedChapters,
+          audits.productionValidation?.summary?.readableChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.productionValidation?.summary?.aigcPassedChapters,
+          audits.productionValidation?.summary?.readableChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.productionValidation?.summary?.styleReadyChapters,
+          audits.productionValidation?.summary?.readableChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.productionValidation?.summary?.qualityPassedChapters,
+          audits.productionValidation?.summary?.readableChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.proseTexture?.summary?.sceneRichChapters,
+          audits.proseTexture?.summary?.requiredTextureChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.proseTexture?.summary?.craftChainChapters,
+          audits.proseTexture?.summary?.requiredTextureChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.proseTexture?.summary?.variedRhythmChapters,
+          audits.proseTexture?.summary?.requiredTextureChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.languageCraft?.summary?.craftedChapters,
+          audits.languageCraft?.summary?.requiredCraftedChapters,
+        )
+        && acceptanceNumberAtMost(
+          audits.languageCraft?.summary?.totalClicheSignals,
+          audits.languageCraft?.summary?.allowedTotalCliches,
+        ),
       ["readerPurity", "productionValidation", "proseTexture", "languageCraft"],
       {
         readerPurity: audits.readerPurity?.summary,
@@ -482,7 +630,30 @@ export function buildAcceptanceRequirementCoverage(audits = {}, options = {}) {
       "跨章承接、变体和结局收束保持连贯",
       acceptanceAuditPassed(audits.continuity)
         && acceptanceAuditPassed(audits.crossChapterVariation)
-        && acceptanceAuditPassed(audits.finalResolution),
+        && acceptanceAuditPassed(audits.finalResolution)
+        && acceptanceNumberAtLeast(
+          audits.continuity?.summary?.bridgedPairs,
+          audits.continuity?.summary?.requiredBridgedPairs,
+        )
+        && acceptanceNumberAtLeast(
+          audits.crossChapterVariation?.summary?.distinctOpenings,
+          audits.crossChapterVariation?.summary?.requiredDistinctOpenings,
+        )
+        && acceptanceNumberAtLeast(
+          audits.crossChapterVariation?.summary?.distinctEndings,
+          audits.crossChapterVariation?.summary?.requiredDistinctEndings,
+        )
+        && Number(audits.crossChapterVariation?.summary?.repeatedOpeningGroups || 0) === 0
+        && Number(audits.crossChapterVariation?.summary?.repeatedEndingGroups || 0) === 0
+        && acceptanceNumberAtMost(
+          audits.crossChapterVariation?.summary?.repeatedParagraphChapters,
+          audits.crossChapterVariation?.summary?.allowedRepeatedParagraphChapters,
+        )
+        && acceptanceNumberAtLeast(
+          audits.finalResolution?.summary?.resolvedFinalChapters,
+          audits.finalResolution?.summary?.requiredResolvedFinalChapters,
+        )
+        && audits.finalResolution?.summary?.finalChapterResolved === true,
       ["continuity", "crossChapterVariation", "finalResolution"],
       {
         continuity: audits.continuity?.summary,
