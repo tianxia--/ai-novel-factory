@@ -5,11 +5,12 @@ import { createServer } from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 process.env.AI_NOVEL_TEST_MODE = "1"
 
-const packageRoot = path.resolve(process.cwd())
+const testFilePath = fileURLToPath(import.meta.url)
+const packageRoot = path.resolve(path.dirname(testFilePath), "..")
 const cliEntry = path.join(packageRoot, "dist", "cli.mjs")
 const envManagerEntry = path.join(packageRoot, "dist", "env-manager.mjs")
 const tuiControllerEntry = path.join(packageRoot, "dist", "tui-controller.mjs")
@@ -18,14 +19,14 @@ const tuiEntry = path.join(packageRoot, "dist", "tui.mjs")
 const serverEntry = path.join(packageRoot, "dist", "server.mjs")
 const superGraphEntry = path.join(packageRoot, "dist", "super-graph.mjs")
 const pluginEntry = path.join(packageRoot, "dist", "index.mjs")
-const coreEntry = path.join(process.cwd(), "..", "ai-novel-core", "dist", "index.js")
-const viewModelEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "view-model.mjs")
-const liveDiscussionEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "live-discussion.mjs")
-const messageRendererEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "message-renderer.mjs")
-const discussionRendererEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "discussion-renderer.mjs")
-const desktopIndexEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "index.html")
-const desktopAppEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "app.js")
-const desktopStyleEntry = path.join(process.cwd(), "..", "..", "apps", "desktop", "style.css")
+const coreEntry = path.join(packageRoot, "..", "ai-novel-core", "dist", "index.js")
+const viewModelEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "src", "view-model.mjs")
+const liveDiscussionEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "src", "live-discussion.mjs")
+const messageRendererEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "src", "message-renderer.mjs")
+const discussionRendererEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "src", "discussion-renderer.mjs")
+const desktopIndexEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "index.html")
+const desktopAppEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "app.js")
+const desktopStyleEntry = path.join(packageRoot, "..", "..", "apps", "desktop", "style.css")
 
 async function loadEnvManager() {
   return import(`${pathToFileURL(envManagerEntry).href}?ts=${Date.now()}`)
@@ -352,6 +353,26 @@ test("plugin novel-init and novel-status use the production managed project flow
   assert.match(statusResult, /Project ID: dream-ledger/)
   assert.match(statusResult, /Autopilot:/)
   assert.match(statusResult, /factory\.sqlite/)
+})
+
+test("ai-novel status resolves managed projects from the workspace root", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-cli-managed-status-"))
+  const { createManagedAutonomousProject } = await loadCoreModule()
+
+  await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A ledger clerk follows impossible rain records",
+    title: "Rain Ledger",
+    totalChapters: 6,
+    chapterWordTarget: 2500,
+  })
+
+  const result = await runCli(["status"], tempDir)
+
+  assert.equal(result.code, 0, result.stderr)
+  assert.match(result.stdout, /Rain Ledger \(rain-ledger\)/)
+  assert.match(result.stdout, /worldbuilding_dialogue/)
+  assert.match(result.stdout, /pending chapters/i)
 })
 
 test("autonomous state saves survive concurrent writes with identical timestamps", async () => {
@@ -791,7 +812,7 @@ test("tui controller executes composer actions against the autonomous workspace"
 test("cli and tui manual workflow changes go through shared director command executors", async () => {
   const cliSource = await fs.readFile(path.join(packageRoot, "src", "cli.ts"), "utf8")
   const tuiControllerSource = await fs.readFile(path.join(packageRoot, "src", "tui-controller.ts"), "utf8")
-  const coreDirectorSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "director-commands.ts"), "utf8")
+  const coreDirectorSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "director-commands.ts"), "utf8")
 
   assert.match(cliSource, /executeManualAdvanceCommand/)
   assert.match(cliSource, /executeManualInterruptCommand/)
@@ -1756,7 +1777,7 @@ test("studio api prunes factory projects that are no longer in the registry", as
 })
 
 test("studio project creation returns without running a blocking kickoff discussion", async () => {
-  const source = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
+  const source = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
   const createBranch = source.slice(
     source.indexOf('if (method === "POST" && requestPathname === "/api/projects")'),
     source.indexOf('if (method === "GET" && requestPathname === "/api/status")'),
@@ -2777,9 +2798,9 @@ test("desktop workflow marks transcript-only chapter drafts as not yet productio
 })
 
 test("agent stage guardrails prevent discussion text from claiming state transitions", async () => {
-  const runtimeSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "runtime-llm.ts"), "utf8")
-  const discussionSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "discussion.ts"), "utf8")
-  const autopilotSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "autopilot-worker.ts"), "utf8")
+  const runtimeSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "runtime-llm.ts"), "utf8")
+  const discussionSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "discussion.ts"), "utf8")
+  const autopilotSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "autopilot-worker.ts"), "utf8")
 
   assert.match(runtimeSource, /权威进度只来自系统提供的/)
   assert.match(discussionSource, /不能替状态机宣布阶段跳转/)
@@ -3193,8 +3214,8 @@ test("desktop snapshot merge preserves state and loads messages before transcrip
 })
 
 test("discussion transcript entries preserve per-agent turn timestamps", async () => {
-  const discussionSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "discussion.ts"), "utf8")
-  const serverSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
+  const discussionSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "discussion.ts"), "utf8")
+  const serverSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
 
   assert.match(discussionSource, /const completedAt = new Date\(\)\.toISOString\(\)/)
   assert.match(discussionSource, /\[`## \$\{completedAt\}`,\s*`\$\{agent\.label\}: \$\{reply\}`/)
@@ -3205,7 +3226,7 @@ test("discussion transcript entries preserve per-agent turn timestamps", async (
 
 test("desktop status polling uses snapshot versions to skip unchanged renders", async () => {
   const js = await fs.readFile(desktopAppEntry, "utf8")
-  const serverSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
+  const serverSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
 
   assert.match(js, /snapshotVersion:\s*""/)
   assert.match(js, /knownSnapshotVersion/)
@@ -3528,8 +3549,8 @@ test("generateAgentReply aborts stalled provider requests using LLM_TIMEOUT_MS",
 })
 
 test("production writing uses streaming provider activity instead of one-shot chapter waits", async () => {
-  const runtimeSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "runtime-llm.ts"), "utf8")
-  const pipelineSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "writing-pipeline.ts"), "utf8")
+  const runtimeSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "runtime-llm.ts"), "utf8")
+  const pipelineSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "writing-pipeline.ts"), "utf8")
 
   assert.match(runtimeSource, /markActivity/)
   assert.match(runtimeSource, /LLM request timed out after \$\{timeoutMs\}ms without provider activity/)
@@ -3580,7 +3601,7 @@ test("desktop message adapter normalizes extensible typed messages", async () =>
     messageContent,
     messageRole,
     toRenderableMessage,
-  } = await import(`${pathToFileURL(path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "messages.mjs")).href}?ts=${Date.now()}`)
+  } = await import(`${pathToFileURL(path.join(packageRoot, "..", "..", "apps", "desktop", "src", "messages.mjs")).href}?ts=${Date.now()}`)
 
   const toolMessage = toRenderableMessage(createToolMessage({
     messageId: "tool-typed",
@@ -3611,7 +3632,7 @@ test("desktop message adapter normalizes extensible typed messages", async () =>
 })
 
 test("desktop message adapter preserves parts and derives artifact paths from artifact parts", async () => {
-  const { toRenderableMessage } = await import(`${pathToFileURL(path.join(process.cwd(), "..", "..", "apps", "desktop", "src", "messages.mjs")).href}?ts=${Date.now()}`)
+  const { toRenderableMessage } = await import(`${pathToFileURL(path.join(packageRoot, "..", "..", "apps", "desktop", "src", "messages.mjs")).href}?ts=${Date.now()}`)
 
   const message = toRenderableMessage({
     messageId: "agent-with-parts",
@@ -4069,8 +4090,8 @@ test("desktop studio exposes manual unattended controls instead of auto-resuming
 
 test("desktop studio streams chapter writing progress into the discussion panel", async () => {
   const js = await fs.readFile(desktopAppEntry, "utf8")
-  const pipelineSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "writing-pipeline.ts"), "utf8")
-  const workerSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "autopilot-worker.ts"), "utf8")
+  const pipelineSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "writing-pipeline.ts"), "utf8")
+  const workerSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "autopilot-worker.ts"), "utf8")
 
   assert.match(pipelineSource, /WritingProgressEvent/)
   assert.match(pipelineSource, /WRITING_PROGRESS/)
@@ -4111,7 +4132,7 @@ test("desktop studio includes project manager and create-project modal scaffoldi
 test("desktop project manager supports scrolling and confirmed project deletion", async () => {
   const js = await fs.readFile(desktopAppEntry, "utf8")
   const css = await fs.readFile(desktopStyleEntry, "utf8")
-  const serverSource = await fs.readFile(path.join(process.cwd(), "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
+  const serverSource = await fs.readFile(path.join(packageRoot, "..", "ai-novel-core", "src", "studio-server.ts"), "utf8")
 
   assert.match(js, /deletingProjectIds:\s*new Set\(\)/)
   assert.match(js, /data-project-delete-id/)

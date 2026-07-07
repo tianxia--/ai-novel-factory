@@ -1,4 +1,4 @@
-import * as node_http from 'node:http';
+import http from 'node:http';
 
 interface ServerFlags {
     rootDir: string;
@@ -6,10 +6,11 @@ interface ServerFlags {
     port: number;
     embeddedWorker?: boolean;
 }
-declare function startStandaloneNovelServer(options?: Partial<ServerFlags>): Promise<{
-    server: node_http.Server<typeof node_http.IncomingMessage, typeof node_http.ServerResponse>;
+interface StandaloneNovelServer {
+    server: http.Server;
     port: number;
     close: () => Promise<void>;
-}>;
+}
+declare function startStandaloneNovelServer(options?: Partial<ServerFlags>): Promise<StandaloneNovelServer>;
 
 export { startStandaloneNovelServer };

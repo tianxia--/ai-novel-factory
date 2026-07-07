@@ -6,8 +6,10 @@ import {
   formatStatus,
   getWorkspaceSummary,
   initAutonomousProject,
+  listAutonomousProjects,
   loadAutonomousState,
   prepareCoverGeneration,
+  resolveManagedProjectRoot,
   saveAutonomousState,
   runMultiAgentDiscussion,
   routeUserMessage,
@@ -54,6 +56,41 @@ function parseArgs(argv: string[]) {
   return { command, flags }
 }
 
+async function loadCliProjectContext(rootDir: string, flags: Record<string, string> = {}) {
+  try {
+    return {
+      project: null,
+      projectRoot: rootDir,
+      state: await loadAutonomousState(rootDir),
+    }
+  } catch (error) {
+    if ((error as Error & { code?: string })?.code !== "ENOENT") {
+      throw error
+    }
+  }
+
+  const projects = await listAutonomousProjects(rootDir)
+  if (projects.length === 0) {
+    throw new Error("No AI Novel Factory project found. Run `ai-novel init --idea \"...\"` first.")
+  }
+
+  const requestedProjectId = flags["project-id"] || flags.projectId || flags.project
+  const project = requestedProjectId
+    ? projects.find((entry) => entry.id === requestedProjectId)
+    : projects[0]
+
+  if (!project) {
+    throw new Error(`Project '${requestedProjectId}' not found. Available projects: ${projects.map((entry) => entry.id).join(", ")}`)
+  }
+
+  const projectRoot = await resolveManagedProjectRoot(rootDir, project.id)
+  return {
+    project,
+    projectRoot,
+    state: await loadAutonomousState(projectRoot),
+  }
+}
+
 async function run() {
   const { command, flags } = parseArgs(process.argv.slice(2))
   const rootDir = process.cwd()
@@ -92,13 +129,17 @@ async function run() {
     }
 
     case "status": {
-      const state = await loadAutonomousState(rootDir)
+      const { project, state } = await loadCliProjectContext(rootDir, flags)
+      if (project) {
+        console.log(`Project: ${project.title} (${project.id})`)
+      }
       console.log(formatStatus(state))
       return
     }
 
     case "advance": {
-      const { state } = await executeManualAdvanceCommand(rootDir, {
+      const { projectRoot } = await loadCliProjectContext(rootDir, flags)
+      const { state } = await executeManualAdvanceCommand(projectRoot, {
         source: "cli",
         requestedBy: "cli:advance",
       })
@@ -108,19 +149,20 @@ async function run() {
     }
 
     case "cover": {
-      const state = await prepareCoverGeneration(rootDir)
+      const { projectRoot } = await loadCliProjectContext(rootDir, flags)
+      const state = await prepareCoverGeneration(projectRoot)
       console.log(`Cover status: ${state.assets.cover.status}`)
       console.log(`Status: ${state.runtime.statusMessage}`)
       return
     }
 
     case "provider-test": {
-      const state = await loadAutonomousState(rootDir)
-      const result = await testProviderConnectivity()
+      const { projectRoot, state } = await loadCliProjectContext(rootDir, flags)
+      const result = await testProviderConnectivity({}, projectRoot)
       state.runtime.lastProviderCheck = result
       state.runtime.lastRoute = "provider_test"
       state.runtime.lastAction = result.ok ? "provider connectivity verified" : "provider connectivity failed"
-      await saveAutonomousState(rootDir, state)
+      await saveAutonomousState(projectRoot, state)
       console.log(`Provider status: ${result.ok ? "ok" : "failed"}`)
       console.log(`Base URL: ${result.baseUrl}`)
       console.log(`Model: ${result.modelName}`)
@@ -134,7 +176,7 @@ async function run() {
         throw new Error("`ai-novel chat` requires `--message`.")
       }
 
-      const state = await loadAutonomousState(rootDir)
+      const { projectRoot, state } = await loadCliProjectContext(rootDir, flags)
       const route = routeUserMessage(message, state)
       console.log(`Route: ${route.type}`)
       console.log(`Reason: ${route.reason}`)
@@ -142,44 +184,44 @@ async function run() {
       if (route.type === "status_query") {
         state.runtime.lastRoute = "status_query"
         state.runtime.lastAction = "reported current project status"
-        await saveAutonomousState(rootDir, state)
+        await saveAutonomousState(projectRoot, state)
         console.log(formatStatus(state))
         return
       }
 
       if (route.type === "workflow_control") {
-        const { state: nextState } = await executeManualAdvanceCommand(rootDir, {
+        const { state: nextState } = await executeManualAdvanceCommand(projectRoot, {
           source: "cli",
           requestedBy: "cli:chat:workflow_control",
         })
         nextState.runtime.lastRoute = "workflow_control"
         nextState.runtime.lastAction = "advanced workflow stage"
-        await saveAutonomousState(rootDir, nextState)
+        await saveAutonomousState(projectRoot, nextState)
         console.log(`Stage: ${nextState.runtime.stage}`)
         console.log(`Status: ${nextState.runtime.statusMessage}`)
         return
       }
 
       if (route.type === "interruption_change") {
-        const { state: nextState } = await executeManualInterruptCommand(rootDir, message, {
+        const { state: nextState } = await executeManualInterruptCommand(projectRoot, message, {
           source: "cli",
           requestedBy: "cli:chat:interruption_change",
         })
         const review = nextState.runtime.lastInterruption
         nextState.runtime.lastRoute = "interruption_change"
         nextState.runtime.lastAction = "reviewed user change request"
-        await saveAutonomousState(rootDir, nextState)
+        await saveAutonomousState(projectRoot, nextState)
         console.log(`Interruption scope: ${review?.scope || "unknown"}`)
         console.log(`Stage: ${nextState.runtime.stage}`)
         console.log(`Action: ${review?.recommendedAction || nextState.runtime.statusMessage}`)
         return
       }
 
-      const discussion = await runMultiAgentDiscussion(rootDir, message)
-      const nextState = await loadAutonomousState(rootDir)
+      const discussion = await runMultiAgentDiscussion(projectRoot, message)
+      const nextState = await loadAutonomousState(projectRoot)
       nextState.runtime.lastRoute = "discussion_chat"
       nextState.runtime.lastAction = "ran visible multi-agent discussion"
-      await saveAutonomousState(rootDir, nextState)
+      await saveAutonomousState(projectRoot, nextState)
       for (const reply of discussion.replies) {
         console.log(`${reply.role}: ${reply.content}`)
       }
@@ -193,7 +235,8 @@ async function run() {
         throw new Error("`ai-novel interrupt` requires `--message`.")
       }
 
-      const { state } = await executeManualInterruptCommand(rootDir, message, {
+      const { projectRoot } = await loadCliProjectContext(rootDir, flags)
+      const { state } = await executeManualInterruptCommand(projectRoot, message, {
         source: "cli",
         requestedBy: "cli:interrupt",
       })
@@ -208,7 +251,8 @@ async function run() {
     }
 
     case "tui": {
-      await runTui(rootDir, { once: flags.once === "true" })
+      const { projectRoot } = await loadCliProjectContext(rootDir, flags)
+      await runTui(projectRoot, { once: flags.once === "true" })
       return
     }
 

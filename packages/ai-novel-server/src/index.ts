@@ -1,4 +1,5 @@
 import path from "node:path"
+import type http from "node:http"
 import { fileURLToPath } from "node:url"
 
 import { startNovelStudioServer } from "./server"
@@ -8,6 +9,12 @@ interface ServerFlags {
   staticDir?: string
   port: number
   embeddedWorker?: boolean
+}
+
+interface StandaloneNovelServer {
+  server: http.Server
+  port: number
+  close: () => Promise<void>
 }
 
 function parseFlags(argv: string[]): ServerFlags {
@@ -41,7 +48,7 @@ function resolveMaybeRelative(value: string | undefined, baseDir: string) {
   return path.isAbsolute(value) ? value : path.resolve(baseDir, value)
 }
 
-export async function startStandaloneNovelServer(options: Partial<ServerFlags> = {}) {
+export async function startStandaloneNovelServer(options: Partial<ServerFlags> = {}): Promise<StandaloneNovelServer> {
   const rootDir = options.rootDir || process.cwd()
   const staticDir = resolveMaybeRelative(options.staticDir, rootDir)
   return startNovelStudioServer({
