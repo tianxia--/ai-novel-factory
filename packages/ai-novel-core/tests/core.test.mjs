@@ -572,7 +572,7 @@ test("core initializes a stateful project with a super graph", async () => {
   const state = await initAutonomousProject({
     rootDir: tempDir,
     idea: "A village clerk records the fall of an empire",
-    totalChapters: 8,
+    totalChapters: 12,
     chapterWordTarget: 2500,
   })
 
@@ -590,6 +590,85 @@ test("core initializes a stateful project with a super graph", async () => {
   assert.ok(chapterNode?.properties?.causalPlan)
   assert.match(String(chapterNode.properties.summary || ""), /交棒/)
   assert.equal(validateSuperGraph(graph).filter((issue) => issue.severity === "error").length, 0)
+})
+
+test("chapter causal seeds use story signals instead of English brief filler words", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-english-idea-"))
+  const { initAutonomousProject } = await loadCore()
+
+  const state = await initAutonomousProject({
+    rootDir: tempDir,
+    idea: "A Chinese long-form mystery about a minor archive clerk who discovers that tax ledgers, family debts, and imperial weather records hide the same impossible contradiction.",
+    totalChapters: 8,
+    chapterWordTarget: 2500,
+  })
+
+  const causalText = state.plan.chapterTasks
+    .map((task) => [
+      task.summary,
+      task.causalPlan?.previousInput,
+      task.causalPlan?.sceneObjective,
+      task.causalPlan?.protagonistDecision,
+      task.causalPlan?.irreversibleConsequence,
+    ].join("\n"))
+    .join("\n")
+
+  assert.match(causalText, /档案小吏|税册|家族债务|司天监气象记录|不可能矛盾/)
+  assert.doesNotMatch(causalText, /「(?:Chinese|long|form|mystery|about|minor|discovers|that|ledgers|family|debts|imperial|weather|records)」/i)
+})
+
+test("persisted causal plans normalize English story-signal leftovers in planning assets", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-persisted-english-causal-"))
+  const {
+    createDetailedChapterBlueprint,
+    createManagedAutonomousProject,
+    createProductionMasterOutline,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A Chinese long-form mystery about a minor archive clerk who discovers that tax ledgers, family debts, and imperial weather records hide the same impossible contradiction.",
+    title: "旧计划英文残留",
+    totalChapters: 12,
+    chapterWordTarget: 2500,
+  })
+  created.state.plan.chapterTasks[7].causalPlan = {
+    previousInput: "承接：第 7 章留下的问题；本章切入点是「minor牵出的制度/规则反噬」。",
+    sceneObjective: "推进：用「一段被删改的记录（必须指向「archive」）」让「archive不能只停留在设定说明里」。",
+    protagonistDecision: "主角必须在「债务变成当场交换，并围绕「clerk」发生」的可见压力下主动做出选择。",
+    irreversibleConsequence: "本章结尾必须留下不可逆变化：围绕「ledgers牵出的旧债」造成关系裂缝。",
+    characterStateDelta: "角色状态必须发生可追踪变化：隐瞒压过亲近，并围绕「minor」发生。",
+    nextHandoff: "交棒：把 archive 留给下一章。",
+    foreshadowingOperation: "推进 ledgers 伏笔。",
+    requiredContinuityAnchors: ["archive", "ledgers"],
+  }
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "主角必须围绕税册、家族债务和司天监气象记录推进。",
+    protagonist: "主角：沈渡；身份：档案小吏。",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = createProductionMasterOutline(created.state, context, resources)
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const plotArchitecture = storyAssets.find((asset) => asset.filename === "plot-architecture.md").content
+  const blueprint = createDetailedChapterBlueprint(created.state, created.state.plan.chapterTasks[7], context, resources, undefined, {
+    prompt: "Canonical Protagonist: 沈渡\nCanonical Cast: 沈渡",
+    files: [],
+  })
+  const combined = [masterOutline, plotArchitecture, blueprint].join("\n")
+
+  assert.match(combined, /档案小吏|档案库|税册/)
+  assert.doesNotMatch(combined, /「(?:minor|archive|clerk|ledgers?)」|(?:minor|archive|clerk|ledgers?)牵出/iu)
 })
 
 test("managed project roots resolve to the server workspace even for legacy relative records", async () => {
@@ -665,6 +744,52 @@ test("discussions append across turns and persist a current context packet", asy
   }
 })
 
+test("discussion protagonist naming writes canonical character dossier fields", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-discussion-protagonist-name-"))
+  const { initAutonomousProject, runMultiAgentDiscussion } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_TEST_MODE = "1"
+
+  try {
+    await initAutonomousProject({
+      rootDir: tempDir,
+      idea: "一个档案小吏发现税册、债务和气象记录藏着同一个矛盾",
+      title: "命名讨论",
+      totalChapters: 4,
+      chapterWordTarget: 2500,
+    })
+    await runMultiAgentDiscussion(
+      tempDir,
+      "请把主角姓名冻结为「沈渡」，身份是「档案小吏」，核心欲望是「保住自己和真相之间仅有的一点秩序」，伤口/恐惧是「父亲旧案让他害怕档案失真」，行为习惯是「紧张时左手小指敲桌面」，说话方式是「说话慢，少解释」，关系压力是「与谢主簿互相试探又互相保护」。",
+    )
+
+    const protagonist = await fs.readFile(
+      path.join(tempDir, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+      "utf8",
+    )
+    assert.match(protagonist, /Canonical Protagonist: 沈渡/)
+    assert.match(protagonist, /identity: 档案小吏/)
+    const dossiers = JSON.parse(await fs.readFile(
+      path.join(tempDir, ".ai-novel", "memory", "characters", "dossiers.json"),
+      "utf8",
+    ))
+    const protagonistDossier = dossiers.find((dossier) => dossier.id === "protagonist")
+    assert.equal(protagonistDossier.canonicalName, "沈渡")
+    assert.equal(protagonistDossier.identityAndRole, "档案小吏")
+    assert.equal(protagonistDossier.coreDesire, "保住自己和真相之间仅有的一点秩序")
+    assert.equal(protagonistDossier.fearOrWound, "父亲旧案让他害怕档案失真")
+    assert.ok(protagonistDossier.behaviorHabits.includes("紧张时左手小指敲桌面"))
+    assert.ok(protagonistDossier.speechMarkers.includes("说话慢"))
+    assert.equal(protagonistDossier.relationshipState, "与谢主簿互相试探又互相保护")
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
 test("factory database records projects, runs, turns, artifacts, and events", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-factory-db-"))
   const { createManagedAutonomousProject, runMultiAgentDiscussion, withFactoryDb } = await loadCore()
@@ -700,6 +825,26 @@ test("factory database records projects, runs, turns, artifacts, and events", as
       part.type === "json"
       && part.data.source === "discussion_agent_turn"
       && part.data.currentStage === "worldbuilding_dialogue"
+    ))
+    const writebackMessage = discussionMessages.find((message) =>
+      message.type === "artifact"
+      && message.metadata?.source === "discussion_writeback_artifacts"
+    )
+    assert.ok(writebackMessage)
+    assert.ok(writebackMessage.parts.some((part) =>
+      part.type === "artifact"
+      && part.data.path === ".ai-novel/prompts/global-consensus.md"
+      && part.data.kind === "consensus"
+    ))
+    assert.ok(writebackMessage.parts.some((part) =>
+      part.type === "artifact"
+      && part.data.path === ".ai-novel/chat/discussion-log.md"
+      && part.data.kind === "transcript"
+    ))
+    assert.ok(writebackMessage.parts.some((part) =>
+      part.type === "json"
+      && part.data.source === "discussion_writeback_artifacts"
+      && Array.isArray(part.data.artifacts)
     ))
   } finally {
     if (previousTestMode === undefined) {
@@ -968,6 +1113,64 @@ test("factory database can mark interrupted streaming messages as failed", async
   const failedMarkdown = rowById.get("writing-1-draft").parts.find((part) => part.type === "markdown")?.data?.text || ""
   assert.doesNotMatch(String(failedMarkdown), /LLM 正在持续返回内容|返回内容会持续合并/)
   assert.equal(rowById.get("writing-2-draft").status, "streaming")
+})
+
+test("manual chapter retry clears unfinished streaming writing messages", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-retry-clears-streaming-"))
+  const { createManagedAutonomousProject, retryChapterProduction, withFactoryDb, createAgentMessage } = await loadCore()
+
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A clerk retries a stalled chapter",
+    totalChapters: 1,
+    chapterWordTarget: 2500,
+  })
+  const state = created.state
+  state.runtime.stage = "drafting"
+  state.plan.chapterTasks = [{
+    chapterNumber: 1,
+    title: "Stalled Chapter",
+    targetWords: 2500,
+    status: "blocked",
+    recoveryAttempts: 0,
+  }]
+  state.plan.pendingChapters = 0
+  await fs.writeFile(
+    path.join(created.project.projectRoot, ".ai-novel", "state.json"),
+    `${JSON.stringify(state, null, 2)}\n`,
+  )
+  await withFactoryDb(tempDir, async (db) => {
+    db.updateProjectState(created.project.id, state)
+    db.recordMessage(createAgentMessage({
+      messageId: "writing-1-stalled-stream",
+      conversationId: `writing:${created.project.id}`,
+      projectId: created.project.id,
+      agentLabel: "Author",
+      status: "streaming",
+      content: "Author is still streaming a stale retry.",
+      metadata: {
+        chapterNumber: 1,
+        step: "revision_3_llm_streaming",
+        phase: "streaming",
+      },
+    }))
+  })
+
+  const retried = await retryChapterProduction(created.project.projectRoot, 1, {
+    factoryRootDir: tempDir,
+    projectId: created.project.id,
+    runNow: false,
+  })
+
+  assert.equal(retried.plan.chapterTasks[0].status, "pending")
+  assert.equal(retried.plan.chapterTasks[0].recoveryAttempts, 1)
+  const rows = await withFactoryDb(tempDir, async (db) =>
+    db.listMessages(created.project.id, { conversationId: `writing:${created.project.id}`, limit: 10 }),
+  )
+  const stale = rows.find((row) => row.id === "writing-1-stalled-stream")
+  assert.equal(stale.status, "failed")
+  assert.equal(stale.metadata.phase, "failed")
+  assert.equal(stale.metadata.interruptedReason, "manual chapter retry superseded an unfinished writing stream")
 })
 
 test("factory snapshot compacts heavy event and memory payloads for UI polling", async () => {
@@ -2010,6 +2213,69 @@ test("chapter consistency locks the first POV protagonist and rejects later prot
   assert.match(third.reason, /李晦/)
 })
 
+test("Chinese person name extraction filters action and object false positives", async () => {
+  const { extractChinesePersonNames } = await loadCore()
+  const draft = [
+    "## Final Body",
+    "顾夜舟把永昌十九年的雨册翻开，朱砂编号压在封皮上。",
+    "沈槐坐在灶台旁边，沈槐点头，又靠回桌沿。",
+    "丰水年的册子没有，常年也没有。周印落在纸角，不是人名。",
+    "顾大人把铁扣收进腰带，方言这个词只出现在校注里。",
+    "周逢春走的前一夜，把钥匙交给沈槐。",
+  ].join("\n")
+
+  const detected = extractChinesePersonNames(draft, 20)
+  assert.deepEqual(detected, ["顾夜舟", "沈槐", "周逢春"])
+  assert.ok(!detected.includes("常年"))
+  assert.ok(!detected.includes("周印"))
+  assert.ok(!detected.includes("沈槐坐"))
+  assert.ok(!detected.includes("沈槐点头"))
+  assert.ok(!detected.includes("朱砂编号"))
+  assert.ok(!detected.includes("顾大人"))
+  assert.ok(!detected.includes("方言"))
+})
+
+test("chapter consistency test mode uses explicit profile protagonist before placeholder lock", async () => {
+  const { evaluateChapterConsistency, inferLockedProtagonistName } = await loadCore()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_TEST_MODE = "1"
+  try {
+    const profile = [
+      "## protagonist",
+      'canonicalName: "Mira Vale"',
+      "role: protagonist",
+      "relationshipState: In conflict with the Imperial Record Office.",
+    ].join("\n")
+
+    assert.equal(inferLockedProtagonistName(profile), "Mira Vale")
+
+    const first = evaluateChapterConsistency({
+      chapterNumber: 1,
+      protagonistProfile: profile,
+      text: "## Final Body\nMira Vale pressed the damaged ledger flat and asked who had altered the record trail.",
+    })
+    assert.equal(first.status, "eligible")
+    assert.equal(first.protagonistName, "Mira Vale")
+    assert.doesNotMatch(first.reason, /首章主角/)
+
+    const second = evaluateChapterConsistency({
+      chapterNumber: 2,
+      previousProtagonistName: first.protagonistName,
+      protagonistProfile: profile,
+      text: "## Final Body\nMira Vale kept the ledger under her coat while the archive door opened again.",
+    })
+    assert.equal(second.status, "eligible")
+    assert.equal(second.protagonistName, "Mira Vale")
+    assert.match(second.reason, /Mira Vale/)
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
 test("factory snapshot does not mark quality-passed chapters complete when protagonist drifts", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-protagonist-drift-facts-"))
   const { createManagedAutonomousProject, withFactoryDb } = await loadCore()
@@ -2432,6 +2698,7 @@ test("production writing pipeline records detailed plans, final chapters, report
     assert.ok(protagonistDossier.skills.some((entry) => /chapter 1/.test(entry)))
     assert.match(protagonistDossier.relationshipState, /chapter 1/)
     assert.ok(protagonistDossier.evidence.some((entry) => /profile signal/.test(entry)))
+    assert.doesNotMatch(JSON.stringify(protagonistDossier), /NaturalnessAgent|Final Quality Gate|已执行.*硬门禁|Quality Gate/)
 
     const snapshot = await withFactoryDb(tempDir, async (db) => db.getSnapshot(created.project.id))
     assert.ok(snapshot.artifacts.some((artifact) => String(artifact.path).includes("master-outline.md")))
@@ -2466,6 +2733,7 @@ test("production writing pipeline records detailed plans, final chapters, report
       "utf8",
     )
     assert.match(memoryUpdate, /### Foreshadowing Ledger Update/)
+    assert.doesNotMatch(memoryUpdate, /NaturalnessAgent|Final Quality Gate|已执行.*硬门禁|Quality Gate/)
     assert.match(memoryUpdate, /- Operation:/)
     assert.match(memoryUpdate, /- Status:/)
     assert.match(memoryUpdate, /- Expected payoff \/ next touchpoint:/)
@@ -2709,6 +2977,7 @@ test("cover generation failure is saved without blocking retry", async () => {
 test("worldbuilding advance attempts cover generation but still reaches setting review", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-cover-nonblocking-"))
   const { createManagedAutonomousProject, advanceAutonomousProject } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
   const previousTestMode = process.env.AI_NOVEL_TEST_MODE
   process.env.AI_NOVEL_TEST_MODE = "1"
 
@@ -2728,8 +2997,217 @@ test("worldbuilding advance attempts cover generation but still reaches setting 
     assert.equal(advanced.runtime.stage, "setting_review")
     assert.equal(advanced.assets.cover.status, "failed")
     assert.match(advanced.assets.cover.error, /image_generation_skipped_in_test_mode/)
-    await fs.stat(path.join(created.project.projectRoot, ".ai-novel", "plans", "setting-freeze.md"))
+    const settingReview = await fs.readFile(path.join(created.project.projectRoot, ".ai-novel", "plans", "setting-freeze.md"), "utf8")
+    assert.match(settingReview, /# Setting Review Packet/)
+    assert.match(settingReview, /Status: review_required/)
+    assert.match(settingReview, /setting-review-approval\.json/)
+    assert.match(settingReview, /not final book canon/)
+    assert.match(settingReview, /Approval checklist/)
+    assert.match(advanced.runtime.statusMessage, /Setting review packet drafted/)
     await fs.stat(path.join(created.project.projectRoot, ".ai-novel", "assets", "cover", "cover-metadata.json"))
+
+    const blocked = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+    assert.equal(blocked.runtime.stage, "setting_review")
+    assert.match(blocked.runtime.statusMessage, /waiting for explicit user approval/)
+    await assert.rejects(
+      fs.stat(path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md")),
+      /ENOENT/,
+    )
+
+    const approvalResponse = await handleNovelStudioApi(tempDir, "POST", "/api/production/setting-review/approve", {
+      projectId: created.project.id,
+      note: "设定评审可以进入主线规划。",
+    }, { projectId: created.project.id })
+    assert.equal(approvalResponse.status, 200)
+
+    const planned = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+    assert.equal(planned.runtime.stage, "setting_review")
+    assert.match(planned.runtime.statusMessage, /Master planning is blocked until a concrete protagonist/)
+    const protagonistBrief = await fs.readFile(path.join(created.project.projectRoot, ".ai-novel", "plans", "master-planning-protagonist-brief.md"), "utf8")
+    assert.match(protagonistBrief, /Master Planning Protagonist Required/)
+    await assert.rejects(
+      fs.stat(path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md")),
+      /ENOENT/,
+    )
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
+test("setting review approval and rejection are durable timeline artifacts", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-setting-review-approval-"))
+  const { createManagedAutonomousProject, advanceAutonomousProject, withFactoryDb } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_TEST_MODE = "1"
+
+  try {
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "A lighthouse keeper bargains with a drowned empire",
+      totalChapters: 4,
+      chapterWordTarget: 2500,
+    })
+    await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+
+    const approveResponse = await handleNovelStudioApi(tempDir, "POST", "/api/production/setting-review/approve", {
+      projectId: created.project.id,
+      note: "这个设定评审包可以进入主线规划。",
+    }, { projectId: created.project.id })
+
+    assert.equal(approveResponse.status, 200)
+    assert.equal(approveResponse.payload.settingReviewApproval.approved, true)
+    assert.equal(approveResponse.payload.settingReviewApproval.status, "approved")
+    assert.equal(approveResponse.payload.settingReviewApproval.note, "这个设定评审包可以进入主线规划。")
+    let approvalFile = JSON.parse(await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "plans", "setting-review-approval.json"),
+      "utf8",
+    ))
+    assert.equal(approvalFile.approved, true)
+    assert.equal(approvalFile.settingReviewPath, ".ai-novel/plans/setting-freeze.md")
+
+    const rejectResponse = await handleNovelStudioApi(tempDir, "POST", "/api/production/setting-review/reject", {
+      projectId: created.project.id,
+      reason: "角色关系压力仍然太笼统。",
+    }, { projectId: created.project.id })
+
+    assert.equal(rejectResponse.status, 200)
+    assert.equal(rejectResponse.payload.settingReviewApproval.approved, false)
+    assert.equal(rejectResponse.payload.settingReviewApproval.status, "rejected")
+    assert.equal(rejectResponse.payload.settingReviewApproval.rejectionReason, "角色关系压力仍然太笼统。")
+    approvalFile = JSON.parse(await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "plans", "setting-review-approval.json"),
+      "utf8",
+    ))
+    assert.equal(approvalFile.approved, false)
+    assert.equal(approvalFile.status, "rejected")
+
+    const messages = await withFactoryDb(tempDir, async (db) =>
+      db.listMessages(created.project.id, { conversationId: "workflow-control", limit: 20 })
+    )
+    assert.ok(messages.some((message) =>
+      message.type === "tool"
+      && message.metadata?.source === "api_setting_review_approve"
+      && message.parts.some((part) =>
+        part.type === "artifact"
+        && part.data.path === ".ai-novel/plans/setting-review-approval.json"
+        && part.data.kind === "setting-review-approval"
+      )
+      && message.parts.some((part) =>
+        part.type === "artifact"
+        && part.data.path === ".ai-novel/plans/setting-freeze.md"
+        && part.data.kind === "setting-review"
+      )
+    ))
+    assert.ok(messages.some((message) =>
+      message.type === "tool"
+      && message.metadata?.source === "api_setting_review_reject"
+      && message.parts.some((part) =>
+        part.type === "artifact"
+        && part.data.path === ".ai-novel/plans/setting-review-approval.json"
+      )
+    ))
+  } finally {
+    if (previousTestMode === undefined) {
+      delete process.env.AI_NOVEL_TEST_MODE
+    } else {
+      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+    }
+  }
+})
+
+test("protagonist profile confirmation unblocks master planning and enters timeline", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-protagonist-confirm-"))
+  const { createManagedAutonomousProject, advanceAutonomousProject, withFactoryDb } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+  process.env.AI_NOVEL_TEST_MODE = "1"
+
+  try {
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "A minor archive clerk finds an impossible contradiction inside tax ledgers and weather records",
+      totalChapters: 4,
+      chapterWordTarget: 2500,
+    })
+    await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+    await handleNovelStudioApi(tempDir, "POST", "/api/production/setting-review/approve", {
+      projectId: created.project.id,
+      note: "设定评审可以进入主线规划。",
+    }, { projectId: created.project.id })
+
+    const blocked = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+    assert.equal(blocked.runtime.stage, "setting_review")
+    assert.match(blocked.runtime.statusMessage, /concrete protagonist/)
+
+    const confirmResponse = await handleNovelStudioApi(tempDir, "POST", "/api/production/protagonist-profile/confirm", {
+      projectId: created.project.id,
+      name: "沈砚",
+      identity: "钦天监外库的低阶档案小吏，负责核对税册、灾异奏报与旧年气象簿。",
+      coreDesire: "查清父亲旧案里被抹掉的账册矛盾，让家族债名从官府簿册中撤销。",
+      fearOrWound: "害怕自己和父亲一样，只要碰到真相就会被档案系统吞没成一行空白。",
+      behaviorHabit: "紧张时会用指节轻敲账册骑缝线，并把听到的谎话按日期默背三遍。",
+      speechMarker: "说话克制少形容，遇到逼问会先复述对方原话里的漏洞。",
+      relationshipName: "沈蘅",
+      relationshipPressure: "妹妹沈蘅靠替人抄契还债，她要求沈砚保全家人，而沈砚必须继续追查会牵连她的父亲旧案。",
+      note: "这是用户确认后的主角锁定档案。",
+    }, { projectId: created.project.id })
+
+    assert.equal(confirmResponse.status, 200)
+    assert.equal(confirmResponse.payload.protagonistProfile.name, "沈砚")
+    assert.equal(confirmResponse.payload.protagonistProfile.path, ".ai-novel/memory/characters/core/protagonist.md")
+
+    const protagonistProfile = await fs.readFile(
+      path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+      "utf8",
+    )
+    assert.match(protagonistProfile, /Canonical Protagonist: 沈砚/)
+    assert.match(protagonistProfile, /named relationship pressure: 沈蘅/)
+
+    const messages = await withFactoryDb(tempDir, async (db) =>
+      db.listMessages(created.project.id, { conversationId: "workflow-control", limit: 30 })
+    )
+    assert.ok(messages.some((message) =>
+      message.type === "user"
+      && message.metadata?.source === "api_protagonist_profile_confirm"
+      && /主角姓名是「沈砚」/.test(message.data?.content || "")
+    ))
+    assert.ok(messages.some((message) =>
+      message.type === "tool"
+      && message.metadata?.source === "api_protagonist_profile_confirm"
+      && message.parts.some((part) =>
+        part.type === "artifact"
+        && part.data.path === ".ai-novel/memory/characters/core/protagonist.md"
+        && part.data.kind === "character-profile"
+      )
+    ))
+
+    const planned = await advanceAutonomousProject(created.project.projectRoot, {
+      factoryRootDir: tempDir,
+      projectId: created.project.id,
+    })
+    assert.equal(planned.runtime.stage, "master_planning")
+    const masterOutline = await fs.readFile(path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md"), "utf8")
+    assert.match(masterOutline, /沈砚/)
   } finally {
     if (previousTestMode === undefined) {
       delete process.env.AI_NOVEL_TEST_MODE
@@ -3570,6 +4048,103 @@ test("unattended deterministic mode is limited to planning and cannot bypass pro
   assert.match(orchestratorSource, /state\.runtime\.stage = "drafting"/)
 })
 
+test("quality revision prompt treats over-budget drafts as compression repairs", async () => {
+  const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
+
+  assert.match(source, /extractWordBudgetRepairDirective/)
+  assert.match(source, /明显超出目标/)
+  assert.match(source, /必须压缩正文到/)
+  assert.match(source, /删掉重复解释、重复对白和旁枝场景/)
+})
+
+test("quality report blocks drafts above the hard word ceiling", async () => {
+  const { createQualityReport } = await loadCore()
+  const task = {
+    chapterNumber: 1,
+    title: "缺页雨档",
+    targetWords: 2500,
+    causalPlan: {
+      previousInput: "承接雨档缺页。",
+      sceneObjective: "沈砚必须查明缺页从何处被抽走。",
+      protagonistDecision: "沈砚选择扣下缺页边角。",
+      irreversibleConsequence: "范思远发现他没有上交全部证据。",
+      nextHandoff: "下一章必须处理范思远追问和缺页编号。",
+      requiredContinuityAnchors: ["沈砚", "缺页", "范思远"],
+      characterStateDelta: "沈砚从旁观变成被追问的人。",
+      foreshadowingOperation: "推进缺页编号与旧印章的关系。",
+    },
+  }
+  const state = {
+    project: { title: "雨档", idea: "审雨官核对百年雨档" },
+    runtime: { stage: "drafting" },
+    plan: { totalChapters: 8, chapterWordTarget: 2500, chapterTasks: [task] },
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "## Causal Objective",
+    task.causalPlan.sceneObjective,
+    "## Irreversible Change",
+    task.causalPlan.irreversibleConsequence,
+    "## Next Chapter Handoff",
+    task.causalPlan.nextHandoff,
+    "Event Sequence",
+  ].join("\n")
+  const draft = [
+    "# 缺页雨档",
+    "",
+    "## Draft Body",
+    "",
+    Array.from({ length: 240 }, (_, index) =>
+      `第 ${index + 1} 次核账时，沈砚按住缺页边角，让范思远看见旧印章的水痕，却仍然没有交出整本雨册。`
+    ).join("\n"),
+  ].join("\n")
+
+  const report = createQualityReport(state, task, draft, blueprint)
+
+  assert.match(report, /WORD_COUNT_CHECK:/)
+  assert.match(report, /超过 115% 上限/)
+  assert.match(report, /压缩重复解释、重复对白和旁枝场景/)
+})
+
+test("quality revision guards against under-budget shrinkage", async () => {
+  const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
+
+  assert.match(source, /enforceRevisionWordBudgetGuard/)
+  assert.match(source, /below the 80% hard floor/)
+  assert.match(source, /above the 115% hard ceiling/)
+  assert.match(source, /generatedWords >= hardMinimum/)
+  assert.match(source, /padDraftToWordFloorFromPrevious/)
+  assert.match(source, /generatedWords <= hardMaximum/)
+  assert.match(source, /禁止把上一稿压缩成摘要/)
+})
+
+test("naturalness pass guards against over-budget expansion", async () => {
+  const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
+
+  assert.match(source, /enforceNaturalnessWordBudgetGuard/)
+  assert.match(source, /Naturalness Word Budget Guard/)
+  assert.match(source, /Naturalness Repair Word Budget Guard/)
+  assert.match(source, /generated naturalness pass expanded/)
+  assert.match(source, /generated naturalness pass shrank/)
+  assert.match(source, /不得把最终正文扩到/)
+})
+
+test("final draft word gate counts narrative body instead of metadata", async () => {
+  const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
+
+  assert.match(source, /const finalWordCount = wordCount\(extractNarrativeBody\(finalDraft\)\)/)
+  assert.match(source, /## Naturalness Pass/)
+  assert.match(source, /## Quality Gate/)
+})
+
+test("character profile contract filters dossiers outside canon cast", async () => {
+  const source = await fs.readFile(path.join(packageRoot, "src", "writing-pipeline.ts"), "utf8")
+
+  assert.match(source, /const canonCast = sanitizeKnownCastNames/)
+  assert.match(source, /const canonCastSet = new Set\(canonCast\)/)
+  assert.match(source, /canonCastSet\.has/)
+})
+
 test("quality gate parser ignores non-blocking blocker language when score passes", async () => {
   const { parseQualityGate } = await loadCore()
   const gate = parseQualityGate([
@@ -3585,6 +4160,27 @@ test("quality gate parser ignores non-blocking blocker language when score passe
 
   assert.equal(gate.status, "passed")
   assert.equal(gate.passed, true)
+})
+
+test("quality gate parser blocks drafts above the hard word ceiling", async () => {
+  const { parseQualityGate } = await loadCore()
+  const gate = parseQualityGate([
+    "# Chapter Quality Report",
+    "",
+    "| 综合评分 | 8/10 | 可进入润色。 |",
+    "",
+    "WORD_COUNT_CHECK: 4717/2500",
+    "QUALITY_GATE: passed",
+    "",
+    "## Required Fixes",
+    "- 暂无阻塞性问题；润色时继续压低 AI 模板句。",
+  ].join("\n"), 0, 2)
+
+  assert.equal(gate.status, "needs_revision")
+  assert.equal(gate.passed, false)
+  assert.match(gate.reason, /超过 115% 上限/)
+  assert.equal(gate.wordCount, 4717)
+  assert.equal(gate.targetWords, 2500)
 })
 
 test("quality gate parser prefers summary score over high dimension scores", async () => {
@@ -3801,7 +4397,7 @@ test("streaming LLM request times out when provider opens SSE but sends no chunk
   }
 })
 
-test("streaming LLM accepts provider delta text from alternate content fields", async () => {
+test("streaming LLM accepts alternate content fields and skips reasoning deltas", async () => {
   const { generateAgentReply, withFactoryDb } = await loadCore()
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-stream-delta-"))
   const previousTestMode = process.env.AI_NOVEL_TEST_MODE
@@ -3853,8 +4449,11 @@ test("streaming LLM accepts provider delta text from alternate content fields", 
       onDelta: (delta) => { streamed += delta },
     })
 
-    assert.equal(reply, "林尘推门而入。")
-    assert.equal(streamed, "林尘推门而入。")
+    // reasoning_content 是推理模型的思维链，不属于正式回答，必须被排除；
+    // content 数组等备用内容字段仍需正常解析。
+    assert.equal(reply, "推门而入。")
+    assert.equal(streamed, "推门而入。")
+    assert.doesNotMatch(reply, /林尘/)
   } finally {
     await new Promise((resolve) => server.close(resolve))
     if (previousTestMode === undefined) {
@@ -4048,10 +4647,10 @@ test("provider test keeps generation fallback error when models endpoint is unsu
 
     assert.equal(testResponse.status, 200)
     assert.equal(testResponse.payload.result.ok, false)
-    assert.match(testResponse.payload.result.message, /status 404/)
-    assert.match(testResponse.payload.result.message, /generation fallback failed/)
+    assert.match(testResponse.payload.result.message, /^Generation fallback failed:/)
     assert.match(testResponse.payload.result.message, /status 401/)
     assert.match(testResponse.payload.result.message, /Invalid API key/)
+    assert.match(testResponse.payload.result.message, /\/models returned 404/)
   } finally {
     await new Promise((resolve) => server.close(resolve))
     if (previousTestMode === undefined) {
@@ -4073,6 +4672,15 @@ test("project creation defaults to production long-form targets while preserving
   assert.equal(defaultResponse.status, 201)
   assert.equal(defaultResponse.payload.state.plan.totalChapters, 40)
   assert.equal(defaultResponse.payload.state.plan.chapterWordTarget, 3000)
+  const defaultPlans = defaultResponse.payload.state.plan.chapterTasks.map((task) => task.causalPlan)
+  assert.ok(defaultPlans.some((plan) => /税册小吏|王朝旧案/.test([
+    plan.previousInput,
+    plan.sceneObjective,
+    plan.protagonistDecision,
+    plan.irreversibleConsequence,
+    plan.foreshadowingOperation,
+  ].join("\n"))))
+  assert.ok(new Set(defaultPlans.slice(0, 4).map((plan) => plan.sceneObjective)).size > 1)
 
   const explicitResponse = await handleNovelStudioApi(tempDir, "POST", "/api/projects", {
     title: "Explicit Length",
@@ -5092,7 +5700,7 @@ test("draft segment plan splits long chapter generation into timeline-sized LLM 
 })
 
 test("draft segment plan uses structured scene cards when a chapter blueprint provides them", async () => {
-  const { createDraftSegmentPlan } = await loadCore()
+  const { createDraftSegmentCompositionPlan, createDraftSegmentPlan } = await loadCore()
   const state = {
     project: {
       title: "雨账",
@@ -5172,8 +5780,124 @@ test("draft segment plan uses structured scene cards when a chapter blueprint pr
   assert.equal(segments[0].sceneCard.goal, "沈砚发现账本缺页。")
   assert.match(segments[0].requiredBeats.join("\n"), /Forbidden Facts/)
   assert.match(segments[0].requiredBeats.join("\n"), /幕后主使身份/)
+  assert.match(segments[0].requiredBeats.join("\n"), /硬门槛：正文必须出现角色「沈砚、账房老周」/)
+  assert.match(segments[0].requiredBeats.join("\n"), /Scene Conflict「账房老周否认经手账本。」/)
   assert.ok(segments[0].continuityFocus.includes("旧印章"))
   assert.ok(segments.every((segment) => segment.targetWords >= 240))
+  const composition = createDraftSegmentCompositionPlan(segments[0], continuityContract)
+  assert.ok(composition.dialogue.some((item) => item.includes("真实参与现场压力")))
+  assert.ok(composition.characterAction.some((item) => item.includes("Required characters 必须在本片段正文中出场")))
+})
+
+test("scene card execution gate accepts concrete anomaly and pressure evidence for abstract cards", async () => {
+  const { evaluateSceneCardCharacterObligations } = await loadCore()
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "```json",
+    JSON.stringify({
+      chapterNumber: 1,
+      sceneCards: [
+        {
+          index: 1,
+          goal: "用物件边缘露出不合常理的细节打开本章问题：本章切入点是「档案小吏牵出的证据异常」。",
+          conflict: "以「从一页顺序错误的档案开场」制造无法回避的现场压力；场景质感为狭窄室内、桌面物件、门外脚步。",
+          turn: "至少让锚点进入事件：主角唯一身份、核心缺口。",
+          endHook: "留下可被下一章追踪的画面、物件、线索或关系压力。",
+          requiredCharacters: ["沈砚"],
+          requiredFacts: [],
+          forbiddenFacts: ["幕后主使身份"],
+        },
+      ],
+    }, null, 2),
+    "```",
+  ].join("\n")
+  const draft = [
+    "## Final Body",
+    "指腹蹭到册子边角时，沈砚的手指停住了。装帧不对，线眼只有四孔，签条边缘脆裂。",
+    "第三页页码标着九，按装订顺序却不该出现在这里；中间缺了七页，纸边还有裁过的痕迹。",
+    "门外脚步停住，周书吏问他为何还没走，范思远今天也问过那批调卷。",
+    "沈砚把丁酉年的残纸折成细条，塞进腰带夹层，带着父亲笔迹走进夜色。",
+  ].join("\n")
+
+  const result = evaluateSceneCardCharacterObligations(draft, blueprint, { lockedProtagonistName: "" })
+  assert.equal(result.status, "eligible")
+})
+
+test("scene card execution gate accepts choice pressure and handoff evidence", async () => {
+  const { evaluateSceneCardCharacterObligations } = await loadCore()
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "```json",
+    JSON.stringify({
+      chapterNumber: 1,
+      sceneCards: [
+        {
+          index: 3,
+          goal: "把主角选择写成行动。",
+          conflict: "选择必须落在「保住职位还是保住证据」上，暴露欲望、短板、能力边界或价值取舍。",
+          turn: "角色状态发生变化：信任被迫提前表态，并围绕「档案库」发生。",
+          endHook: "选择带来的代价开始显形。",
+          requiredCharacters: ["沈砚"],
+          requiredFacts: [],
+          forbiddenFacts: [],
+        },
+        {
+          index: 5,
+          goal: "完成下一章交棒。",
+          conflict: "余波不能用总结代替，必须有现场动作或对白。",
+          turn: "本章局部结果落定，同时下一章必须处理被保留下来的证据。",
+          endHook: "账页合上后仍露出半枚湿印；下一章必须处理被保留下来的证据。",
+          requiredCharacters: ["沈砚", "范思远"],
+          requiredFacts: [],
+          forbiddenFacts: [],
+        },
+      ],
+    }, null, 2),
+    "```",
+  ].join("\n")
+  const draft = [
+    "## Final Body",
+    "周书吏垂着眼说可以帮沈砚拖两天，但要他把天字七号弄丢。",
+    "沈砚没有答应，只提出条件：他至少要知道自己把底牌压在了什么上面。",
+    "到值房时，范思远已经坐在案后。他把刑部司送来的册页放到沈砚面前，要求调取丁酉年所有与司天监灾异奏报相关的副本。",
+    "沈砚掀开第一页，看见刑部司大印在纸面上微微渗开，像半枚湿印还没干透。",
+  ].join("\n")
+
+  const result = evaluateSceneCardCharacterObligations(draft, blueprint, { lockedProtagonistName: "" })
+  assert.equal(result.status, "eligible")
+})
+
+test("scene card execution gate still blocks concrete missing turn and hook evidence", async () => {
+  const { evaluateSceneCardCharacterObligations } = await loadCore()
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "```json",
+    JSON.stringify({
+      chapterNumber: 1,
+      sceneCards: [
+        {
+          index: 1,
+          goal: "沈砚发现账本缺页。",
+          conflict: "老周否认经手账本。",
+          turn: "旧印章遇水显出第二层纹路。",
+          endHook: "门外传来敲门暗号。",
+          requiredCharacters: ["沈砚", "老周"],
+          requiredFacts: [],
+          forbiddenFacts: ["幕后主使身份"],
+        },
+      ],
+    }, null, 2),
+    "```",
+  ].join("\n")
+  const draft = [
+    "## Final Body",
+    "沈砚发现账本缺页，把册子按在桌角。",
+    "老周站在门口否认经手账本，声音压得很低。",
+  ].join("\n")
+
+  const result = evaluateSceneCardCharacterObligations(draft, blueprint, { lockedProtagonistName: "" })
+  assert.equal(result.status, "quarantined")
+  assert.match(result.reason, /转折|钩子|执行证据/)
 })
 
 function completeProductionBlueprintFixture() {
@@ -6583,6 +7307,59 @@ test("studio API exposes freeze preview before final style approval", async () =
   }
 })
 
+test("studio API records style candidate artifacts in the message timeline", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-style-message-artifacts-"))
+  const { createManagedAutonomousProject } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const previousAigcEnv = snapshotAigcEnv()
+  clearAigcEnv()
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名审雨官发现降雨记录被篡改",
+    title: "雨账",
+    totalChapters: 6,
+    chapterWordTarget: 2500,
+  })
+
+  try {
+    await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/init", {
+      projectId: created.project.id,
+      userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    }, { projectId: created.project.id })
+
+    const candidateResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/candidate", {
+      projectId: created.project.id,
+      prompt: "第二版样段",
+      sample: "雨线挂在门槛外。沈砚把缺页账本推到灯下，纸边齐得发亮。老周的手缩进袖口，没有接。",
+      review: "可作为全书基础写法。",
+    }, { projectId: created.project.id })
+    assert.equal(candidateResponse.status, 200)
+
+    const messagesResponse = await handleNovelStudioApi(
+      tempDir,
+      "GET",
+      `/api/messages?projectId=${encodeURIComponent(created.project.id)}&limit=20`,
+      {},
+      { projectId: created.project.id },
+    )
+    assert.equal(messagesResponse.status, 200)
+    const rows = messagesResponse.payload.messages || messagesResponse.payload.entries || []
+    const parts = rows.flatMap((row) => row.parts || [])
+    const artifactPaths = parts
+      .filter((part) => part.type === "artifact")
+      .map((part) => part.data?.path)
+    assert.ok(artifactPaths.includes(".ai-novel/style/evolution/style-contract.json"))
+    assert.ok(artifactPaths.includes(".ai-novel/style/evolution/style-evolution-history.json"))
+
+    const toolResult = parts.find((part) => part.type === "tool_result" && part.data?.artifactPath === ".ai-novel/style/evolution/style-contract.json")
+    assert.ok(toolResult)
+    assert.equal(toolResult.data.output.version, 1)
+    assert.ok(toolResult.data.artifacts.length >= 2)
+  } finally {
+    restoreAigcEnv(previousAigcEnv)
+  }
+})
+
 test("studio API status exposes production readiness gate", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-production-readiness-api-"))
   const { createManagedAutonomousProject } = await loadCore()
@@ -6772,6 +7549,12 @@ test("studio API can repair production story foundation assets", async () => {
 
   assert.equal(repairResponse.status, 200)
   assert.deepEqual(repairResponse.payload.repairedStoryAssets.sort(), [
+    ".ai-novel/plans/chapter-blueprints/chapter-001.md",
+    ".ai-novel/plans/chapter-blueprints/chapter-002.md",
+    ".ai-novel/plans/chapter-blueprints/chapter-003.md",
+    ".ai-novel/plans/chapter-blueprints/chapter-004.md",
+    ".ai-novel/plans/chapter-blueprints/chapter-005.md",
+    ".ai-novel/plans/chapter-blueprints/chapter-006.md",
     ".ai-novel/plans/character-dynamics.json",
     ".ai-novel/plans/character-dynamics.md",
     ".ai-novel/plans/foreshadowing-ledger.json",
@@ -6847,6 +7630,64 @@ test("studio API can repair production story foundation assets", async () => {
   )
   assert.equal(previewResponse.status, 200)
   assert.match(previewResponse.payload.content, /Non-Negotiable Story Contract/)
+})
+
+test("story asset repair rebuilds unnamed master outline after protagonist naming confirmation", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-story-repair-protagonist-name-"))
+  const { createManagedAutonomousProject } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个档案小吏发现税册、债务和气象记录藏着同一个矛盾",
+    title: "命名闭环",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const plansDir = path.join(created.project.projectRoot, ".ai-novel", "plans")
+  await fs.mkdir(plansDir, { recursive: true })
+  await fs.writeFile(path.join(plansDir, "master-outline.md"), [
+    "# Production Master Outline",
+    "",
+    "## Character Spine",
+    "**主角（未命名档案小吏）**",
+    "- 核心欲望：保持安全，不惹事。",
+    "## pending-protagonist-name",
+    "- Canonical Protagonist: 沈渡",
+    "**上司（谢主簿）**",
+    "- 功能：保护者与约束者。",
+  ].join("\n"))
+  await fs.writeFile(
+    path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+    [
+      "# Protagonist Seed",
+      "",
+      "## Canonical protagonist lock",
+      "Canonical Protagonist: 沈渡",
+      "- identity: 档案小吏",
+      "- core desire: 保住自己和真相之间仅有的一点秩序",
+      "- fear or wound: 父亲旧案让他害怕档案失真",
+      "- behavior habit: 紧张时左手小指敲桌面",
+      "- speech marker: 说话慢，少解释",
+      "- relationship pressure: 与谢主簿互相试探又互相保护",
+    ].join("\n"),
+  )
+
+  const repairResponse = await handleNovelStudioApi(tempDir, "POST", "/api/production/story-assets/repair", {
+    projectId: created.project.id,
+  }, { projectId: created.project.id })
+
+  assert.equal(repairResponse.status, 200)
+  assert.ok(repairResponse.payload.repairedStoryAssets.includes(".ai-novel/plans/master-outline.md"))
+  const masterOutline = await fs.readFile(path.join(plansDir, "master-outline.md"), "utf8")
+  assert.match(masterOutline, /Canonical Protagonist: 沈渡/)
+  assert.doesNotMatch(masterOutline, /主角（未命名档案小吏）/)
+  assert.doesNotMatch(masterOutline, /pending-protagonist-name/)
+  const characterSpineSection = masterOutline.match(/##\s+Character Spine\b([\s\S]*?)(?:\n##\s+|\s*$)/u)?.[1] || ""
+  assert.match(characterSpineSection, /### 沈渡（主角）/)
+  assert.match(characterSpineSection, /Canonical Protagonist: 沈渡/)
+  const foundation = JSON.parse(await fs.readFile(path.join(plansDir, "story-foundation-contract.json"), "utf8"))
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.equal(foundation.characters.protagonist, "沈渡")
 })
 
 test("story foundation approval becomes stale after planning assets change", async () => {
@@ -8144,8 +8985,9 @@ test("style evolution keeps AIGC verification attached even when structured eval
       loopIterations: 1,
     }, { projectId: created.project.id })
 
-    assert.equal(generateResponse.status, 409)
+    assert.equal(generateResponse.status, 200)
     assert.equal(generateResponse.payload.error, "style_candidates_all_blocked")
+    assert.equal(generateResponse.payload.status, "blocked")
     assert.equal(generateResponse.payload.loopRun.stopReason, "style_candidates_all_blocked")
     assert.equal(generateResponse.payload.loopRun.iterations[0].winningReason, "本轮所有候选都未通过 Generation Verification Gate，未写入正式候选历史。")
     const blockedCandidate = generateResponse.payload.loopRun.iterations[0].candidates[0]
@@ -8533,6 +9375,77 @@ test("chapter drafting sends the approved style contract to the configured text 
       style: "",
     }, resources)
     await fs.writeFile(path.join(paths.chapterBlueprintsDir, "chapter-001.md"), `${blueprint}\n`)
+    state.memory = {
+      ...(state.memory || {}),
+      characterDossiers: [
+        {
+          id: "protagonist",
+          canonicalName: "沈砚",
+          aliases: ["沈砚"],
+          role: "protagonist",
+          identityAndRole: "沈砚是审雨官，习惯先看物件再问人。",
+          coreDesire: "NaturalnessAgent 目标：减少解释性模板句。",
+          fearOrWound: "chapter 1: pressure is tied to 承接：原始创作目标。",
+          contradiction: "",
+          behaviorHabits: ["chapter 1: 已执行快速生产硬门禁：字数、主角、角色档案。"],
+          speechMarkers: ["chapter 1: 沈砚合上账册，只问了一句：谁动过这一页？"],
+          appearanceAndBody: "Final Quality Gate: passed",
+          skills: ["chapter 1: 沈砚把缺页账本推到灯下。"],
+          limitations: ["Quality Gate blocked"],
+          relationshipState: "relationship pressure follows 角色状态必须发生可追踪变化。",
+          relationshipEdges: [{ targetId: "supporting-沈砚蹲", label: "polluted", pressure: "已执行快速生产硬门禁" }],
+          arcTrajectory: "",
+          currentChapterDelta: "角色状态必须发生可追踪变化。",
+          continuityNotes: [],
+          evidence: ["chapter 1: 沈砚把缺页账本推到灯下。"],
+          updatedAt: "2026-07-12T00:00:00.000Z",
+        },
+        {
+          id: "supporting-沈砚蹲",
+          canonicalName: "沈砚蹲",
+          aliases: ["沈砚蹲"],
+          role: "supporting",
+          identityAndRole: "fake action shard",
+          coreDesire: "",
+          fearOrWound: "",
+          contradiction: "",
+          behaviorHabits: [],
+          speechMarkers: [],
+          appearanceAndBody: "",
+          skills: [],
+          limitations: [],
+          relationshipState: "",
+          relationshipEdges: [],
+          arcTrajectory: "",
+          currentChapterDelta: "",
+          continuityNotes: [],
+          evidence: [],
+          updatedAt: "2026-07-12T00:00:00.000Z",
+        },
+        {
+          id: "supporting-左手",
+          canonicalName: "左手",
+          aliases: ["左手"],
+          role: "supporting",
+          identityAndRole: "fake body-part shard",
+          coreDesire: "",
+          fearOrWound: "",
+          contradiction: "",
+          behaviorHabits: [],
+          speechMarkers: [],
+          appearanceAndBody: "",
+          skills: [],
+          limitations: [],
+          relationshipState: "",
+          relationshipEdges: [],
+          arcTrajectory: "",
+          currentChapterDelta: "",
+          continuityNotes: [],
+          evidence: [],
+          updatedAt: "2026-07-12T00:00:00.000Z",
+        },
+      ],
+    }
 
     await runChapterProductionPipeline(tempDir, paths, state, task, {
       factoryRootDir: tempDir,
@@ -8632,6 +9545,15 @@ test("chapter drafting sends the approved style contract to the configured text 
     assert.match(qualityReport, /## Style Conformance Drift/)
     assert.match(qualityReport, /Conformance score: \d+(?:\.\d+)?\/10/)
     assert.match(qualityReport, /Drift score: \d+(?:\.\d+)?\/10/)
+    assert.match(qualityReport, /## Final Quality Gate/)
+    assert.match(qualityReport, /- Status: (?:passed|blocked|needs_revision)/)
+    assert.match(qualityReport, /- Reason:/)
+    const memoryUpdate = await fs.readFile(path.join(paths.memoryDir, "chapter-001-memory.md"), "utf8")
+    assert.match(memoryUpdate, /### Foreshadowing Ledger Update/)
+    assert.doesNotMatch(memoryUpdate, /NaturalnessAgent|Final Quality Gate|已执行.*硬门禁|Quality Gate/)
+    const characterDossiers = JSON.parse(await fs.readFile(paths.characterDossiersPath, "utf8"))
+    assert.doesNotMatch(JSON.stringify(characterDossiers), /NaturalnessAgent|Final Quality Gate|已执行.*硬门禁|Quality Gate/)
+    assert.doesNotMatch(JSON.stringify(characterDossiers), /沈砚蹲|左手/)
     const chapterManifest = JSON.parse(await fs.readFile(path.join(paths.chaptersDir, "chapter-001.versions.json"), "utf8"))
     assert.equal(chapterManifest.aigcDetection.status, "skipped")
     assert.equal(chapterManifest.locked, false)
@@ -10133,9 +11055,265 @@ test("advance uses configured draft subcall roles from writing settings", async 
       process.env.AI_NOVEL_WRITING_MODE = previousWritingMode
     }
   }
+	})
+
+	test("master planning LLM prompt uses artifact contract without drafting agent pollution", async () => {
+	  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-master-planning-prompt-"))
+	  const {
+	    createManagedAutonomousProject,
+	    withFactoryDb,
+	    writeProductionMasterOutline,
+	  } = await loadCore()
+	  const previousTestMode = process.env.AI_NOVEL_TEST_MODE
+	  const receivedBodies = []
+	  const server = http.createServer(async (request, response) => {
+	    if (request.url !== "/responses") {
+	      response.writeHead(404).end()
+	      return
+	    }
+	    let rawBody = ""
+	    request.on("data", (chunk) => { rawBody += chunk })
+	    request.on("end", () => {
+	      const receivedBody = JSON.parse(rawBody)
+	      receivedBodies.push(receivedBody)
+	      const outputText = [
+	        "# Production Master Outline",
+	        "",
+	        "## Story Promise",
+	        "- fixture",
+	        "",
+	        "## Arc Structure",
+	        "- 第 1 章完成单章闭环。",
+	        "",
+	        "## Chapter Causality Matrix",
+	        "| Chapter | Previous Input | Causal Objective | Protagonist Decision | Irreversible Change | Next Handoff |",
+	        "|---:|---|---|---|---|---|",
+	        "| 1 | 起点 | 查证 | 藏证 | 暴露 | 结局余味 |",
+	        "",
+	        "## Chapter Blueprint Contract",
+	        "- 第 1 章：fixture。",
+	      ].join("\n")
+	      if (receivedBody.stream) {
+	        response.writeHead(200, { "content-type": "text/event-stream" })
+	        response.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: outputText })}\n\n`)
+	        response.write("data: [DONE]\n\n")
+	        response.end()
+	      } else {
+	        response.writeHead(200, { "content-type": "application/json" })
+	        response.end(JSON.stringify({ output_text: outputText }))
+	      }
+	    })
+	  })
+
+	  delete process.env.AI_NOVEL_TEST_MODE
+	  try {
+	    await new Promise((resolve, reject) => {
+	      server.listen(0, "127.0.0.1", resolve)
+	      server.once("error", reject)
+	    })
+	    const address = server.address()
+	    assert.ok(address && typeof address === "object")
+	    const created = await createManagedAutonomousProject({
+	      rootDir: tempDir,
+	      idea: "一个审雨官核对百年雨档，发现大旱与婚丧记录对应。",
+	      title: "雨档",
+	      totalChapters: 1,
+	      chapterWordTarget: 2500,
+	    })
+	    await withFactoryDb(tempDir, async (db) => {
+	      db.addLlmConfig({
+	        name: "Master Planning Prompt Test",
+	        baseUrl: `http://127.0.0.1:${address.port}`,
+	        apiKey: "test-key",
+	        modelName: "planning-model",
+	        apiMode: "responses",
+	        timeoutMs: 2000,
+	        isActive: true,
+	      })
+	    })
+	    const workspaceDir = path.join(created.project.projectRoot, ".ai-novel")
+	    const paths = {
+	      workspaceDir,
+	      plansDir: path.join(workspaceDir, "plans"),
+	      reportsDir: path.join(workspaceDir, "reports"),
+	      chaptersDir: path.join(workspaceDir, "chapters"),
+	      memoryDir: path.join(workspaceDir, "memory"),
+	      styleDir: path.join(workspaceDir, "style"),
+	      styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+	      styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+	      styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+	      styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+	      consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+	      protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+	      relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+	      characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+	      characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+	      masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+	      chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+	    }
+
+	    const outline = await writeProductionMasterOutline(created.project.projectRoot, paths, created.state, {
+	      consensus: "只做一章闭环。",
+	      protagonist: "主角：沈渡；身份：审雨官。",
+	      style: "场景优先，克制。",
+	    }, {
+	      envRootDir: tempDir,
+	    })
+
+	    assert.match(outline, /# Production Master Outline/)
+	    assert.equal(receivedBodies.length, 1)
+	    const requestText = JSON.stringify(receivedBodies[0])
+	    assert.match(requestText, /生产资产生成协议/)
+	    assert.match(requestText, /只允许规划 1 章/)
+	    assert.match(requestText, /精确覆盖第 1-1 章/)
+	    assert.match(requestText, /Character Spine 第一条必须声明一个具体、可追踪的主角姓名/)
+	    assert.match(requestText, /Planning Blocker: concrete protagonist name missing/)
+	    assert.doesNotMatch(requestText, /Writer Agent/)
+	    assert.doesNotMatch(requestText, /Chapter Planner Agent/)
+	    assert.doesNotMatch(requestText, /必须按照章节格式要求输出章节正文内容/)
+	    assert.doesNotMatch(requestText, /## Draft Body/)
+	  } finally {
+	    await new Promise((resolve) => server.close(resolve))
+	    if (previousTestMode === undefined) {
+	      delete process.env.AI_NOVEL_TEST_MODE
+	    } else {
+	      process.env.AI_NOVEL_TEST_MODE = previousTestMode
+	    }
+	  }
+	})
+
+test("story foundation blocks when master outline has no concrete protagonist", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-foundation-protagonist-gate-"))
+  const {
+    createManagedAutonomousProject,
+    writeProductionStoryBibleAssets,
+  } = await loadCore()
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个档案小吏发现税册、债务和气象记录藏着同一个矛盾",
+    title: "主角门禁",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const workspaceDir = path.join(created.project.projectRoot, ".ai-novel")
+  const paths = {
+    workspaceDir,
+    plansDir: path.join(workspaceDir, "plans"),
+    reportsDir: path.join(workspaceDir, "reports"),
+    chaptersDir: path.join(workspaceDir, "chapters"),
+    memoryDir: path.join(workspaceDir, "memory"),
+    styleDir: path.join(workspaceDir, "style"),
+    styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+    consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+    protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+    characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+  }
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  await fs.writeFile(paths.masterOutlinePath, [
+    "# Production Master Outline",
+    "",
+    "## Character Spine",
+    "**主角（未命名档案小吏）**",
+    "- 核心欲望：保持安全，不惹事。",
+    "**上司（谢主簿）**",
+    "- 功能：保护者与约束者。",
+  ].join("\n"))
+
+  const progressEvents = []
+  await assert.rejects(
+    () => writeProductionStoryBibleAssets(created.project.projectRoot, paths, created.state, {
+      consensus: "主角姓名尚未冻结，不能冻结 story foundation。",
+      protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+      style: "场景优先，克制。",
+    }, {
+      onProgress: (event) => progressEvents.push(event),
+      preferDeterministicPlanning: true,
+    }),
+    /planning protagonist missing: master outline does not declare a concrete protagonist/,
+  )
+  assert.ok(progressEvents.some((event) =>
+    event.step === "story_foundation_blocked"
+    && event.status === "blocked"
+    && event.artifactPath === ".ai-novel/plans/protagonist-naming-brief.md"
+  ))
+  const namingBrief = await fs.readFile(path.join(paths.plansDir, "protagonist-naming-brief.md"), "utf8")
+  assert.match(namingBrief, /Protagonist Naming Required/)
+  assert.match(namingBrief, /Master protagonist: missing/)
+  assert.match(namingBrief, /谢主簿/)
+  assert.match(namingBrief, /Suggested Next Input/)
+  await assert.rejects(
+    () => fs.access(path.join(paths.plansDir, "story-foundation-contract.json")),
+    /ENOENT/,
+  )
 })
 
-test("initial planning artifacts carry chapter-level causality before drafting", async () => {
+test("master planning blocks before LLM can invent a protagonist", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-master-protagonist-gate-"))
+  const {
+    createManagedAutonomousProject,
+    writeProductionMasterOutline,
+  } = await loadCore()
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个档案小吏发现税册、债务和气象记录藏着同一个矛盾",
+    title: "主线主角门禁",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const workspaceDir = path.join(created.project.projectRoot, ".ai-novel")
+  const paths = {
+    workspaceDir,
+    plansDir: path.join(workspaceDir, "plans"),
+    reportsDir: path.join(workspaceDir, "reports"),
+    chaptersDir: path.join(workspaceDir, "chapters"),
+    memoryDir: path.join(workspaceDir, "memory"),
+    styleDir: path.join(workspaceDir, "style"),
+    styleProfilePath: path.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: path.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: path.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: path.join(workspaceDir, "style", "anti-patterns.md"),
+    consensusPath: path.join(workspaceDir, "prompts", "global-consensus.md"),
+    protagonistPath: path.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: path.join(workspaceDir, "memory", "characters", "evolution.md"),
+    characterDossiersPath: path.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    masterOutlinePath: path.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: path.join(workspaceDir, "plans", "chapter-blueprints"),
+  }
+  const progressEvents = []
+  await assert.rejects(
+    () => writeProductionMasterOutline(created.project.projectRoot, paths, created.state, {
+      consensus: "世界观和主线还在讨论，尚未确认主角。",
+      protagonist: "Structured production dossier\n## pending-protagonist-name\n- aliases: 主角\n- core desire: pending",
+      style: "场景优先，克制。",
+    }, {
+      onProgress: (event) => progressEvents.push(event),
+    }),
+    /source context does not declare a concrete protagonist/,
+  )
+  assert.ok(progressEvents.some((event) =>
+    event.step === "master_planning_blocked"
+    && event.status === "blocked"
+    && event.artifactPath === ".ai-novel/plans/master-planning-protagonist-brief.md"
+  ))
+  const brief = await fs.readFile(path.join(paths.plansDir, "master-planning-protagonist-brief.md"), "utf8")
+  assert.match(brief, /Master Planning Protagonist Required/)
+  assert.match(brief, /pending-protagonist-name|待冻结主角/)
+  assert.match(brief, /Suggested Next Input/)
+  await assert.rejects(
+    () => fs.access(paths.masterOutlinePath),
+    /ENOENT/,
+  )
+})
+
+	test("initial planning artifacts carry chapter-level causality before drafting", async () => {
   const {
     createProductionStoryBibleAssets,
     createDetailedChapterBlueprint,
@@ -10222,14 +11400,21 @@ test("initial planning artifacts carry chapter-level causality before drafting",
     "character-dynamics.json",
   ])
   assert.match(storyAssets.find((asset) => asset.filename === "world-matrix.md").content, /Frozen World Rules/)
+  assert.match(storyAssets.find((asset) => asset.filename === "world-matrix.md").content, /Story-Specific Premise/)
+  assert.match(storyAssets.find((asset) => asset.filename === "world-matrix.md").content, /Concrete Story Signals/)
   assert.match(storyAssets.find((asset) => asset.filename === "plot-architecture.md").content, /Chapter Causality Matrix/)
   assert.match(storyAssets.find((asset) => asset.filename === "story-bible.md").content, /Non-Negotiable Story Contract/)
   assert.match(storyAssets.find((asset) => asset.filename === "foreshadowing-ledger.md").content, /Initial Schedule/)
   assert.match(storyAssets.find((asset) => asset.filename === "character-dynamics.md").content, /Required Dossier Fields/)
+  assert.match(storyAssets.find((asset) => asset.filename === "character-dynamics.md").content, /Structured Character Dossiers/)
+  assert.match(storyAssets.find((asset) => asset.filename === "character-dynamics.md").content, /Relationship Pressure Map/)
   const structuredContract = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
   assert.equal(structuredContract.version, 1)
   assert.equal(structuredContract.project.totalChapters, 5)
   assert.equal(structuredContract.plot.chapters.length, 5)
+  assert.equal(structuredContract.characters.protagonist, "李延")
+  assert.ok(structuredContract.consensus.concreteSignals.some((line) => /李延|底层小吏/.test(line)))
+  assert.ok(structuredContract.world.conflictEngine.some((line) => /穿越到大唐末期/.test(line)))
   assert.ok(structuredContract.gates.structuredAssets.includes("foreshadowing-ledger.json"))
   assert.ok(structuredContract.foreshadowing.entries.some((entry) => entry.operation.includes("伏笔")))
 
@@ -10238,15 +11423,31 @@ test("initial planning artifacts carry chapter-level causality before drafting",
   assert.match(chapterTwo.summary, /承接/)
   assert.match(chapterTwo.summary, /交棒/)
   assert.doesNotMatch(chapterTwo.summary, /Draft chapter/)
+  const causalPlanTexts = created.state.plan.chapterTasks.map((task) => [
+    task.causalPlan.previousInput,
+    task.causalPlan.sceneObjective,
+    task.causalPlan.protagonistDecision,
+    task.causalPlan.irreversibleConsequence,
+    task.causalPlan.foreshadowingOperation,
+    task.causalPlan.requiredContinuityAnchors.join("、"),
+  ].join("\n"))
+  assert.ok(causalPlanTexts.some((text) => /大唐末期|小人物|底层|王朝终局/.test(text)))
+  assert.ok(new Set(created.state.plan.chapterTasks.map((task) => task.causalPlan.sceneObjective)).size > 1)
 
   const blueprint = createDetailedChapterBlueprint(created.state, chapterTwo, context, resources)
   assert.match(blueprint, /## Previous Inputs/)
+  assert.match(blueprint, /## Chapter Differentiators/)
+  assert.match(blueprint, /压力模式/)
+  assert.match(blueprint, /证据呈现/)
   assert.match(blueprint, /## Causal Objective/)
   assert.match(blueprint, /## Protagonist Decision/)
   assert.match(blueprint, /## Irreversible Change/)
   assert.match(blueprint, /## Character State Delta/)
   assert.match(blueprint, /## Required Continuity Anchors/)
   assert.match(blueprint, /## Next Chapter Handoff/)
+  assert.match(blueprint, /## Character Participation Contract/)
+  assert.match(blueprint, /requiredCharacters[\s\S]*李延/)
+  assert.match(blueprint, /本章 scene cards 的 requiredCharacters 必须使用这些具体姓名：李延/)
   assert.match(blueprint, /因果推进/)
   assert.match(blueprint, /词汇使用指南/)
   assert.match(blueprint, /成语关联性检查/)
@@ -10274,9 +11475,19 @@ test("initial planning artifacts carry chapter-level causality before drafting",
     masterOutlinePath: path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md"),
     chapterBlueprintsDir: path.join(created.project.projectRoot, ".ai-novel", "plans", "chapter-blueprints"),
   }
+  const storyProgressEvents = []
   await writeProductionStoryBibleAssets(created.project.projectRoot, paths, created.state, context, {
     preferDeterministicPlanning: true,
+    onProgress: (event) => storyProgressEvents.push(event),
   })
+  const assetBundleEvent = storyProgressEvents.find((event) => event.step === "story_bible_assets_saved")
+  assert.ok(assetBundleEvent)
+  assert.equal(assetBundleEvent.artifactPath, ".ai-novel/plans/story-bible.md")
+  assert.ok(assetBundleEvent.artifacts.some((artifact) => artifact.path === ".ai-novel/plans/world-matrix.md"))
+  assert.ok(assetBundleEvent.artifacts.some((artifact) => artifact.path === ".ai-novel/plans/plot-architecture.md"))
+  assert.ok(assetBundleEvent.artifacts.some((artifact) => artifact.path === ".ai-novel/plans/character-dynamics.md"))
+  assert.ok(assetBundleEvent.artifacts.some((artifact) => artifact.path === ".ai-novel/plans/writing-plan.json"))
+  assert.equal(assetBundleEvent.workflow.kind, "artifact_saved")
   const writingPlan = JSON.parse(await fs.readFile(
     path.join(created.project.projectRoot, ".ai-novel", "plans", "writing-plan.json"),
     "utf8",
@@ -10298,6 +11509,28 @@ test("initial planning artifacts carry chapter-level causality before drafting",
   const blueprintWithStoryAssets = createDetailedChapterBlueprint(created.state, chapterTwo, context, resources, undefined, storyAssetContext)
   assert.match(blueprintWithStoryAssets, /Production Story Asset Context/)
   assert.match(blueprintWithStoryAssets, /plot-architecture\.md/)
+  assert.match(blueprintWithStoryAssets, /Referenced files:/)
+  assert.match(blueprintWithStoryAssets, /Blueprint Variation Contract/)
+  assert.match(blueprintWithStoryAssets, /Previous Input status: planned_dependency/)
+  assert.match(blueprintWithStoryAssets, /不得把未来章节蓝图、计划摘要或未成稿章节写成已经发生的 canon 事实/)
+  assert.doesNotMatch(blueprintWithStoryAssets, /"version": 1,[\s\S]*"projectKey"/)
+
+  const chapterThree = created.state.plan.chapterTasks[2]
+  const blueprintThree = createDetailedChapterBlueprint(created.state, chapterThree, context, resources, undefined, storyAssetContext)
+  const extractExecutionContract = (text) => JSON.parse(text.match(/## Chapter Execution Contract\n```json\n([\s\S]*?)\n```/u)?.[1] || "{}")
+  const contractTwo = extractExecutionContract(blueprintWithStoryAssets)
+  const contractThree = extractExecutionContract(blueprintThree)
+  assert.ok(contractTwo.chapterDifferentiators.openingMove)
+  assert.equal(contractTwo.canonBoundary.previousInputStatus, "planned_dependency")
+  assert.equal(contractTwo.canonBoundary.completedPreviousChapters, 0)
+  assert.match(contractTwo.canonBoundary.rule, /planned upstream dependency/)
+  assert.ok(contractTwo.chapterDifferentiators.keyProp)
+  assert.ok(contractTwo.chapterDifferentiators.relationshipTurn)
+  assert.notEqual(contractTwo.chapterDifferentiators.openingMove, contractThree.chapterDifferentiators.openingMove)
+  assert.notEqual(contractTwo.chapterDifferentiators.keyProp, contractThree.chapterDifferentiators.keyProp)
+  assert.notEqual(contractTwo.chapterDifferentiators.relationshipTurn, contractThree.chapterDifferentiators.relationshipTurn)
+  assert.notEqual(contractTwo.sceneCards[0].conflict, contractThree.sceneCards[0].conflict)
+  assert.notEqual(contractTwo.sceneCards.at(-1).endHook, contractThree.sceneCards.at(-1).endHook)
 })
 
 test("chapter consistency blocks drift before an editor report can pass it", async () => {
@@ -10321,6 +11554,873 @@ test("chapter consistency blocks drift before an editor report can pass it", asy
   })
   assert.equal(consistency.status, "quarantined")
   assert.match(consistency.reason, /未出现已锁定主角「李延」/)
+})
+
+test("story assets and blueprints inherit canonical cast from master outline", async () => {
+  const {
+    createDetailedChapterBlueprint,
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+    loadProductionStoryAssetContext,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-cast-lock-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个审雨官核对百年雨档，发现城中每次大旱都对应同一个家族的婚丧记录",
+    title: "雨档角色锁",
+    totalChapters: 1,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "主角必须在官署、旧友和伪造雨册之间选择先保人还是先保证据。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Story Promise",
+    "读者将跟随审雨官顾夜舟，在一夜之间拆解证据保全与人命保全之间的死结。",
+    "",
+    "## Character State Ledger Plan",
+    "| 角色 | 章节开始状态 | 章节结束状态 | 状态变化载体 |",
+    "|---|---|---|---|",
+    "| 顾夜舟 | 五年雨档阁书吏，从未出过错 | 刚伪造了雨册 | 把伪造卷轴放进霜降档的夹层 |",
+    "| 沈槐 | 顾夜舟唯一信任的旧友 | 欠顾夜舟一条命 | 交出沈家近三代婚丧底册 |",
+    "| 梁典簿 | 雨档阁副职 | 暗示顾夜舟停止追查 | 把顾夜舟的手从霜降档上轻轻拍开 |",
+    "",
+    "## Character Spine",
+    "**顾夜舟**：",
+    "- 核心欲望：守护雨档制度的绝对可信",
+    "- 行为习惯：核档前必先洗手、正冠、焚香",
+    "**沈槐**：",
+    "- 在1章中的功能：引发顾夜舟选择的触发者",
+    "**梁典簿**：",
+    "- 在1章中的功能：系统的化身",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.characters.protagonist, "顾夜舟")
+  assert.deepEqual(foundation.characters.canonicalPlanningCast.cast.slice(0, 3), ["顾夜舟", "沈槐", "梁典簿"])
+  const characterDynamics = storyAssets.find((asset) => asset.filename === "character-dynamics.md").content
+  assert.match(characterDynamics, /主角：顾夜舟/)
+  assert.match(characterDynamics, /核心人物：顾夜舟、沈槐、梁典簿/)
+  assert.doesNotMatch(characterDynamics, /pending-protagonist-name/)
+
+  const paths = {
+    workspaceDir: path.join(created.project.projectRoot, ".ai-novel"),
+    plansDir: path.join(created.project.projectRoot, ".ai-novel", "plans"),
+    reportsDir: path.join(created.project.projectRoot, ".ai-novel", "reports"),
+    chaptersDir: path.join(created.project.projectRoot, ".ai-novel", "chapters"),
+    memoryDir: path.join(created.project.projectRoot, ".ai-novel", "memory"),
+    styleDir: path.join(created.project.projectRoot, ".ai-novel", "style"),
+    styleProfilePath: path.join(created.project.projectRoot, ".ai-novel", "style", "profile.md"),
+    styleRulebookPath: path.join(created.project.projectRoot, ".ai-novel", "style", "rulebook.md"),
+    styleReferencesPath: path.join(created.project.projectRoot, ".ai-novel", "style", "references.md"),
+    styleAntiPatternsPath: path.join(created.project.projectRoot, ".ai-novel", "style", "anti-patterns.md"),
+    consensusPath: path.join(created.project.projectRoot, ".ai-novel", "prompts", "global-consensus.md"),
+    protagonistPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "relations.md"),
+    characterEvolutionPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "evolution.md"),
+    masterOutlinePath: path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md"),
+    chapterBlueprintsDir: path.join(created.project.projectRoot, ".ai-novel", "plans", "chapter-blueprints"),
+  }
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  for (const asset of storyAssets) {
+    await fs.writeFile(path.join(paths.plansDir, asset.filename), `${asset.content}\n`)
+  }
+  const task = created.state.plan.chapterTasks[0]
+  const storyAssetContext = await loadProductionStoryAssetContext(paths, task, 1800)
+  assert.match(storyAssetContext.prompt, /Canonical Protagonist: 顾夜舟/)
+  assert.match(storyAssetContext.prompt, /Canonical Cast: 顾夜舟、沈槐、梁典簿/)
+
+  const blueprint = createDetailedChapterBlueprint(created.state, task, context, resources, undefined, storyAssetContext)
+  assert.match(blueprint, /Canonical protagonist: 顾夜舟/)
+  assert.match(blueprint, /requiredCharacters[\s\S]*顾夜舟/)
+  assert.match(blueprint, /本章 scene cards 的 requiredCharacters 必须使用这些具体姓名：顾夜舟/)
+  assert.doesNotMatch(blueprint, /沈砚/)
+  const executionContract = JSON.parse(blueprint.match(/## Chapter Execution Contract\n```json\n([\s\S]*?)\n```/u)?.[1] || "{}")
+  assert.ok(executionContract.sceneCards.every((card) => card.requiredCharacters.includes("顾夜舟")))
+  assert.ok(executionContract.sceneCards.some((card) => card.requiredCharacters.length === 1))
+  assert.ok(executionContract.sceneCards.every((card) => card.requiredCharacters.length <= 2))
+})
+
+test("planning cast extraction ignores character state dimension tables", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-state-table-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个审雨官核对百年雨档，发现城中每次大旱都对应同一个家族的婚丧记录",
+    title: "雨档状态表过滤",
+    totalChapters: 1,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "主角必须在官署、旧友和伪造雨册之间选择先保人还是先保证据。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Arc Structure",
+    "- 起点：审雨官沈渡在秋季雨档大核对中发现纸张异常。",
+    "- 转折：旧友苏昀深夜闯入档案库，带来伪造雨册。",
+    "",
+    "## Character State Ledger Plan",
+    "角色身份与代号：",
+    "- 审雨官 · 沈渡（暂用名）——守册三十年，未娶妻。",
+    "- 旧友 · 苏昀——深夜闯入档案库。",
+    "",
+    "**沈渡 第1章状态变化：**",
+    "",
+    "| 状态维度 | 章前 | 章后 |",
+    "|---|---|---|",
+    "| 身份安全性 | 清白，从未违规 | 已撬过暗格，形成违规事实 |",
+    "| 对雨档的信仰 | 相信记录即真相 | 被手稿颠覆，记录可以被制造 |",
+    "| 与苏昀关系 | 旧友，十年未深聊 | 信任破裂，苏昀视他为潜在告密者 |",
+    "| 心理压力等级 | 常规工作压力 | 发现恩师手稿+旧友背叛双重压力 |",
+    "",
+    "## Character Spine",
+    "**沈渡（暂用名）**",
+    "- 核心欲望：让雨档系统成为无可辩驳的公器。",
+    "- 关系压力点：苏昀是他的旧友。",
+    "**苏昀**：",
+    "- 在1章中的功能：用旧友身份逼迫沈渡选择。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("沈渡"))
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("苏昀"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("状态维度"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("身份安全性"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("心理压力等级"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("用名"))
+  assert.equal(foundation.characters.protagonist, "沈渡")
+})
+
+test("planning cast extraction reads protagonist names from character spine headings", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-heading-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册和司天监记录互相矛盾",
+    title: "主角标题提取",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "档案小吏必须在税册、家族债务和司天监气象记录之间做出选择。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Character Spine",
+    "### 沈渡（主角）",
+    "- 身份：永昌县户房档案小吏，入职六年。",
+    "- 核心欲望：不想引人注目，只想安稳还债。",
+    "### 郑守拙（压力源）",
+    "- 身份：户房主事，沈渡的直接上司。",
+    "### 沈斗（关系变化载体）",
+    "- 身份：县衙杂役，沈渡的族弟。",
+    "",
+    "## Character State Ledger Plan",
+    "| 章节 | 主角状态 | 核心物件状态 |",
+    "|---:|---|---|",
+    "| 1 | 日常变警觉 | 两卷矛盾税册 |",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.characters.protagonist, "沈渡")
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.deepEqual(foundation.canonicalPlanningCast.cast.slice(0, 3), ["沈渡", "郑守拙", "沈斗"])
+  assert.notEqual(foundation.characters.protagonist, "角色1")
+})
+
+test("planning cast extraction reads protagonist names from bold tagged character spine headings", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-bold-heading-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名驿站账房发现雨税账册被人改写",
+    title: "粗体主角标题提取",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "陈渡必须从驿站雨税错账追到县衙暗账。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Character Spine",
+    "**陈渡（主角）**：",
+    "- 身份：驿站账房，负责雨税往来账。",
+    "- 核心欲望：保住账房身份，同时查清父亲旧案。",
+    "**许澜**：",
+    "- 身份：县衙书吏，陈渡的旧友。",
+    "",
+    "## Character State Ledger Plan",
+    "| 章节 | 主角状态 | 核心物件状态 |",
+    "|---:|---|---|",
+    "| 1 | 从避事变成扣账 | 雨税账册出现同日双记 |",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.characters.protagonist, "陈渡")
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "陈渡")
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("陈渡"))
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("许澜"))
+  assert.notEqual(foundation.characters.protagonist, "角色1")
+})
+
+test("planning cast extraction reads descriptive spine titles and titled officials", async () => {
+  const {
+    createDetailedChapterBlueprint,
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+    loadProductionStoryAssetContext,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-titled-cast-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、家族债务和司天监记录藏着同一个矛盾",
+    title: "官职人物锁",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "沈渡必须从税册错账追到虚构收支科目。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Character State Ledger Plan",
+    "**沈渡**（主角）",
+    "- 第1章末：好奇 + 警惕。",
+    "**赵主簿**（上司/初期压力源）",
+    "- 第1章末：怀疑但克制。",
+    "**陈录事**（同事/不稳定的同盟）",
+    "- 第2章末：发现异常，主动靠近。",
+    "**何澄**（司天监杂役/潜在的深层同盟）",
+    "- 第2章末：初次见面，紧张但答应。",
+    "",
+    "## Character Spine",
+    "**沈渡 —— 从“藏匿者”到“暴露者”**",
+    "- 核心欲望：弄清双缴条目与亡父契约的关系。",
+    "- 核心恐惧：继续追查会让他从档案小吏变成需要被处理的人。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.deepEqual(foundation.canonicalPlanningCast.cast.slice(0, 4), ["沈渡", "赵主簿", "陈录事", "何澄"])
+  assert.equal(foundation.characters.protagonist, "沈渡")
+
+  const paths = {
+    plansDir: path.join(created.project.projectRoot, ".ai-novel", "plans"),
+  }
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  for (const asset of storyAssets) {
+    await fs.writeFile(path.join(paths.plansDir, asset.filename), `${asset.content}\n`)
+  }
+  const storyAssetContext = await loadProductionStoryAssetContext(paths, created.state.plan.chapterTasks[1], 2200)
+  const blueprint = createDetailedChapterBlueprint(created.state, created.state.plan.chapterTasks[1], context, resources, undefined, storyAssetContext)
+  assert.match(blueprint, /Canonical protagonist: 沈渡/)
+  assert.match(blueprint, /Canonical cast: 沈渡、赵主簿、陈录事、何澄/)
+  assert.match(blueprint, /已知角色必须按姓名进入场景：沈渡、赵主簿、陈录事、何澄/)
+  assert.doesNotMatch(blueprint, /待冻结主/)
+})
+
+test("planning cast extraction preserves narrative relationship cast from master outline", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-narrative-cast-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、家族债务和司天监气象记录互相矛盾",
+    title: "关系线人物锁",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "沈默必须在档案库、税册、家族债务和司天监气象记录之间追查同一处矛盾。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Causal Spine",
+    "1. **线索汇流线**：第1章三套文书的不可能矛盾 → 第2章发现查证路径被人监视、对手在档案库中留下误导条目 → 第3章核心矛盾指向父亲旧友陈同知的私印印记 → 第4章陈同知承认伪造。",
+    "2. **关系绷断线**：第1章与上司周守拙的信任试探 → 第2章同僚何四娘在关键节点选择避嫌远离 → 第3章挚友张文远的协助实际上是陈同知安排的监视 → 第4章陈同知摊牌时，沈默与所有人决裂。",
+    "3. **选择压力线**：主角必须在追查方向的选择和有限时间内选择之间暴露弱点。",
+    "",
+    "## Chapter Causality Matrix",
+    "| Chapter | Previous Input | Causal Objective |",
+    "|---|---|---|",
+    "| 2 | 第1章老书吏死亡；沈默的查询路径被暗中标记 | 何四娘没有告发，但第二天主动提交调职申请 |",
+    "| 3 | 第2章何四娘调职；沈默被边缘化 | 张文远将沈默的异常行为告知周守拙 |",
+    "",
+    "## Character Spine",
+    "### 沈默（主角）",
+    "- 欲望：查清父亲旧案。",
+    "### 周守拙（上司/压力镜像）",
+    "- 欲望：维持档案库秩序。",
+    "### 陈同知（父亲旧友/条件性保护者）",
+    "- 欲望：保护旧案不再翻出。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈默")
+  assert.deepEqual(
+    foundation.canonicalPlanningCast.cast.slice(0, 5),
+    ["沈默", "周守拙", "陈同知", "何四娘", "张文远"],
+  )
+  const characterDynamics = storyAssets.find((asset) => asset.filename === "character-dynamics.md").content
+  assert.match(characterDynamics, /核心人物：沈默、周守拙、陈同知、何四娘、张文远/)
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("关系绷断线"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("老书吏"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("常行为"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("方向的"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("时间内"))
+})
+
+test("planning cast extraction rejects narrative fragments as canonical characters", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-fragment-filter-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、债务和司天监记录互相矛盾",
+    title: "叙述残片过滤",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "沈默必须在档案库、税册、家族债务和司天监气象记录之间追查同一处矛盾。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Causal Spine",
+    "21. 老吏告诉主角：那些「不可能生存的户」是帝国的影子账。",
+    "22. 主角：查的。",
+    "33. 此人告诉主角：他是因为复制这些记录才活到现在。",
+    "",
+    "## Chapter Causality Matrix",
+    "| Chapter | Previous Input | Causal Objective |",
+    "|---|---|---|",
+    "| 18 | 住处被翻 | 入侵者按错误年份搜了别处 |",
+    "",
+    "## Character Spine",
+    "### 沈默（主角）",
+    "- 欲望：查清父亲旧案。",
+    "### 周守拙（上司/压力镜像）",
+    "- 欲望：维持档案库秩序。",
+    "**旧书摊老板（孟老伯）**",
+    "- 功能：保留被注销户籍的地方传闻。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  const cast = foundation.canonicalPlanningCast.cast
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈默")
+  assert.ok(cast.includes("沈默"))
+  assert.ok(cast.includes("周守拙"))
+  assert.ok(cast.includes("孟老伯"))
+  assert.ok(!cast.includes("那些"))
+  assert.ok(!cast.includes("查的"))
+  assert.ok(!cast.includes("他是因为复制这些"))
+  assert.ok(!cast.includes("入侵者按错误年份"))
+  assert.ok(!cast.includes("minor"))
+  assert.ok(!cast.includes("archive"))
+  assert.ok(!cast.includes("clerk"))
+  assert.ok(!cast.includes("ledgers"))
+
+  const characterDynamics = storyAssets.find((asset) => asset.filename === "character-dynamics.md").content
+  assert.match(characterDynamics, /主角：沈默/)
+  assert.match(characterDynamics, /核心人物：沈默、周守拙、孟老伯/)
+  assert.doesNotMatch(characterDynamics, /主角：那些/)
+  assert.doesNotMatch(characterDynamics, /查的/)
+  assert.doesNotMatch(characterDynamics, /他是因为复制这些/)
+  assert.doesNotMatch(characterDynamics, /入侵者按错误年份/)
+})
+
+test("planning cast extraction does not promote role-labeled support cast to protagonist", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-role-label-protagonist-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一个档案小吏发现税册、债务和气象记录藏着同一个矛盾",
+    title: "角色标签主角保护",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Story Promise",
+    "主角不是侦探，没有查案权限，他唯一能做的决定是要不要让这个矛盾在归档前从世界上消失。",
+    "",
+    "## Character Spine",
+    "**主角（未命名档案小吏）**",
+    "- 核心欲望：保持安全，不惹事。",
+    "**上司（谢主簿）**",
+    "- 功能：体制内保护者与约束者的双重角色。",
+    "**遗属孙辈（沈三娘）**",
+    "- 功能：活人证据，平民视角的受害者代表。",
+    "**旧书摊老板（孟老伯）**",
+    "- 功能：外部保存者，历史接力棒的接受者。",
+  ].join("\n")
+  const storyAssets = createProductionStoryBibleAssets(created.state, {
+    consensus: "必须先冻结主角姓名，不能把配角功能标签当主角。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "")
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("谢主簿"))
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("沈三娘"))
+  assert.ok(foundation.canonicalPlanningCast.cast.includes("孟老伯"))
+  assert.notEqual(foundation.characters.protagonist, "谢主簿")
+  assert.notEqual(foundation.characters.protagonist, "沈三娘")
+  const characterDynamics = storyAssets.find((asset) => asset.filename === "character-dynamics.md").content
+  assert.doesNotMatch(characterDynamics, /主角：谢主簿/)
+  assert.doesNotMatch(characterDynamics, /主角：沈三娘/)
+})
+
+test("planning cast extraction preserves names after role separators", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-role-separator-cast-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、家族债务和司天监气象记录藏着同一个矛盾",
+    title: "角色标签姓名锁",
+    totalChapters: 3,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "沈渡必须从档案库追查到父亲旧债。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Character State Ledger Plan",
+    "| Character | Ch1 起始状态 | Ch1 变化 |",
+    "|---|---|---|",
+    "| **沈渡（主角）** | 普通档案小吏 | 做出隐瞒决定 |",
+    "| **妹妹·沈蘅** | 仅被提及 | 被卷入司天监记录 |",
+    "| **保管员·老周** | 档案库保管员 | 记住异常调阅 |",
+    "| **亡父·沈怀严** | 已故八年 | 遗物出现同一数字 |",
+    "",
+    "## Character Spine",
+    "### 沈渡（主角）",
+    "- 欲望：查清父亲旧债。",
+    "妹妹·沈蘅",
+    "- 功能：家人关系压力。",
+    "保管员·老周",
+    "- 功能：档案库压力源。",
+    "亡父·沈怀严",
+    "- 功能：伤口来源。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  const cast = foundation.canonicalPlanningCast.cast
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.ok(cast.includes("沈渡"))
+  assert.ok(cast.includes("沈蘅"))
+  assert.ok(cast.includes("老周"))
+  assert.ok(cast.includes("沈怀严"))
+  assert.ok(!cast.includes("妹妹"))
+  assert.ok(!cast.includes("保管员"))
+  assert.ok(!cast.includes("亡父"))
+})
+
+test("planning cast extraction uses master ledger relationship columns and ignores spine field labels", async () => {
+  const {
+    createDetailedChapterBlueprint,
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+    loadProductionStoryAssetContext,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-ledger-cast-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、死籍和司天监气象记录互相矛盾",
+    title: "档案人物锁",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "沈渡必须在档案库、税册、死籍和司天监气象记录之间追查同一处矛盾。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Arc Structure",
+    "**总弧线：4章 / 约12000字**",
+    "- 结局余味在水神庙副本。",
+    "",
+    "## Character State Ledger Plan",
+    "| 章节 | 沈渡 | 与赵伯关系 | 与陈元启关系 | 与周慎之关系 | 资产/资源 | 债务/威胁 |",
+    "|---|---|---|---|---|---|---|",
+    "| 第1章 | 被动检校吏 | 赵伯知其父旧事但不言明 | — | — | 调卷权限 | 名字出现在调卷簿上 |",
+    "| 第2章 | 主动追查者 | 赵伯暗示有些卷不该翻 | 陈元启借出底簿 | — | 底簿残页 | 陈元启被调走 |",
+    "| 第3章 | 发现真相者 | 赵伯划掉他当值簿的名字 | — | 发现周慎之洗田真相 | 证据副本 | 失去职务 |",
+    "",
+    "## Character Spine",
+    "### 沈渡",
+    "",
+    "**核心渴望**：解开父亲死亡的真相。",
+    "**初始创伤**：十四年前永宁仓大火后，父亲被认定为失职。",
+    "**中间矛盾**：父亲不是没有证据，而是有证据却选择不告发。",
+    "**最终状态**：沈渡选择不成为殉道者，故事余味留在水神庙副本。",
+    "**弧线标记**：被动模仿到主动选择。",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.deepEqual(foundation.canonicalPlanningCast.cast.slice(0, 4), ["沈渡", "赵伯", "陈元启", "周慎之"])
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("核心渴望"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("最终状态"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("总弧线"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("余味"))
+
+  const paths = {
+    workspaceDir: path.join(created.project.projectRoot, ".ai-novel"),
+    plansDir: path.join(created.project.projectRoot, ".ai-novel", "plans"),
+    reportsDir: path.join(created.project.projectRoot, ".ai-novel", "reports"),
+    chaptersDir: path.join(created.project.projectRoot, ".ai-novel", "chapters"),
+    memoryDir: path.join(created.project.projectRoot, ".ai-novel", "memory"),
+    styleDir: path.join(created.project.projectRoot, ".ai-novel", "style"),
+    styleProfilePath: path.join(created.project.projectRoot, ".ai-novel", "style", "profile.md"),
+    styleRulebookPath: path.join(created.project.projectRoot, ".ai-novel", "style", "rulebook.md"),
+    styleReferencesPath: path.join(created.project.projectRoot, ".ai-novel", "style", "references.md"),
+    styleAntiPatternsPath: path.join(created.project.projectRoot, ".ai-novel", "style", "anti-patterns.md"),
+    consensusPath: path.join(created.project.projectRoot, ".ai-novel", "prompts", "global-consensus.md"),
+    protagonistPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "relations.md"),
+    characterEvolutionPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "evolution.md"),
+    masterOutlinePath: path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md"),
+    chapterBlueprintsDir: path.join(created.project.projectRoot, ".ai-novel", "plans", "chapter-blueprints"),
+  }
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  for (const asset of storyAssets) {
+    await fs.writeFile(path.join(paths.plansDir, asset.filename), `${asset.content}\n`)
+  }
+  const storyAssetContext = await loadProductionStoryAssetContext(paths, created.state.plan.chapterTasks[0], 2200)
+  assert.match(storyAssetContext.prompt, /Canonical Protagonist: 沈渡/)
+  assert.match(storyAssetContext.prompt, /Canonical Cast: 沈渡、赵伯、陈元启、周慎之/)
+  const blueprint = createDetailedChapterBlueprint(created.state, created.state.plan.chapterTasks[0], context, resources, undefined, storyAssetContext)
+  assert.match(blueprint, /Known cast: 沈渡、赵伯、陈元启、周慎之/)
+  assert.doesNotMatch(blueprint, /pending-protagonist-name/)
+  assert.doesNotMatch(blueprint, /relationship-axis/)
+  assert.doesNotMatch(blueprint, /antagonist-force/)
+})
+
+test("planning cast extraction normalizes spine labels and ignores state attributes", async () => {
+  const {
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-spine-labels-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "一名档案小吏发现税册、债务和天气记录互相矛盾",
+    title: "人物标签归一",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Character State Ledger Plan",
+    "| 属性 | 第1章状态 | 第2章变化 |",
+    "|---|---|---|",
+    "| 沈渡·身份安全 | 无虞 | 绿字名单，受限 |",
+    "| 沈渡·经济压力 | 稳定但拮据 | 无变化 |",
+    "| 三联档完整性 | 完整但被关注 | 缺一页，被控 |",
+    "",
+    "## Character Spine",
+    "**沈渡·完整弧线**",
+    "- 初始状态：普通书吏。",
+    "**库丞苏德安·对抗弧线**",
+    "- 表面身份：档案库的二把手。",
+  ].join("\n")
+  const storyAssets = createProductionStoryBibleAssets(created.state, {
+    consensus: "",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "",
+  }, resources, { masterOutline })
+  const foundation = JSON.parse(storyAssets.find((asset) => asset.filename === "story-foundation-contract.json").content)
+  assert.equal(foundation.canonicalPlanningCast.protagonist, "沈渡")
+  assert.deepEqual(foundation.canonicalPlanningCast.cast.slice(0, 2), ["沈渡", "苏德安"])
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("沈渡·完整弧线"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("沈渡·身份安全"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("三联档完整性"))
+  assert.ok(!foundation.canonicalPlanningCast.cast.includes("属性"))
+})
+
+test("planning story assets replace placeholder dossiers with canonical cast locks", async () => {
+  const {
+    createDetailedChapterBlueprint,
+    createManagedAutonomousProject,
+    createProductionStoryBibleAssets,
+    loadProductionStoryAssetContext,
+  } = await loadCore()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-core-planning-cast-contract-"))
+  const created = await createManagedAutonomousProject({
+    rootDir: tempDir,
+    idea: "A Chinese long-form mystery about archive ledgers, family debt, and weather records.",
+    title: "档案悬疑合同",
+    totalChapters: 4,
+    chapterWordTarget: 2500,
+  })
+  const resources = {
+    styleGuide: "",
+    chapterPlannerGuide: "",
+    writerGuide: "",
+    editorGuide: "",
+    styleControllerGuide: "",
+    consistencyGuide: "",
+    vocabularyIndex: "",
+    vocabularySamples: [],
+    examples: [],
+  }
+  const context = {
+    consensus: "档案库、税册、家族债务和司天监气象记录必须形成同一个不可绕开的矛盾。",
+    protagonist: "Structured production dossier:\n## pending-protagonist-name\n- aliases: 主角",
+    style: "场景优先，克制。",
+  }
+  const masterOutline = [
+    "# Production Master Outline",
+    "",
+    "## Story Promise",
+    "沈渡在档案库核对税册，发现父亲旧债和司天监气象记录指向同一处矛盾。",
+    "",
+    "## Character Spine",
+    "### 沈渡（主角）",
+    "- 身份：府衙档案小吏。",
+    "- 核心欲望：查清父亲旧债背后的账册矛盾。",
+    "- 行为习惯：核档前先洗手，把笔搁在砚台右侧。",
+    "### 陈渡（恩人）",
+    "- 身份：冷案司司务，沈渡父亲死后收留过他。",
+    "### 赵序（旧友）",
+    "- 身份：户部书办，掌握注销底档。",
+    "### 章禄（债务压力）",
+    "- 身份：巡库小吏，知道沈渡越权调卷。",
+    "",
+    "## Character State Ledger Plan",
+    "| 角色 | 章节开始状态 | 章节结束状态 | 状态变化载体 |",
+    "|---|---|---|---|",
+    "| 沈渡 | 想低调还债 | 被迫独自查证 | 私藏税册残页 |",
+    "| 陈渡 | 恩人 | 可能遮掩真相 | 避开沈渡的问题 |",
+    "| 赵序 | 旧友 | 信任裂开 | 沉默不答 |",
+    "| 章禄 | 旁观 | 发出警告 | 递还借据 |",
+  ].join("\n")
+
+  const storyAssets = createProductionStoryBibleAssets(created.state, context, resources, { masterOutline })
+  const characterDynamics = storyAssets.find((asset) => asset.filename === "character-dynamics.md").content
+  const worldMatrix = storyAssets.find((asset) => asset.filename === "world-matrix.md").content
+  assert.match(characterDynamics, /主角：沈渡/)
+  assert.match(characterDynamics, /核心人物：沈渡、陈渡、赵序、章禄/)
+  assert.doesNotMatch(characterDynamics, /### 角色1/)
+  assert.doesNotMatch(characterDynamics, /relationship-axis/)
+  assert.doesNotMatch(worldMatrix, /沈渡想要Must embody/)
+
+  const paths = {
+    workspaceDir: path.join(created.project.projectRoot, ".ai-novel"),
+    plansDir: path.join(created.project.projectRoot, ".ai-novel", "plans"),
+    reportsDir: path.join(created.project.projectRoot, ".ai-novel", "reports"),
+    chaptersDir: path.join(created.project.projectRoot, ".ai-novel", "chapters"),
+    memoryDir: path.join(created.project.projectRoot, ".ai-novel", "memory"),
+    styleDir: path.join(created.project.projectRoot, ".ai-novel", "style"),
+    styleProfilePath: path.join(created.project.projectRoot, ".ai-novel", "style", "profile.md"),
+    styleRulebookPath: path.join(created.project.projectRoot, ".ai-novel", "style", "rulebook.md"),
+    styleReferencesPath: path.join(created.project.projectRoot, ".ai-novel", "style", "references.md"),
+    styleAntiPatternsPath: path.join(created.project.projectRoot, ".ai-novel", "style", "anti-patterns.md"),
+    consensusPath: path.join(created.project.projectRoot, ".ai-novel", "prompts", "global-consensus.md"),
+    protagonistPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "core", "protagonist.md"),
+    relationsPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "relations.md"),
+    characterEvolutionPath: path.join(created.project.projectRoot, ".ai-novel", "memory", "characters", "evolution.md"),
+    masterOutlinePath: path.join(created.project.projectRoot, ".ai-novel", "plans", "master-outline.md"),
+    chapterBlueprintsDir: path.join(created.project.projectRoot, ".ai-novel", "plans", "chapter-blueprints"),
+  }
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  for (const asset of storyAssets) {
+    await fs.writeFile(path.join(paths.plansDir, asset.filename), `${asset.content}\n`)
+  }
+  const chapterFour = created.state.plan.chapterTasks[3]
+  const storyAssetContext = await loadProductionStoryAssetContext(paths, chapterFour, 2200)
+  const blueprint = createDetailedChapterBlueprint(created.state, chapterFour, context, resources, undefined, storyAssetContext)
+  assert.match(blueprint, /Canonical protagonist: 沈渡/)
+  assert.match(blueprint, /Contract status: ready/)
+  assert.match(blueprint, /Locked protagonist: 沈渡/)
+  assert.match(blueprint, /Known cast: 沈渡、陈渡、赵序、章禄/)
+  assert.doesNotMatch(blueprint, /Contract status: blocked/)
+  assert.doesNotMatch(blueprint, /首章待锁定/)
+  assert.doesNotMatch(blueprint, /Known cast: none/)
 })
 
 test("writing resource gate blocks idiom stacking and accepts concrete skill-style prose", async () => {
@@ -10721,6 +12821,395 @@ test("character profile gate ignores abstract ledger terms in known cast", async
   assert.doesNotMatch(gate.reason, /关系\(缺少/)
 })
 
+test("character profile gate ignores chapter hook labels in known cast", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李远", "周掌柜", "章末期待", "后续期待"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+  }
+
+  const draft = [
+    "## Final Body",
+    "李远把缺页田册压在灯下，指腹停在旧印章的湿痕上。",
+    "周掌柜退到门边，低声道：「小李大人，外头的人只问账，不问命。」",
+    "李远没有让章末期待替他做决定，只把后续期待落在门外脚步和半枚官印上。",
+    "他吹低油灯，决定先藏起缺页，再让周掌柜去拦住院外的人。",
+  ].join("\n")
+
+  const gate = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gate.status, "eligible")
+  assert.doesNotMatch(gate.reason, /章末期待\(缺少|后续期待\(缺少/)
+})
+
+test("known cast sanitizer keeps concrete names and removes workflow vocabulary", async () => {
+  const { sanitizeKnownCastNames } = await loadCore()
+  const cast = sanitizeKnownCastNames([
+    "李远",
+    "周掌柜",
+    "成兵曹",
+    "Steward Song",
+    "story",
+    "foreshadowing",
+    "worldbuilding",
+    "continuity",
+    "canon",
+    "memory",
+    "dossier",
+    "contract",
+    "asset",
+    "minor",
+    "archive",
+    "clerk",
+    "ledgers",
+    "成语",
+    "余波",
+    "支持角色状态计划",
+    "钱主事的调离令",
+    "被删改的原始地契",
+    "开始",
+    "来源",
+    "身份",
+    "矛盾",
+    "话语标记",
+    "形象",
+    "技能",
+    "边界",
+    "关系压力轴",
+    "陈渡失",
+    "章末期待",
+    "关系网络",
+    "主线线索",
+    "陈述句",
+    "东奔西撞",
+    "胡斯畏忌",
+    "时候",
+    "常年",
+    "方言",
+    "沈槐坐",
+    "沈槐点头",
+    "沈砚蹲",
+    "沈砚搁",
+    "沈砚低头",
+    "沈砚搁下",
+    "沈砚走",
+    "沈砚走到",
+    "上回",
+    "黄昏",
+    "余光",
+    "沈砚没",
+    "朱砂编号",
+    "顾大人",
+    "周印",
+    "那些",
+    "查的",
+    "他是因为复制这些",
+    "入侵者按错误年份",
+    "第一弧",
+    "第二弧",
+    "第三卷",
+    "Arc 2",
+    "pending-protagonist-name",
+    "待冻结主角",
+    "时宜",
+    "胡家",
+    "时再次",
+    "时再来",
+    "关好门",
+    "关上门",
+    "司农监",
+    "尚书省",
+    "考功司",
+    "钦天监",
+  ])
+
+  assert.deepEqual(cast, ["李远", "周掌柜", "成兵曹", "Steward Song"])
+})
+
+test("unplanned character drift gate blocks key names invented during drafting", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈渡",
+    requiredNames: ["沈渡"],
+    knownCast: ["沈渡", "张砚"],
+  }
+  const draft = [
+    "## Final Body",
+    "沈渡把错页税册压在灯下，张砚站在门口，没有立刻说话。",
+    "时再兴是上一任乙字库库使，三年前教过沈渡辨纸。",
+    "张砚压低声音问：「你怎么会认识时再兴的印？」",
+    "沈渡没有回答，只把那页纸塞进袖口。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "quarantined")
+  assert.match(result.reason, /时再兴/)
+})
+
+test("unplanned character drift gate ignores Chinese prose shard false positives", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "陈渡",
+    requiredNames: ["陈渡", "余良", "王守约"],
+    knownCast: ["陈渡", "余良", "王守约"],
+  }
+  const draft = [
+    "## Final Body",
+    "永和七年广阳郡夏税，应该接在六月账目之后。",
+    "这页夹在三月的册页里，像一枚错位的骨节。",
+    "门关着，走廊里有人走动，蝉声闷得人太阳穴发胀。",
+    "陈渡盯着那片空白看了三个呼吸的时间。",
+    "余良压低声音问：「你们库房那批永和七年的档案，有没有被人动过？」",
+    "王守约把调卷簿转过半圈，调卷人一栏填上陈渡。",
+    "陈渡想了一下，知道自己向不会被允许偷偷送回这本册子。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "eligible")
+  assert.equal(result.risks.some((risk) => ["阳郡夏", "位的骨", "关着", "阳穴发", "向不会", "陈渡盯"].includes(risk.name)), false)
+})
+
+test("unplanned character drift gate ignores temporal words and protagonist action fragments", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈砚",
+    requiredNames: ["沈砚"],
+    knownCast: ["沈砚", "范思远", "沈蘅"],
+  }
+  const draft = [
+    "## Final Body",
+    "上回那枚湿印还压在纸缝里，沈砚走到案前，指腹慢慢摸过页角。",
+    "范思远把铜钥匙搁在案角，低声道：「有些卷宗，翻太深容易伤到手。」",
+    "沈砚走回门边，又停住，把钥匙收进袖口。",
+    "黄昏压到窗纸上，沈砚没有立刻开口，只把账册合上。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "eligible")
+  assert.doesNotMatch(result.reason, /上回|沈砚走|黄昏|沈砚没/)
+})
+
+test("unplanned character drift gate ignores known cast suffix fragments and gaze nouns", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈砚",
+    requiredNames: ["沈砚", "沈蘅", "范思远"],
+    knownCast: ["沈砚", "沈蘅", "范思远"],
+  }
+  const draft = [
+    "## Final Body",
+    "门推开时沈砚没抬头。余光里，范思远身后跟着两个人，一个穿着库司青衫。",
+    "他推开家门时，沈蘅正站在桌前，背对着他用裁纸刀顺着旧纸折缝划开。",
+    "沈蘅放下刀转过身来，目光平直地停在他脸上。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "eligible")
+  assert.doesNotMatch(result.reason, /沈蘅正|余光/)
+})
+
+test("unplanned character drift gate ignores known cast action suffixes while blocking invented clerks", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈砚",
+    requiredNames: ["沈砚", "沈蘅", "范思远"],
+    knownCast: ["沈砚", "沈蘅", "范思远"],
+  }
+  const draft = [
+    "## Final Body",
+    "沈蘅摇头：「夹板里就这一张，底下的旧信烧了大半。」",
+    "胡书办。胡书办伸出手，把册页收走，没有留下调令。",
+    "沈砚看着门槛，没有把袖中的纸角交出去。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "quarantined")
+  assert.match(result.reason, /胡书办/)
+  assert.doesNotMatch(result.reason, /沈蘅摇/)
+})
+
+test("unplanned character drift gate filters place and time terms while blocking invented people", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈砚",
+    requiredNames: ["沈砚", "沈蘅", "范思远", "娄鹤亭"],
+    knownCast: ["沈砚", "沈蘅", "范思远", "娄鹤亭"],
+    characterLedger: "沈蘅是沈砚的妹妹，负责承担家庭债务压力。",
+    prompt: "",
+  }
+  const draft = [
+    "## Final Body",
+    "沈砚把丁酉年的东南路税册压在灯下，指尖停了三个呼吸的时间。",
+    "范思远站在门口，没有提娄鹤亭，只问沈砚是否还要继续查。",
+    "周书吏从架后走出来，说自己姓周名逢，常在外库抄录名册。",
+    "沈砚看着周逢，没有把袖中的夹纸交出去。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "quarantined")
+  assert.match(result.reason, /周书吏|周逢/)
+  assert.doesNotMatch(result.reason, /东南路/)
+  assert.doesNotMatch(result.reason, /丁酉年/)
+  assert.doesNotMatch(result.reason, /时间/)
+})
+
+test("unplanned character drift gate blocks known cast identity conflicts", async () => {
+  const { evaluateUnplannedCharacterDrift } = await loadCore()
+  const contract = {
+    lockedProtagonistName: "沈砚",
+    requiredNames: ["沈砚", "沈蘅", "范思远"],
+    knownCast: ["沈砚", "沈蘅", "范思远"],
+    characterLedger: "沈蘅是沈砚的妹妹，靠替人抄契还债。",
+    prompt: "关系锚：妹妹沈蘅要求沈砚保全家人。",
+  }
+  const draft = [
+    "## Final Body",
+    "范思远把油灯放在案上，低声说：「你父亲沈蘅，司天监五官司历，案子就是丁酉年结的。」",
+    "沈砚没有回答，袖口里的夹纸压着手腕。",
+  ].join("\n")
+
+  const result = evaluateUnplannedCharacterDrift(draft, contract)
+  assert.equal(result.status, "quarantined")
+  assert.match(result.reason, /人物身份冲突/)
+  assert.match(result.reason, /沈蘅/)
+})
+
+test("quality report ignores polluted character dossiers when building cast gate", async () => {
+  const { createQualityReport } = await loadCore()
+  const task = {
+    chapterNumber: 1,
+    title: "雨档",
+    targetWords: 80,
+    causalPlan: {
+      requiredContinuityAnchors: ["雨册", "铁扣"],
+    },
+  }
+  const state = {
+    project: { title: "雨档", idea: "审雨官核对百年雨档" },
+    runtime: { stage: "drafting" },
+    memory: {
+      characterDossiers: ["顾夜舟", "沈槐", "余波", "常年", "方言", "沈槐坐", "朱砂编号"].map((name, index) => ({
+        id: index === 0 ? "protagonist" : `supporting-${name}`,
+        canonicalName: name,
+        aliases: [name],
+        role: index === 0 ? "protagonist" : "supporting",
+        identityAndRole: `${name} identity`,
+        coreDesire: `${name} desire`,
+        fearOrWound: `${name} wound`,
+        contradiction: `${name} contradiction`,
+        behaviorHabits: [`${name} habit`],
+        speechMarkers: [`${name} speech`],
+        appearanceAndBody: `${name} body`,
+        skills: [`${name} skill`],
+        limitations: [`${name} limit`],
+        relationshipState: `${name} relationship`,
+        relationshipEdges: [],
+        arcTrajectory: `${name} arc`,
+        currentChapterDelta: `${name} delta`,
+        continuityNotes: [],
+        evidence: [],
+        updatedAt: "2026-07-12T00:00:00.000Z",
+      })),
+    },
+    plan: { totalChapters: 1, chapterTasks: [task] },
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "## Previous Inputs",
+    "首章建立雨册异常。",
+    "## Causal Objective",
+    "顾夜舟决定保留铁扣并追查雨册。",
+    "## Irreversible Change",
+    "沈槐承认周逢春留下过铁扣。",
+    "## Character State Delta",
+    "顾夜舟和沈槐的信任提前表态。",
+    "## Required Continuity Anchors",
+    "- 雨册",
+    "- 铁扣",
+    "## Next Chapter Handoff",
+    "子时回档案房。",
+    "Event Sequence",
+  ].join("\n")
+  const draft = [
+    "## Final Body",
+    "顾夜舟把雨册按在桌角，决定先保住铁扣，再去查档案房后门。",
+    "沈槐站在灶台边，袖口蹭着草药袋，低声道：「我不知道能不能兜住你。」",
+    "顾夜舟看着他：「那就今晚子时，把钥匙带来。」",
+    "沈槐没有退，反而把铁扣推回顾夜舟掌心；这一下让两个人的信任都不能再装作没发生。",
+  ].join("\n")
+
+  const report = createQualityReport(state, task, draft, blueprint)
+  assert.doesNotMatch(report, /常年\(缺少|方言\(缺少|沈槐坐|朱砂编号/)
+  assert.doesNotMatch(report, /余波\(缺少|Known cast: .*余波/)
+})
+
+test("continuity contract filters abstract vocabulary out of known cast candidates", async () => {
+  const { createContinuityContract } = await loadCore()
+  const task = {
+    chapterNumber: 1,
+    title: "缺页账本",
+    status: "pending",
+    summary: "沈砚追查雨账。",
+    targetWords: 2500,
+  }
+  const state = {
+    project: {
+      title: "雨账",
+      idea: "一名审雨官发现降雨记录被篡改",
+      createdAt: "2026-06-25T00:00:00.000Z",
+      workspaceVersion: 1,
+    },
+    runtime: {
+      stage: "drafting",
+      statusMessage: "",
+      lastUpdatedAt: "2026-06-25T00:00:00.000Z",
+      lastInterruption: null,
+    },
+    reactSetup: { discussionGoals: [], unansweredQuestions: [] },
+    plan: {
+      totalChapters: 2,
+      chapterWordTarget: 2500,
+      pendingChapters: 2,
+      chapterTasks: [task],
+    },
+    assets: {
+      cover: { status: "pending", briefPath: "" },
+      comic: { status: "pending", planPath: "" },
+    },
+  }
+  const contract = createContinuityContract({
+    state,
+    task,
+    context: {
+      consensus: [
+        "### Known Cast",
+        "- 成语",
+        "- 章末期待",
+        "- 关系网络",
+        "- 东奔西撞",
+        "- 沈砚站在账房里问话。",
+      ].join("\n"),
+    },
+    protagonistProfile: "姓名：沈砚\n身份：审雨官\n周掌柜负责账房。",
+    blueprint: "## Current Scene Card\n- Required characters: 沈砚、周掌柜、章末钩子、关系裂缝",
+  })
+
+  assert.ok(contract.knownCast.includes("沈砚"))
+  assert.ok(contract.knownCast.includes("周掌柜"))
+  assert.ok(!contract.knownCast.includes("成语"))
+  assert.ok(!contract.knownCast.includes("章末期待"))
+  assert.ok(!contract.knownCast.includes("关系网络"))
+  assert.ok(!contract.knownCast.includes("东奔西撞"))
+  const knownCastSection = contract.prompt.match(/### Known Cast Candidates\n(?<section>[\s\S]*?)\n\n### Continuity Anchors/u)?.groups?.section || ""
+  assert.match(knownCastSection, /- 沈砚/)
+  assert.match(knownCastSection, /- 周掌柜/)
+  assert.doesNotMatch(knownCastSection, /- 成语|- 章末期待|- 关系网络|- 东奔西撞/)
+})
+
 test("quality report accepts causal execution shown through concrete scene evidence", async () => {
   const { createQualityReport } = await loadCore()
   const task = {
@@ -10774,6 +13263,61 @@ test("quality report accepts causal execution shown through concrete scene evide
   const report = createQualityReport(state, task, draft, blueprint)
   assert.match(report, /因果合同执行 \| 8\/10/)
   assert.doesNotMatch(report, /正文没有清晰执行承接-选择-代价-交棒/)
+})
+
+test("quality report accepts abstract causal anchors proven by scene objects", async () => {
+  const { createQualityReport } = await loadCore()
+  const task = {
+    chapterNumber: 1,
+    title: "Chapter 1",
+    targetWords: 250,
+    causalPlan: {
+      previousInput: "承接设定冻结结论，档案小吏牵出证据异常。",
+      sceneObjective: "围绕档案小吏、档案库、税册和不可能矛盾打开压力。",
+      protagonistDecision: "沈砚必须在保住职位还是保住证据之间做出选择。",
+      irreversibleConsequence: "名字进入调卷簿，证据被扣下，关系压力延续到下一章。",
+      nextHandoff: "下一章必须处理调卷簿签名、半枚湿印和被扣下的纸块。",
+      requiredContinuityAnchors: ["主角唯一身份", "核心缺口", "第一枚主线线索"],
+      characterStateDelta: "沈砚与范思远的信任提前裂开。",
+      foreshadowingOperation: "新增一个可追踪伏笔，并明确它与主线或角色伤口的关系。",
+    },
+  }
+  const state = {
+    project: { title: "雨档", idea: "档案小吏发现税册与天气记录互相矛盾" },
+    runtime: { stage: "drafting" },
+    plan: { totalChapters: 12, chapterTasks: [task] },
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "## Previous Inputs",
+    task.causalPlan.previousInput,
+    "## Causal Objective",
+    task.causalPlan.sceneObjective,
+    "## Irreversible Change",
+    task.causalPlan.irreversibleConsequence,
+    "## Character State Delta",
+    task.causalPlan.characterStateDelta,
+    "## Required Continuity Anchors",
+    "- 主角唯一身份",
+    "- 核心缺口",
+    "- 第一枚主线线索",
+    "## Next Chapter Handoff",
+    task.causalPlan.nextHandoff,
+    "Event Sequence",
+  ].join("\n")
+  const draft = [
+    "## Final Body",
+    "沈书吏站在外库桌边，指腹停在丁酉年税册的纸缝上。前页是六月十四临安县入账，后页却跳到二月廿六饶州茶税，中间隔了四个月。",
+    "他抽出乙档核对，饶州茶税额一个写七千三百贯，一个写七千一百贯。差了两百贯，数字底下的横笔像故意拖长，遮住了纸面原来的缺口。",
+    "范思远把簿子推到他面前，低声道：「收下这角纸，当没看见。」",
+    "沈砚看着那枚纸块，最后把它收进袖口。他选择保住证据，调卷簿上那一行名字也再擦不干净。",
+    "日光落到门槛上时，他翻开调卷簿，看见自己的签名旁边多出一行底档副本。纸缝里露出半枚暗红湿印，水汽还没干。",
+    "他把纸块往袖口深处塞了塞。那枚湿印不会是最后一件他摸到的东西。",
+  ].join("\n")
+
+  const report = createQualityReport(state, task, draft, blueprint)
+  assert.match(report, /因果合同执行 \| 8\/10/)
+  assert.match(report, /锚点=主角唯一身份、核心缺口、第一枚主线线索/)
 })
 
 test("quality report blocks specific foreshadowing operations missing from prose", async () => {
@@ -11002,6 +13546,245 @@ test("character voice gate accepts distinct dossier-backed speech and habits", a
   assert.match(gateResult.reason, /角色差异化通过/)
 })
 
+test("character voice gate recognizes concealed evidence choices as profile pressure", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["沈砚", "范思远"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "沈砚",
+        aliases: [],
+        behaviorHabits: ["指腹摸过纸缝"],
+        speechMarkers: [],
+        skills: ["复核档案编号"],
+        limitations: ["不能当场交出缺页"],
+        relationshipState: "父亲旧案与税册缺页牵连",
+      },
+      {
+        canonicalName: "范思远",
+        aliases: [],
+        behaviorHabits: ["提着铁锁"],
+        speechMarkers: ["当没看见"],
+        relationshipState: "用调卷压力逼沈砚沉默",
+      },
+    ],
+  }
+
+  const draft = [
+    "## Final Body",
+    "沈砚指腹摸过纸缝，发现税册与入库记录之间夹着半枚页角。那枚朱砂指印像父亲借据上的尾痕，他不能当场交出去。",
+    "他把页角攥进手心，又折成小方块塞进腰带暗缝，取出一块废纸边压在竹尺下，准备让人看见另一个答案。",
+    "范思远提着铁锁进门，翻到税册那一页，把两本册子带走，低声道：「小沈，刚才那个出入，你当没看见。」",
+    "沈砚没有回答，只按住腰侧那枚缺页；范思远没有再逼问，却把调卷簿上的名字留给了他。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.match(gateResult.reason, /角色差异化通过/)
+})
+
+test("character voice gate accepts concrete cast pressure when legacy dossier relation is workflow noise", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["沈砚", "沈蘅", "范思远"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "沈蘅",
+        aliases: [],
+        behaviorHabits: ["袖子卷到肘弯以上"],
+        speechMarkers: ["你袖袋里装了什么"],
+        skills: ["看出沈砚藏了东西"],
+        limitations: ["家里会被丁酉年档案牵连"],
+        relationshipState: "chapter 1: 已执行快速生产硬门禁：字数、主角、角色档案、连续性、因果合同、资源吸收和自然度规则。",
+        relationshipEdges: [
+          { targetId: "protagonist", label: "observed with", pressure: "chapter 1: NaturalnessAgent 目标：减少解释性模板句，增强动作、感官、对白、角色习惯、关系压力和具体选择。" },
+        ],
+      },
+      {
+        canonicalName: "范思远",
+        aliases: [],
+        behaviorHabits: ["用指腹捻着封面的书角"],
+        speechMarkers: ["你是想活着离开这座库房"],
+        skills: ["调走丁酉年副本"],
+        limitations: ["不能让沈砚带走湿印证据"],
+        relationshipState: "chapter 1: 已执行快速生产硬门禁：字数、主角、角色档案、连续性、因果合同、资源吸收和自然度规则。",
+        relationshipEdges: [
+          { targetId: "protagonist", label: "observed with", pressure: "needs relationship pressure enrichment" },
+        ],
+      },
+    ],
+  }
+
+  const draft = [
+    "## Final Body",
+    "沈砚裹紧外袍走出院门时，伙房檐下蹲着沈蘅。她袖子卷到肘弯以上，正把手浸在水缸里洗布巾。",
+    "沈蘅拧干布巾，目光先扫过沈砚的脸，最后定在他肋下那个位置，低声问：「你袖袋里装了什么？」",
+    "沈砚没有回答。沈蘅往前走了一步：「范思远调走了丁酉年的册子。你看出了东西，有人不想让人知道你看出过。」",
+    "门推开了。范思远坐在沈砚的位置上，面前摊着三本丁酉年副本，一只手压在封面上，用指腹捻着封面的书角。",
+    "范思远把那页纸翻过来，露出湿印，低声道：「你是想活着离开这座库房，还是想死在这里头？」",
+    "沈砚把手从衣缝里抽出来，指尖夹着泛黄的裁边放在桌上；范思远拿起纸页，捏纸的手指放轻了。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.doesNotMatch(gateResult.reason, /角色档案关系压力未驱动行动|角色差异化不足/)
+})
+
+test("character voice gate does not assign an observed speaker quote to the viewpoint character", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["沈砚", "范思远"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "沈砚",
+        aliases: [],
+        behaviorHabits: ["指腹慢慢摸过页角"],
+        speechMarkers: ["对得上"],
+        skills: ["核对丁酉年税册"],
+        limitations: ["不再是只管入库出库的小吏"],
+        relationshipState: "chapter 1: relationship pressure follows 角色状态必须发生可追踪变化：信任被迫提前表态，并围绕「档案库」发生。",
+      },
+      {
+        canonicalName: "范思远",
+        aliases: [],
+        behaviorHabits: ["按住卷宗"],
+        speechMarkers: ["我在说规矩"],
+        skills: ["调丁酉年河道奏报底本"],
+        limitations: ["不能让税册异常直接上报"],
+        relationshipState: "chapter 1: relationship pressure follows 角色状态必须发生可追踪变化：信任被迫提前表态，并围绕「档案库」发生。",
+      },
+    ],
+  }
+
+  const draft = [
+    "## Final Body",
+    "沈砚坐在长案前，指腹慢慢摸过页角，发现丁酉年税册少了一页。",
+    "范思远推门进来，没走向东架，停在门框边，目光先在案面堆叠的税册上扫了一圈：「今日要调丁酉年的河道奏报底本。」",
+    "沈砚没起身，抽出腰侧钥匙磕了磕桌面：「东架第三排，去年刚重新编号过。」",
+    "范思远抽出卷宗，走回案前，搁在上面却不松手。沈砚看见他指腹上有块暗红色的旧疤，被纸张长久磨出的痕迹。",
+    "「司农监最近在查元庆十到二十年的粮税底账，」范思远声音压低了，「有人递了条子，说有几年的账目对不上。你要是翻到什么东西，先别急着往上报。」",
+    "沈砚抬起头看他：「范大人这算是提醒我？」",
+    "「我在说规矩。」范思远松开按住卷宗的手，从腰间摸出一枚铜钥匙搁在案角。",
+    "沈砚拾起钥匙，又把钥匙搁回案角，没动。要么封存，当什么都没发现；要么查下去，但从此不再是只管入库出库的小吏。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.doesNotMatch(gateResult.reason, /跨角色对白复用|角色档案关系压力未驱动行动|角色差异化不足/)
+})
+
+test("character voice gate does not assign a quoted line to a nearby observed character", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["沈砚", "范思远", "沈蘅"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "沈砚",
+        aliases: [],
+        behaviorHabits: ["指腹沿着纸缝缓缓摸过"],
+        speechMarkers: [],
+        skills: ["识别档案装订异常"],
+        limitations: ["不能直接交出税册"],
+        relationshipState: "父亲旧案与税册夹页牵连",
+      },
+      {
+        canonicalName: "范思远",
+        aliases: [],
+        behaviorHabits: ["端着粗瓷茶碗"],
+        speechMarkers: ["你自己掂量"],
+        skills: ["用钥匙和时间试探沈砚"],
+        limitations: ["不能明说调卷风险"],
+        relationshipState: "用帮忙换取沈砚沉默",
+      },
+      {
+        canonicalName: "沈蘅",
+        aliases: [],
+        behaviorHabits: ["补袖子"],
+        speechMarkers: ["你翻窗出来的"],
+        skills: ["保管父亲留下的麻纸"],
+        limitations: ["家里会被税册旧案牵连"],
+        relationshipState: "替沈砚把税册放回库房",
+      },
+    ],
+  }
+  const draft = [
+    "## Final Body",
+    "沈砚翻开第三册丁酉年河南道雨水呈报，指腹沿着纸缝缓缓摸过，发现骑缝章完整，装订线却断过。",
+    "走廊里又响起脚步声。范思远去而复返，端着一只粗瓷茶碗，靠在门框上喝了一口，目光落在地面的阳光上。",
+    "「有几册卷宗封皮潮了。」沈砚说。声音比平时低了一度，他控制住了语气。",
+    "范思远又喝了一口茶，把碗沿搁在嘴唇上，慢慢转过脸来，看了沈砚一眼。「有些东西，翻出来容易，放回去难。你自己掂量。」",
+    "沈砚把夹页折起，压入袖口内侧，合上封面，把整册税册抱在怀里。",
+    "沈蘅坐在门槛上补袖子，看见沈砚从巷口出来，只问：「你翻窗出来的。」",
+    "她接过税册，抱在胸口，替沈砚往库房方向走去。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.doesNotMatch(gateResult.reason, /跨角色对白复用|角色差异化不足/)
+})
+
+test("character profile gate ignores placeholder relationship pressure dossiers", async () => {
+  const { evaluateCharacterProfilePresence } = await loadCore()
+  const contract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["陈渡", "王守约", "余良", "郑四"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: ["陈渡", "王守约", "余良", "郑四"].map((name) => ({
+      canonicalName: name,
+      aliases: [],
+      behaviorHabits: [],
+      speechMarkers: [],
+      skills: [],
+      limitations: [],
+      relationshipState: "Observed around 陈渡 in 第 1 章; relationship pressure pending.",
+      relationshipEdges: [
+        { targetId: "protagonist", label: "observed with", pressure: "needs relationship pressure enrichment" },
+      ],
+    })),
+  }
+
+  const draft = [
+    "## Final Body",
+    "陈渡把有针眼的税册压在桌角，决定先抄下那页数字，再把册子放回木箱。",
+    "王守约站在门槛后，靛蓝色调卷簿压在掌心，说：「小陈，今天这页，当没看见。」",
+    "余良把木箱推回架下，低声道：「明早放回去，今天我没见过你。」",
+    "郑四提着纸笼灯站在门外，没有拦人，只把光移到陈渡脚边。",
+    "陈渡没有把抄录纸交出去，反而折进贴身暗袋，走过王守约身边。",
+  ].join("\n")
+
+  const gateResult = evaluateCharacterProfilePresence(draft, contract)
+  assert.equal(gateResult.status, "eligible")
+  assert.doesNotMatch(gateResult.reason, /角色档案关系压力未进入行动|角色差异化不足/)
+})
+
 test("character relationship pressure gate quarantines generic tension without dossier terms", async () => {
   const { evaluateCharacterProfilePresence } = await loadCore()
   const contract = {
@@ -11144,6 +13927,121 @@ test("naturalness report flags flattened dialogue voices", async () => {
 
   assert.equal(report.status, "needs_revision")
   assert.match(report.reason, /同质化|角色差异化不足|角色鲜明度不足/)
+})
+
+test("naturalness report ignores narrative ordinal objects", async () => {
+  const { createNaturalnessReport } = await loadCore()
+  const task = { chapterNumber: 1, title: "Chapter 1", targetWords: 2500 }
+  const state = {
+    project: { title: "Test", idea: "Test idea" },
+    runtime: { stage: "drafting" },
+    plan: { chapterTasks: [task] }
+  }
+  const continuityContract = {
+    lockedProtagonistName: "李延",
+    requiredNames: ["李延", "宋管事"],
+    knownCast: ["李延", "宋管事"],
+    continuityAnchors: [],
+    previousChapterLedger: []
+  }
+  const characterProfileContract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["低头"],
+        speechMarkers: ["不能"],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["退到门边"],
+        speechMarkers: ["知罪"],
+      }
+    ]
+  }
+  const narrativeOrdinals = [
+    "## Final Body",
+    "李延把第一条备注压在账册下，手指第二个关节被木刺划疼。他低头看向倒数第二格，那里夹着第三册税簿的缺页。",
+    "宋管事退到第一张桌面后，拨动第一行算盘珠，又指了指第二行第三个字，低声道：「知罪，大人，这页不能交。」",
+    "冷灯贴着袖口晃了一下，李延握住账册，决定逼他交出剩下半枚官印。"
+  ].join("\n")
+
+  const report = createNaturalnessReport({
+    beforeDraft: narrativeOrdinals,
+    afterDraft: narrativeOrdinals,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract
+  })
+
+  assert.doesNotMatch(report.riskFlags.join("\n"), /分析报告腔信号过多/)
+})
+
+test("naturalness report still flags report-style analytic connectors", async () => {
+  const { createNaturalnessReport } = await loadCore()
+  const task = { chapterNumber: 1, title: "Chapter 1", targetWords: 2500 }
+  const state = {
+    project: { title: "Test", idea: "Test idea" },
+    runtime: { stage: "drafting" },
+    plan: { chapterTasks: [task] }
+  }
+  const continuityContract = {
+    lockedProtagonistName: "李延",
+    requiredNames: ["李延", "宋管事"],
+    knownCast: ["李延", "宋管事"],
+    continuityAnchors: [],
+    previousChapterLedger: []
+  }
+  const characterProfileContract = {
+    status: "ready",
+    requiredFields: [],
+    knownCast: ["李延", "宋管事"],
+    missingSignals: [],
+    dossierBrief: "",
+    profileBrief: "",
+    prompt: "",
+    characterDossiers: [
+      {
+        canonicalName: "李延",
+        aliases: [],
+        behaviorHabits: ["按住桌角"],
+        speechMarkers: ["不能"],
+      },
+      {
+        canonicalName: "宋管事",
+        aliases: [],
+        behaviorHabits: ["退到门边"],
+        speechMarkers: ["知罪"],
+      }
+    ]
+  }
+  const reportLikeDraft = [
+    "## Final Body",
+    "首先，李延按住桌角的选择说明了局势变化。其次，宋管事退到门边体现了关系压力。",
+    "最后，可以看出缺页田册仍是核心。原因是半枚官印证明了旧案未结。",
+    "从人物动机角度看，这一段说明了李延必须追问，也说明了宋管事不能再隐瞒。",
+    "宋管事低声道：「知罪，大人。」"
+  ].join("\n")
+
+  const report = createNaturalnessReport({
+    beforeDraft: reportLikeDraft,
+    afterDraft: reportLikeDraft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract
+  })
+
+  assert.match(report.riskFlags.join("\n"), /分析报告腔信号过多/)
 })
 
 test("semantic preservation blocks naturalness drift while allowing local prose patches", async () => {

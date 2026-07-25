@@ -48,6 +48,70 @@ function inferFactoryRoot(rootDir) {
   return index >= 0 ? resolved.slice(0, index) || path.parse(resolved).root : resolved
 }
 
+test("style generation verification blocks visibly truncated samples", async () => {
+  const { buildStyleGenerationVerification } = await loadCore()
+  const evaluation = {
+    source: "llm_critic",
+    verdict: "approve",
+    summary: "样段已接近可冻结。",
+    scores: {
+      narrativeVoice: 9,
+      sentenceRhythm: 9,
+      dialogueTexture: 9,
+      informationDensity: 9,
+      emotionalTension: 9,
+      readability: 9,
+      requirementAlignment: 9,
+      forbiddenPatternRisk: 0.2,
+      overall: 9,
+    },
+    strengths: ["动作推进稳定。"],
+    deviations: [],
+    forbiddenHits: [],
+    nextFocus: ["保持当前写法。"],
+    aigc: {
+      enabled: true,
+      status: "passed",
+      score: 0.1,
+      threshold: 0.8,
+      highRiskCount: 0,
+      reason: "fixture passed",
+    },
+  }
+
+  const complete = buildStyleGenerationVerification({
+    evaluation,
+    sample: "雨声压在窗外。沈砚把账册推到灯下，只问一句：谁动过这一页？",
+  })
+  assert.equal(complete.status, "passed")
+
+  const truncated = buildStyleGenerationVerification({
+    evaluation,
+    sample: "雨声压在窗外。沈砚把账册推到灯下，指腹沿着纸边慢慢停住。门外脚步声压低，灯影贴着墙根往下滑，老周把手缩进袖口，纸页",
+  })
+  assert.equal(truncated.status, "blocked")
+  assert.ok(truncated.reasons.some((reason) => /截断/.test(reason)))
+})
+
+test("style candidate prompt overrides stale length instructions from refiner prompts", async () => {
+  const { buildStyleEvolutionCandidatePrompt } = await loadCore()
+  const prompt = buildStyleEvolutionCandidatePrompt({
+    projectTitle: "雨账",
+    idea: "一名审雨官发现降雨记录被篡改",
+    userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    seedPrompt: "继续上一轮场景。节奏上，前半段缓慢，后半段加速。字数控制在2000-3000字之间。",
+    iterationFeedback: "上一轮可以保留，但下一轮字数约800-1000字，结尾更完整。",
+  })
+
+  assert.match(prompt.system, /样段长度控制在 500-700 个中文字符/)
+  assert.match(prompt.system, /忽略旧字数/)
+  assert.match(prompt.system, /最后一个字符必须是完整句读/)
+  assert.match(prompt.user, /忽略其中任何字数/)
+  assert.match(prompt.user, /只写 500-700 个中文字符/)
+  assert.doesNotMatch(prompt.user, /2000-3000字/)
+  assert.doesNotMatch(prompt.user, /800-1000字/)
+})
+
 test("style freeze advice parser repairs trailing unclosed array string", async () => {
   const { parseStyleFreezeAdviceFromText } = await loadCore()
   const parsed = parseStyleFreezeAdviceFromText(`{
@@ -453,6 +517,139 @@ test("style evolution loop stops after evaluator approval without extra refiner 
   }
 })
 
+test("style evolution repairs malformed evaluator json without marking fallback", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-loop-json-repair-"))
+  const { createManagedAutonomousProject } = await loadCore()
+  const { handleNovelStudioApi } = await loadStudioServer()
+  let responsesHit = 0
+  let aigcServer = null
+  const server = http.createServer(async (request, response) => {
+    await readBody(request)
+    if (request.url !== "/responses") {
+      response.writeHead(404).end()
+      return
+    }
+    responsesHit += 1
+    response.writeHead(200, { "content-type": "application/json" })
+    const outputText = responsesHit === 1
+      ? [
+          "沈砚把雨册压在灯下，纸边的水痕已经干透，只剩一道浅白的圈。",
+          "赵典簿端着冷茶进来，没有先看他，反倒把茶盏搁在承办格旁边，盏底压住半枚旧印。",
+          "“别把这一页摊开。”赵典簿说。",
+          "沈砚把笔放回笔架，指尖没有离开册脊。“已经摊开了。”",
+          "门外皂隶敲了两下门，又停住，像是等里面先给一句准话。",
+          "赵典簿伸手去够那半枚旧印，袖口擦过茶盏，茶水溅在空白格上。",
+          "沈砚看着那一滴水往下渗，直到它停在本该落签的位置。",
+          "“那就别让第三个人看见。”赵典簿压低声音。",
+          "沈砚把雨册合上，只把湿掉的空白格留在外面。“已经有第三个人听见了。”",
+          "皂隶在门外咳了一声，麻绳轻轻撞着木门。",
+          "赵典簿把茶盏端起来，茶水没有喝，倒进旁边的废纸篓里。",
+          "纸篓里传出一点轻响，像铜扣碰到了瓷沿。",
+          "沈砚没有低头，只把那半枚旧印往袖下推了推。",
+          "“承办格空着，不算错。”赵典簿说。",
+          "“空着才最显眼。”",
+          "门外的皂隶又敲了一下，这次比前一次重。",
+          "赵典簿终于看向门口。“等。”",
+          "沈砚趁这个字落下，把湿掉的页角折进内侧。水痕被压住，只剩一点浅灰。",
+          "皂隶隔着门说：“上房催签，半炷香。”",
+          "赵典簿把茶盏放回原处，盏底正好盖住那点浅灰。",
+          "沈砚抬眼，两个人谁都没谢，也谁都没再问。",
+        ].join("\n")
+      : responsesHit === 2
+        ? "{\"evaluation\":{\"verdict\":\"candidate\",\"summary\":\"样段对白已经起效\",\"scores\":{\"overall\":8.1},\"strengths\":[\"动作清楚\""
+        : responsesHit === 3
+          ? JSON.stringify({
+              evaluation: {
+                verdict: "candidate",
+                summary: "修复后的结构化评价，样段可继续收紧。",
+                scores: {
+                  narrativeVoice: 8,
+                  sentenceRhythm: 8,
+                  dialogueTexture: 8,
+                  informationDensity: 8,
+                  emotionalTension: 8,
+                  readability: 8,
+                  requirementAlignment: 8,
+                  forbiddenPatternRisk: 0.5,
+                  overall: 8.1,
+                },
+                strengths: ["动作清楚。"],
+                deviations: ["还可增加外部压力。"],
+                forbiddenHits: [],
+                nextFocus: ["继续收紧对白。"],
+              },
+            })
+          : responsesHit === 4
+            ? JSON.stringify({
+                refinement: {
+                  summary: "继续强化人物对话和外部压力。",
+                  promptAdjustments: ["增加一次打断。"],
+                  contractAdjustments: ["对白必须改变关系状态。"],
+                  nextPrompt: "写一段被打断的档案库对话。",
+                },
+              })
+            : JSON.stringify({
+                freezeVerdict: "continue",
+                freezeSummary: "还需要一轮。",
+                blockingReasons: ["外部压力不足。"],
+                contractAdjustments: ["增加打断。"],
+                forbiddenPatterns: [],
+                positiveExamples: ["门外皂隶敲门。"],
+                inheritedRules: ["对白必须改变关系。"],
+              })
+    response.end(JSON.stringify({ output_text: outputText }))
+  })
+
+  try {
+    const address = await listen(server)
+    aigcServer = http.createServer(async (request, response) => {
+      await readBody(request)
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ aiProbability: 0.08, label: "human", confidence: 0.92 }))
+    })
+    const aigcAddress = await listen(aigcServer)
+    const created = await createManagedAutonomousProject({
+      rootDir: tempDir,
+      idea: "一名审雨官发现降雨记录被篡改",
+      title: "雨账",
+      totalChapters: 4,
+      chapterWordTarget: 2500,
+    })
+    await writeAigcDetectorSettings(created.project.projectRoot, `http://127.0.0.1:${aigcAddress.port}/detect`)
+    const configResponse = await handleNovelStudioApi(tempDir, "POST", "/api/llm-configs", {
+      name: "JSON Repair Loop Model",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      apiKey: "test-key",
+      modelName: "json-repair-loop-model",
+      apiMode: "responses",
+      timeoutMs: 1000,
+    })
+    assert.equal(configResponse.status, 200)
+
+    const generateResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/generate-candidate", {
+      projectId: created.project.id,
+      userStylePrompt: "克制、冷感、白描，动作和物件推动悬疑。",
+      loopIterations: 1,
+    }, { projectId: created.project.id })
+
+    assert.equal(generateResponse.status, 200)
+    assert.equal(responsesHit, 5)
+    const candidate = generateResponse.payload.loopIteration.candidates[0]
+    assert.equal(candidate.evaluation.source, "llm_critic")
+    assert.equal(candidate.refinement.source, "llm_critic")
+    assert.equal(candidate.freezer.source, "llm_critic")
+    assert.equal(candidate.llmFallbackUsed, false)
+    assert.deepEqual(candidate.fallbackReasons, [])
+    assert.equal(generateResponse.payload.styleEvolution.loopRuntime.iterations[0].llmFallbackUsed, false)
+    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory[0].llmFallbackUsed, false)
+  } finally {
+    await close(server)
+    if (aigcServer) {
+      await close(aigcServer)
+    }
+  }
+})
+
 test("style evolution keeps AIGC verification attached when structured evaluator output replaces heuristic evaluation", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-style-loop-aigc-"))
   const { createManagedAutonomousProject } = await loadCore()
@@ -555,8 +752,9 @@ test("style evolution keeps AIGC verification attached when structured evaluator
       loopIterations: 1,
     }, { projectId: created.project.id })
 
-    assert.equal(generateResponse.status, 409)
+    assert.equal(generateResponse.status, 200)
     assert.equal(generateResponse.payload.error, "style_candidates_all_blocked")
+    assert.equal(generateResponse.payload.status, "blocked")
     const blockedCandidate = generateResponse.payload.loopRun.iterations[0].candidates[0]
     assert.equal(blockedCandidate.evaluation.source, "llm_critic")
     assert.equal(blockedCandidate.evaluation.aigc.status, "blocked")
@@ -801,8 +999,9 @@ test("style evolution loop surfaces AIGC detector diagnostics when URL is missin
       loopIterations: 1,
     }, { projectId: created.project.id })
 
-    assert.equal(generateResponse.status, 409)
+    assert.equal(generateResponse.status, 200)
     assert.equal(generateResponse.payload.error, "style_candidates_all_blocked")
+    assert.equal(generateResponse.payload.status, "blocked")
     const candidate = generateResponse.payload.loopRun.iterations[0].candidates[0]
     assert.equal(candidate.evaluation.aigc.status, "unavailable")
     assert.equal(candidate.evaluation.aigc.provider, "generic-json")
@@ -1123,8 +1322,9 @@ test("style evolution loop does not persist a winner when every candidate is blo
       candidateCount: 2,
     }, { projectId: created.project.id })
 
-    assert.equal(generateResponse.status, 409)
+    assert.equal(generateResponse.status, 200)
     assert.equal(generateResponse.payload.error, "style_candidates_all_blocked")
+    assert.equal(generateResponse.payload.status, "blocked")
 	    assert.equal(generateResponse.payload.loopRun.stopReason, "style_candidates_all_blocked")
 	    assert.equal(generateResponse.payload.styleEvolution.contract.evolutionHistory.length, 0)
     assert.equal(generateResponse.payload.loopRun.iterations[0].candidateScores.length, 2)

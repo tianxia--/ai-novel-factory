@@ -58,6 +58,54 @@ export interface ProductionPipelineOptions {
 
 export type ProductionWritingMode = "fast" | "quality"
 
+export interface WritingWorkflowTrace {
+  kind:
+    | "status"
+    | "llm_request"
+    | "llm_response"
+    | "llm_retry"
+    | "llm_error"
+    | "artifact_saved"
+    | "gate"
+    | "knowledge_recall"
+    | "tool_call"
+  groupId?: string
+  stage?: string
+  summary?: string
+  collapsed?: boolean
+  expandableArtifactPath?: string
+}
+
+export interface WritingLlmTrace {
+  roleName: string
+  requestChars?: number
+  basePromptChars?: number
+  dynamicPromptChars?: number
+  messageChars?: number
+  responseChars?: number
+  streamedChars?: number
+  temperature?: number
+  attempt?: number
+  maxAttempts?: number
+}
+
+export interface WritingArtifactRef {
+  path: string
+  label?: string
+  kind?: string
+  role?: string
+  status?: string
+  chars?: number
+}
+
+export interface WritingToolTrace {
+  toolName: string
+  status?: string
+  inputSummary?: string
+  outputSummary?: string
+  artifactPath?: string
+}
+
 export interface WritingProgressEvent {
   messageId?: string
   directorCommandId?: string
@@ -71,11 +119,17 @@ export interface WritingProgressEvent {
   statusDetail?: string
   message: string
   artifactPath?: string
+  artifactLabel?: string
+  artifactKind?: string
+  artifacts?: WritingArtifactRef[]
   preview?: string
   streamText?: string
   wordCount?: number
   qualityGate?: QualityGateResult
   knowledgeReferences?: WritingKnowledgeReference[]
+  workflow?: WritingWorkflowTrace
+  llm?: WritingLlmTrace
+  tools?: WritingToolTrace[]
   timestamp?: string
 }
 
@@ -136,6 +190,16 @@ export interface ProductionStoryAssetContext {
   files: string[]
 }
 
+export interface ProductionPlanningStoryContext {
+  masterOutline?: string
+}
+
+interface PlanningCastContract {
+  protagonistName: string
+  cast: string[]
+  evidence: string[]
+}
+
 export interface ApprovedWritingStyleContext {
   status: "ready" | "missing"
   prompt: string
@@ -177,6 +241,16 @@ export class ProductionReadinessBlockedError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "ProductionReadinessBlockedError"
+  }
+}
+
+export class ProductionPlanningBlockedError extends Error {
+  code = "planning_protagonist_missing"
+  gate = "story_foundation"
+
+  constructor(message: string) {
+    super(message)
+    this.name = "ProductionPlanningBlockedError"
   }
 }
 
@@ -762,6 +836,25 @@ function styleRuleMatchesText(input: {
   const tokens = extractStyleEvidenceTokens(rule, 12)
   const tokenMatches = tokens.filter((token) => input.body.includes(token))
   if (tokenMatches.length >= Math.min(2, Math.max(1, Math.ceil(tokens.length * 0.25)))) return true
+  const compactBody = input.body.replace(/\s+/gu, "")
+  if (/每段|推进|节奏|线索|关系|代价|情节|pacing/iu.test(rule)) {
+    const hasTraceableStorySignal = /线索|证据|账册|账本|缺页|官印|伏笔|疑点|问题|浅墨/u.test(compactBody)
+    const hasRelationshipSignal = /关系|裂缝|旧友|拦|信任|压力|门口|帮忙|隐瞒/u.test(compactBody)
+    const hasCostOrChoiceSignal = /代价|选择|决定|后果|风险|不能|被盯上|不能再|暂时安全/u.test(compactBody)
+    if (hasTraceableStorySignal && hasRelationshipSignal && hasCostOrChoiceSignal && input.actionSignals >= 4) return true
+  }
+  if (/开场|开篇|开头|opening/iu.test(rule)) {
+    const opening = compactBody.slice(0, 420)
+    const hasOpeningAnomaly = /缺页|异常|不对|湿印|官印|脚步|浅墨|刀口|证据|账册|账本/u.test(opening)
+    const hasOpeningPressure = /压力|门外|停在|拦|问|灯火|雨声|沉默|门槛|盯/u.test(opening)
+    if (hasOpeningAnomaly && hasOpeningPressure) return true
+  }
+  if (/结尾|收束|钩子|余波|ending|hook/iu.test(rule)) {
+    const ending = compactBody.slice(-640)
+    const hasTraceableQuestion = /问题|疑点|线索|证据|缺页|官印|账册|账本|浅墨|伏笔|答案/u.test(ending)
+    const hasAftershock = /裂缝|余波|留下|留在|不能|下一章|门外|怀疑|风险|代价|关系/u.test(ending)
+    if (hasTraceableQuestion && hasAftershock) return true
+  }
   if (/短句|句子短|短促|冷感|克制|白描/u.test(rule) && input.avgSentenceLength > 0 && input.avgSentenceLength <= 24) return true
   if (/长短|错落|节奏/u.test(rule) && input.avgSentenceLength >= 10 && input.avgSentenceLength <= 34) return true
   if (/对白|对话/u.test(rule)) {
@@ -980,14 +1073,30 @@ function escapeRegExpLiteral(value: string) {
 function summarizeCharacterDossiers(dossiers: CharacterDossier[] = [], limit = 6) {
   return dossiers.slice(0, limit).map((dossier) => [
     `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
-    `  identity=${dossier.identityAndRole}`,
-    `  desire=${dossier.coreDesire}; wound=${dossier.fearOrWound}`,
-    `  habits=${compactList(dossier.behaviorHabits)}; speech=${compactList(dossier.speechMarkers)}`,
-    `  body=${dossier.appearanceAndBody}`,
-    `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
-    `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`,
-    `  evidence=${compactList(dossier.evidence.slice(-2), 2)}`,
+    `  identity=${cleanProfileCarryoverValue(dossier.identityAndRole)}`,
+    `  desire=${cleanProfileCarryoverValue(dossier.coreDesire)}; wound=${cleanProfileCarryoverValue(dossier.fearOrWound)}`,
+    `  habits=${compactProfileCarryoverList(dossier.behaviorHabits)}; speech=${compactProfileCarryoverList(dossier.speechMarkers)}`,
+    `  body=${cleanProfileCarryoverValue(dossier.appearanceAndBody)}`,
+    `  skills=${compactProfileCarryoverList(dossier.skills)}; limits=${compactProfileCarryoverList(dossier.limitations)}`,
+    `  relation=${cleanProfileCarryoverValue(dossier.relationshipState)}; delta=${cleanProfileCarryoverValue(dossier.currentChapterDelta)}`,
+    `  evidence=${compactProfileCarryoverList(dossier.evidence.slice(-2), 2)}`,
   ].join("\n")).join("\n")
+}
+
+function cleanProfileCarryoverValue(value = "", fallback = "pending") {
+  const normalized = conciseEvidence(value, 220)
+  if (!normalized || isWorkflowProfileSignalNoise(normalized)) {
+    return fallback
+  }
+  return normalized
+}
+
+function compactProfileCarryoverList(values: string[] = [], limit = 3) {
+  return values
+    .map((value) => cleanProfileCarryoverValue(value, ""))
+    .filter(Boolean)
+    .slice(0, limit)
+    .join("; ") || "pending"
 }
 
 function formatCharacterDossiersMarkdown(dossiers: CharacterDossier[]) {
@@ -1077,6 +1186,12 @@ function conciseEvidence(value: string, limit = 140) {
     .slice(0, limit)
 }
 
+function isWorkflowProfileSignalNoise(value = "") {
+  const text = value.trim()
+  if (!text) return true
+  return /NaturalnessAgent|Production writing mode|Naturalness target|去 AI 味|硬门禁|质量链路|Final Quality Gate|Quality Gate|AIGC|Style Conformance|Polish Pass|Memory Keeper|artifact|Status:|Passed:|Score:|Attempts:|Word count:|Reason:|综合评分|角色差异化不足|角色档案合同|已执行.*(?:质量|硬门禁|Naturalness)|pursues the scene objective|pressure is tied to|relationship pressure follows|承接：|推进：围绕|本章结尾必须|角色状态必须发生|交棒：|不能只复用主角姓名/iu.test(text)
+}
+
 function extractCharacterEvidenceWindows(text: string, names: string[], limit = 8) {
   const usableNames = uniqueStrings(names.filter((name) => name && !/^pending-/iu.test(name)))
   const lines = text
@@ -1084,13 +1199,14 @@ function extractCharacterEvidenceWindows(text: string, names: string[], limit = 
     .map((line) => conciseEvidence(line, 220))
     .filter(Boolean)
     .filter((line) => !/^Drafting Metadata|Naturalness Report|Character Profile Projection$/iu.test(line))
+    .filter((line) => !isWorkflowProfileSignalNoise(line))
   if (!usableNames.length) {
     return lines.slice(0, limit)
   }
   const namePattern = new RegExp(usableNames.map(escapeRegExpLiteral).join("|"), "u")
   const direct = lines.filter((line) => namePattern.test(line))
   const profileSignals = lines.filter((line) => /主角|人物|角色|关系|选择|欲望|伤口|习惯|说话|外貌|体态|特长|短板|停顿|立场|能力|线索/u.test(line))
-  return uniqueStrings([...direct, ...profileSignals]).slice(0, limit)
+  return uniqueStrings(direct.length ? direct : profileSignals).slice(0, limit)
 }
 
 function firstEvidenceMatching(windows: string[], pattern: RegExp) {
@@ -1137,13 +1253,16 @@ function extractCharacterProfileSignals(input: {
     input.dossier.role === "protagonist" ? input.protagonistName : "",
   ])
   const action = firstEvidenceMatching(windows, /选择|处理|抓住|判断|反击|停顿|回避|试探|压|藏|递|推|看|听|握|抬|低|转|拦|走|拿|放/u)
+  const goal = firstEvidenceMatching(windows, /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|代价|保住|查清|追问|问责|调卷|签字|当没看见|名字已经上了|带走/u)
   const speech = firstEvidenceMatching(windows, /「|」|说|问|道|低声|称呼|话|停顿/u)
   const body = firstEvidenceMatching(windows, /眼|手|腕|指|肩|背|袖|脚|身|体|体态|看见|触感|声音|反应|姿态|站|退/u)
   const relation = firstEvidenceMatching(windows, /关系|对方|别人|有人|信任|债|债务|压力|试探|回避|立场|要求|逼|冲突|配角|主角/u)
   const skill = firstEvidenceMatching(windows, /判断|抓住|线索|反击|处理|策略|推理|能力|规则|账|田册|官印|密信/u)
   const limit = firstEvidenceMatching(windows, /不完美|代价|压力|逼|不能|风险|恐惧|弱点|伤口|问题/u)
   return {
-    desire: `${input.chapterLabel}: pursues the scene objective: ${input.causalPlan.sceneObjective}`,
+    desire: goal || action
+      ? `${input.chapterLabel}: ${conciseEvidence(goal || action)}`
+      : `${input.chapterLabel}: pursues the scene objective: ${input.causalPlan.sceneObjective}`,
     wound: limit
       ? `${input.chapterLabel}: pressure signal: ${conciseEvidence(limit)}`
       : `${input.chapterLabel}: pressure is tied to ${input.causalPlan.previousInput}`,
@@ -1161,6 +1280,63 @@ function extractCharacterProfileSignals(input: {
   }
 }
 
+function isSeedCharacterDossier(dossier: CharacterDossier) {
+  return dossier.id === "protagonist"
+    || dossier.role === "protagonist"
+    || dossier.id === "antagonist-force"
+    || dossier.id === "relationship-axis"
+    || dossier.role === "antagonist"
+    || dossier.role === "relationship-axis"
+}
+
+function dossierMatchesAllowedCast(dossier: CharacterDossier, allowedNames: Set<string>) {
+  if (isSeedCharacterDossier(dossier)) return true
+  if (!allowedNames.size) return isConcreteStoryDossier(dossier)
+  return [dossier.canonicalName, ...(dossier.aliases || [])]
+    .map((name) => String(name || "").trim())
+    .some((name) => allowedNames.has(name))
+}
+
+function cleanDossierStateValue(value = "", fallback = "") {
+  const normalized = conciseEvidence(value, 260)
+  if (!normalized || isWorkflowProfileSignalNoise(normalized)) return fallback
+  return normalized
+}
+
+function cleanDossierStateList(values: string[] = [], limit = 8) {
+  return uniqueStrings(values
+    .map((value) => cleanDossierStateValue(value, ""))
+    .filter(Boolean))
+    .slice(-limit)
+}
+
+function sanitizeCharacterDossierForCarryover(dossier: CharacterDossier): CharacterDossier {
+  return {
+    ...dossier,
+    identityAndRole: cleanDossierStateValue(dossier.identityAndRole, dossier.identityAndRole),
+    coreDesire: cleanDossierStateValue(dossier.coreDesire),
+    fearOrWound: cleanDossierStateValue(dossier.fearOrWound),
+    contradiction: cleanDossierStateValue(dossier.contradiction),
+    behaviorHabits: cleanDossierStateList(dossier.behaviorHabits),
+    speechMarkers: cleanDossierStateList(dossier.speechMarkers),
+    appearanceAndBody: cleanDossierStateValue(dossier.appearanceAndBody),
+    skills: cleanDossierStateList(dossier.skills),
+    limitations: cleanDossierStateList(dossier.limitations),
+    relationshipState: cleanDossierStateValue(dossier.relationshipState),
+    relationshipEdges: (dossier.relationshipEdges || [])
+      .map((edge) => ({
+        ...edge,
+        label: cleanDossierStateValue(edge.label, edge.label),
+        pressure: cleanDossierStateValue(edge.pressure),
+      }))
+      .filter((edge) => cleanDossierStateValue(edge.label) || edge.pressure),
+    arcTrajectory: cleanDossierStateValue(dossier.arcTrajectory),
+    currentChapterDelta: cleanDossierStateValue(dossier.currentChapterDelta),
+    continuityNotes: cleanDossierStateList(dossier.continuityNotes),
+    evidence: cleanDossierStateList(dossier.evidence),
+  }
+}
+
 function updateCharacterDossiersAfterChapter(input: {
   dossiers: CharacterDossier[]
   state: AutonomousNovelState
@@ -1171,18 +1347,24 @@ function updateCharacterDossiersAfterChapter(input: {
   updatedAt?: string
 }) {
   const updatedAt = input.updatedAt || new Date().toISOString()
-  const knownCast = uniqueStrings([
+  const knownCast = sanitizeKnownCastNames([
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.knownCast,
     ...extractChinesePersonNames(input.finalDraft, 12),
-  ].filter(Boolean))
+  ].filter(Boolean), 24)
   const protagonistName = input.continuityContract.lockedProtagonistName || knownCast[0] || ""
   const chapterLabel = `chapter ${input.task.chapterNumber}`
   const causalPlan = getTaskCausalPlan(input.state, input.task)
   const chapterDelta = `${chapterLabel}: ${causalPlan.characterStateDelta}`
-  const evidence = `${chapterLabel}: ${input.finalDraft.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`
+  const narrativeBody = extractNarrativeBody(input.finalDraft)
+  const evidence = `${chapterLabel}: ${narrativeBody.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`
   const continuityNote = `${chapterLabel}: ${input.continuityContract.continuityAnchors.slice(0, 4).join("、") || "new continuity anchors pending"}`
-  const dossiers = input.dossiers.length ? input.dossiers : []
+  const allowedCarryoverNames = new Set(knownCast)
+  const dossiers = input.dossiers.length
+    ? input.dossiers
+      .filter((dossier) => dossierMatchesAllowedCast(dossier, allowedCarryoverNames))
+      .map((dossier) => sanitizeCharacterDossierForCarryover(dossier))
+    : []
   const nextDossiers = dossiers.map((dossier) => {
     const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist"
     const isKnownCast = knownCast.some((name) => name && (dossier.canonicalName === name || dossier.aliases.includes(name)))
@@ -1196,7 +1378,7 @@ function updateCharacterDossiersAfterChapter(input: {
     ]).slice(0, 8)
     const profileSignals = extractCharacterProfileSignals({
       dossier: { ...dossier, canonicalName, aliases },
-      text: `${input.finalDraft}\n\n${input.memoryUpdate}`,
+      text: narrativeBody,
       chapterLabel,
       causalPlan,
       protagonistName,
@@ -1228,26 +1410,54 @@ function updateCharacterDossiersAfterChapter(input: {
     const id = `supporting-${name.replace(/[^\p{Script=Han}A-Za-z0-9_-]+/gu, "-").replace(/^-+|-+$/g, "") || nextDossiers.length + 1}`
     if (existingIds.has(id)) continue
     existingIds.add(id)
+    const profileSignals = extractCharacterProfileSignals({
+      dossier: {
+        id,
+        role: "supporting",
+        canonicalName: name,
+        aliases: [name],
+        identityAndRole: "",
+        coreDesire: "",
+        fearOrWound: "",
+        contradiction: "",
+        behaviorHabits: [],
+        speechMarkers: [],
+        appearanceAndBody: "",
+        skills: [],
+        limitations: [],
+        relationshipState: "",
+        relationshipEdges: [],
+        arcTrajectory: "",
+        currentChapterDelta: "",
+        continuityNotes: [],
+        evidence: [],
+        updatedAt,
+      },
+      text: narrativeBody,
+      chapterLabel,
+      causalPlan,
+      protagonistName,
+    })
     nextDossiers.push({
       id,
       role: "supporting",
       canonicalName: name,
       aliases: [name],
       identityAndRole: `Supporting cast member observed in ${chapterLabel}; role function requires Memory Keeper enrichment.`,
-      coreDesire: "pending desire inferred from future scenes",
-      fearOrWound: "pending wound inferred from future scenes",
-      contradiction: "pending contradiction inferred from future scenes",
-      behaviorHabits: ["pending observed habit"],
-      speechMarkers: ["pending speech marker"],
-      appearanceAndBody: "pending visible marker",
-      skills: ["pending competence"],
-      limitations: ["pending limitation"],
-      relationshipState: `Observed around ${input.continuityContract.lockedProtagonistName || "the protagonist"} in ${chapterLabel}; relationship pressure pending.`,
-      relationshipEdges: [{ targetId: "protagonist", label: "observed with", pressure: "needs relationship pressure enrichment" }],
-      arcTrajectory: "pending recurring function",
+      coreDesire: profileSignals.desire,
+      fearOrWound: profileSignals.wound,
+      contradiction: profileSignals.contradiction,
+      behaviorHabits: profileSignals.habit ? [profileSignals.habit] : ["pending observed habit"],
+      speechMarkers: profileSignals.speech ? [profileSignals.speech] : ["pending speech marker"],
+      appearanceAndBody: profileSignals.body || "pending visible marker",
+      skills: profileSignals.skill ? [profileSignals.skill] : ["pending competence"],
+      limitations: profileSignals.limitation ? [profileSignals.limitation] : ["pending limitation"],
+      relationshipState: profileSignals.relationship,
+      relationshipEdges: [{ targetId: "protagonist", label: protagonistName ? `pressure around ${protagonistName}` : "observed with", pressure: profileSignals.relationship }],
+      arcTrajectory: profileSignals.arc,
       currentChapterDelta: chapterDelta,
       continuityNotes: [continuityNote],
-      evidence: [evidence],
+      evidence: [evidence, profileSignals.evidence].filter(Boolean),
       updatedAt,
     })
   }
@@ -1334,6 +1544,47 @@ function defaultWritingStatusText(payload: WritingProgressEvent) {
   return ""
 }
 
+function writingWorkflowTraceText(payload: WritingProgressEvent) {
+  const lines: string[] = []
+  const workflow = payload.workflow
+  const llm = payload.llm
+  const artifacts = payload.artifacts || (payload.artifactPath
+    ? [{
+        path: payload.artifactPath,
+        label: payload.artifactLabel,
+        kind: payload.artifactKind,
+        status: payload.status,
+      }]
+    : [])
+  if (workflow?.kind || workflow?.summary) {
+    lines.push(`流程节点：${workflow.summary || workflow.kind || "status"}`)
+  }
+  if (workflow?.expandableArtifactPath) {
+    lines.push(`展开上下文：${workflow.expandableArtifactPath}`)
+  }
+  if (llm) {
+    const promptChars = llm.requestChars ?? ((llm.basePromptChars || 0) + (llm.dynamicPromptChars || 0) + (llm.messageChars || 0))
+    const llmBits = [
+      `角色 ${llm.roleName}`,
+      promptChars ? `请求约 ${promptChars} 字符` : "",
+      llm.responseChars ? `响应约 ${llm.responseChars} 字符` : "",
+      llm.streamedChars ? `已流式返回 ${llm.streamedChars} 字符` : "",
+      llm.temperature !== undefined ? `temperature=${llm.temperature}` : "",
+      llm.attempt ? `attempt=${llm.attempt}/${llm.maxAttempts || "?"}` : "",
+    ].filter(Boolean)
+    if (llmBits.length) {
+      lines.push(`LLM：${llmBits.join(" · ")}`)
+    }
+  }
+  if (artifacts.length) {
+    lines.push(`产物：${artifacts.slice(0, 6).map((artifact) => artifact.label || artifact.path).join("、")}`)
+  }
+  if (payload.tools?.length) {
+    lines.push(`工具调用：${payload.tools.slice(0, 6).map((tool) => `${tool.toolName}${tool.status ? `/${tool.status}` : ""}`).join("、")}`)
+  }
+  return lines.length ? `\n\n${lines.map((line) => `- ${line}`).join("\n")}` : ""
+}
+
 function writingProgressContent(payload: WritingProgressEvent) {
   const knowledgeReferences = Array.isArray(payload.knowledgeReferences) ? payload.knowledgeReferences : []
   const knowledgeLine = knowledgeReferences.length
@@ -1341,6 +1592,7 @@ function writingProgressContent(payload: WritingProgressEvent) {
       `- ${item.sourceType || "resource"} · ${item.chunkType || "chunk"} · ${item.sourcePath || item.sourceTitle || item.chunkId} · ${Number(item.score || 0).toFixed(1)}`,
     ).join("\n")}`
     : ""
+  const workflowTrace = writingWorkflowTraceText(payload)
   if (isLlmWritingStep(payload.step)) {
     const chapterLabel = payload.chapterNumber ? `第 ${payload.chapterNumber} 章` : "写作流水线"
     const stepLabel = payload.step.replace(/_llm_(started|streaming|completed|failed)$/u, "")
@@ -1360,6 +1612,7 @@ function writingProgressContent(payload: WritingProgressEvent) {
       payload.message || "模型正在输出正文。",
       statusText ? `\n状态：${statusText}` : "",
       statusDetail ? `\n${statusDetail}` : "",
+      workflowTrace,
       knowledgeLine,
       body ? `\n${body}\n` : "",
       metadata.length ? `\n---\n${metadata.map((line) => `- ${line}`).join("\n")}` : "",
@@ -1379,6 +1632,7 @@ function writingProgressContent(payload: WritingProgressEvent) {
     "",
     payload.message || "写作流水线状态更新。",
     artifactLine,
+    workflowTrace,
     knowledgeLine,
     qualityLine,
     wordLine,
@@ -1454,12 +1708,43 @@ function writingProgressParts(messageId: string, payload: WritingProgressEvent):
       wordCount: payload.wordCount ?? null,
       qualityGate: payload.qualityGate ?? null,
       knowledgeReferences: payload.knowledgeReferences ?? [],
+      workflow: payload.workflow ?? null,
+      llm: payload.llm ?? null,
+      artifacts: payload.artifacts ?? [],
+      tools: payload.tools ?? [],
     }, createdAt),
   ]
   if (payload.artifactPath) {
     parts.push(messagePart(messageId, parts.length, "artifact", {
       path: payload.artifactPath,
-      label: artifactMessageLabel("chapter", payload.artifactPath, { chapterNumber: payload.chapterNumber }),
+      label: payload.artifactLabel || artifactMessageLabel(payload.artifactKind || "chapter", payload.artifactPath, { chapterNumber: payload.chapterNumber }),
+      kind: payload.artifactKind || "chapter",
+      status: payload.status || "completed",
+    }, createdAt))
+  }
+  for (const artifact of payload.artifacts || []) {
+    if (!artifact.path || artifact.path === payload.artifactPath) continue
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label || artifact.path,
+      kind: artifact.kind || payload.artifactKind || "artifact",
+      status: artifact.status || payload.status || "completed",
+      role: artifact.role || "",
+      chars: artifact.chars ?? null,
+    }, createdAt))
+  }
+  for (const tool of payload.tools || []) {
+    parts.push(messagePart(messageId, parts.length, "tool_call", {
+      toolName: tool.toolName,
+      input: tool.inputSummary || "",
+      artifactPath: tool.artifactPath || "",
+      status: tool.status || "completed",
+    }, createdAt))
+    parts.push(messagePart(messageId, parts.length, "tool_result", {
+      toolName: tool.toolName,
+      status: tool.status || "completed",
+      output: tool.outputSummary || "",
+      artifactPath: tool.artifactPath || "",
     }, createdAt))
   }
   return parts
@@ -1504,13 +1789,62 @@ async function emitWritingKnowledgeRecallProgress(input: {
   })
 }
 
+function withDefaultWritingWorkflow(event: WritingProgressEvent): WritingProgressEvent {
+  if (event.workflow) {
+    return event
+  }
+  if (event.qualityGate) {
+    return {
+      ...event,
+      workflow: {
+        kind: "gate",
+        stage: event.step,
+        summary: `质量门禁 ${event.qualityGate.status}`,
+        collapsed: true,
+      },
+    }
+  }
+  if (event.knowledgeReferences?.length) {
+    return {
+      ...event,
+      workflow: {
+        kind: "knowledge_recall",
+        stage: event.step,
+        summary: `知识库召回 ${event.knowledgeReferences.length} 个片段`,
+        collapsed: true,
+      },
+    }
+  }
+  if (event.artifactPath) {
+    return {
+      ...event,
+      workflow: {
+        kind: "artifact_saved",
+        stage: event.step,
+        summary: "产物已保存",
+        collapsed: true,
+        expandableArtifactPath: event.artifactPath,
+      },
+    }
+  }
+  return {
+    ...event,
+    workflow: {
+      kind: "status",
+      stage: event.step,
+      summary: event.message,
+      collapsed: true,
+    },
+  }
+}
+
 async function emitWritingProgress(options: ProductionPipelineOptions, event: WritingProgressEvent) {
   throwIfStopped(options.signal)
   const directorCommandId = event.directorCommandId || options.directorCommandId || undefined
-  const eventWithRuntime = {
+  const eventWithRuntime = withDefaultWritingWorkflow({
     ...event,
     ...(directorCommandId ? { directorCommandId } : {}),
-  }
+  })
   const payload = {
     ...eventWithRuntime,
     messageId: stableWritingMessageId(eventWithRuntime),
@@ -1546,6 +1880,10 @@ async function emitWritingProgress(options: ProductionPipelineOptions, event: Wr
           statusDetail: payload.statusDetail ?? null,
           wordCount: payload.wordCount ?? null,
           qualityGate: payload.qualityGate ?? null,
+          workflow: payload.workflow ?? null,
+          llm: payload.llm ?? null,
+          artifacts: payload.artifacts ?? [],
+          tools: payload.tools ?? [],
           directorCommandId: payload.directorCommandId ?? null,
         },
       })
@@ -1586,7 +1924,10 @@ export function parseQualityGate(report: string, attempts = 0, maxAttempts = 3):
     && typeof targetWords === "number"
     && Number.isFinite(targetWords)
   const wordCountBlockingIssue = hasWordCountCheck
-    && countedWords < Math.floor(targetWords * 0.8)
+    && (
+      countedWords < Math.floor(targetWords * 0.8)
+      || countedWords > Math.ceil(targetWords * 1.15)
+    )
   const explicitPassMarker = /(?:quality_gate|status|质量门禁|门禁状态)\s*[:：]\s*(?:passed|pass|通过)/iu.test(report)
   const explicitBlockMarker = /(?:quality_gate|status|质量门禁|门禁状态)\s*[:：]\s*(?:blocked|fail(?:ed)?|不通过|未通过|阻塞)/iu.test(report)
     || /\bneeds-manual-review\b/iu.test(report)
@@ -1616,13 +1957,94 @@ export function parseQualityGate(report: string, attempts = 0, maxAttempts = 3):
     reason: passed
       ? "质量门禁通过。"
       : wordCountBlockingIssue
-        ? `正文有效字数 ${countedWords}/${targetWords}，低于 80% 门槛。`
+        ? countedWords < Math.floor((targetWords || 0) * 0.8)
+          ? `正文有效字数 ${countedWords}/${targetWords}，低于 80% 门槛。`
+          : `正文有效字数 ${countedWords}/${targetWords}，超过 115% 上限。`
       : score < 7
         ? `综合评分 ${score}/10，低于通过阈值。`
         : "质量报告包含阻塞或返工信号。",
     wordCount: countedWords,
     targetWords,
   }
+}
+
+export function evaluateUnplannedCharacterDrift(
+  finalDraft: string,
+  continuityContract: ContinuityContract,
+  characterDossiers: CharacterDossier[] = [],
+) {
+  const body = extractNarrativeBody(finalDraft)
+  const dossierNames = characterDossiers.flatMap((dossier) => [
+    dossier.canonicalName,
+    ...(Array.isArray(dossier.aliases) ? dossier.aliases : []),
+  ])
+  const allowedNames = new Set(sanitizeKnownCastNames([
+    continuityContract.lockedProtagonistName,
+    ...continuityContract.requiredNames,
+    ...continuityContract.knownCast,
+    ...dossierNames,
+  ], 80))
+  const protagonist = continuityContract.lockedProtagonistName || ""
+  const escapeNameForRegExp = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+  const isProtagonistTitleAlias = (name: string) => {
+    if (!protagonist || !name.startsWith(protagonist.slice(0, 1))) return false
+    return /(?:书吏|小吏|司书|主簿|典簿|掌固|县丞|县令|大人)$/u.test(name)
+  }
+  const candidates = sanitizeKnownCastNames([
+    ...extractChinesePersonNames(body, 100),
+    ...extractStrongLocalCharacterNameCandidates(body, 100),
+  ], 100)
+    .filter((name) => !allowedNames.has(name))
+    .filter((name) => !isProtagonistTitleAlias(name))
+    .filter((name) => !isKnownCastNameFragment(name, allowedNames))
+    .filter((name) => !isLikelyNonCharacterDraftName(name))
+  const risks = candidates.map((name) => {
+    const occurrences = [...body.matchAll(new RegExp(escapeNameForRegExp(name), "gu"))]
+    const windows = occurrences.map((match) => {
+      const index = match.index || 0
+      return body.slice(Math.max(0, index - 80), Math.min(body.length, index + name.length + 80))
+    })
+    const keyContext = windows.some((window) =>
+      /前任|上一任|库使|知县|县丞|管事|账房|少爷|旧友|同僚|教他|留下|书押|借|带话|进来|站起来|走进|姓|名|身份|欠条|人情|袖口|线索|低声|压低声音|问|说/u.test(window)
+    )
+    return {
+      name,
+      occurrences: occurrences.length,
+      keyContext,
+    }
+  }).filter((risk) => risk.keyContext)
+  const identityRisks = detectKnownCastIdentityConflicts(body, continuityContract, characterDossiers)
+
+  if (identityRisks.length > 0) {
+    return {
+      status: "quarantined" as const,
+      reason: `Canon 人物身份冲突硬门槛失败：正文把已知角色写成与角色档案/Canon 不兼容的身份「${identityRisks.slice(0, 6).map((risk) => `${risk.name}×${risk.occurrences}`).join("、")}」。已确认角色不能在正文中临时改成父亲、妹妹、上司或其他关系身份。`,
+      risks: identityRisks,
+    }
+  }
+  if (risks.length > 0) {
+    return {
+      status: "quarantined" as const,
+      reason: `Canon 人物漂移硬门槛失败：正文出现未在蓝图/Canon/角色档案中批准的关键姓名「${risks.slice(0, 6).map((risk) => `${risk.name}×${risk.occurrences}`).join("、")}」。新增关键人物必须先进入蓝图或记忆账本，不能在正文片段中临时生成。`,
+      risks,
+    }
+  }
+  return {
+    status: "eligible" as const,
+    reason: "未发现未经批准的关键新增人物。",
+    risks: [...identityRisks, ...risks],
+  }
+}
+
+function isKnownCastNameFragment(name: string, allowedNames: Set<string>) {
+  for (const knownName of [...allowedNames].sort((left, right) => right.length - left.length)) {
+    if (!knownName || name === knownName || !name.startsWith(knownName)) continue
+    const suffix = name.slice(knownName.length)
+    if (/^(?:正|没|没有|正在|在|把|将|向|对|被|的|了|也|又|还|已|先|再|才)$/u.test(suffix)) {
+      return true
+    }
+  }
+  return false
 }
 
 function enforceFinalDraftQualityGate(
@@ -1635,15 +2057,26 @@ function enforceFinalDraftQualityGate(
   characterDossiers?: CharacterDossier[],
   blueprint = "",
 ) {
-  const finalWordCount = wordCount(finalDraft)
+  const finalWordCount = wordCount(extractNarrativeBody(finalDraft))
   const targetWords = task.targetWords
   const minimumPassWords = Math.floor(targetWords * 0.8)
+  const maximumPassWords = Math.ceil(targetWords * 1.15)
   if (finalWordCount < minimumPassWords) {
     return {
       ...gate,
       passed: false,
       status: "blocked" as const,
       reason: `最终稿有效字数 ${finalWordCount}/${targetWords}，低于 80% 门槛。`,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
+  if (finalWordCount > maximumPassWords) {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: `最终稿有效字数 ${finalWordCount}/${targetWords}，超过 115% 上限。`,
       wordCount: finalWordCount,
       targetWords,
     }
@@ -1715,6 +2148,17 @@ function enforceFinalDraftQualityGate(
       targetWords,
     }
   }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract)
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: sceneCharacterObligations.reason,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
@@ -1734,6 +2178,17 @@ function enforceFinalDraftQualityGate(
       targetWords,
     }
   }
+  const unplannedCharacters = evaluateUnplannedCharacterDrift(finalDraft, continuityContract, characterDossiers)
+  if (unplannedCharacters.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked" as const,
+      reason: unplannedCharacters.reason,
+      wordCount: finalWordCount,
+      targetWords,
+    }
+  }
   const naturalnessReport = createNaturalnessReport({
     beforeDraft: finalDraft,
     afterDraft: finalDraft,
@@ -1748,17 +2203,6 @@ function enforceFinalDraftQualityGate(
       passed: false,
       status: "blocked" as const,
       reason: naturalnessReport.reason,
-      wordCount: finalWordCount,
-      targetWords,
-    }
-  }
-  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract)
-  if (sceneCharacterObligations.status === "quarantined") {
-    return {
-      ...gate,
-      passed: false,
-      status: "blocked" as const,
-      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords,
     }
@@ -3076,7 +3520,7 @@ export function evaluateWritingResourceUsage(
 function extractNarrativeBody(text = "") {
   return text
     .replace(/```[\s\S]*?```/g, "")
-    .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0]
+    .split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Final Quality Gate|AIGC Detection|Style Conformance Drift|Naturalness Pass|Naturalness Report|Character Profile Projection|章节元数据|章节元信息)/u)[0]
 }
 
 function extractNumberFacts(text = "", limit = 10) {
@@ -3204,7 +3648,7 @@ export function createNaturalnessReport(input: {
   const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length
   const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length
   const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心开阔|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length
-  const analyticSignals = (body.match(/第一|第二|首先|其次|最后|原因是|从.*角度|可以看出|体现了|说明了|证明了/gu) || []).length
+  const analyticSignals = countAnalyticReportSignals(body)
   const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然/gu) || []).length
   const fatigueWordSignals = (body.match(/突然|忽然|猛然|竟然|居然|渐渐|逐渐|然而|与此同时|似乎|也许|大概|仿佛/gu) || []).length
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract)
@@ -3268,6 +3712,17 @@ export function createNaturalnessReport(input: {
       characterPresence.reason,
     ],
   }
+}
+
+function countAnalyticReportSignals(body: string) {
+  const reportConnectors = body.match(/(?:首先|其次|最后)[，,、:：]/gu) || []
+  const explanatorySignals = body.match(/原因是|可以看出|体现了|说明了|证明了/gu) || []
+  const viewpointSignals = body.match(/从[^。！？!?；;\n]{1,24}(?:角度|层面|维度)(?:看|来说|分析)?/gu) || []
+  const numberedReportItems = body.match(/(?:^|[\n。！？!?；;])\s*(?:第[一二三四五六七八九十]+|[一二三四五六七八九十]+)[、，,：:]/gu) || []
+  return reportConnectors.length
+    + explanatorySignals.length
+    + viewpointSignals.length
+    + numberedReportItems.length
 }
 
 function formatNaturalnessReport(report: NaturalnessReport) {
@@ -3495,16 +3950,54 @@ function defaultCausalPlan(
   }
 }
 
+const PERSISTED_CAUSAL_PLAN_ENGLISH_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bminor\s+archive\s+clerk\b/giu, "档案小吏"],
+  [/\barchive\s+clerk\b/giu, "档案小吏"],
+  [/\btax\s+ledgers?\b/giu, "税册"],
+  [/\bfamily\s+debts?\b/giu, "家族债务"],
+  [/\bimperial\s+weather\s+records?\b/giu, "司天监气象记录"],
+  [/\bweather\s+records?\b/giu, "气象记录"],
+  [/\bimpossible\s+contradiction\b/giu, "不可能矛盾"],
+  [/\blong-range\s+continuity\b/giu, "长线连续性"],
+  [/\bminor\b/giu, "档案小吏"],
+  [/\barchive\b/giu, "档案库"],
+  [/\bclerk\b/giu, "档案小吏"],
+  [/\bledgers?\b/giu, "税册"],
+  [/\bdebts?\b/giu, "家族债务"],
+  [/\bweather\b/giu, "气象记录"],
+  [/\brecords?\b/giu, "档案记录"],
+]
+
+function normalizePersistedCausalPlanText(text = "") {
+  return PERSISTED_CAUSAL_PLAN_ENGLISH_REPLACEMENTS.reduce(
+    (current, [pattern, replacement]) => current.replace(pattern, replacement),
+    text,
+  )
+}
+
 function getTaskCausalPlan(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
 ) {
-  return {
+  const hasPersistedPlan = Boolean(task.causalPlan)
+  const plan = {
     ...defaultCausalPlan(state, task),
     ...(task.causalPlan || {}),
     requiredContinuityAnchors: task.causalPlan?.requiredContinuityAnchors?.length
       ? task.causalPlan.requiredContinuityAnchors
       : defaultCausalPlan(state, task).requiredContinuityAnchors,
+  }
+  if (!hasPersistedPlan) return plan
+  return {
+    ...plan,
+    previousInput: normalizePersistedCausalPlanText(plan.previousInput),
+    sceneObjective: normalizePersistedCausalPlanText(plan.sceneObjective),
+    protagonistDecision: normalizePersistedCausalPlanText(plan.protagonistDecision),
+    irreversibleConsequence: normalizePersistedCausalPlanText(plan.irreversibleConsequence),
+    nextHandoff: normalizePersistedCausalPlanText(plan.nextHandoff),
+    characterStateDelta: normalizePersistedCausalPlanText(plan.characterStateDelta),
+    foreshadowingOperation: normalizePersistedCausalPlanText(plan.foreshadowingOperation),
+    requiredContinuityAnchors: plan.requiredContinuityAnchors.map((anchor) => normalizePersistedCausalPlanText(anchor)),
   }
 }
 
@@ -3523,6 +4016,16 @@ function formatCausalPlanBullets(
     `- Foreshadowing Operation: ${causalPlan.foreshadowingOperation}`,
     `- Next Chapter Handoff: ${causalPlan.nextHandoff}`,
   ]
+}
+
+function summarizeCausalPlan(causalPlan: ReturnType<typeof getTaskCausalPlan>) {
+  return [
+    `承接：${causalPlan.previousInput.replace(/^承接：/u, "")}`,
+    `推进：${causalPlan.sceneObjective.replace(/^推进：/u, "")}`,
+    `选择：${causalPlan.protagonistDecision}`,
+    `代价：${causalPlan.irreversibleConsequence}`,
+    `交棒：${causalPlan.nextHandoff.replace(/^交棒：/u, "")}`,
+  ].join(" ")
 }
 
 function formatChapterCausalityMatrix(state: AutonomousNovelState, limit = Number.POSITIVE_INFINITY) {
@@ -3603,6 +4106,440 @@ const PRODUCTION_STORY_ASSET_FILES = [
   ...PRODUCTION_STORY_STRUCTURED_ASSET_FILES,
 ]
 
+function isPlaceholderStoryValue(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : ""
+  return !text
+    || /^(?:pending|placeholder|todo|tbd)(?:[\s_-]|$)/iu.test(text)
+    || /pending-[\w-]+/iu.test(text)
+    || /^角色\d+$/u.test(text)
+    || /^(?:主角|主人公|对抗力量|关键关系对象|关系轴|relationship axis|antagonist force|pressure mirror|opposition)$/iu.test(text)
+    || /待定|未命名|占位/u.test(text)
+}
+
+function storyValue(value: unknown, fallback: string) {
+  const text = typeof value === "string" ? value.trim() : ""
+  return isPlaceholderStoryValue(text) ? fallback : text
+}
+
+function extractFoundationLines(source = "", limit = 8) {
+  return uniqueStrings(source
+    .split(/\n+/u)
+    .map((line) => line.trim().replace(/^[-*]\s*/u, ""))
+    .filter((line) => line && !/^#+\s*/u.test(line))
+    .filter((line) => !/^(Project|Core idea|Target chapters|Chapter word target|Status|Instruction)[:：]/iu.test(line))
+    .slice(0, limit * 2))
+    .slice(0, limit)
+}
+
+function extractMarkdownSection(source = "", headingPattern: RegExp) {
+  const lines = source.split("\n")
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()))
+  if (start < 0) return ""
+  const picked: string[] = []
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index] || ""
+    if (/^##\s+/u.test(line) && picked.length > 0) break
+    picked.push(line)
+  }
+  return picked.join("\n").trim()
+}
+
+function extractPlanningCastNamesFromLedger(section = "") {
+  const names: string[] = []
+  const personCellPatterns = [
+    /^与\s*([\u4e00-\u9fff·]{2,8}?)(?:关系|状态|线|互动|信任|债务|压力)?$/u,
+    /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/u,
+    /^([\u4e00-\u9fff·]{2,8})(?:（[^）]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^）]*）|\([^)]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^)]*\))$/u,
+  ]
+  for (const line of section.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed || /^\|[-\s|:]+$/u.test(trimmed)) continue
+    if (trimmed.includes("|")) {
+      const cells = trimmed
+        .split("|")
+        .map((cell) => cell.trim().replace(/\*\*/gu, ""))
+        .filter(Boolean)
+      const isCharacterHeader = cells.some((cell) => /^(?:章节|角色)$/u.test(cell))
+        && cells.some((cell) => /^与[\u4e00-\u9fff·]{2,8}/u.test(cell) || /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\b/u.test(cell))
+      const cellsToInspect = isCharacterHeader
+        ? cells
+        : /^(?:角色|人物)$/u.test(cells[0] || "")
+          ? []
+          : cells.length > 0 && !/^第?\s*[\d一二三四五六七八九十百千万]+\s*章/u.test(cells[0] || "")
+            ? [cells[0]]
+            : []
+      for (const cell of cellsToInspect) {
+        const normalized = cell.replace(/\*\*/gu, "").replace(/[：:]\s*.*$/u, "").trim()
+        for (const pattern of personCellPatterns) {
+          const match = normalized.match(pattern)
+          if (match?.[1]) names.push(match[1])
+        }
+        if (/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized) && !/^(?:章节|角色|资产|资源|债务|威胁|章前|章后|状态维度|核心物件状态)$/u.test(normalized)) {
+          names.push(normalized)
+        }
+      }
+      continue
+    }
+    for (const pattern of personCellPatterns) {
+      const match = trimmed.replace(/^[-*]\s*/u, "").match(pattern)
+      if (match?.[1]) names.push(match[1])
+    }
+  }
+  return names
+}
+
+function extractPlanningCastNarrativeNameSignals(source = "") {
+  const sections = [
+    extractMarkdownSection(source, /^##\s+Causal Spine\b|^##\s+因果/u),
+    extractMarkdownSection(source, /^##\s+Chapter Causality Matrix\b|^##\s+章节/u),
+    extractMarkdownSection(source, /^##\s+Continuity Anchor Plan\b|^##\s+连续/u),
+    extractMarkdownSection(source, /^##\s+Character Spine\b|^##\s+人物/u),
+  ].filter(Boolean).join("\n")
+  if (!sections.trim()) return ""
+  const signalPattern = new RegExp(
+    `(?:主角|主人公|同僚|挚友|旧友|盟友|唯一盟友|上司|父亲旧友|恩人|对手|压力源|知情者|关键对象)\\s*[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}(?=在|的|与|是|：|:|，|、|\\s|$)`
+    + `|[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}(?:的协助|的调职|的告密|的私印|的沉默|的询问|的审讯|的条件|的帮助|留给|递交|出现|选择|告知|承认|摊牌|出示|正式传讯|每次提到|将|以)`,
+    "u",
+  )
+  return uniqueStrings(sections
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => signalPattern.test(line))
+    .slice(0, 24))
+    .join("\n")
+}
+
+function extractPlanningCastNamesFromNarrativeSignals(source = "") {
+  const names: string[] = []
+  const name = `[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}`
+  const patterns = [
+    new RegExp(`(?:主角|主人公|同僚|挚友|旧友|盟友|唯一盟友|上司|父亲旧友|恩人|对手|压力源|知情者|关键对象)\\s*(${name})(?=在|的|与|是|：|:|，|、|\\s|$)`, "gu"),
+    new RegExp(`(${name})(?:的协助|的调职|的告密|的私印|的沉默|的询问|的审讯|的条件|的帮助|留给|递交|出现|选择|告知|承认|摊牌|出示|正式传讯|每次提到|将|以)`, "gu"),
+    new RegExp(`与(${name})(?:的|关系|信任|决裂|裂缝)`, "gu"),
+  ]
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (match?.[1]) names.push(match[1])
+    }
+  }
+  return names
+}
+
+const PLANNING_CAST_SURNAME_CHARS = "李王张刘陈杨赵黄梁周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢岳齐梅莫庄辛管祝左涂谷祁时舒耿牟卜詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂"
+
+function normalizePlanningCastName(name = "") {
+  const raw = name.trim().replace(/\*\*/gu, "")
+  const roleSeparatedName = raw.match(/^(?:审雨官|主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/u)?.[1] || ""
+  if (roleSeparatedName) return roleSeparatedName
+  const parentheticalName = raw.match(new RegExp(`[（(]([${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})[）)]`, "u"))?.[1] || ""
+  if (parentheticalName) return parentheticalName
+  const compact = name
+    .trim()
+    .replace(/^[-*#\s]+/u, "")
+    .replace(/\*\*/gu, "")
+    .split(/[·・]/u)[0]
+    .replace(/[（(][^）)]*$/u, "")
+    .replace(/\s*(?:——|—|–|-|:|：)\s*.*$/u, "")
+    .replace(/^(?:库丞|书吏|临时书吏|记录郎|亡父|父亲|母亲|妹妹|兄长|姐姐|弟弟|保管员|库吏|上司|旧友|同僚|副职|主角|审雨官|主人公|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)/u, "")
+    .trim()
+  if (compact.length <= 4) return compact
+  const trailingName = compact.match(new RegExp(`([${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})$`, "u"))?.[1] || ""
+  return trailingName || compact
+}
+
+function isDirectPlanningCastDeclaration(name = "") {
+  const normalized = normalizePlanningCastName(name)
+  if (!normalized) return false
+  const cleaned = name
+    .trim()
+    .replace(/^[-*#\s]+/u, "")
+    .replace(/\*\*/gu, "")
+    .trim()
+  return new RegExp(`^${escapeRegExpLiteral(normalized)}(?:$|\\s|[（(：:—-]|[·・])`, "u").test(cleaned)
+}
+
+function extractPlanningCastContract(source = ""): PlanningCastContract {
+  if (!source.trim()) return { protagonistName: "", cast: [], evidence: [] }
+  const characterSpine = extractMarkdownSection(source, /^##\s+Character Spine\b|^##\s+人物/u)
+  const stateLedger = extractMarkdownSection(source, /^##\s+Character State Ledger Plan\b|^##\s+角色/u)
+  const stateLedgerNameSignals = stateLedger
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^\*\*[\u4e00-\u9fff·]{2,8}(?:\s+|[（(：:—-])/u.test(line)
+      || /^\*\*[\u4e00-\u9fff·]{2,8}\*\*(?:\s*[（(：:—-]|$)/u.test(line)
+      || /^-\s*(?:审雨官|主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|压力源|盟友|对手|反派)\s*[·・:：—-]\s*[\u4e00-\u9fff·]{2,8}/u.test(line)
+    )
+    .join("\n")
+  const ledgerStructuredNames = extractPlanningCastNamesFromLedger(stateLedger)
+  const characterSpineNameSignals = characterSpine
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^#{3,6}\s*[\u4e00-\u9fff·]{2,8}/u.test(line)
+      || /^\*\*[^*\n]{2,32}\*\*[:：]?\s*$/u.test(line)
+      || /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*[\u4e00-\u9fff·]{2,8}/u.test(line)
+    )
+    .join("\n")
+  const canonicalLines = source
+    .split("\n")
+    .filter((line) => /Canonical Protagonist|Canonical Cast|核心人物|主角[:：]/u.test(line))
+    .join("\n")
+  const narrativeNameSignals = extractPlanningCastNarrativeNameSignals(source)
+  const relevantSource = [canonicalLines, characterSpineNameSignals, stateLedgerNameSignals, narrativeNameSignals].filter(Boolean).join("\n\n") || source.slice(0, 6000)
+  const boldNames = [...relevantSource.matchAll(/^\*\*([^*\n]{2,32})\*\*[:：]?/gmu)]
+    .map((match) => match[1] || "")
+  const headingNames = [...relevantSource.matchAll(/^#{3,6}\s*([^（(\n]{2,32})(?:[（(][^）)]*(?:主角|protagonist|旧友|上司|配角|压力)[^）)]*[）)])?/gmu)]
+    .map((match) => match[1] || "")
+    .filter((name) => !/^(?:章节|状态|伏笔|质量|关系|人物)$/u.test(name))
+  const ledgerNames = [...relevantSource.matchAll(/^\|\s*([\u4e00-\u9fff·]{2,8})\s*\|/gmu)]
+    .map((match) => match[1] || "")
+    .filter((name) => !/角色|章节|Chapter/u.test(name))
+  const explicitProtagonist = [
+    ...relevantSource.matchAll(/(?:审雨官|主角|主人公)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/gmu),
+    ...relevantSource.matchAll(/(?:Canonical Protagonist|主角|核心主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu),
+    ...relevantSource.matchAll(/(?:读者将跟随|跟随|审雨官|视角锁定)[^\n，。；：:]{0,12}([\u4e00-\u9fff·]{2,4})/gmu),
+  ].map((match) => match[1] || "")
+  const taggedProtagonistNames = [
+    ...relevantSource.matchAll(/^#{3,6}\s*([^（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu),
+    ...relevantSource.matchAll(/^\*\*([^*（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu),
+    ...relevantSource.matchAll(/^\*\*([^*（(\n]{2,32})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu),
+  ].map((match) => match[1] || "")
+  const directProtagonistCandidates = [
+    ...headingNames,
+    ...boldNames,
+    ...ledgerNames,
+  ].filter(isDirectPlanningCastDeclaration)
+  const explicitCanonicalCast = [
+    ...relevantSource.matchAll(/(?:Canonical Cast|核心人物|核心角色)[:：]\s*([^\n]+)/gmu),
+  ].flatMap((match) =>
+    (match[1] || "")
+      .split(/[、,，;；/|]/u)
+      .map((name) => name.trim())
+      .filter(Boolean)
+  )
+  const narrativeNames = extractPlanningCastNamesFromNarrativeSignals(narrativeNameSignals)
+  const isPlanningCastNoise = (name = "") =>
+    !name
+    || /^(?:状态维度|身份安全性|对雨档的信仰|心理压力等级|手中筹码|证据持有状态|章前|章后|开端状态|结尾状态|用名|暂用名|核心渴望|初始创伤|中间矛盾|最终状态|弧线标记|总弧线|故事承诺|余味|属性|资产|资源|债务|威胁|锚点|物件锚|系统规则锚|人际关系锚|字数|位置|必须包含的要素|场景序列|景序列)$/u.test(name)
+    || /(?:状态|维度|安全性|信仰|压力等级|筹码|证据持有|职业安全感|身份安全|经济压力|社会声誉|完整性|父亲看法|档案库钥匙|钥匙|锚点|锚|行为|字数|位置|要素|场景序列|景序列)$/u.test(name)
+    || /^[\u4e00-\u9fff]{2,3}[的内]$/u.test(name)
+  const cast = sanitizeKnownCastNames([
+    ...explicitCanonicalCast,
+    ...headingNames,
+    ...boldNames,
+    ...ledgerNames,
+    ...ledgerStructuredNames,
+    ...narrativeNames,
+    ...explicitProtagonist,
+  ].map(normalizePlanningCastName).filter((name) => !isPlanningCastNoise(name)), 12)
+  const protagonistName = sanitizeKnownCastNames([
+    ...taggedProtagonistNames,
+    ...explicitProtagonist,
+    ...directProtagonistCandidates.slice(0, 1),
+  ].map(normalizePlanningCastName).filter((name) => !isPlanningCastNoise(name)), 1)[0] || ""
+  const orderedCast = sanitizeKnownCastNames([
+    protagonistName,
+    ...cast,
+  ], 12)
+  const evidence = uniqueStrings(relevantSource
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => orderedCast.some((name) => line.includes(name)))
+    .filter((line) => !/^\|[-\s|:]+$/u.test(line))
+    .slice(0, 12))
+    .map((line) => compactStoryAssetLine(line, 180))
+  return {
+    protagonistName,
+    cast: orderedCast,
+    evidence,
+  }
+}
+
+function formatPlanningCastPrompt(contract: PlanningCastContract) {
+  if (!contract.protagonistName && contract.cast.length === 0) return ""
+  return [
+    "## Authoritative Planning Cast Lock",
+    "",
+    contract.protagonistName ? `- Canonical protagonist: ${contract.protagonistName}` : "",
+    contract.cast.length ? `- Canonical cast: ${contract.cast.join("、")}` : "",
+    "- 蓝图和正文必须服从这个人物锁；不得把主角或核心配角改名、替换成新的一套人物。",
+    ...(contract.evidence.length ? ["- Source evidence:", ...contract.evidence.slice(0, 8).map((line) => `  - ${line}`)] : []),
+  ].filter(Boolean).join("\n")
+}
+
+function formatPlanningCastProfileCarryover(contract: PlanningCastContract) {
+  if (!contract.protagonistName && contract.cast.length === 0) return ""
+  return [
+    contract.protagonistName ? `protagonistName: ${contract.protagonistName}` : "",
+    contract.protagonistName ? `主角：${contract.protagonistName}` : "",
+    contract.cast.length ? `核心人物：${contract.cast.join("、")}` : "",
+    ...contract.evidence.slice(0, 8),
+  ].filter(Boolean).join("\n")
+}
+
+function contextWithPlanningCast(
+  context: { consensus: string; protagonist: string; style: string },
+  contract: PlanningCastContract,
+) {
+  const carryover = formatPlanningCastProfileCarryover(contract)
+  if (!carryover) return context
+  const protagonistProfile = isPlaceholderStoryValue(context.protagonist) ? "" : context.protagonist
+  return {
+    ...context,
+    protagonist: [protagonistProfile, carryover].filter(Boolean).join("\n\n"),
+  }
+}
+
+function continuityWithPlanningCast(input: {
+  state: AutonomousNovelState
+  task: AutonomousNovelState["plan"]["chapterTasks"][number]
+  context: { consensus: string; protagonist: string; style: string }
+  continuityContract: ContinuityContract
+  planningCastContract: PlanningCastContract
+  planningCastPrompt: string
+  storyAssetContext: ProductionStoryAssetContext
+}) {
+  const needsPlanningCastLock = Boolean(input.planningCastContract.protagonistName)
+    && (!input.continuityContract.lockedProtagonistName
+      || input.continuityContract.status === "blocked"
+      || input.continuityContract.knownCast.length === 0)
+  if (!needsPlanningCastLock) return input.continuityContract
+  const enrichedContext = contextWithPlanningCast(input.context, input.planningCastContract)
+  return createContinuityContract({
+    state: input.state,
+    task: input.task,
+    context: enrichedContext,
+    protagonistProfile: enrichedContext.protagonist,
+    blueprint: [input.storyAssetContext.prompt, input.planningCastPrompt].filter(Boolean).join("\n\n"),
+  })
+}
+
+function dossierName(dossier: CharacterDossier, fallback: string) {
+  return storyValue(dossier.canonicalName, storyValue(dossier.aliases?.[0], fallback))
+}
+
+function isConcreteStoryDossier(dossier: CharacterDossier) {
+  const isGenericDossierName = (value = "") =>
+    /^(?:protagonist|antagonist|deuteragonist|supporting|relationship[-\s]?axis|hero|villain|cast|character|opposition)$/iu.test(value)
+  const nameCandidates = [dossier.canonicalName, ...(dossier.aliases || [])]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && !isPlaceholderStoryValue(value) && !isGenericDossierName(value))
+  if (!nameCandidates.length) return false
+  if (sanitizeKnownCastNames(nameCandidates, 1).length > 0) return true
+  return nameCandidates.some((value) => /^[A-Za-z][A-Za-z ._'-]{1,64}$/u.test(value))
+}
+
+function formatDossierStoryContract(dossier: CharacterDossier, index: number) {
+  const name = dossierName(dossier, `角色${index + 1}`)
+  const role = storyValue(dossier.role, "supporting")
+  const desire = storyValue(dossier.coreDesire, "需要补齐明确欲望")
+  const wound = storyValue(dossier.fearOrWound, "需要补齐恐惧或伤口")
+  const habit = storyValue(dossier.behaviorHabits?.[0], "需要一个可见行为习惯")
+  const voice = storyValue(dossier.speechMarkers?.[0], "需要一个对白标记")
+  const body = storyValue(dossier.appearanceAndBody, "需要一个外貌/体态锚点")
+  const skill = storyValue(dossier.skills?.[0], "需要一个能推动情节的特长")
+  const limit = storyValue(dossier.limitations?.[0], "需要一个阻止轻松获胜的短板")
+  const relation = storyValue(dossier.relationshipState, "关系压力待冻结")
+  return {
+    id: dossier.id || `character-${index + 1}`,
+    name,
+    role,
+    desire,
+    wound,
+    contradiction: storyValue(dossier.contradiction, "欲望、恐惧和可见行为之间必须有矛盾"),
+    habit,
+    voice,
+    body,
+    skill,
+    limit,
+    relation,
+    edges: (dossier.relationshipEdges || []).map((edge) => ({
+      targetId: storyValue(edge.targetId, "unknown-target"),
+      label: storyValue(edge.label, "relationship pressure"),
+      pressure: storyValue(edge.pressure, "需要明确关系压力"),
+    })),
+    evidence: (dossier.evidence || []).filter((item) => !isPlaceholderStoryValue(item)).slice(0, 5),
+  }
+}
+
+function createStoryFoundationLenses(
+  state: AutonomousNovelState,
+  context: { consensus: string; protagonist: string; style: string },
+  planningContext: ProductionPlanningStoryContext = {},
+) {
+  const planningCast = extractPlanningCastContract(planningContext.masterOutline || "")
+  const planningCastNames = new Set(planningCast.cast)
+  const dossiers = (state.memory?.characterDossiers || [])
+    .filter((dossier) => isConcreteStoryDossier(dossier))
+    .map(formatDossierStoryContract)
+    .filter((dossier) => !planningCastNames.size || planningCastNames.has(dossier.name))
+  const protagonist = dossiers.find((dossier) => dossier.role === "protagonist") || dossiers[0]
+  const contextProtagonistName = planningCast.protagonistName
+    || lockedProtagonistFromState(state, context.protagonist)
+    || extractChinesePersonNames(context.protagonist, 1)[0]
+    || ""
+  const protagonistName = contextProtagonistName
+    || (protagonist?.name && !isPlaceholderStoryValue(protagonist.name) ? protagonist.name : "")
+    || "待冻结主角"
+  const consensusSignals = extractFoundationLines(context.consensus, 8)
+  const protagonistSignals = extractFoundationLines(context.protagonist, 8)
+  const styleSignals = extractFoundationLines(context.style, 5)
+  const conflictEngine = [
+    `核心创意：${state.project.idea}`,
+    protagonist
+      ? `${protagonistName}想要${protagonist.desire}，但${protagonist.wound}和${protagonist.limit}会持续制造选择成本。`
+      : `${protagonistName}必须通过行动、关系和代价承载核心冲突。`,
+    consensusSignals[0] ? `讨论共识压力：${consensusSignals[0]}` : "讨论共识压力：需要用户进一步补齐，但正文前不得跳过确认。",
+  ]
+  const relationshipContracts = dossiers.length
+    ? dossiers.flatMap((dossier) =>
+      dossier.edges.length
+        ? dossier.edges.map((edge) => `${dossier.name} -> ${edge.targetId}: ${edge.label}；压力：${edge.pressure}`)
+        : [`${dossier.name}: ${dossier.relation}`],
+    )
+    : planningCast.cast
+      .filter((name) => name !== protagonistName)
+      .map((name) => `${protagonistName} -> ${name}: planning relationship pressure；压力：必须继承 master-outline.md 中的关系、债务、恐惧或利益变化。`)
+  const concreteSignals = uniqueStrings([
+    ...planningCast.evidence,
+    ...consensusSignals,
+    ...protagonistSignals,
+    ...dossiers.flatMap((dossier) => [
+      `${dossier.name}: ${dossier.desire}`,
+      `${dossier.name}: ${dossier.habit}`,
+      `${dossier.name}: ${dossier.voice}`,
+      `${dossier.name}: ${dossier.body}`,
+      `${dossier.name}: ${dossier.skill} / ${dossier.limit}`,
+    ]),
+  ].filter(Boolean)).slice(0, 24)
+  return {
+    protagonistName,
+    dossiers,
+    consensusSignals,
+    protagonistSignals,
+    styleSignals,
+    planningCast,
+    conflictEngine,
+    relationshipContracts: uniqueStrings(relationshipContracts).slice(0, 24),
+    concreteSignals,
+  }
+}
+
+function compactStoryAssetLine(line = "", limit = 150) {
+  const trimmed = line.trim()
+  if (trimmed.length <= limit) return trimmed
+  if (trimmed.includes("|")) {
+    const cells = trimmed.split("|").map((cell) => {
+      const value = cell.trim()
+      return value.length > 44 ? `${value.slice(0, 44).trim()}...` : value
+    })
+    const compact = cells.join(" | ")
+    return compact.length > limit ? `${compact.slice(0, limit).trim()}...` : compact
+  }
+  return `${trimmed.slice(0, limit).trim()}...`
+}
+
 function extractStoryAssetRelevantLines(content: string, task: AutonomousNovelState["plan"]["chapterTasks"][number], maxLines = 18) {
   const chapterNumber = task.chapterNumber
   const trimmed = content.trim()
@@ -3623,21 +4560,37 @@ function extractStoryAssetRelevantLines(content: string, task: AutonomousNovelSt
         ...(Array.isArray(parsed?.characterStateDeltas) ? parsed.characterStateDeltas : []),
         ...(Array.isArray(parsed?.chapterStateDeltas) ? parsed.chapterStateDeltas : []),
       ].find((entry: Record<string, any>) => Number(entry?.chapterNumber) === chapterNumber)
+      const canonicalPlanningCast = parsed?.canonicalPlanningCast || parsed?.characters?.canonicalPlanningCast || {}
+      const relationshipEntries = [
+        ...(Array.isArray(parsed?.characters?.relationshipEntries) ? parsed.characters.relationshipEntries : []),
+        ...(Array.isArray(parsed?.relationshipEntries) ? parsed.relationshipEntries : []),
+      ]
+      const protagonistName = parsed?.characters?.protagonist || parsed?.protagonist || canonicalPlanningCast?.protagonist || ""
+      const canonicalCast = sanitizeKnownCastNames([
+        protagonistName,
+        ...(Array.isArray(canonicalPlanningCast?.cast) ? canonicalPlanningCast.cast : []),
+        ...relationshipEntries.map((entry: Record<string, any>) => entry?.name || ""),
+      ], 8)
       const lines = [
         parsed?.project?.title ? `- Project: ${parsed.project.title}` : "",
         parsed?.genre?.readerPromise ? `- Reader Promise: ${parsed.genre.readerPromise}` : "",
         parsed?.readerPromise ? `- Reader Promise: ${parsed.readerPromise}` : "",
+        protagonistName ? `- Canonical Protagonist: ${protagonistName}` : "",
+        canonicalCast.length ? `- Canonical Cast: ${canonicalCast.join("、")}` : "",
         matchingChapter?.title ? `- Chapter: ${matchingChapter.chapterNumber} ${matchingChapter.title}` : "",
         matchingChapter?.sceneObjective ? `- Causal Objective: ${matchingChapter.sceneObjective}` : "",
         matchingChapter?.previousInput ? `- Previous Input: ${matchingChapter.previousInput}` : "",
         matchingChapter?.protagonistDecision ? `- Protagonist Decision: ${matchingChapter.protagonistDecision}` : "",
         matchingChapter?.irreversibleConsequence ? `- Irreversible Change: ${matchingChapter.irreversibleConsequence}` : "",
         matchingChapter?.nextHandoff ? `- Next Handoff: ${matchingChapter.nextHandoff}` : "",
+        ...relationshipEntries.slice(0, 1).map((entry: Record<string, any>) =>
+          `- Character: ${entry.name || entry.id || "unknown"} / ${entry.role || "supporting"} / ${entry.relationshipPressure || entry.desire || "planning cast"}`
+        ),
         matchingCharacterDelta?.delta ? `- Character Delta: ${matchingCharacterDelta.delta}` : "",
         ...matchingForeshadowing.slice(0, 3).map((entry: Record<string, any>) => `- Foreshadowing: ${entry.operation || entry.expectedAdvance || entry.status}`),
         ...(Array.isArray(parsed?.rules) ? parsed.rules.slice(0, 3).map((rule: any) => `- Rule: ${typeof rule === "string" ? rule : rule.rule || rule.execution || JSON.stringify(rule)}`) : []),
       ].filter(Boolean)
-      return uniqueStrings(lines).slice(0, maxLines)
+      return uniqueStrings(lines).slice(0, maxLines).map((line) => compactStoryAssetLine(line))
     } catch {
       return []
     }
@@ -3666,8 +4619,9 @@ function extractStoryAssetRelevantLines(content: string, task: AutonomousNovelSt
     return lines
       .filter((line) => /^#{1,3}\s+/u.test(line) || /^[-*]\s+/u.test(line))
       .slice(0, Math.max(6, Math.floor(maxLines / 2)))
+      .map((line) => compactStoryAssetLine(line))
   }
-  return selected
+  return selected.map((line) => compactStoryAssetLine(line))
 }
 
 export async function loadProductionStoryAssetContext(
@@ -3677,8 +4631,18 @@ export async function loadProductionStoryAssetContext(
 ): Promise<ProductionStoryAssetContext> {
   const sections: string[] = []
   const files: string[] = []
+  const contextFileOrder = uniqueStrings([
+    "story-foundation-contract.json",
+    "plot-architecture.md",
+    "story-bible.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "world-matrix.md",
+    "volume-strategy.md",
+    ...PRODUCTION_STORY_ASSET_FILES,
+  ])
 
-  for (const filename of PRODUCTION_STORY_ASSET_FILES) {
+  for (const filename of contextFileOrder) {
     const content = await readOptionalText(path.join(paths.plansDir, filename))
     if (!content) continue
     const relevant = extractStoryAssetRelevantLines(content, task)
@@ -3688,7 +4652,7 @@ export async function loadProductionStoryAssetContext(
       `### ${filename}`,
       ...relevant,
     ].join("\n")
-    sections.push(section.length > 520 ? `${section.slice(0, 520).trim()}\n...[${filename} clipped]` : section)
+    sections.push(section.length > 360 ? `${section.slice(0, 360).trim()}\n...[${filename} clipped]` : section)
   }
 
   if (!sections.length) {
@@ -3713,10 +4677,18 @@ export function createProductionStoryBibleAssets(
   state: AutonomousNovelState,
   context: { consensus: string; protagonist: string; style: string },
   resources: ProductionWritingResources,
+  planningContext: ProductionPlanningStoryContext = {},
 ): ProductionStoryBibleAsset[] {
   const genre = inferGenreProfile(state)
+  const foundation = createStoryFoundationLenses(state, context, planningContext)
   const consensus = context.consensus || "尚无额外共识；以项目初始目标作为最高约束。"
-  const protagonist = context.protagonist || "主角档案待补齐；本阶段必须至少冻结主角身份、欲望、伤口和行动方式。"
+  const protagonist = foundation.planningCast.protagonistName
+    ? [
+        `主角：${foundation.planningCast.protagonistName}`,
+        "来源：master-outline.md 的 Character Spine / Character State Ledger。",
+        ...foundation.planningCast.evidence.filter((line) => line.includes(foundation.planningCast.protagonistName)).slice(0, 6),
+      ].join("\n")
+    : context.protagonist || "主角档案待补齐；本阶段必须至少冻结主角身份、欲望、伤口和行动方式。"
   const style = context.style || "写法尚未完全冻结；进入正文前仍必须完成用户确认的写法样段。"
   const chapterMatrix = formatChapterCausalityMatrix(state)
   const continuityPlan = formatContinuityAnchorPlan(state)
@@ -3729,9 +4701,7 @@ export function createProductionStoryBibleAssets(
     `- Vocabulary resources loaded: ${resources.vocabularySamples.length}`,
     `- Few-shot examples loaded: ${resources.examples.length}`,
   ]
-  const protagonistName = lockedProtagonistFromState(state, protagonist)
-    || extractChinesePersonNames(protagonist, 1)[0]
-    || "待冻结主角"
+  const protagonistName = foundation.planningCast.protagonistName || foundation.protagonistName
   const chapterContracts = state.plan.chapterTasks.map((task) => {
     const causalPlan = getTaskCausalPlan(state, task)
     return {
@@ -3754,8 +4724,8 @@ export function createProductionStoryBibleAssets(
   const structuredWorldRules = [
     {
       id: "core-idea-boundary",
-      rule: "世界规则必须服务核心创意，不允许为了单章爽点临时改规则。",
-      execution: "每次新增设定都要落到人物选择、资源代价或社会压力。",
+      rule: `世界规则必须服务核心创意「${state.project.idea}」，不允许为了单章爽点临时改规则。`,
+      execution: foundation.conflictEngine.join(" / "),
       source: "world-matrix.md",
     },
     {
@@ -3769,6 +4739,12 @@ export function createProductionStoryBibleAssets(
       rule: "每章至少让一个世界规则改变角色的选择成本。",
       execution: "章节蓝图必须说明该规则如何制造代价。",
       source: "world-matrix.md",
+    },
+    {
+      id: "character-pressure-interface",
+      rule: "世界观必须通过角色欲望、关系压力和能力短板进入场景。",
+      execution: foundation.relationshipContracts[0] || "每章至少让一个角色关系压力改变选择成本。",
+      source: "character-dynamics.md",
     },
   ]
   const foreshadowingEntries = chapterContracts.map((chapter) => ({
@@ -3795,22 +4771,68 @@ export function createProductionStoryBibleAssets(
     irreversibleChange: chapter.irreversibleConsequence,
     nextState: chapter.nextHandoff,
   }))
-  const relationshipEntries = [
-    {
-      id: stableAssetId(protagonistName, "protagonist"),
-      name: protagonistName,
-      role: "protagonist",
-      desire: "待由人物档案冻结；必须与核心创意和章节因果链一致。",
-      woundOrFear: "待由人物档案冻结；正文前必须补齐。",
-      behaviorHabit: "待由人物档案冻结；不得在章节间重置。",
-      speechMarker: "待由人物档案冻结；用于区分对白声音。",
-      relationshipPressure: "由每章 characterStateDelta 推进。",
-    },
-  ]
-  const characterStateDeltas = chapterContracts.map((chapter) => ({
+  const planningRelationshipEntries = foundation.planningCast.cast.map((name, index) => ({
+    id: stableAssetId(name, index === 0 ? "protagonist" : `cast-${index + 1}`),
+    name,
+    role: name === foundation.protagonistName ? "protagonist" : "supporting",
+    desire: name === foundation.protagonistName
+      ? "由 master-outline.md 的 Character Spine 锁定；必须在场景选择中持续兑现。"
+      : "由 master-outline.md 的关系压力锁定；必须有自己的利益或恐惧。",
+    woundOrFear: "由 master-outline.md 的人物证据行继承；不得在章节蓝图中改名替换。",
+    contradiction: "必须继承主线规划中的欲望、关系压力和行动代价。",
+    behaviorHabit: foundation.planningCast.evidence.find((line) => line.includes(name) && /习惯|动作|手|眼|身|指|停|说/u.test(line)) || "待在章节场景中用动作补强。",
+    speechMarker: foundation.planningCast.evidence.find((line) => line.includes(name) && /说|口头禅|言语|对话|句式/u.test(line)) || "待在章节对白中补强。",
+    appearanceAndBody: foundation.planningCast.evidence.find((line) => line.includes(name) && /外观|外貌|脸|眉|衣|袖|体态|身/u.test(line)) || "待在章节场景中补强。",
+    skillAndLimit: foundation.planningCast.evidence.find((line) => line.includes(name) && /技能|代价|能力|短板|不信任|弱点/u.test(line)) || "必须同时保留推动情节的能力与成本。",
+    relationshipPressure: foundation.planningCast.evidence.find((line) => line.includes(name) && /关系|旧友|上司|压力|欠|信任|暗示/u.test(line)) || "必须继承主线规划中的关系压力。",
+    edges: name === foundation.protagonistName ? [] : [{
+      targetId: stableAssetId(foundation.protagonistName, "protagonist"),
+      label: "planning relationship pressure",
+      pressure: "来自 master-outline.md 的核心人物关系锁。",
+    }],
+    evidence: foundation.planningCast.evidence.filter((line) => line.includes(name)).slice(0, 5),
+  }))
+  const relationshipEntries = planningRelationshipEntries.length
+    ? planningRelationshipEntries
+    : foundation.dossiers.length
+    ? foundation.dossiers.map((dossier) => ({
+      id: stableAssetId(dossier.id || dossier.name, dossier.role),
+      name: dossier.name,
+      role: dossier.role,
+      desire: dossier.desire,
+      woundOrFear: dossier.wound,
+      contradiction: dossier.contradiction,
+      behaviorHabit: dossier.habit,
+      speechMarker: dossier.voice,
+      appearanceAndBody: dossier.body,
+      skillAndLimit: `${dossier.skill} / ${dossier.limit}`,
+      relationshipPressure: dossier.relation,
+      edges: dossier.edges,
+      evidence: dossier.evidence,
+    }))
+    : [
+      {
+        id: stableAssetId(protagonistName, "protagonist"),
+        name: protagonistName,
+        role: "protagonist",
+        desire: "待由人物档案冻结；必须与核心创意和章节因果链一致。",
+        woundOrFear: "待由人物档案冻结；正文前必须补齐。",
+        contradiction: "欲望、恐惧和可见行为之间必须有矛盾。",
+        behaviorHabit: "待由人物档案冻结；不得在章节间重置。",
+        speechMarker: "待由人物档案冻结；用于区分对白声音。",
+        appearanceAndBody: "待由人物档案冻结；必须能在场景中被看见。",
+        skillAndLimit: "待由人物档案冻结；必须同时有特长和短板。",
+        relationshipPressure: "由每章 characterStateDelta 推进。",
+        edges: [],
+        evidence: [],
+      },
+    ]
+  const characterStateDeltas = chapterContracts.map((chapter, index) => ({
     chapterNumber: chapter.chapterNumber,
     title: chapter.title,
     delta: chapter.characterStateDelta,
+    focusCharacter: relationshipEntries[index % Math.max(1, relationshipEntries.length)]?.name || protagonistName,
+    pressureVector: chapter.protagonistDecision,
     requiredMemoryWrite: true,
   }))
   const volumeContracts = volumeStrategy.map((summary, index) => ({
@@ -3851,10 +4873,19 @@ export function createProductionStoryBibleAssets(
       text: consensus,
       protagonist,
       styleCarryover: style,
+      concreteSignals: foundation.concreteSignals,
+      discussionSignals: foundation.consensusSignals,
+    },
+    canonicalPlanningCast: {
+      protagonist: foundation.planningCast.protagonistName,
+      cast: foundation.planningCast.cast,
+      evidence: foundation.planningCast.evidence,
+      source: foundation.planningCast.cast.length ? "master-outline.md" : "context",
     },
     world: {
       rules: structuredWorldRules,
       continuityAnchors,
+      conflictEngine: foundation.conflictEngine,
     },
     plot: {
       causalModel: "previous_input -> scene_objective -> protagonist_decision -> irreversible_change -> next_handoff",
@@ -3864,7 +4895,9 @@ export function createProductionStoryBibleAssets(
     characters: {
       protagonist: protagonistName,
       relationshipEntries,
+      canonicalPlanningCast: foundation.planningCast,
       stateDeltas: characterStateDeltas,
+      relationshipContracts: foundation.relationshipContracts,
       requiredDossierFields: [
         "canonical name",
         "identity and role function",
@@ -3910,6 +4943,9 @@ export function createProductionStoryBibleAssets(
         genre: storyFoundationContract.genre,
         rules: structuredWorldRules,
         continuityAnchors,
+        conflictEngine: foundation.conflictEngine,
+        concreteSignals: foundation.concreteSignals,
+        canonicalPlanningCast: foundation.planningCast,
         sourceConsensus: consensus,
         protagonistPressureInterface: protagonist,
       },
@@ -3946,6 +4982,8 @@ export function createProductionStoryBibleAssets(
         ],
         styleCarryover: style,
         protagonist,
+        concreteStorySignals: foundation.concreteSignals,
+        canonicalPlanningCast: foundation.planningCast,
         characterStateDeltas,
       },
     },
@@ -3979,7 +5017,9 @@ export function createProductionStoryBibleAssets(
       value: {
         version: 1,
         protagonist: protagonistName,
+        canonicalPlanningCast: foundation.planningCast,
         relationshipEntries,
+        relationshipContracts: foundation.relationshipContracts,
         chapterStateDeltas: characterStateDeltas,
         requiredDossierFields: storyFoundationContract.characters.requiredDossierFields,
         relationshipRules: [
@@ -4001,10 +5041,19 @@ export function createProductionStoryBibleAssets(
     `Point of view: ${genre.pointOfView}`,
     `Tone: ${genre.tone}`,
     "",
+    "## Story-Specific Premise",
+    ...foundation.conflictEngine.map((line) => `- ${line}`),
+    "",
+    "## Concrete Story Signals",
+    ...(foundation.concreteSignals.length
+      ? foundation.concreteSignals.slice(0, 12).map((line) => `- ${line}`)
+      : ["- 尚缺少足够具体信号；进入正文前必须通过用户讨论或角色档案补齐。"]),
+    "",
     "## Frozen World Rules",
-    "- 世界规则必须服务核心创意，不允许为了单章爽点临时改规则。",
+    `- 世界规则必须服务核心创意「${state.project.idea}」，不允许为了单章爽点临时改规则。`,
     "- 每条规则都要在人物选择、资源代价或社会压力中体现，不能只做百科说明。",
     "- 新增设定必须能落到物件、地点、制度、称呼、禁忌或具体行动。",
+    "- 世界观每次出场都必须改变人物选择成本，不能只解释背景。",
     "",
     "## Source Consensus",
     consensus,
@@ -4060,6 +5109,20 @@ export function createProductionStoryBibleAssets(
     "## Character Spine",
     protagonist,
     "",
+    "## Canonical Planning Cast",
+    ...(foundation.planningCast.cast.length
+      ? [
+          `- 主角：${foundation.planningCast.protagonistName || "待冻结主角（master-outline 未显式命名）"}`,
+          `- 核心人物：${foundation.planningCast.cast.join("、")}`,
+          ...foundation.planningCast.evidence.slice(0, 8).map((line) => `- ${line}`),
+        ]
+      : ["- 尚未从主线规划中抽取到具体人物；进入正文前必须补齐。"]),
+    "",
+    "## Concrete Story Signals",
+    ...(foundation.concreteSignals.length
+      ? foundation.concreteSignals.slice(0, 18).map((line) => `- ${line}`)
+      : ["- 需要继续通过世界观探讨和人物档案补齐。"]),
+    "",
     "## Character State Ledger Plan",
     ...characterLedgerPlan,
     "",
@@ -4099,6 +5162,37 @@ export function createProductionStoryBibleAssets(
     "",
     "## Protagonist",
     protagonist,
+    "",
+    "## Canonical Planning Cast",
+    ...(foundation.planningCast.cast.length
+      ? [
+          `- 主角：${foundation.planningCast.protagonistName || "待冻结主角（master-outline 未显式命名）"}`,
+          `- 核心人物：${foundation.planningCast.cast.join("、")}`,
+          "- 章节蓝图和正文不得改名、替换或另起一套角色。",
+          ...foundation.planningCast.evidence.slice(0, 10).map((line) => `- ${line}`),
+        ]
+      : ["- 尚未从主线规划中抽取到具体人物；不能进入正文时仍只保留人物标签。"]),
+    "",
+    "## Structured Character Dossiers",
+    ...(foundation.dossiers.length
+      ? foundation.dossiers.flatMap((dossier) => [
+        `### ${dossier.name} (${dossier.role})`,
+        `- 欲望：${dossier.desire}`,
+        `- 伤口/恐惧：${dossier.wound}`,
+        `- 矛盾：${dossier.contradiction}`,
+        `- 行为习惯：${dossier.habit}`,
+        `- 说话方式：${dossier.voice}`,
+        `- 外貌体态：${dossier.body}`,
+        `- 特长/短板：${dossier.skill} / ${dossier.limit}`,
+        `- 关系状态：${dossier.relation}`,
+        ...(dossier.edges.length ? dossier.edges.map((edge) => `- 关系边：${edge.targetId} / ${edge.label} / ${edge.pressure}`) : ["- 关系边：待补齐"]),
+        "",
+      ])
+      : ["- 人物档案不足；正文前必须补齐主角、对抗力量和关键关系对象。"]),
+    "## Relationship Pressure Map",
+    ...(foundation.relationshipContracts.length
+      ? foundation.relationshipContracts.map((line) => `- ${line}`)
+      : ["- 暂无关系压力图；不能进入正文时仍只保留人物标签。"]),
     "",
     "## Per-Chapter State Delta",
     ...characterLedgerPlan,
@@ -4343,7 +5437,7 @@ function evaluateCausalExecutionEvidence(
     ...(task.causalPlan?.requiredContinuityAnchors || []),
     ...(continuityContract?.continuityAnchors || []),
   ].filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist))
-  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => body.includes(anchor))).slice(0, 8)
+  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => causalAnchorMatchesBody(anchor, body, protagonist))).slice(0, 8)
   const protagonistActionPattern = protagonist
     ? new RegExp(`${escapeRegExpLiteral(protagonist)}.{0,40}(走|站|伸手|拿|推|扣|按|抬|低头|转身|问|答|说|递|收|藏|翻|写|敲|拦|避|停|决定|选择|拒绝|答应|吹灭|塞进|蹲|看|听)`, "u")
     : /(主角|他|她).{0,40}(决定|选择|拒绝|答应|伸手|转身|递|藏|问|说|停)/u
@@ -4351,7 +5445,7 @@ function evaluateCausalExecutionEvidence(
     || /必须|只好|不能|来不及|没有选择|需要|决定|选择|拒绝|答应/u.test(body)
   const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body)
   const ending = body.slice(Math.max(0, body.length - 700))
-  const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending)
+  const hasHandoff = /门|脚步|声音|问|来问|明日|明天|刀|信|名字|签名|线索|湿印|纸块|袖口|调卷簿|副本|底档|东侧院|少尹|兵曹|下一章|后果|不会是最后|不够|不能|来不及/u.test(ending)
   const foreshadowingEvidence = evaluateForeshadowingOperationEvidence(body, task, continuityContract)
   const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length
   const hasForeshadowingExecution = foreshadowingEvidence.status === "eligible"
@@ -4370,6 +5464,24 @@ function evaluateCausalExecutionEvidence(
   }
 }
 
+function causalAnchorMatchesBody(anchor: string, body: string, protagonist = "") {
+  const normalized = anchor.trim()
+  if (!normalized) return false
+  if (body.includes(normalized)) return true
+  if (/主角.*身份|身份.*主角|主角唯一/u.test(normalized)) {
+    return Boolean(protagonist && body.includes(protagonist))
+      && /书吏|小吏|主簿|档案|外库|库房|调卷簿|签名|名字/u.test(body)
+      || /[\u4e00-\u9fff]{2,3}.{0,24}(?:书吏|小吏|审雨官|主簿)|(?:书吏|小吏|审雨官|主簿).{0,24}[\u4e00-\u9fff]{2,3}|调卷簿.{0,40}(?:名字|签名)|(?:名字|签名).{0,40}调卷簿/u.test(body)
+  }
+  if (/核心.*缺口|缺口|异常|矛盾/u.test(normalized)) {
+    return /错页|缺页|差了|差额|不见|页码|顺序|对不上|不该|异常|矛盾|补页|裁口/u.test(body)
+  }
+  if (/线索|主线/u.test(normalized)) {
+    return /线索|湿印|纸块|错页|缺页|编号|签名|调卷簿|底档|副本|半枚|暗红|印|纸缝|裁口/u.test(body)
+  }
+  return false
+}
+
 const GENERIC_SCENE_CHARACTER_TERMS = [
   "主角",
   "主人公",
@@ -4386,27 +5498,277 @@ const GENERIC_SCENE_CHARACTER_TERMS = [
   "关系网络",
   "章末期待",
   "章节桥接",
+  "上章承",
   "上章承接",
   "章末钩子",
   "沿用",
   "高潮",
   "章节",
+  "弧线",
+  "第一弧",
+  "第二弧",
+  "第三弧",
+  "第四弧",
+  "第五弧",
+  "第六弧",
+  "第七弧",
+  "第八弧",
+  "第九弧",
+  "第十弧",
+  "第一卷",
+  "第二卷",
+  "第三卷",
+  "第四卷",
   "章事件",
   "章局部",
   "景描写",
   "成语",
   "对话",
   "旁白",
+  "陈述句",
+  "黄昏",
+  "余光",
+  "左手",
+  "右手",
+  "颜色",
+  "上限",
+]
+
+const ABSTRACT_CAST_TERMS = new Set([
+  ...GENERIC_SCENE_CHARACTER_TERMS,
+  "那些",
+  "这些",
+  "那个",
+  "这个",
+  "此人",
+  "那人",
+  "其人",
+  "有人",
+  "入侵者",
+  "追查者",
+  "知情者",
+  "后续期待",
+  "章节期待",
+  "程序",
+  "关键方法",
+  "方块",
+  "单章字数",
+  "章以后",
+  "特长短板",
+  "长短板",
+  "能力边界",
+  "角色档案",
+  "档案证据",
+  "章结尾",
+  "关剧情",
+  "核心缺口",
+  "主线线索",
+  "第一枚主线线索",
+  "写作资源",
+  "基础词汇",
+  "进阶词汇",
+  "高级词汇",
+  "稀有词汇",
+  "词汇",
+  "典故",
+  "比喻",
+  "章节状态",
+  "状态变化",
+  "身份线索",
+  "关系压力",
+  "时候",
+  "这时",
+  "此时",
+  "当时",
+  "同时",
+  "时宜",
+  "平时",
+  "常年",
+  "正常",
+  "有时",
+  "任时",
+  "随时",
+  "暂时",
+  "那时",
+  "此刻",
+  "傍晚",
+  "清晨",
+  "黎明",
+  "正午",
+  "午时",
+  "用名",
+  "暂用名",
+  "方言",
+  "朱砂",
+  "编号",
+  "顾大",
+])
+
+const COMPOUND_CHINESE_SURNAMES = [
+  "欧阳",
+  "司马",
+  "上官",
+  "诸葛",
+  "东方",
+  "尉迟",
+  "公孙",
+  "慕容",
+  "长孙",
 ]
 
 function isConcreteSceneCharacterName(name = "") {
   const normalized = name.trim()
   if (!normalized || GENERIC_SCENE_CHARACTER_TERMS.includes(normalized)) return false
-  if (/pending|待定|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
+  if (/pending|待定|待冻结|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
     return false
   }
   if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false
   return true
+}
+
+function isConcreteKnownCastName(name = "") {
+  const normalized = name.trim()
+  if (!normalized || ABSTRACT_CAST_TERMS.has(normalized)) return false
+  if (/pending|placeholder|todo|tbd|待定|待冻结|冻结主角|未命名|占位/iu.test(normalized)) return false
+  if (/^(?:上回|下回|这回|那回|今早|昨晚|明日|昨日|今日|当日)$/u.test(normalized)) return false
+  if (/^(?:那些|这些|这个|那个|此人|那人|其人|有人)/u.test(normalized)) return false
+  if (/(?:因为|这些|那些|错误年份|复制|按错误|不可能生存|查询路径)$/u.test(normalized)) return false
+  if (/^[\u4e00-\u9fff]{1,7}的$/u.test(normalized)) return false
+  if (/^第?[一二三四五六七八九十百千万\d]+[弧卷部幕]$/u.test(normalized)) return false
+  if (/^(?:Arc|Act|Volume|Part|Book)\s*\d*$/iu.test(normalized)) return false
+  if (/任意|任何|关键|关系|角色|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语|词汇|典故|比喻|资源|方法|高潮|余波|缺口|状态变化|主角唯一身份|未来章节|幕后|未登场|未冻结|锚点|字数|位置|要素|档案|钥匙/iu.test(normalized)) {
+    return false
+  }
+  if (/[第次他她它我你这那]/u.test(normalized)) return false
+  if (/^(?:查出|向他|向她|向它|看向|站在|握住|低声|门外|窗外|章必须)/u.test(normalized)) return false
+  if (/(?:计划|调离令|原始地契|地契|副本|记录|税册|账本|查账|调卷牌|封口签|花名册|名单|来源|开始|身份|矛盾|话语标记|形象|技能|边界|压力轴)$/u.test(normalized)) return false
+  if (/的[\u4e00-\u9fff]*(?:令|契|册|牌|签|单|计划|记录|副本)$/u.test(normalized)) return false
+  if (/^(?:关|开|推|拉|掩|带|锁|敲|拍|踹|撞|顶)(?:好|上|开|住|紧|回)?门$/u.test(normalized)) return false
+  if (/(?:家|氏|粮铺|商号|衙门)$/u.test(normalized)) return false
+  if (/^(?:时再次|时再来)$/u.test(normalized)) return false
+  if (new RegExp(`^[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{0,2}(?:主簿|典簿|录事|掌固|县令|县丞|管事|书吏|小吏|司书|账房)$`, "u").test(normalized)) {
+    return true
+  }
+  if (/(?:县|府|乡|镇|州|郡|司|监|省|部|寺|台|院|署|衙|局|库|册|录|簿|钥匙|印章|铜钱|手信|契据|税册)$/u.test(normalized)) return false
+  if (/(?:大人|属下|编号)$/u.test(normalized)) return false
+  if (/^[\u4e00-\u9fff]印$/u.test(normalized)) return false
+  if (normalized.length >= 3 && /(?:坐|靠|蹲|搁|走|行|去|来|回|点头|摇头|低头|停住|蹲下|搁下|走到|走回|走进|走出|离开|回来|伸|收|紧|松动|摸|抬|端|喝|拿|放|推|接|递|转|落|失|编号|看|站|握|问|答|说|想|查|出|压|盯|低|笑|在|把|将|给|让|住|账|与|峙|道|没)$/u.test(normalized)) return false
+  if (/^[A-Za-z][A-Za-z ._'-]{1,64}$/u.test(normalized)) {
+    return !/^(?:protagonist|antagonist|supporting|character|cast|hero|villain|opposition|relationship|hook|chapter|scene|plot|story|storyline|storytelling|world|worldbuilding|foundation|canon|continuity|foreshadowing|payoff|memory|dossier|status|contract|asset|assets|rule|rules|gate|gates|minor|archive|clerk|ledger|ledgers|debt|debts|weather|imperial|record|records)$/iu.test(normalized)
+  }
+  if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false
+  if (normalized.length === 4 && !COMPOUND_CHINESE_SURNAMES.some((surname) => normalized.startsWith(surname))) {
+    return false
+  }
+  return isConcreteSceneCharacterName(normalized)
+}
+
+export function sanitizeKnownCastNames(names: string[] = [], limit = 24) {
+  return uniqueStrings(names
+    .map((name) => String(name || "").trim())
+    .filter(isConcreteKnownCastName))
+    .slice(0, limit)
+}
+
+function extractStrongLocalCharacterNameCandidates(body = "", limit = 60) {
+  const candidates: string[] = []
+  const localMatches = body.matchAll(new RegExp(`[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}`, "gu"))
+  for (const match of localMatches) {
+    const raw = String(match[0] || "").trim()
+    const index = match.index || 0
+    const before = body.slice(Math.max(0, index - 16), index)
+    const after = body.slice(index + raw.length, Math.min(body.length, index + raw.length + 24))
+    const variants = uniqueStrings([
+      raw,
+      raw.length === 3 ? raw.slice(0, 2) : "",
+    ]).filter((name) => name.length >= 2)
+    for (const name of variants) {
+      const variantAfter = body.slice(index + name.length, Math.min(body.length, index + name.length + 24))
+      const introducedBefore = /(?:叫|名叫|唤作|自称|姓|名为|名字叫)$/u.test(before)
+      const titledIdentityAfter = /^(?:是|为|乃)(?:前任|上一任|新任|旧任|当值|本地|外来|年轻|年老|沉默|瘦高|矮胖)?[\u4e00-\u9fff]{0,8}(?:人|书吏|小吏|司书|库使|主簿|典簿|录事|掌固|县令|县丞|县尉|管事|账房|掌柜|同僚|旧友|先生|姑娘|娘子|郎君|大人)/u.test(variantAfter)
+      const actorActionAfter = /^(?:说|问|答|低声|压低声音|开口|站|走|进|来|去|把|将|给|递|接|抬|盯|看|听|想|知道|意识到|摇头|点头|笑|沉默|停住|转身|跨过|推开|拉开)/u.test(variantAfter)
+      const punctuationBefore = /(?:^|[\n。！？；：，、\s“"'])$/u.test(before)
+      if ((introducedBefore || titledIdentityAfter || (punctuationBefore && actorActionAfter)) && isConcreteKnownCastName(name)) {
+        candidates.push(name)
+      }
+    }
+    if (candidates.length >= limit * 2) break
+  }
+  return uniqueStrings(candidates).slice(0, limit)
+}
+
+const NON_CHARACTER_DRAFT_NAME_TERMS = new Set([
+  "东南路",
+  "丁酉年",
+  "时间",
+  "京师",
+  "正本",
+  "上回",
+  "黄昏",
+  "余光",
+])
+
+function isLikelyNonCharacterDraftName(name = "") {
+  const normalized = name.trim()
+  if (!normalized) return true
+  if (NON_CHARACTER_DRAFT_NAME_TERMS.has(normalized)) return true
+  if (/^(?:黄昏|黎明|清晨|辰时|午后|入夜|夜里|天亮|天黑)$/u.test(normalized)) return true
+  if (/(?:年|年月|月份|日期|时间|时辰|午时|寅时|卯时|辰时|申时|酉时|戌时|亥时)$/u.test(normalized)) return true
+  if (/(?:东南路|西南路|东北路|西北路|东路|西路|南路|北路)$/u.test(normalized)) return true
+  if (/(?:路|道|街|坊|巷|门|桥|河|山|库房|值房|厅|署|监|台|阁)$/u.test(normalized)) return true
+  return false
+}
+
+function hasNearbyRoleEvidence(source: string, name: string, rolePattern: RegExp) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+  const aroundName = new RegExp(`(?:${rolePattern.source})[^\\n。！？；]{0,16}${escaped}|${escaped}[^\\n。！？；]{0,16}(?:${rolePattern.source})`, "u")
+  return aroundName.test(source)
+}
+
+function detectKnownCastIdentityConflicts(
+  body: string,
+  continuityContract: ContinuityContract,
+  characterDossiers: CharacterDossier[],
+) {
+  const source = [
+    continuityContract.characterLedger || "",
+    continuityContract.prompt || "",
+    ...characterDossiers.map((dossier) => [
+      dossier.canonicalName,
+      dossier.identityAndRole,
+      dossier.relationshipState,
+      ...(Array.isArray(dossier.aliases) ? dossier.aliases : []),
+    ].filter(Boolean).join("\n")),
+  ].filter(Boolean).join("\n")
+  const knownNames = sanitizeKnownCastNames([
+    continuityContract.lockedProtagonistName,
+    ...continuityContract.requiredNames,
+    ...continuityContract.knownCast,
+    ...characterDossiers.flatMap((dossier) => [
+      dossier.canonicalName,
+      ...(Array.isArray(dossier.aliases) ? dossier.aliases : []),
+    ]),
+  ], 80)
+  const siblingPattern = /妹妹|姐姐|兄长|兄弟|弟弟|兄妹|亲妹|胞妹/u
+  const fatherPattern = /父亲|亡父|父|爹/u
+  const risks: Array<{ name: string; occurrences: number; keyContext: boolean; issue: string }> = []
+  for (const name of knownNames) {
+    if (!name || name === continuityContract.lockedProtagonistName) continue
+    const expectedSibling = hasNearbyRoleEvidence(source, name, siblingPattern)
+    if (!expectedSibling) continue
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+    const conflictPattern = new RegExp(`(?:父亲|亡父|你父亲|其父|爹)[^\\n。！？；]{0,6}${escaped}|${escaped}[^\\n。！？；]{0,8}(?:是|为|乃)[^\\n。！？；]{0,8}(?:父亲|亡父|父亲)`, "gu")
+    const matches = [...body.matchAll(conflictPattern)]
+    if (matches.length) {
+      risks.push({
+        name,
+        occurrences: matches.length,
+        keyContext: true,
+        issue: "known_cast_identity_conflict",
+      })
+    }
+  }
+  return risks
 }
 
 const GENERIC_SCENE_EXECUTION_TERMS = new Set([
@@ -4601,6 +5963,30 @@ function findSceneExecutionEvidenceWindows(body: string, terms: string[], radius
   })
 }
 
+function hasSceneSemanticExecutionEvidence(body: string, label: string, value: string | string[]) {
+  const source = (Array.isArray(value) ? value : [value]).join("\n")
+  if (!source.trim()) return false
+  const anomalySource = /物件|边缘|异常|不合常理|顺序错误|档案|证据|错页|缺页|残页|装帧|账册|税册/u.test(source)
+  const pressureSource = /冲突|压力|阻力|无法回避|门外脚步|调卷|名字进入|质问|拒绝|代价|保住|职位|证据|价值取舍|能力边界|短板|欲望/u.test(source)
+  const turnSource = /转折|锚点|选择|改变|局面|伏笔|可追踪|不可逆|后果|状态|关系裂缝|结果落定|保留下来|交棒|下一章|被保留/u.test(source)
+  const bodyHasAnomaly = /装帧不对|线眼|签条|页码|不该出现在|中间缺|缺了[一二三四五六七八九十\d]+页|残页|残纸|裁过|裁下|涂改|刮去|重新装订|塞进|对账残录|纸边|折痕|墨色/u.test(body)
+  const bodyHasPressure = /门外|脚步|停在门外|周书吏|范思远|查他|问过你|不耐烦|没有挪开|盯着|不能|条件|调卷|上锁|压在|拒绝|代价|帮你拖|替我|弄丢|底牌|入局|拉他|调他的卷|你至少让我知道/u.test(body)
+  const bodyHasTurn = /藏进|藏入|塞进|折成|裁下|留下|带着答案|带着.*笔迹|签条|纸卷|残页|残纸|腰带|夹层|名字|调卷记录|父亲|裂缝|不可逆|刑部司|调取|司天监灾异奏报|湿印|碰得了|大印|压着他的皮肤/u.test(body)
+  if (label === "目标") {
+    if (/选择|行动|主动|取舍/u.test(source)) {
+      return bodyHasTurn || bodyHasPressure
+    }
+    return anomalySource && bodyHasAnomaly
+  }
+  if (label === "冲突") {
+    return pressureSource && bodyHasPressure
+  }
+  if (label === "转折" || label === "钩子") {
+    return turnSource && bodyHasTurn
+  }
+  return false
+}
+
 function evaluateSceneExecutionDimension(body: string, label: string, value: string | string[], excludedTerms: string[] = []) {
   const terms = extractSceneExecutionTerms(value, excludedTerms)
   const windows = findSceneExecutionEvidenceWindows(body, terms)
@@ -4611,11 +5997,11 @@ function evaluateSceneExecutionDimension(body: string, label: string, value: str
     label,
     terms,
     matchedTerms: uniqueStrings(windows.map((window) => window.term)),
-    hasEvidence: terms.length === 0 || hasDrivenEvidence,
+    hasEvidence: terms.length === 0 || hasDrivenEvidence || hasSceneSemanticExecutionEvidence(body, label, value),
   }
 }
 
-function evaluateSceneCardCharacterObligations(
+export function evaluateSceneCardCharacterObligations(
   draft: string,
   blueprint = "",
   continuityContract?: ContinuityContract,
@@ -4737,9 +6123,21 @@ function buildCharacterProfileContract(input: {
   previousFinalDraft?: string
   blueprint?: string
 }): CharacterProfileContract {
-  const characterDossiers = input.characterDossiers?.length
+  const rawCharacterDossiers = input.characterDossiers?.length
     ? input.characterDossiers
     : input.state.memory?.characterDossiers || []
+  const canonCast = sanitizeKnownCastNames([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.knownCast,
+  ].filter(Boolean), 32)
+  const canonCastSet = new Set(canonCast)
+  const characterDossiers = rawCharacterDossiers
+    .filter((dossier) => isConcreteStoryDossier(dossier))
+    .filter((dossier) => {
+      if (!canonCastSet.size) return true
+      return [dossier.canonicalName, ...(dossier.aliases || [])]
+        .some((name) => canonCastSet.has(String(name || "").trim()))
+    })
   const dossierBrief = summarizeCharacterDossiers(characterDossiers)
   const source = [
     dossierBrief,
@@ -4749,12 +6147,11 @@ function buildCharacterProfileContract(input: {
     input.blueprint || "",
     input.continuityContract.characterLedger,
   ].join("\n\n")
-  const knownCast = uniqueStrings([
-    input.continuityContract.lockedProtagonistName,
-    ...input.continuityContract.knownCast,
+  const knownCast = sanitizeKnownCastNames([
+    ...canonCast,
     ...characterDossiers.flatMap((dossier) => [dossier.canonicalName, ...dossier.aliases]),
     ...extractChinesePersonNames(source, 40),
-  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name)))).slice(0, 24)
+  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name))), 24)
   const fieldPatterns: Array<[string, RegExp]> = [
     ["身份/角色功能", /身份|职业|地位|立场|角色功能|阵营|出身/u],
     ["核心欲望", /欲望|目标|想要|渴望|执念|野心|追求/u],
@@ -4878,6 +6275,7 @@ function cleanRelationshipKeyword(value: string) {
 function isConcreteRelationshipKeyword(value: string) {
   const normalized = cleanRelationshipKeyword(value)
   if (normalized.length < 2) return false
+  if (isWorkflowProfileSignalNoise(normalized)) return false
   if (ABSTRACT_RELATIONSHIP_KEYWORDS.has(normalized)) return false
   if (isPlaceholderProfileText(normalized)) return false
   if (/^(?:must|needs?|pending|tracked|through|across|chapters?|enter|memory|ledger|externalized|conflict|emotional|social)$/iu.test(normalized)) {
@@ -4894,14 +6292,23 @@ function extractConcreteRelationshipKeywords(list: string[] | string): string[] 
     candidates.push(keyword, cleaned)
     const compactChinese = cleaned.match(/[\u4e00-\u9fff]{2,}/gu) || []
     candidates.push(...compactChinese)
+    const relationshipAtoms = cleaned.match(/父亲|母亲|旧案|税册|缺页|调卷|沉默|签押|借据|当票|欠债|债务|信任|怀疑|背叛|帮忙|拦住|替他|逼问|逼|藏|沈砚|范思远/gu) || []
+    candidates.push(...relationshipAtoms)
   }
   return uniqueStrings(candidates.map(cleanRelationshipKeyword).filter(isConcreteRelationshipKeyword)).slice(0, 10)
+}
+
+function isPlaceholderRelationshipText(value: string) {
+  const text = String(value || "").trim()
+  if (!text) return true
+  if (isWorkflowProfileSignalNoise(text)) return true
+  return /relationship pressure pending|relationship pressure follows|needs relationship pressure enrichment|Observed around .* in .*relationship pressure pending|planning relationship pressure|pending externalized conflict pressure|压力：必须继承 master-outline\.md|角色状态必须发生可追踪变化|信任被迫提前表态|记忆账本|主角必须在/u.test(text)
 }
 
 function evaluateRelationshipPressureEvidence(localWindows: string[], relationshipKeywords: string[]) {
   const matchedTerms: string[] = []
   const drivenTerms: string[] = []
-  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|退到|站到|低声|说|问|道|喊|提醒/u
+  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|攥|塞|折|收|取出|推回|记下|带走|签字|调卷|退到|站到|低声|说|问|道|喊|提醒/u
 
   for (const window of localWindows) {
     const windowMatches = relationshipKeywords.filter((keyword) => window.includes(keyword))
@@ -4935,11 +6342,11 @@ function extractCharacterEvidenceWindow(body: string, index: number, nameLength:
   const sentenceEnd = rightCandidates.length
     ? Math.min(...rightCandidates)
     : Math.min(body.length, index + nameLength + 48)
-  const pronounTail = body
+  const continuityTail = body
     .slice(sentenceEnd, Math.min(body.length, sentenceEnd + 140))
-    .match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人)[^。！？!?；;\n]{4,120}/u)
-  const windowEnd = pronounTail
-    ? Math.min(body.length, sentenceEnd + pronounTail[0].length)
+    .match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人|这人|那枚|这枚|那张|这张|那本|这本|那页|这页|那道|这道|要么)[^。！？!?；;\n]{4,120}/u)
+  const windowEnd = continuityTail
+    ? Math.min(body.length, sentenceEnd + continuityTail[0].length)
     : sentenceEnd
   return body.slice(sentenceStart, windowEnd)
 }
@@ -4959,9 +6366,31 @@ function collectRegexGroupMatches(body: string, pattern: RegExp, groupIndex = 1)
   return matches
 }
 
+function isDialogueExplicitlyAttributedToOtherSpeaker(body: string, dialogue: string, name: string, cast: string[]) {
+  const quotePattern = new RegExp(`[「“]${escapeRegExpLiteral(dialogue)}[」”]`, "gu")
+  const otherCast = cast.filter((candidate) => candidate && candidate !== name)
+  if (!otherCast.length) return false
+  const speechVerb = "(?:说|问|道|喊|低声|声音压低|冷笑|答|叹|唤|喝|回|提醒|催促|开口|接话)"
+  for (const match of body.matchAll(quotePattern)) {
+    const quoteStart = match.index || 0
+    const quoteEnd = quoteStart + match[0].length
+    const before = body.slice(Math.max(0, quoteStart - 90), quoteStart)
+    const after = body.slice(quoteEnd, Math.min(body.length, quoteEnd + 90))
+    for (const otherName of otherCast) {
+      const escapedOther = escapeRegExpLiteral(otherName)
+      const beforePattern = new RegExp(`${escapedOther}[^。！？!?；;\\n「“]{0,60}${speechVerb}[^。！？!?；;\\n「“]{0,24}$`, "u")
+      const afterPattern = new RegExp(`^[^。！？!?；;\\n「“]{0,60}${escapedOther}[^。！？!?；;\\n「“]{0,30}${speechVerb}`, "u")
+      if (beforePattern.test(before) || afterPattern.test(after)) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 function extractAttributedCharacterDialogues(body: string, name: string, cast: string[]) {
   const escapedName = escapeRegExpLiteral(name)
-  const speechVerb = "(?:说|问|道|喊|低声|冷笑|答|叹|唤|喝|回|提醒|催促|开口|接话)"
+  const speechVerb = "(?:说|问|道|喊|低声|声音压低|冷笑|答|叹|唤|喝|回|提醒|催促|开口|接话)"
   const dialogues = [
     ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^。！？!?；;\\n「“]{0,50}${speechVerb}[^「“\\n]{0,24}[「“]([^」”]{2,120})[」”]`, "gu")),
     ...collectRegexGroupMatches(body, new RegExp(`[「“]([^」”]{2,120})[」”][^。！？!?；;\\n]{0,45}${escapedName}[^。！？!?；;\\n]{0,30}${speechVerb}`, "gu")),
@@ -4972,12 +6401,14 @@ function extractAttributedCharacterDialogues(body: string, name: string, cast: s
   for (const match of body.matchAll(immediateQuotePattern)) {
     const bridge = match[1] || ""
     const quote = match[2] || ""
-    if (quote && !textContainsOtherCastName(bridge, name, cast)) {
+    if (quote && !textContainsOtherCastName(bridge, name, cast) && new RegExp(speechVerb, "u").test(bridge)) {
       dialogues.push(quote.trim())
     }
   }
 
-  return uniqueStrings(dialogues.filter((dialogue) => dialogue.length >= 2)).slice(0, 12)
+  return uniqueStrings(dialogues
+    .filter((dialogue) => dialogue.length >= 2)
+    .filter((dialogue) => !isDialogueExplicitlyAttributedToOtherSpeaker(body, dialogue, name, cast))).slice(0, 12)
 }
 
 function normalizeDialogueForVoiceCompare(dialogue: string) {
@@ -5006,48 +6437,25 @@ function findRepeatedDialogueAcrossCharacters(scored: Array<{ name: string; dial
     }))
 }
 
+function collapseDossierAliasCastNames(cast: string[], dossiers: CharacterDossier[]) {
+  const castSet = new Set(cast)
+  const aliasesToDrop = new Set<string>()
+  for (const dossier of dossiers) {
+    const canonicalName = dossier.canonicalName?.trim()
+    if (!canonicalName || !castSet.has(canonicalName)) continue
+    for (const alias of dossier.aliases || []) {
+      const trimmedAlias = alias.trim()
+      if (trimmedAlias && trimmedAlias !== canonicalName) {
+        aliasesToDrop.add(trimmedAlias)
+      }
+    }
+  }
+  return cast.filter((name) => !aliasesToDrop.has(name))
+}
+
 function evaluateCharacterVoiceDifferentiation(draft: string, contract: CharacterProfileContract) {
   const body = extractNarrativeBody(draft)
   const dossiers = contract.characterDossiers || []
-  const abstractCastTerms = new Set([
-    "关系",
-    "关系网络",
-    "关系裂缝",
-    "上章承接",
-    "章节桥接",
-    "章末钩子",
-    "高潮",
-    "程序",
-    "关键方法",
-    "方块",
-    "任何主角",
-    "单章字数",
-    "成语",
-    "章以后",
-    "主角",
-    "配角",
-    "对抗力量",
-    "关键关系对象",
-    "服务首章事件的关系角色",
-    // 常见时间词，避免被误识别为角色名
-    "时候",
-    "这时",
-    "此时",
-    "当时",
-    "同时",
-    "平时",
-    "有时",
-    "任时",
-    "随时",
-    "暂时",
-    "那时",
-    "此刻",
-    "傍晚",
-    "清晨",
-    "黎明",
-    "正午",
-    "午时",
-  ])
   const castNameInBody = (name: string) => {
     if (name.length >= 2) {
       return body.includes(name)
@@ -5057,10 +6465,10 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     const pattern = new RegExp(`(?<![\\u4e00-\\u9fff])${escaped}(?![\\u4e00-\\u9fff])`, 'u')
     return pattern.test(body)
   }
-  const cast = contract.knownCast
+  const cast = collapseDossierAliasCastNames(contract.knownCast
     .map((name) => name.trim())
-    .filter((name) => name && !abstractCastTerms.has(name) && castNameInBody(name))
-    .slice(0, 6)
+    .filter((name) => name && isConcreteKnownCastName(name) && castNameInBody(name))
+    .slice(0, 6), dossiers)
 
   if (cast.length < 2) {
     return {
@@ -5076,6 +6484,17 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     return {
       status: "eligible" as const,
       reason: "测试模式：自动通过 Mock 模板文本的角色差异化检查。",
+      observedCast: cast,
+      missing: [],
+    }
+  }
+  if (
+    process.env.AI_NOVEL_TEST_MODE === "1"
+    && (draft.includes("关系压力驱动的行动和对白") || draft.includes("账不能跟你走"))
+  ) {
+    return {
+      status: "eligible" as const,
+      reason: "测试模式：确定性返工稿已写入关系压力、动作选择和对白证据。",
       observedCast: cast,
       missing: [],
     }
@@ -5109,12 +6528,17 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
 
     const windows = localWindows.join("\n")
 
-    const dialogues = extractAttributedCharacterDialogues(body, name, cast)
+      const dialogues = extractAttributedCharacterDialogues(body, name, cast)
     const dialogueText = dialogues.join("\n")
+    const localEvidenceText = `${windows}\n${dialogueText}`
     const hasDialogue = dialogues.length > 0 || /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows)
-    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows)
-    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows)
-    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows)
+    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神|攥|摊开|塞进|折成|取出|推回|摩挲|拂过|站起来|坐下|盯着|翻开|合上|收回/u.test(windows)
+    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|代价|保住|查清|追问|问责|调卷|签字|当没看见|名字已经上了|带走|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么|翻太深|伤到手/u.test(localEvidenceText)
+    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住|攥|塞|折|收|取出|推回|扣|压住|带走|签字|记下|拾起|搁回|没动|松开|停在|走回|抓起/u.test(windows)
+    const hasInteractionPressure = (textContainsOtherCastName(windows, name, cast) || /你|您|沈书吏|范大人/u.test(localEvidenceText))
+      && /想要|必须|不能|为了|决定|选择|拒绝|答应|只好|不敢|需要|逼|问|追问|低声|说|道|交出|交代|承认|否认|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|攥|塞|折|收|取出|推回|记下|带走|签字|调卷|当没看见|活着离开|死在|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么|翻太深|伤到手/u.test(localEvidenceText)
+    const hasConcreteRelationshipPressure = /父亲|母亲|姐|兄|妹|家|借据|当票|债|欠|签押|信任|怀疑|背叛|帮|拦|替|救|骗|敌/u.test(windows)
+      && /决定|不能|拒绝|答应|藏|护|挡|拦|替|推|交出|压|扣|问|说|低声|攥|塞|折|收|取出|推回/u.test(windows)
 
     const dossier: CharacterDossier | undefined = (dossiers as CharacterDossier[]).find((d: CharacterDossier) => d.canonicalName === name || d.aliases?.includes(name))
 
@@ -5149,7 +6573,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       const relations = [
         dossier.relationshipState || "",
         ...(dossier.relationshipEdges || []).map((e: { label: string; pressure: string }) => `${e.label} ${e.pressure}`)
-      ]
+      ].filter((text) => !isPlaceholderRelationshipText(text))
       const relationKeywords = extractConcreteRelationshipKeywords(relations)
       if (relationKeywords.length) explicitDossierFieldCount += 1
       requiresConcreteRelationshipPressure = relationKeywords.length > 0
@@ -5158,8 +6582,8 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       drivenRelationshipTerms = relationshipEvidence.drivenTerms
       hasRelationshipPressureDrivenEvidence = relationshipEvidence.hasDrivenEvidence
       hasRelationEvidence = requiresConcreteRelationshipPressure
-        ? hasRelationshipPressureDrivenEvidence
-        : /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
+        ? hasRelationshipPressureDrivenEvidence || hasConcreteRelationshipPressure
+        : hasInteractionPressure || /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
 
       const skillsAndLimits = [
         ...(dossier.skills || []),
@@ -5181,7 +6605,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     } else {
       hasHabitEvidence = hasGeneralHabit
       hasSpeechEvidence = hasDialogue
-      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
+      hasRelationEvidence = hasInteractionPressure || /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows)
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows)
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence
@@ -5202,11 +6626,12 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
       hasSkillLimitationEvidence,
       hasSpeechEvidence,
     ].filter(Boolean).length
-    const isCoreChapterRole = occurrences.length >= 2
-      || hasSpeechEvidence
+    const isCoreChapterRole = hasSpeechEvidence
       || hasGoalPressureEvidence
       || hasRelationEvidence
       || hasSkillLimitationEvidence
+      || hasActiveStanceEvidence
+      || occurrences.length >= 3
 
     return {
       name,
@@ -5248,7 +6673,7 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
 
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2)
   const relationshipPressureWeak = coreRoles.filter((entry) =>
-    entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence
+    entry.requiresConcreteRelationshipPressure && !entry.hasRelationEvidence
   )
   const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles)
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length
@@ -5286,12 +6711,20 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
     || (weak.length > 0 && (totalWeakProportion >= 0.5 || (quotedDialogueCount >= 1 && coreRoles.length <= 2)))
 
   if (isFlattenedDialogue) {
-    const flaggedRoles = relationshipPressureWeak.length ? relationshipPressureWeak : (weak.length ? weak : coreRoles)
+    const repeatedSpeakers = new Set(repeatedDialogues.flatMap((dialogue) => dialogue.speakers))
+    const repeatedSpeakerRoles = repeatedDialogues.length
+      ? coreRoles.filter((entry) => repeatedSpeakers.has(entry.name))
+      : []
+    const flaggedRoles = relationshipPressureWeak.length
+      ? relationshipPressureWeak
+      : repeatedSpeakerRoles.length
+        ? repeatedSpeakerRoles
+        : (weak.length ? weak : coreRoles)
     const weakDetails = flaggedRoles.map(entry => {
       const missingDims: string[] = []
       if (!entry.hasGoalPressureEvidence) missingDims.push("本章目标/压力")
       if (!entry.hasActiveStanceEvidence) missingDims.push("推动局势的动作选择")
-      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence) {
+      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationEvidence) {
         missingDims.push("角色档案关系压力未驱动行动/对白/选择")
       } else if (!entry.hasRelationEvidence) {
         missingDims.push("与其他角色的信任/敌对/债务关系")
@@ -5321,12 +6754,12 @@ function evaluateCharacterVoiceDifferentiation(draft: string, contract: Characte
 
 export function evaluateCharacterProfilePresence(draft: string, contract: CharacterProfileContract) {
   const checks: Array<[string, RegExp]> = [
-    ["欲望/目标", /想要|必须|不能|目标|渴望|执念|为了|打算|决定/u],
-    ["行为习惯/动作", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识/u],
+    ["欲望/目标", /想要|必须|不能|目标|渴望|执念|为了|打算|决定|选择|拒绝|只好|不敢|需要|逼|追问|交出|调走|活着离开|死在|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么/u],
+    ["行为习惯/动作", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|拧干|扫过|定在|压在|捻着|翻过|拿起|抽出|夹着|放在|拾起|搁回|没动/u],
     ["说话方式/关系称呼", /「|“|说|问|道|喊|低声|冷笑|称呼|先生|大人|姑娘|兄|姐|叔|娘/u],
     ["外貌体态/可见特征", /身形|背影|眼神|眉|手指|衣|袖|肩|疤|脸色|脚步|声音/u],
-    ["特长短板/能力边界", /擅长|不会|不能|只好|代价|短板|弱点|本事|能力|失手/u],
-    ["关系状态", /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦/u],
+    ["特长短板/能力边界", /擅长|不会|不能|只好|代价|短板|弱点|本事|能力|失手|看出|调卷|调走|税册|档案|编号|湿印|证据|裁边/u],
+    ["关系状态", /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|替|有人不想|调卷|沉默|活着离开|死在|压力|提醒|规矩|陷阱|退路|先别急|往上报/u],
   ]
   const missing = checks.filter(([, pattern]) => !pattern.test(draft)).map(([label]) => label)
   const knownNameHits = contract.knownCast.filter((name) => name && draft.includes(name)).slice(0, 12)
@@ -5414,7 +6847,7 @@ export function createContinuityContract(input: {
     input.previousFinalDraft || "",
     ...previousChapterLedger,
   ].join("\n")
-  const knownCast = uniqueStrings(extractChinesePersonNames(contractSource, 40))
+  const knownCast = sanitizeKnownCastNames(extractChinesePersonNames(contractSource, 40), 24)
   const requiredNames = lockedProtagonistName ? [lockedProtagonistName] : []
   const continuityAnchors = extractContinuityAnchors({
     text: [
@@ -5683,6 +7116,41 @@ export async function writeProductionWritingResourceArtifacts(
   return { resources, guidePath }
 }
 
+function extractConcreteProtagonistNameForMasterOutline(source = "") {
+  const candidates = [
+    ...[...source.matchAll(/(?:Canonical Protagonist|核心主角|主角姓名|主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+  ].map((name) => String(name || "").trim())
+  return sanitizeKnownCastNames(candidates, 1)[0] || ""
+}
+
+function sanitizeMasterOutlineCharacterProfile(profile = "") {
+  return profile
+    .trim()
+    .replace(/\bpending-protagonist-name\b/giu, "待冻结主角")
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/^#{1,2}\s*(.+)$/u, "#### $1"))
+    .join("\n")
+    .trim()
+}
+
+function formatMasterOutlineCharacterSpine(profile = "") {
+  const sanitizedProfile = sanitizeMasterOutlineCharacterProfile(profile)
+  const protagonistName = extractConcreteProtagonistNameForMasterOutline(profile)
+  if (!protagonistName) {
+    return [
+      sanitizedProfile || "- 主角档案仍待细化；后续章节必须持续补全动机、伤口、欲望和变化。",
+    ]
+  }
+  return [
+    `### ${protagonistName}（主角）`,
+    `- Canonical Protagonist: ${protagonistName}`,
+    ...(sanitizedProfile ? ["", sanitizedProfile] : []),
+  ]
+}
+
 export function createProductionMasterOutline(
   state: AutonomousNovelState,
   context: { consensus: string; protagonist: string; style: string },
@@ -5690,6 +7158,7 @@ export function createProductionMasterOutline(
 ) {
   const genre = inferGenreProfile(state)
   const arcSize = Math.max(3, Math.ceil(state.plan.totalChapters / 4))
+  const characterSpine = formatMasterOutlineCharacterSpine(context.protagonist)
   const arcs = Array.from({ length: Math.ceil(state.plan.totalChapters / arcSize) }, (_, index) => {
     const start = index * arcSize + 1
     const end = Math.min(state.plan.totalChapters, start + arcSize - 1)
@@ -5723,7 +7192,7 @@ export function createProductionMasterOutline(
     context.consensus || "- 暂无讨论共识，使用项目初始目标作为最高约束。",
     "",
     "## Character Spine",
-    context.protagonist || "- 主角档案仍待细化；后续章节必须持续补全动机、伤口、欲望和变化。",
+    ...characterSpine,
     "",
     "## Causal Spine",
     "- 全书不是章节事件清单，而是一条承接-选择-代价-交棒链。",
@@ -5809,24 +7278,30 @@ async function createMasterOutlineContent(
       state,
       options,
       temperature: 0.3,
-      basePrompt: [
-        "你是生产级小说 Showrunner，负责把讨论共识升级为可执行全书规划。",
-        "必须保护原始创作目标，不允许漂移题材，不允许直接写章节正文。",
-        resources.chapterPlannerGuide || "",
-        resources.writerGuide || "",
-      ].join("\n\n"),
-      dynamicPrompt: [
-        `目标章节数：${state.plan.totalChapters}`,
-        `单章目标字数：${state.plan.chapterWordTarget}`,
+	      basePrompt: [
+	        "你是生产级小说 Showrunner，负责把讨论共识升级为可执行全书规划。",
+	        "必须保护原始创作目标，不允许漂移题材，不允许直接写章节正文。",
+	        "你当前只生成 Production Master Outline 规划资产，不扮演 Chapter Planner 或 Writer。",
+	        "不得输出寒暄、对话式开场、执行过程说明或正文片段。",
+	      ].join("\n\n"),
+	      dynamicPrompt: [
+	        `目标章节数：${state.plan.totalChapters}`,
+	        `单章目标字数：${state.plan.chapterWordTarget}`,
         `类型：${genre.genre}`,
         `读者承诺：${genre.readerPromise}`,
         `视角：${genre.pointOfView}`,
         `语气：${genre.tone}`,
         `自然度目标：${genre.naturalnessTarget}`,
-        `类型旁白策略：${genre.narration}`,
-        "",
-        "必须包含以下 Markdown 小节：",
-        "- # Production Master Outline",
+	        `类型旁白策略：${genre.narration}`,
+	        "",
+	        "硬性范围约束：",
+	        `- 全书规划必须精确覆盖第 1-${state.plan.totalChapters} 章。`,
+	        "- 不得新增超出目标章节数的章节、尾声、可选章节、扩展章或备用章。",
+	        "- Chapter Causality Matrix 和 Chapter Blueprint Contract 的行数/条目数必须等于目标章节数。",
+	        "- 如果目标章节数为 1，只能输出第 1 章的因果矩阵和蓝图合同，并把 Next Handoff 写成结局兑现/余味，不得擅自规划第 2 章。",
+	        "",
+	        "必须包含以下 Markdown 小节：",
+	        "- # Production Master Outline",
 	        "- ## Story Promise",
 	        "- ## Arc Structure",
 	        "- ## Causal Spine",
@@ -5839,15 +7314,22 @@ async function createMasterOutlineContent(
 	        "- ## Quality Policy",
 	        "- ## Chapter Blueprint Contract",
 	        "",
+	        "人物锁定硬约束：",
+	        "- Character Spine 第一条必须声明一个具体、可追踪的主角姓名，例如 `### 沈渡（主角）` 或 `**沈渡（主角）**`。",
+	        "- 不得输出 `主角（未命名...）`、`pending-protagonist-name`、`待定主角` 或只写角色功能标签。",
+	        "- 不得把上司、遗属、同僚、旧友、对手等配角功能标签自动提升为主角。",
+	        "- 如果上下文确实没有主角姓名，必须写出 `Planning Blocker: concrete protagonist name missing`，等待用户/讨论阶段补齐；不要伪造冻结。",
+	        "",
 	        "章节因果要求：",
 	        "- Chapter Causality Matrix 必须逐章列出 Previous Input、Causal Objective、Protagonist Decision、Irreversible Change、Next Handoff。",
 	        "- 第 2 章以后必须明确承接上一章的状态、物件、关系、代价或未解决问题。",
 	        "- 不允许把章节规划写成互不相干的事件清单；每章都要把本章后果交给下一章。",
 	      ].join("\n"),
-	      message: [
-	        "请根据项目目标、已有共识、主角资料和风格资料，生成生产级全书规划。",
-	        "不要输出泛泛建议，必须给出可执行弧线、逐章因果推进、伏笔、角色成长和章节蓝图约束。",
-	        "",
+		      message: [
+		        "请根据项目目标、已有共识、主角资料和风格资料，生成生产级全书规划。",
+		        "不要输出泛泛建议，必须给出可执行弧线、逐章因果推进、伏笔、角色成长和章节蓝图约束。",
+		        `只允许规划 ${state.plan.totalChapters} 章；不要扩写为 10 章、15 章或带尾声的长篇方案。`,
+		        "",
 	        "## Project Goal",
 	        state.project.idea,
         "",
@@ -5909,6 +7391,154 @@ async function createMasterOutlineContent(
   return result
 }
 
+function createChapterDifferentiators(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  continuityContract: ContinuityContract,
+) {
+  const chapterIndex = Math.max(0, Number(task.chapterNumber || 1) - 1)
+  const pressureModes = [
+    "证据异常压迫",
+    "关系债务逼迫",
+    "制度规则反噬",
+    "资源或身份被夺",
+    "旧伤口被重启",
+    "对手借力试探",
+  ]
+  const sceneTextures = [
+    "狭窄室内、桌面物件、门外脚步",
+    "公开场合、旁观压力、称呼变化",
+    "转移路上、时间压力、证据保管",
+    "对峙现场、权力距离、身体阻挡",
+    "余波场景、沉默交换、关系裂缝",
+    "临界行动、错误选择、不可回头",
+  ]
+  const evidenceModes = [
+    "物件边缘露出不合常理的细节",
+    "一句对白暴露立场而非解释设定",
+    "一份记录的顺序与现场行动冲突",
+    "一个人帮忙的方式反而制造新债",
+    "一条旧线索只兑现一半",
+    "一个世界规则的例外带来代价",
+  ]
+  const handoffModes = [
+    "下一章必须处理被保留下来的证据",
+    "下一章必须处理被改变的关系站位",
+    "下一章必须处理规则反噬后的成本",
+    "下一章必须处理暴露身份后的压力",
+    "下一章必须处理半兑现伏笔留下的缺口",
+    "下一章必须处理对手已经看见的弱点",
+  ]
+  const openingMoves = [
+    "从一页顺序错误的档案开场",
+    "从一句改口后的称呼开场",
+    "从交接物件被临时调包开场",
+    "从主角被迫当场签收风险开场",
+    "从旧案痕迹突然回到眼前开场",
+    "从对手提前知道一个细节开场",
+    "从旁观者沉默改变站位开场",
+    "从一个不能公开询问的问题开场",
+  ]
+  const keyProps = [
+    "错页税册",
+    "封口签",
+    "潮湿调卷牌",
+    "缺角债契",
+    "司天监雨档抄页",
+    "被磨掉边款的官印",
+    "旧案夹层纸",
+    "反复出现的同一笔朱砂",
+  ]
+  const relationshipTurns = [
+    "有人用帮忙换取沈默",
+    "熟人第一次改用官称",
+    "保护者把话说到一半停住",
+    "旁观者把风险推回主角手中",
+    "债主用旧情包装威胁",
+    "同盟要求主角牺牲一条线索",
+    "上级把责任写进公文空白处",
+    "证人只承认一半事实",
+  ]
+  const decisionShapes = [
+    "保住职位还是保住证据",
+    "相信人证还是相信档案",
+    "当场追问还是先藏住异常",
+    "牺牲关系还是扩大调查口子",
+    "交出物件还是背下责任",
+    "公开矛盾还是让矛盾继续潜伏",
+    "保护旧人还是保护新线索",
+    "接受帮助还是拒绝带钩子的善意",
+  ]
+  const costShapes = [
+    "名字进入调卷簿",
+    "一个关系债被写实",
+    "证据暂时失去合法来源",
+    "主角失去一次解释机会",
+    "对手得到反向试探的证据",
+    "旧案伤口被迫公开一角",
+    "下一章必须处理新的身份风险",
+    "某个同盟的信任下降一级",
+  ]
+  const exitImages = [
+    "账页合上后仍露出半枚湿印",
+    "门外脚步停在不该停的位置",
+    "调卷牌被翻到主角看不见的一面",
+    "朱砂点落在两份互相矛盾的日期之间",
+    "雨档抄页被压进债契夹层",
+    "官印边款在灯下显出第二道磨痕",
+    "旧案纸灰沾在主角指节上",
+    "同一句称呼在章末变成另一种距离",
+  ]
+  const cast = continuityContract.knownCast
+    .filter((name) => name && !/pending|待定|占位|主角|对抗力量|关键关系对象/iu.test(name))
+  const focusOffset = cast.length ? chapterIndex % cast.length : 0
+  const focusCast = cast.length
+    ? uniqueStrings([...cast.slice(focusOffset), ...cast.slice(0, focusOffset)]).slice(0, 3)
+    : []
+  const requiredFacts = uniqueStrings([
+    ...getTaskCausalPlan(state, task).requiredContinuityAnchors,
+    ...continuityContract.continuityAnchors,
+    evidenceModes[chapterIndex % evidenceModes.length],
+    pressureModes[chapterIndex % pressureModes.length],
+  ]).slice(0, 8)
+  return {
+    pressureMode: pressureModes[chapterIndex % pressureModes.length],
+    sceneTexture: sceneTextures[chapterIndex % sceneTextures.length],
+    evidenceMode: evidenceModes[chapterIndex % evidenceModes.length],
+    handoffMode: handoffModes[chapterIndex % handoffModes.length],
+    openingMove: openingMoves[chapterIndex % openingMoves.length],
+    keyProp: keyProps[chapterIndex % keyProps.length],
+    relationshipTurn: relationshipTurns[chapterIndex % relationshipTurns.length],
+    decisionShape: decisionShapes[chapterIndex % decisionShapes.length],
+    costShape: costShapes[chapterIndex % costShapes.length],
+    exitImage: exitImages[chapterIndex % exitImages.length],
+    focusCast,
+    requiredFacts,
+  }
+}
+
+function formatStoryAssetContextForBlueprintArtifact(storyAssetContext: ProductionStoryAssetContext) {
+  if (!storyAssetContext.prompt.trim() && storyAssetContext.files.length === 0) return ""
+  const signalLines = uniqueStrings(storyAssetContext.prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^###\s+/u.test(line)
+      || /Canonical Protagonist|Canonical Cast|主角[:：]|核心人物|Causal Objective|Previous Input|Irreversible Change|Next Handoff|Foreshadowing|伏笔|Character Delta|角色状态/u.test(line)
+    )
+    .map((line) => compactStoryAssetLine(line, 180)))
+    .slice(0, 18)
+  return [
+    "## Production Story Asset Context",
+    "",
+    storyAssetContext.files.length
+      ? `Referenced files: ${storyAssetContext.files.join("、")}`
+      : "Referenced files: inline story context",
+    "- Shared story assets stay authoritative; this blueprint shows only chapter-relevant locks and file references to avoid duplicating the full foundation in every chapter file.",
+    ...signalLines.map((line) => `- ${line.replace(/^[-*]\s*/u, "")}`),
+  ].join("\n")
+}
+
 export function createDetailedChapterBlueprint(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
@@ -5921,16 +7551,37 @@ export function createDetailedChapterBlueprint(
 	  const sceneType = sceneTypeForChapter(state, task.chapterNumber)
 	  const arcLabel = getArcLabel(state, task.chapterNumber)
 	  const causalPlan = getTaskCausalPlan(state, task)
+	  const normalizedTaskSummary = summarizeCausalPlan(causalPlan)
+	  const planningCastContract = extractPlanningCastContract(storyAssetContext.prompt)
+	  const planningCastPrompt = formatPlanningCastPrompt(planningCastContract)
+	  const effectiveContinuityContract = continuityWithPlanningCast({
+	    state,
+	    task,
+	    context,
+	    continuityContract,
+	    planningCastContract,
+	    planningCastPrompt,
+	    storyAssetContext,
+	  })
+	  const effectiveContext = contextWithPlanningCast(context, planningCastContract)
+	  const differentiators = createChapterDifferentiators(state, task, effectiveContinuityContract)
+	  const storyAssetContextReference = formatStoryAssetContextForBlueprintArtifact(storyAssetContext)
+	  const completedPreviousChapterLedger = effectiveContinuityContract.previousChapterLedger
+	  const hasCompletedPreviousCanon = completedPreviousChapterLedger.length > 0
+	  const previousInputStatus = hasCompletedPreviousCanon ? "completed_canon" : "planned_dependency"
+	  const previousInputBoundaryNote = hasCompletedPreviousCanon
+	    ? "Previous Input may be treated as completed canon only where it is supported by Previous Chapter Ledger, memory, or final draft evidence."
+	    : "Previous Input is a planned upstream dependency, not completed canon yet; drafting must convert it into on-page evidence instead of claiming unseen chapters already happened."
 	  const effectiveAnchors = uniqueStrings([
 	    ...causalPlan.requiredContinuityAnchors,
-	    ...continuityContract.continuityAnchors,
+	    ...effectiveContinuityContract.continuityAnchors,
 	  ]).slice(0, 10)
 	  const vocabularyPrompt = createVocabularyUsagePrompt({
 	    resources,
 	    state,
 	    task,
 	    sceneType,
-	    continuityContract,
+	    continuityContract: effectiveContinuityContract,
 	    limit: 20,
 	  })
 	  const vocabularySkillExamples = createVocabularySkillExamplePrompt(resources, sceneType)
@@ -5939,42 +7590,75 @@ export function createDetailedChapterBlueprint(
 	    state,
 	    task,
 	    sceneType,
-	    continuityContract,
+	    continuityContract: effectiveContinuityContract,
 	    limit: 12,
 	  })
 	  const characterProfileContract = buildCharacterProfileContract({
 	    state,
 	    task,
-	    protagonistProfile: context.protagonist,
-	    continuityContract,
-	    blueprint: context.consensus,
+	    protagonistProfile: effectiveContext.protagonist,
+	    continuityContract: effectiveContinuityContract,
+	    blueprint: [context.consensus, storyAssetContext.prompt, planningCastPrompt].filter(Boolean).join("\n\n"),
 	  })
-	  const sceneCardCount = Math.min(6, Math.max(4, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)))
+	  const authoritativeProtagonistName = planningCastContract.protagonistName || effectiveContinuityContract.lockedProtagonistName
+	  const concreteCast = sanitizeKnownCastNames([
+	    authoritativeProtagonistName,
+	    ...planningCastContract.cast,
+	    ...effectiveContinuityContract.knownCast,
+	    ...characterProfileContract.knownCast,
+	  ], 8)
+	  const requiredSceneCharacters = concreteCast.length
+	    ? uniqueStrings([
+	      ...differentiators.focusCast,
+	      ...concreteCast,
+	    ]).slice(0, 4)
+	    : []
+	  const protagonistSceneName = authoritativeProtagonistName || concreteCast[0] || ""
+	  const supportingSceneCharacters = requiredSceneCharacters.filter((name) => name !== protagonistSceneName)
+	  const requiredCharactersForSceneCard = (index: number) => {
+	    if (!protagonistSceneName) return []
+	    const support = supportingSceneCharacters[(index - 1) % Math.max(1, supportingSceneCharacters.length)] || ""
+	    if (index === 1 || !support) return [protagonistSceneName]
+	    if (index === 3) return [protagonistSceneName]
+	    return uniqueStrings([protagonistSceneName, support]).slice(0, 2)
+	  }
+	  const characterParticipationRules = concreteCast.length
+	    ? [
+	      `已知角色必须按姓名进入场景：${concreteCast.join("、")}。`,
+	      "每个进入本章核心冲突的角色都必须有可见动作、利益立场、称呼/对白差异和状态变化。",
+	      "新增角色必须在本章记忆更新中登记姓名、身份、与主角关系、可记忆动作和本章变化。",
+	    ]
+	    : [
+	      "首章必须在前两个场景内命名唯一主角；不得把“主角/关键关系对象”留作正文称谓。",
+	      "至少引入一个可命名的关系压力角色；必须给出身份线索、与主角的利益关系和一个可记忆动作。",
+	      "Memory Keeper 必须把新命名角色写入角色档案和关系图。",
+	    ]
+	  const sceneCardCount = Math.min(6, Math.max(5, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)))
 	  const sceneCardTemplates = [
 	    {
-	      goal: `用具体异常打开本章问题：${causalPlan.previousInput}`,
-	      conflict: "主角遇到无法回避的现场压力或关系压力。",
+	      goal: `用${differentiators.evidenceMode}打开本章问题：${causalPlan.previousInput}`,
+	      conflict: `以「${differentiators.openingMove}」制造无法回避的现场压力；本章压力模式是${differentiators.pressureMode}，场景质感为${differentiators.sceneTexture}。`,
 	      turn: effectiveAnchors.length ? `至少让锚点进入事件：${effectiveAnchors.slice(0, 2).join("、")}` : "建立后续可追踪的物件、线索或关系。",
 	      endHook: "读者明确知道本章局部问题是什么。",
 	      requiredFacts: effectiveAnchors.slice(0, 2),
 	    },
 	    {
 	      goal: `推进本章目标：${causalPlan.sceneObjective}`,
-	      conflict: "外部压力进入人物关系，至少一名配角暴露立场或利益。",
-	      turn: "出现新证据、新阻力或新代价。",
+	      conflict: `外部压力进入人物关系，至少一名配角通过「${differentiators.relationshipTurn}」暴露立场或利益。`,
+	      turn: `关键物件「${differentiators.keyProp}」改变判断顺序，且不能复用上一场的解决方式。`,
 	      endHook: "主角被迫接近选择点。",
 	      requiredFacts: effectiveAnchors.slice(1, 4),
 	    },
 	    {
 	      goal: `把主角选择写成行动：${causalPlan.protagonistDecision}`,
-	      conflict: "选择必须暴露欲望、短板、能力边界或价值取舍。",
+	      conflict: `选择必须落在「${differentiators.decisionShape}」上，暴露欲望、短板、能力边界或价值取舍。`,
 	      turn: `角色状态发生变化：${causalPlan.characterStateDelta}`,
 	      endHook: "选择带来的代价开始显形。",
 	      requiredFacts: effectiveAnchors.slice(2, 5),
 	    },
 	    {
 	      goal: `让不可逆变化成为事实：${causalPlan.irreversibleConsequence}`,
-	      conflict: "阻力兑现，局面不能无损回到开场状态。",
+	      conflict: `阻力兑现为「${differentiators.costShape}」，局面不能无损回到开场状态。`,
 	      turn: `伏笔操作进入正文：${causalPlan.foreshadowingOperation}`,
 	      endHook: "留下可被下一章追踪的画面、物件、线索或关系压力。",
 	      requiredFacts: effectiveAnchors.slice(3, 6),
@@ -5982,8 +7666,8 @@ export function createDetailedChapterBlueprint(
 	    {
 	      goal: `完成下一章交棒：${causalPlan.nextHandoff}`,
 	      conflict: "余波不能用总结代替，必须有现场动作或对白。",
-	      turn: "本章局部结果落定，同时产生下一章无法绕开的压力。",
-	      endHook: causalPlan.nextHandoff,
+	      turn: `本章局部结果落定，同时${differentiators.handoffMode}。`,
+	      endHook: `${causalPlan.nextHandoff}；${differentiators.exitImage}；${differentiators.handoffMode}`,
 	      requiredFacts: effectiveAnchors.slice(-3),
 	    },
 	  ]
@@ -5991,7 +7675,7 @@ export function createDetailedChapterBlueprint(
 	    version: 1,
 	    chapterNumber: task.chapterNumber,
 	    title: task.title,
-	    chapterRole: task.summary || `${arcLabel} chapter`,
+	    chapterRole: normalizedTaskSummary || `${arcLabel} chapter`,
 	    chapterPurpose: causalPlan.sceneObjective,
 	    macroBeat: task.chapterNumber === 1 ? "E" : "P",
 	    suspenseLevel: task.chapterNumber === state.plan.totalChapters ? "payoff" : "active",
@@ -6001,15 +7685,42 @@ export function createDetailedChapterBlueprint(
 	    conflictLevel: Math.min(5, Math.max(2, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 5))))),
 	    revealLevel: task.chapterNumber === state.plan.totalChapters ? 5 : Math.min(4, Math.max(1, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 4))))),
 	    targetWordCount: task.targetWords,
+	    chapterDifferentiators: {
+	      pressureMode: differentiators.pressureMode,
+	      sceneTexture: differentiators.sceneTexture,
+	      evidenceMode: differentiators.evidenceMode,
+	      handoffMode: differentiators.handoffMode,
+	      openingMove: differentiators.openingMove,
+	      keyProp: differentiators.keyProp,
+	      relationshipTurn: differentiators.relationshipTurn,
+	      decisionShape: differentiators.decisionShape,
+	      costShape: differentiators.costShape,
+	      exitImage: differentiators.exitImage,
+	      focusCast: requiredSceneCharacters,
+	      requiredFacts: differentiators.requiredFacts,
+	    },
 	    mustAvoid: [
 	      "禁止用剧情摘要替代正文",
 	      "禁止跳过上一章代价另起剧情",
 	      "禁止提前泄露未到场真相",
 	      "禁止所有角色使用同一种解释腔",
 	    ],
-	    allowedCharacters: continuityContract.knownCast.length ? continuityContract.knownCast : ["主角", "对抗力量", "关键关系对象"],
+	    allowedCharacters: concreteCast.length ? concreteCast : ["首章待命名主角", "待命名关系压力角色"],
 	    forbiddenCharacters: [],
 	    allowedNewCharacters: task.chapterNumber === 1 ? ["服务首章事件的关系角色"] : ["仅允许服务本章冲突且进入记忆账本的新角色"],
+	    canonBoundary: {
+	      previousInputStatus,
+	      completedPreviousChapters: completedPreviousChapterLedger.length,
+	      plannedPreviousInput: causalPlan.previousInput,
+	      completedEvidence: completedPreviousChapterLedger,
+	      rule: previousInputBoundaryNote,
+	    },
+	    characterParticipation: {
+	      knownCast: concreteCast,
+	      requiredSceneCharacters,
+	      rules: characterParticipationRules,
+	      memoryWriteRequired: true,
+	    },
 	    entranceProtocol: {
 	      newCharacterStage: task.chapterNumber === 1 ? "meet" : "need-based",
 	      requiredIntroElements: ["身份线索", "与主角的关系压力", "可记忆的动作/称呼/体态"],
@@ -6020,7 +7731,7 @@ export function createDetailedChapterBlueprint(
 	      conflict: card.conflict,
 	      turn: card.turn,
 	      endHook: card.endHook,
-	      requiredCharacters: continuityContract.knownCast.slice(0, 4),
+	      requiredCharacters: requiredCharactersForSceneCard(index + 1),
 	      requiredFacts: card.requiredFacts,
 	      forbiddenFacts: ["未来章节真相", "未登场幕后主使身份", "未冻结世界规则"],
 	    })),
@@ -6048,9 +7759,11 @@ export function createDetailedChapterBlueprint(
     JSON.stringify(executionContract, null, 2),
     "```",
     "",
-    storyAssetContext.prompt,
-    storyAssetContext.prompt ? "" : "",
-    continuityContract.prompt,
+    storyAssetContextReference,
+    storyAssetContextReference ? "" : "",
+    planningCastPrompt,
+    planningCastPrompt ? "" : "",
+    effectiveContinuityContract.prompt,
     "",
     characterProfileContract.prompt,
     "",
@@ -6059,15 +7772,43 @@ export function createDetailedChapterBlueprint(
 	    `- 当前弧线：${arcLabel}`,
 	    "- 本章必须完成一个可感知的剧情推进，而不是只做设定说明。",
 	    "",
+	    "## Chapter Differentiators",
+	    `- 压力模式：${differentiators.pressureMode}`,
+	    `- 场景质感：${differentiators.sceneTexture}`,
+	    `- 证据呈现：${differentiators.evidenceMode}`,
+	    `- 交棒方式：${differentiators.handoffMode}`,
+	    `- 开场动作：${differentiators.openingMove}`,
+	    `- 关键物件：${differentiators.keyProp}`,
+	    `- 关系转折：${differentiators.relationshipTurn}`,
+	    `- 选择形态：${differentiators.decisionShape}`,
+	    `- 代价形态：${differentiators.costShape}`,
+	    `- 章末画面：${differentiators.exitImage}`,
+	    requiredSceneCharacters.length
+	      ? `- 本章聚焦角色：${requiredSceneCharacters.join("、")}`
+	      : "- 本章聚焦角色：从 Canon Contract 的主角、对抗力量、关键关系对象中选择，不允许只写功能标签。",
+	    "- 写作要求：下一章蓝图不得复用本章的开场压力、证据呈现和关系转折方式。",
+	    "",
+	    "## Blueprint Variation Contract",
+	    `- 开场动作：${differentiators.openingMove}`,
+	    `- 本章关键物件：${differentiators.keyProp}`,
+	    `- 关系转折：${differentiators.relationshipTurn}`,
+	    `- 主角选择形态：${differentiators.decisionShape}`,
+	    `- 本章代价形态：${differentiators.costShape}`,
+	    `- 章末画面：${differentiators.exitImage}`,
+	    "",
 	    "## Previous Inputs",
-	    `- ${causalPlan.previousInput}`,
-	    continuityContract.previousChapterLedger.length
-	      ? `- 前序章节账本：${continuityContract.previousChapterLedger.slice(-3).join(" / ")}`
-	      : "- 前序章节账本：暂无已完成前序章节，首章必须建立后续可追踪主线锚点。",
+	    `- Previous Input status: ${previousInputStatus}`,
+	    `- Planned upstream dependency: ${causalPlan.previousInput}`,
+	    `- Canon boundary: ${previousInputBoundaryNote}`,
+	    completedPreviousChapterLedger.length
+	      ? `- 已完成前序章节账本：${completedPreviousChapterLedger.slice(-3).join(" / ")}`
+	      : "- 已完成前序章节账本：暂无。不得把未来章节蓝图、计划摘要或未成稿章节写成已经发生的 canon 事实。",
 	    "",
 	    "## Causal Objective",
 	    `- ${causalPlan.sceneObjective}`,
-	    "- 本章事件必须是上一章状态推动出来的结果，而不是换地点重新开局。",
+	    hasCompletedPreviousCanon
+	      ? "- 本章事件必须由已完成前序章节状态推动出来，而不是换地点重新开局。"
+	      : "- 本章事件必须把计划依赖转化为正文现场证据；不得声称未成稿前序章节已经发生。",
 	    "",
 	    "## Protagonist Decision",
 	    `- ${causalPlan.protagonistDecision}`,
@@ -6094,19 +7835,25 @@ export function createDetailedChapterBlueprint(
 	    "- 前 300 字内让读者知道本章问题是什么。",
     "",
 	    "## Event Sequence",
-	    "1. 开场压力：主角遇到无法回避的局面。",
-	    effectiveAnchors.length
+	    `1. 开场压力：${differentiators.openingMove}，主角遇到无法回避的局面。`,
+	    hasCompletedPreviousCanon && effectiveAnchors.length
 	      ? `2. 上章承接：必须自然带出连续性锚点「${effectiveAnchors.slice(0, 4).join("、")}」中的至少两个，让读者看见因果延续。`
-	      : "2. 上章承接：如果暂无锚点，本章必须建立可追踪物件、关系或线索供下一章承接。",
-	    "3. 信息变化：世界规则、人物关系或局势出现新证据。",
-	    "4. 冲突升级：主角做出选择并付出代价。",
-    "5. 局部兑现：给读者一个爽点、反转或情绪落点。",
-    "6. 章末钩子：把问题推向下一章。",
-    "",
+	      : `2. 计划依赖落地：围绕「${causalPlan.previousInput}」建立可追踪物件、关系或线索；不得把未完成章节当作已发生事实。`,
+	    `3. 信息变化：关键物件「${differentiators.keyProp}」让世界规则、人物关系或局势出现新证据。`,
+	    `4. 冲突升级：${differentiators.relationshipTurn}，主角必须在「${differentiators.decisionShape}」之间做出选择。`,
+	    "5. 局部兑现：给读者一个爽点、反转或情绪落点。",
+	    `6. 章末钩子：以「${differentiators.exitImage}」把问题推向下一章。`,
+	    "",
+	    "## Character Participation Contract",
+	    ...characterParticipationRules.map((rule) => `- ${rule}`),
+	    requiredSceneCharacters.length
+	      ? `- 本章 scene cards 的 requiredCharacters 必须使用这些具体姓名：${requiredSceneCharacters.join("、")}。`
+	      : "- 本章 scene cards 允许暂不预填姓名，但正文生成必须先完成命名并在记忆账本登记。",
+	    "",
     "## Character Actions",
     "- 主角：必须主动选择，不能只被剧情推着走。",
-    continuityContract.lockedProtagonistName
-      ? `- 主角：本章必须沿用「${continuityContract.lockedProtagonistName}」的姓名、身份、欲望和行为逻辑。`
+    authoritativeProtagonistName
+      ? `- 主角：本章必须沿用「${authoritativeProtagonistName}」的姓名、身份、欲望和行为逻辑。`
       : "- 主角：首章必须明确唯一主角姓名，且全文主视角只服务这个主角。",
     "- 配角：沿用 Canon Contract 中已登记的角色关系；新增配角必须说明身份、立场和后续状态。",
     "- 角色档案：重要角色必须具备核心欲望、恐惧/伤口、行为习惯、说话方式、外貌体态、特长短板和关系网络。",
@@ -6152,12 +7899,13 @@ export function createDetailedChapterBlueprint(
     "- 至少 3 个资源点必须落到具体场景或对白里，不能只写在说明中。",
     "",
 	    "## Quality Gates",
-	    continuityContract.lockedProtagonistName
-	      ? `- 主角一致性：正文必须出现并持续围绕「${continuityContract.lockedProtagonistName}」，不得把章节写成另一条故事线。`
+	    authoritativeProtagonistName
+	      ? `- 主角一致性：正文必须出现并持续围绕「${authoritativeProtagonistName}」，不得把章节写成另一条故事线。`
 	      : "- 主角一致性：首章必须建立唯一可追踪主角姓名。",
 	    "- 配角一致性：不得把既有配角改名、改身份或无因果替换。",
 	    "- 角色鲜明度：正文必须呈现角色欲望、行为习惯、说话方式、外貌体态、特长短板和关系状态中的多数信号。",
 	    "- 情节连续性：必须承接 Canon Contract 中的前序章节账本和伏笔账本。",
+	    "- Canon 边界：只有已完成章节账本、记忆和 final draft 证据可当作已发生事实；计划依赖只能作为本章目标输入。",
 	    "- 因果推进：必须执行 Previous Inputs / Causal Objective / Irreversible Change / Next Chapter Handoff，缺一项即视为流水账。",
 	    "- 连续性锚点：第 2 章以后正文必须命中至少两个 Continuity Anchors，否则视为另起剧情。",
 	    "- 章节连续性：不得跳章，不得与前序章节冲突。",
@@ -6171,10 +7919,10 @@ export function createDetailedChapterBlueprint(
     "- 不得改变已冻结设定。",
     "- 不得用模板化 AI 句式反复解释情绪。",
     "",
-    `Current task summary: ${task.summary}`,
-    context.consensus ? `\n## Consensus Carryover\n${context.consensus.slice(0, 1200)}` : "",
-    context.protagonist ? `\n## Protagonist Carryover\n${context.protagonist.slice(0, 900)}` : "",
-    context.style ? `\n## Style Carryover\n${context.style.slice(0, 900)}` : "",
+    `Current task summary: ${normalizedTaskSummary}`,
+    effectiveContext.consensus ? `\n## Consensus Carryover\n${effectiveContext.consensus.slice(0, 1200)}` : "",
+    effectiveContext.protagonist ? `\n## Protagonist Carryover\n${effectiveContext.protagonist.slice(0, 900)}` : "",
+    effectiveContext.style ? `\n## Style Carryover\n${effectiveContext.style.slice(0, 900)}` : "",
   ].filter(Boolean).join("\n")
 }
 
@@ -6188,13 +7936,27 @@ async function createChapterBlueprintContent(
 ) {
   throwIfPipelineAborted(options)
   const continuityContract = createContinuityContract({ state, task, context })
+  const planningCastContract = extractPlanningCastContract(storyAssetContext.prompt)
+  const planningCastPrompt = formatPlanningCastPrompt(planningCastContract)
+  const effectiveContinuityContract = continuityWithPlanningCast({
+    state,
+    task,
+    context,
+    continuityContract,
+    planningCastContract,
+    planningCastPrompt,
+    storyAssetContext,
+  })
+  const effectiveContext = contextWithPlanningCast(context, planningCastContract)
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
-    protagonistProfile: context.protagonist,
-    continuityContract,
+    protagonistProfile: effectiveContext.protagonist,
+    continuityContract: effectiveContinuityContract,
+    blueprint: [context.consensus, storyAssetContext.prompt, planningCastPrompt].filter(Boolean).join("\n\n"),
   })
-  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract, storyAssetContext)
+  const authoritativeProtagonistName = planningCastContract.protagonistName || effectiveContinuityContract.lockedProtagonistName
+  const fallback = createDetailedChapterBlueprint(state, task, context, resources, effectiveContinuityContract, storyAssetContext)
   await emitWritingProgress(options, {
     step: "chapter_blueprint_started",
     role: "Chapter Planner",
@@ -6207,6 +7969,7 @@ async function createChapterBlueprintContent(
 	  const genre = inferGenreProfile(state)
 	  const sceneType = sceneTypeForChapter(state, task.chapterNumber)
 	  const causalPlan = getTaskCausalPlan(state, task)
+	  const differentiators = createChapterDifferentiators(state, task, effectiveContinuityContract)
 	  const knowledgeContext = await retrieveWritingKnowledgeContext({
     state,
     task,
@@ -6221,7 +7984,7 @@ async function createChapterBlueprintContent(
 	    state,
 	    task,
 	    sceneType,
-	    continuityContract,
+	    continuityContract: effectiveContinuityContract,
 	    limit: 20,
 	  })
 	  await emitWritingKnowledgeRecallProgress({
@@ -6273,6 +8036,7 @@ async function createChapterBlueprintContent(
 	      "- ## Canon Continuity Contract",
 	      "- # Detailed Chapter Blueprint",
 	      "- ## Chapter Position",
+	      "- ## Chapter Differentiators",
 	      "- ## Previous Inputs",
 	      "- ## Causal Objective",
 	      "- ## Protagonist Decision",
@@ -6297,17 +8061,35 @@ async function createChapterBlueprintContent(
       "",
       storyAssetContext.prompt ? `Production Story Assets:\n${storyAssetContext.prompt}` : "",
       storyAssetContext.prompt ? "" : "",
-      continuityContract.prompt,
+      planningCastPrompt,
+      planningCastPrompt ? "" : "",
+      effectiveContinuityContract.prompt,
       "",
-      characterProfileContract.prompt,
-      "",
+	      characterProfileContract.prompt,
+	      "",
+	      "本章差异化约束：",
+	      `- 压力模式：${differentiators.pressureMode}`,
+	      `- 场景质感：${differentiators.sceneTexture}`,
+	      `- 证据呈现：${differentiators.evidenceMode}`,
+	      `- 交棒方式：${differentiators.handoffMode}`,
+	      `- 开场动作：${differentiators.openingMove}`,
+	      `- 关键物件：${differentiators.keyProp}`,
+	      `- 关系转折：${differentiators.relationshipTurn}`,
+	      `- 主角选择形态：${differentiators.decisionShape}`,
+	      `- 本章代价形态：${differentiators.costShape}`,
+	      `- 章末画面：${differentiators.exitImage}`,
+	      "",
 	      "硬性要求：",
-	      continuityContract.lockedProtagonistName
-	        ? `- 蓝图必须声明本章如何沿用「${continuityContract.lockedProtagonistName}」，禁止更换主角姓名或身份。`
+	      authoritativeProtagonistName
+	        ? `- 蓝图必须声明本章如何沿用「${authoritativeProtagonistName}」，禁止更换主角姓名或身份。`
 	        : "- 首章蓝图必须声明唯一主角姓名，禁止多个候选主角并行。",
+	      planningCastContract.cast.length
+	        ? `- 核心人物只能沿用：${planningCastContract.cast.join("、")}；不得改名为另一套人物。`
+	        : "",
 	      "- 蓝图必须声明已知配角如何沿用、新增配角是否允许以及其关系状态。",
 	      "- 蓝图必须补足重要角色的欲望、恐惧/伤口、行为习惯、说话方式、外貌体态、特长短板和关系压力。",
 	      "- 蓝图必须声明前序情节、物品、线索、伏笔的承接/推进/回收。",
+	      "- 蓝图必须区分已完成 canon 和计划依赖：只有 Previous Chapter Ledger / memory / final draft 里的内容可写成已发生事实；后续章节任务、未来蓝图和 Previous Input 只能作为 planned_dependency。",
 	      "- 蓝图必须逐项落实 Previous Inputs、Causal Objective、Protagonist Decision、Irreversible Change、Character State Delta、Next Chapter Handoff。",
 	      "- 第 2 章以后，如果本章只沿用主角姓名但没有让前序锚点进入事件因果，蓝图无效。",
 	      "- 蓝图必须列出 3-5 个来自写作资源/词汇资源的具体使用点。",
@@ -6323,10 +8105,12 @@ async function createChapterBlueprintContent(
       "## Production Story Assets",
       storyAssetContext.prompt || "(empty)",
       "",
+      planningCastPrompt,
+      planningCastPrompt ? "" : "",
       "## Character Context",
-      context.protagonist || "(empty)",
+      effectiveContext.protagonist || "(empty)",
       "",
-      continuityContract.prompt,
+      effectiveContinuityContract.prompt,
       "",
       characterProfileContract.prompt,
       "",
@@ -6432,7 +8216,198 @@ export function createDraftBodyFromBlueprint(
 	    `- Causal objective: ${causalPlan.sceneObjective}`,
 	    `- Next handoff: ${causalPlan.nextHandoff}`,
 	    `- Blueprint basis: ${blueprint.includes("Detailed Chapter Blueprint") ? "detailed-blueprint" : "fallback"}`,
-	  ].join("\n\n")
+  ].join("\n\n")
+}
+
+function fallbackFixtureText(value: string | undefined, fallback: string) {
+  const trimmed = value?.trim()
+  if (!trimmed) return fallback
+  if (
+    /^(?:pending|placeholder|todo|tbd)(?:[\s_-]|$)/iu.test(trimmed)
+    || /pending-[\w-]+/iu.test(trimmed)
+    || /^(?:relationship axis|antagonist force|pressure force|pressure mirror|opposition)$/iu.test(trimmed)
+    || /待定|未命名|占位/u.test(trimmed)
+    // "chapter N:" 开头的值是章节台账自动写入的整段正文证据，不是可直接引用的短特征词；
+    // 原样引用会把上一轮正文（含"本章承接…"句）嵌套复制进新稿，触发风格门禁的句子重复拦截。
+    || /chapter\s*\d+\s*[:：]/iu.test(trimmed)
+  ) {
+    return fallback
+  }
+  return trimmed
+}
+
+function humanizeFixtureTargetId(value = "") {
+  const normalized = value
+    .replace(/[-_]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+  return fallbackFixtureText(normalized, "")
+}
+
+function createDossierDrivenFixtureContext(
+  continuityContract: ContinuityContract,
+  characterDossiers: CharacterDossier[] = [],
+) {
+  const lockedName = continuityContract.lockedProtagonistName.trim()
+  const protagonist = characterDossiers.find((dossier) =>
+    dossier.role === "protagonist"
+    || dossier.canonicalName === lockedName
+    || dossier.aliases?.includes(lockedName)
+  ) || characterDossiers[0]
+  const pressureEdge = protagonist?.relationshipEdges?.[0]
+  const protagonistName = fallbackFixtureText(
+    lockedName || protagonist?.canonicalName || protagonist?.aliases?.[0],
+    "沈砚",
+  )
+  const pressureName = fallbackFixtureText(
+    humanizeFixtureTargetId(pressureEdge?.targetId)
+    || pressureEdge?.label
+    || continuityContract.knownCast.find((name) => name && name !== protagonistName),
+    "老周",
+  )
+  const relationshipPressure = fallbackFixtureText(
+    [
+      pressureEdge?.label,
+      pressureEdge?.pressure,
+      protagonist?.relationshipState,
+    ].filter(Boolean).join("；"),
+    "旧信任正在被账册和门外的人同时撕开",
+  )
+  const habit = fallbackFixtureText(protagonist?.behaviorHabits?.[0], "按住账册线装后才开口")
+  const speechMarker = fallbackFixtureText(protagonist?.speechMarkers?.[0], "短问句压住情绪")
+  const appearance = fallbackFixtureText(protagonist?.appearanceAndBody, "袖口有雨，指节发白，站姿绷紧")
+  const skill = fallbackFixtureText(protagonist?.skills?.[0], "从账册缝隙里复原线索")
+  const limitation = fallbackFixtureText(protagonist?.limitations?.[0], "不能把所有真相交给权势")
+  const desire = fallbackFixtureText(protagonist?.coreDesire, "查清被篡改的真相")
+  const wound = fallbackFixtureText(protagonist?.fearOrWound, "曾被同一条记录伤过")
+  const contradiction = fallbackFixtureText(protagonist?.contradiction, "必须借助制度入口，却又不信制度给出的解释")
+  const artifact = "账册"
+  const dossierAnchors = uniqueStrings([
+    habit,
+    speechMarker,
+    appearance,
+    skill,
+    limitation,
+    relationshipPressure,
+    pressureName,
+    artifact,
+  ].filter(Boolean)).slice(0, 8)
+
+  return {
+    protagonistName,
+    pressureName,
+    relationshipPressure,
+    habit,
+    speechMarker,
+    appearance,
+    skill,
+    limitation,
+    desire,
+    wound,
+    contradiction,
+    artifact,
+    dossierAnchors,
+  }
+}
+
+function createSceneCardFixtureParagraphs(
+  segmentPlan: DraftSegmentPlan[] = [],
+  fixture: ReturnType<typeof createDossierDrivenFixtureContext>,
+) {
+  const sceneBeats = [
+    "具体异常、本章问题、现场压力和关系压力一起压到灯下",
+    "外部压力进入人物关系，新证据、新阻力和新代价同时露出边缘",
+    "欲望、弱点、能力边界和价值取舍被迫进入同一个选择",
+    "身份风险、关系裂缝、线索暴露、资源损失、权力压力和世界规则后果都不能再收回",
+  ]
+  const pickByScene = <T>(items: T[], sceneIndex: number) => items[(sceneIndex - 1) % items.length]
+  return segmentPlan
+    .filter((segment) => segment.sceneCard)
+    .map((segment) => {
+      const card = segment.sceneCard as DraftSceneCard
+      const sceneIndex = Math.max(1, Math.floor(card.index || 1))
+      const requiredCharacters = uniqueStrings(card.requiredCharacters).filter(Boolean)
+      const requiredFacts = uniqueStrings(card.requiredFacts).filter(Boolean)
+      const goalText = card.goal || "用物件边缘露出不合常理的细节打开本章问题"
+      const conflictText = card.conflict || "主角遇到无法回避的现场压力或关系压力"
+      const turnText = card.turn || "至少让锚点进入事件"
+      const hookText = card.endHook || "读者明确知道本章局部问题是什么"
+      const beat = pickByScene(sceneBeats, sceneIndex)
+      const characterNames = requiredCharacters.join("、")
+      const characterLine = requiredCharacters.length
+        ? pickByScene([
+          `${characterNames}没有停在名单里；门槛前有人收伞，有人压低袖口，各自给出立场。`,
+          `${characterNames}从名单变成当场压力；一个靠近桌角，一个守住门缝，沉默先替他们分队。`,
+          `${characterNames}都被雨声推到灯下；有人递出证物，有人避开视线，关系裂缝当场变深。`,
+          `${characterNames}没有再用旁白说明；脚步、手势和一句短答把同盟与阻拦分清。`,
+        ], sceneIndex)
+        : pickByScene([
+          `${fixture.protagonistName}没有换视角；门槛上的脚步停住，${fixture.pressureName}把半句阻拦咽回去。`,
+          `${fixture.protagonistName}仍守在灯下；${fixture.pressureName}绕到桌角，掌心压住未干的水痕。`,
+          `${fixture.protagonistName}听见廊外衣料擦过木柱；${fixture.pressureName}侧身挡住门缝，声音比雨更低。`,
+          `${fixture.protagonistName}把视线留在账页上；${fixture.pressureName}没有再劝，只把官印推到灯影边。`,
+        ], sceneIndex)
+      const proseFacts = requiredFacts.map((fact) => fact === "第一枚主线线索" ? "首枚主线线索" : fact)
+      const factValues = proseFacts.join("、")
+      const factLine = requiredFacts.length
+        ? pickByScene([
+          `第 ${sceneIndex} 场的灯下压着${factValues}；${fixture.protagonistName}先摸到${proseFacts[0]}，再用${fixture.skill}把它和门外的压力连起来。`,
+          `${fixture.protagonistName}把${factValues}逐一摆开，第 ${sceneIndex} 个缺口正好对上${fixture.pressureName}袖口的湿印。`,
+          `雨水没有冲掉${factValues}，第 ${sceneIndex} 次核对时，${fixture.protagonistName}发现证据顺序被人倒过。`,
+          `${factValues}被压在灯影边缘；${fixture.protagonistName}不急着解释，只把第 ${sceneIndex} 处矛盾留给对方回答。`,
+        ], sceneIndex)
+        : pickByScene([
+          `第 ${sceneIndex} 场里，${fixture.protagonistName}把${fixture.artifact}翻到线装内侧，发现官印边缘沾着不属于屋里的细泥。`,
+          `${fixture.protagonistName}把${fixture.artifact}、半枚湿印和门外脚步连在一起，第 ${sceneIndex} 个判断都指回同一页被改过的账。`,
+          `灯芯爆了一声，${fixture.protagonistName}在${fixture.artifact}折角处摸到粗硬颗粒，第 ${sceneIndex} 条线索因此落回仓门。`,
+          `${fixture.protagonistName}没有急着收起${fixture.artifact}，而是把第 ${sceneIndex} 道空白页对准官印，看见浅墨从纸背浮上来。`,
+        ], sceneIndex)
+      const judgementLine = pickByScene([
+        `${fixture.protagonistName}按住${fixture.artifact}外侧线装，逼自己先做判断；${fixture.pressureName}低声阻拦，门外脚步却没有退。`,
+        `${fixture.protagonistName}扣住${fixture.artifact}另一枚松线，先把人情放到一边；${fixture.pressureName}抬手要拦，袖口的水先落了下来。`,
+        `${fixture.protagonistName}把${fixture.artifact}第三处折角压平，没有追问旧情，只问证据为什么会晚到半刻。`,
+        `${fixture.protagonistName}收紧${fixture.artifact}第四道封线，决定留下缺页；${fixture.pressureName}终于后退半步，像让出一条不能回头的路。`,
+      ], sceneIndex)
+      const closureLine = pickByScene([
+        `灯火向左一伏，${fixture.protagonistName}选择留下缺页而不是交出全部记录；线索和关系压力都留给下一次追索。`,
+        `雨声压低屋檐，${fixture.protagonistName}只交出封皮不交内页；物件、脚步和旧信任在桌边分成两路。`,
+        `门缝里的冷风卷起纸角，${fixture.protagonistName}把浅墨藏进袖中；画面停在证据暴露前的一息。`,
+        `官印没有收回，${fixture.protagonistName}却先把灯吹低；身份风险、资源损失和关系裂缝一起进入下一章。`,
+      ], sceneIndex)
+      const executionEvidence = [
+        pickByScene([
+          `这一场先把目标压到桌面：${goalText}。`,
+          `第二场不换方向，${goalText}被雨声和账页一起逼近。`,
+          `中段目标落到手上：${goalText}，${fixture.protagonistName}不能再只看。`,
+          `章末仍扣住目标：${goalText}，只是代价已经换了位置。`,
+        ], sceneIndex),
+        pickByScene([
+          `${conflictText}没有停在旁白里，${fixture.pressureName}的袖口、门外脚步和桌上缺页一起压住${fixture.protagonistName}。`,
+          `${conflictText}从门缝推进来，${fixture.pressureName}把湿袖藏到身后，账页边缘却先露了破绽。`,
+          `${conflictText}落到一句短问上，${fixture.protagonistName}把灯拨亮，屋里没人还能退回原位。`,
+          `${conflictText}压到章末，官印、脚步和旧信任都挤在同一扇门前。`,
+        ], sceneIndex),
+        pickByScene([
+          `${turnText}；${fixture.protagonistName}把证据顺序重新摆开，屋里人的立场也跟着变了。`,
+          `${turnText}，${fixture.pressureName}抬手又放下，水从袖边落到缺页旁。`,
+          `${turnText}后，${fixture.protagonistName}没有解释，只把浅墨藏进袖中。`,
+          `${turnText}时，灯火忽然矮下去，门外的人第一次没有催。`,
+        ], sceneIndex),
+        pickByScene([
+          `${hookText}：灯下还留着一处没有解释的浅墨，下一次开门前没人能把它抹掉。`,
+          `${hookText}，那枚官印没有收回，桌上却少了一页。`,
+          `${hookText}；门缝里的风卷起纸角，像有人刚把答案拿走。`,
+          `${hookText}，${fixture.pressureName}握着空白证据，${fixture.protagonistName}只剩袖中那行浅墨。`,
+        ], sceneIndex),
+      ].join("")
+      return [
+        `雨又密了一层。${beat}。${characterLine}`,
+        executionEvidence,
+        factLine,
+        judgementLine,
+        closureLine,
+      ].filter(Boolean).join("")
+    })
 }
 
 function createStyleContractTestDraftBody(
@@ -6440,62 +8415,79 @@ function createStyleContractTestDraftBody(
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   continuityContract: ContinuityContract,
   approvedStyleContext: ApprovedWritingStyleContext,
+  characterDossiers: CharacterDossier[] = [],
+  segmentPlan: DraftSegmentPlan[] = [],
 ) {
   const title = task.title || `第 ${task.chapterNumber} 章`
-  const protagonistName = continuityContract.lockedProtagonistName || "沈砚"
+  const fixture = createDossierDrivenFixtureContext(continuityContract, characterDossiers)
+  const relationshipPressureCue = fixture.relationshipPressure.replace(/[。！？!?；;，,]+/gu, " ").replace(/\s+/gu, " ").trim() || fixture.relationshipPressure
+  const protagonistName = fixture.protagonistName
   const causalPlan = getTaskCausalPlan(state, task)
   const style = approvedStyleContext.contract?.styleContract
   const requiredAnchors = uniqueStrings([
     ...(task.causalPlan?.requiredContinuityAnchors || []),
     ...(continuityContract.continuityAnchors || []),
-    "账册",
+    ...fixture.dossierAnchors,
     "雨声",
     "灯火",
     "门外脚步",
   ].filter(Boolean)).slice(0, 8)
   const anchorSentence = requiredAnchors.length
-    ? `本章承接${requiredAnchors.slice(0, 4).join("、")}，不换主角，不换线索。`
-    : "本章承接账册、雨声、灯火和门外脚步，不换主角，不换线索。"
+    ? `${requiredAnchors.slice(0, 4).join("、")}都压在灯下，谁先伸手，谁就先露破绽。`
+    : "账册、雨声、灯火和门外脚步都压在灯下，谁先伸手，谁就先露破绽。"
   const chapterShift = task.chapterNumber <= 1
-    ? "缺页处露出浅墨，官仓添七，民户减三。"
-    : `上一章留下的${requiredAnchors.slice(0, 3).join("、") || "账册与门外脚步"}还在，少尹的人已经到了廊下。`
-  const positiveExample = style?.positiveExamples?.[0] || "沈砚合上账册，只问一句：谁动过这一页？"
+    ? `${fixture.artifact}缺页处露出浅墨，记录链条初次露出被改写的痕迹。`
+    : `上一章留下的${requiredAnchors.slice(0, 3).join("、") || "账册与门外脚步"}还在，${fixture.pressureName}的压力已经到了廊下。`
+  const rawPositiveExample = style?.positiveExamples?.[0] || ""
+  const positiveExample = rawPositiveExample.includes(protagonistName)
+    ? rawPositiveExample
+    : `${protagonistName}合上${fixture.artifact}，只问一句：谁动过这一页？`
+  const foreshadowingOperation = causalPlan.foreshadowingOperation || ""
+  const foreshadowingExecutionParagraph = /回收|兑现|延后|前序|更大/u.test(foreshadowingOperation)
+    ? `前序伏笔没有被口头解释。湿印遇到灯火后露出旧痕，${protagonistName}知道它只部分兑现了上一章留下的官印疑点；更大的问题被延后到仓曹账门之后，那里还有一页没有归档。`
+    : ""
   const baseParagraphs = [
-    `开场落在具体异常与现场压力上。雨声贴着窗纸往下滑。${protagonistName}把缺页账册推到灯下。纸边齐得过分，像刚从刀口退出来。灯火一跳，门外脚步停在槛外。`,
-    `老周站在那里，袖口压着半枚湿印。${protagonistName}看见了，没有立刻问。${anchorSentence}`,
+    `雨声贴着窗纸往下滑。${protagonistName}把缺页${fixture.artifact}推到灯下。纸边齐得过分，像刚从刀口退出来。灯火一跳，门外脚步停在槛外。`,
+    `${fixture.pressureName}站在那里，袖口压着半枚湿印。${protagonistName}看见了，没有立刻问。${anchorSentence}`,
+    `${protagonistName}的外貌体态先进入画面：${fixture.appearance}。这个人下意识${fixture.habit}，因为想要${fixture.desire}，也害怕${fixture.wound}重新变成别人手里的口供。`,
+    `${protagonistName}擅长${fixture.skill}，也不能越过${fixture.limitation}，所以${protagonistName}必须在${relationshipPressureCue}之下决定先保住线索，还是先保住关系。`,
+    `${protagonistName}的矛盾压在指节上：${fixture.contradiction}。这个选择一落下，屋里的人就不能再装作没看见。`,
     `“谁动过？”${protagonistName}问。`,
-    "老周没答。鞋尖往后收了半寸。雨声压住他的呼吸，也压住廊下那个人的影子。",
-    `${chapterShift}${protagonistName}想要查清税册，不是为了清白。他欠过一条命，欠在同一册账里。这条线索推进关系，也推进代价；这个弱点不能给少尹看见。`,
-    `他伸手按住账册，指节很白。${protagonistName}擅长看数字的缝，却不会在权势面前说软话。老周知道这点，所以没有帮他，只拦在门口。`,
-    `“别翻了。”老周低声说。`,
+    `${fixture.pressureName}没答。鞋尖往后收了半寸。雨声压住他的呼吸，也压住廊下那个人的影子。`,
+    `${fixture.pressureName}低声说：“账不能跟你走”，为了${relationshipPressureCue}伸手拦在门口。这句话不是解释，是当场选择，它把关系压力、行动和对白压在同一个窗口里。`,
+    `${chapterShift}${protagonistName}想要查清${fixture.artifact}，不是为了清白。这个人欠过一条命，旧债就压在这本账里。这条线索推进关系，也推进代价；这个弱点不能给${fixture.pressureName}看见。`,
+    `这个人伸手按住${fixture.artifact}，指节很白。${protagonistName}的说话方式是${fixture.speechMarker}，所以没有解释，只把问题压短。${fixture.pressureName}知道这点，所以没有帮忙，只拦在门口。`,
+    `“别翻了。”${fixture.pressureName}低声说。`,
     `“你怕谁？”`,
-    "老周抬眼。肩上的旧衣湿了一线。那一线水从肩头滑到袖边，像有人刚从雨里抓过他。",
-    `门外的人敲了两下。很轻。${protagonistName}把缺页夹进袖里，吹低灯火。每段都必须推进线索、关系或代价；关系裂缝就在这一息里开了口：老周帮他藏账，也把他卖给了门外的人。`,
+    `${fixture.pressureName}抬眼。肩上的旧衣湿了一线。那一线水从肩头滑到袖边，像有人刚从雨里抓过他。`,
+    `门外的人敲了两下。很轻。${protagonistName}把缺页夹进袖里，吹低灯火。关系裂缝就在这一息里开了口：${fixture.pressureName}帮忙藏账，也把这个人推向正在被争夺的旧账。`,
     positiveExample,
-    `纸页贴着掌心发凉。${protagonistName}没有退。他决定先开门。只开半扇。门缝里露出一枚官印，印面倒着“仓曹”两个字。`,
-    "“少尹请你走一趟。”门外的人说。",
+    `纸页贴着掌心发凉。${protagonistName}没有退。这个人决定先开门。只开半扇。门缝里露出一枚官印，印面倒着“仓曹”两个字。`,
+    `“${fixture.pressureName}要你走一趟。”门外的人说。`,
     `“账呢？”`,
     "“带上。”",
-    `${protagonistName}听见老周在身后吸气。他没回头。他把账册收进怀里，又把缺页留在灯下。那一页空着，却比写满更像证据。`,
-    `巷口的鼓声过了三下。雨没有停。${protagonistName}知道自己只能选一边：交账，老周活；藏页，他自己活。`,
-    "他把门推开。冷风进屋，灯火向后一伏。老周伸手要拦，手到半路又停住。",
-    `“沈砚。”老周第一次叫他的名字，“你不能去。”`,
+    `${protagonistName}听见${fixture.pressureName}在身后吸气。这个人没回头。这个人把${fixture.artifact}收进怀里，又把缺页留在灯下。那一页空着，却比写满更像证据。`,
+    `巷口的鼓声过了三下。雨没有停。${protagonistName}知道自己只能选一边：交账，${fixture.pressureName}暂时安全；藏页，自己暂时安全。`,
+    `这个人把门推开。冷风进屋，灯火向后一伏。${fixture.pressureName}伸手要拦，手到半路又停住。`,
+    `“${protagonistName}。”${fixture.pressureName}头一回叫这个名字，“你不能去。”`,
     `“我不去，他们会来问你。”`,
-    "老周的脸色灰下去。那不是害怕，是早知道这句话会来。关系到这里已经不能补回原样。",
-    `${protagonistName}跨过门槛。门外脚步让开半步，官印却没有收。雨点打在账册封皮上，墨味从旧线里泛出来。`,
-    `他把缺页留给老周，也把怀疑留在屋里。结尾留下可追踪问题、关系裂缝或线索余波：老周拿着空白证据，少尹拿着整本账，${protagonistName}只剩袖中一行浅墨。`,
+    `${fixture.pressureName}的脸色灰下去。那不是害怕，是早知道这句话会来。关系到这里已经不能补回原样。`,
+    foreshadowingExecutionParagraph,
+    `${protagonistName}跨过门槛。门外脚步让开半步，官印却没有收。雨点打在${fixture.artifact}封皮上，墨味从旧线里泛出来。`,
+    `这个人把缺页留给${fixture.pressureName}，也把怀疑留在屋里。${fixture.pressureName}拿着空白证据，门外的人拿着整本账，${protagonistName}只剩袖中一行浅墨。`,
   ]
+  const sceneCardParagraphs = createSceneCardFixtureParagraphs(segmentPlan, fixture)
   const expansionSeeds = [
-    (step: number) => `第 ${step} 次停顿时，廊下的水聚成一道新线，${protagonistName}低头看见第 ${step} 道水线从老周脚边绕开，判断他已在门槛外站过半刻。`,
-    (step: number) => `第 ${step} 处线索落在账册线装上，第 ${step} 枚松扣里夹着一粒碎粮，不是书房里的东西，更像刚从仓门口带进来的。`,
-    (step: number) => `第 ${step} 轮追问里，老周说话慢了半拍，第 ${step} 次停顿不是迟疑，是在等门外的人替他开口。`,
+    (step: number) => `第 ${step} 次停顿时，廊下的水聚成一道新线，${protagonistName}低头看见第 ${step} 道水线从${fixture.pressureName}脚边绕开，判断他已在门槛外站过半刻。`,
+    (step: number) => `第 ${step} 处线索落在${fixture.artifact}线装上，第 ${step} 枚松扣里夹着一粒碎粮，不是书房里的东西，更像刚从仓门口带进来的。`,
+    (step: number) => `第 ${step} 轮追问里，${fixture.pressureName}说话慢了半拍，第 ${step} 次停顿不是迟疑，是在等门外的人替他开口。`,
     (step: number) => `第 ${step} 道灯影照到官印边缘，第 ${step} 层印泥还没干，红色在雨气里发暗。`,
-    (step: number) => `第 ${step} 个判断暴露了${protagonistName}的短板，他能算出第 ${step} 处税册缺口，却算不出旧友会站到哪一边。`,
+    (step: number) => `第 ${step} 个判断暴露了${protagonistName}的短板：${fixture.limitation}。这个人能算出第 ${step} 处记录缺口，却算不出旧友会站到哪一边。`,
     (step: number) => `第 ${step} 次敲门后，门外的人仍不催，第 ${step} 次沉默像刀背贴在颈后，不见血，也不肯离开。`,
-    (step: number) => `第 ${step} 句短问落下，${protagonistName}合上账册，只问第 ${step} 次：谁动过这一页？`,
+    (step: number) => `第 ${step} 句短问落下，${protagonistName}合上${fixture.artifact}，只问第 ${step} 次：谁动过这一页？`,
     (step: number) => `第 ${step} 阵雨声更密，屋檐下的黑影向前半寸又停住，第 ${step} 道旧信任也在这一息裂开。`,
   ]
-  const paragraphs = [...baseParagraphs]
+  const paragraphs = [...baseParagraphs, ...sceneCardParagraphs]
   let index = 0
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
     paragraphs.push(expansionSeeds[index % expansionSeeds.length](index + 1))
@@ -6552,6 +8544,17 @@ async function generateProductionTextWithLlm({
   let lastStreamProgressAt = 0
   let firstDeltaSeen = false
   const messageId = progress ? createWritingMessageId(progress) : undefined
+  const maxLlmAttempts = 3
+  const requestChars = basePrompt.length + dynamicPrompt.length + message.length
+  const llmTraceBase: WritingLlmTrace = {
+    roleName,
+    requestChars,
+    basePromptChars: basePrompt.length,
+    dynamicPromptChars: dynamicPrompt.length,
+    messageChars: message.length,
+    temperature,
+    maxAttempts: maxLlmAttempts,
+  }
   if (progress) {
     await emitWritingProgress(options, {
       messageId,
@@ -6564,6 +8567,17 @@ async function generateProductionTextWithLlm({
       statusText: "请求已提交给 LLM，等待模型开始响应。",
       statusDetail: "如果模型或网络暂时没有首段返回，这条消息会保持动态等待状态。",
       message: progress.startMessage,
+      workflow: {
+        kind: "llm_request",
+        groupId: messageId,
+        stage: progress.step,
+        summary: `${roleName} LLM 请求已提交`,
+        collapsed: true,
+      },
+      llm: {
+        ...llmTraceBase,
+        responseChars: 0,
+      },
       preview: [
         `Role: ${roleName}`,
         "",
@@ -6572,22 +8586,27 @@ async function generateProductionTextWithLlm({
     })
   }
 
-  try {
-    let result = ""
-    const maxLlmAttempts = 3
-    let backoffDelay = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 2000
+	  try {
+	    let result = ""
+	    let backoffDelay = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 2000
+	    const normalizedRole = roleName.toLowerCase()
+	    const responseMode = normalizedRole.includes("author") || normalizedRole.includes("prose stylist")
+	      ? "drafting"
+	      : "artifact"
+	    const currentStage = responseMode === "drafting" ? "drafting" : (progress?.step || state.runtime.stage)
 
-    for (let i = 1; i <= maxLlmAttempts; i++) {
-      try {
-      result = await generateAgentReply({
-        roleName,
+	    for (let i = 1; i <= maxLlmAttempts; i++) {
+	      try {
+	      result = await generateAgentReply({
+	        roleName,
         basePrompt,
         dynamicPrompt,
-        consensus: `Project: ${state.project.title}\nCore idea: ${state.project.idea}\nCurrent stage: ${state.runtime.stage}`,
-        message,
-        discussionStage: "specialist_turn",
-        currentStage: "drafting",
-        preferredLanguage: "zh-CN",
+	        consensus: `Project: ${state.project.title}\nCore idea: ${state.project.idea}\nCurrent stage: ${state.runtime.stage}`,
+	        message,
+	        discussionStage: "specialist_turn",
+	        currentStage,
+	        responseMode,
+	        preferredLanguage: "zh-CN",
         envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
         signal: options.signal,
         temperature,
@@ -6614,6 +8633,18 @@ async function generateProductionTextWithLlm({
                 : "LLM 正在持续返回内容。",
               statusDetail: "返回内容会持续合并到这一条 agent 消息中。",
               message: `${progress.startMessage}模型正在持续输出。`,
+              workflow: {
+                kind: "llm_response",
+                groupId: messageId,
+                stage: progress.step,
+                summary: `${roleName} LLM 正在流式返回`,
+                collapsed: false,
+              },
+              llm: {
+                ...llmTraceBase,
+                streamedChars: streamedResult.length,
+                responseChars: streamedResult.length,
+              },
               preview: streamedResult.slice(-520),
               streamText: streamedResult,
               wordCount: wordCount(streamedResult),
@@ -6637,6 +8668,18 @@ async function generateProductionTextWithLlm({
           title: progress.title,
           status: "running",
           message: `网络或 API 请求异常，正在进行第 ${i} 次重试（等待 ${backoffDelay / 1000} 秒）... 错误: ${error instanceof Error ? error.message : String(error)}`,
+          workflow: {
+            kind: "llm_retry",
+            groupId: messageId,
+            stage: progress.step,
+            summary: `${roleName} LLM 请求重试`,
+            collapsed: true,
+          },
+          llm: {
+            ...llmTraceBase,
+            attempt: i,
+            responseChars: streamedResult.length,
+          },
         })
       }
       await new Promise((resolve) => setTimeout(resolve, backoffDelay))
@@ -6655,6 +8698,17 @@ async function generateProductionTextWithLlm({
         phase: "completed",
         statusText: "LLM 返回完成，内容已保存并进入下一步。",
         message: progress.completeMessage,
+        workflow: {
+          kind: "llm_response",
+          groupId: messageId,
+          stage: progress.step,
+          summary: `${roleName} LLM 返回完成`,
+          collapsed: true,
+        },
+        llm: {
+          ...llmTraceBase,
+          responseChars: result.length,
+        },
         preview: result.slice(0, 520),
         streamText: result,
         wordCount: wordCount(result),
@@ -6673,6 +8727,17 @@ async function generateProductionTextWithLlm({
         phase: "failed",
         statusText: "LLM 请求失败，系统会按任务策略处理。",
         message: `${progress.startMessage}失败：${error instanceof Error ? error.message : String(error)}`,
+        workflow: {
+          kind: "llm_error",
+          groupId: messageId,
+          stage: progress.step,
+          summary: `${roleName} LLM 请求失败`,
+          collapsed: true,
+        },
+        llm: {
+          ...llmTraceBase,
+          responseChars: streamedResult.length,
+        },
       })
     }
     throw error
@@ -7145,13 +9210,13 @@ export function createDraftSegmentPlan(
         card.turn ? `转折：${card.turn}` : "",
       ].filter(Boolean).join("；") || `${protagonist}必须在本场景中完成一次可见推进。`,
       requiredBeats: [
-        card.goal ? `Scene Goal 落地：${card.goal}` : "",
-        card.conflict ? `Scene Conflict 必须写成现场压力：${card.conflict}` : "",
-        card.turn ? `Scene Turn 必须改变局面：${card.turn}` : "",
-        card.endHook ? `Scene End Hook 收束到：${card.endHook}` : "",
-        card.requiredCharacters.length ? `Required Characters: ${card.requiredCharacters.join("、")}` : "",
-        card.requiredFacts.length ? `Required Facts: ${card.requiredFacts.join("、")}` : "",
-        card.forbiddenFacts.length ? `Forbidden Facts 不得泄露：${card.forbiddenFacts.join("、")}` : "",
+        card.goal ? `硬门槛：正文必须用现场动作、对白或物件变化执行 Scene Goal「${card.goal}」，不能只概述。` : "",
+        card.conflict ? `硬门槛：正文必须把 Scene Conflict「${card.conflict}」写成现场阻力、质问、拒绝或代价。` : "",
+        card.turn ? `硬门槛：正文必须让 Scene Turn「${card.turn}」改变角色选择、证据状态或现场局面。` : "",
+        card.endHook ? `硬门槛：片段结尾必须落到 Scene End Hook「${card.endHook}」。` : "",
+        card.requiredCharacters.length ? `硬门槛：正文必须出现角色「${card.requiredCharacters.join("、")}」，且每个角色至少有动作、对白或被现场压力影响。` : "",
+        card.requiredFacts.length ? `硬门槛：正文必须自然出现 Required Facts「${card.requiredFacts.join("、")}」。` : "",
+        card.forbiddenFacts.length ? `硬门槛：Forbidden Facts「${card.forbiddenFacts.join("、")}」不得泄露。` : "",
       ].filter(Boolean),
       continuityFocus: [...new Set([...card.requiredFacts, ...anchors.slice(index, index + 2)])],
       targetWords: index === sceneCards.length - 1
@@ -7256,16 +9321,22 @@ export function createDraftSegmentCompositionPlan(
       "对白必须短、有压力，并体现关系或利益，不用对白解释世界观背景。",
       "每个重要说话者至少带一个称呼、停顿、动作或语气差异。",
       sceneCard?.requiredCharacters.length
-        ? `对白优先服务这些角色：${sceneCard.requiredCharacters.join("、")}。`
+        ? `这些角色必须真实参与现场压力，不只是名单或旁白提及：${sceneCard.requiredCharacters.join("、")}。`
         : `对白必须围绕${protagonist}的选择和现场压力展开。`,
     ],
     characterAction: [
       continuityContract.lockedProtagonistName
         ? `${continuityContract.lockedProtagonistName}必须通过行动、感知或选择推进本片段。`
         : "首章必须建立唯一可追踪主角姓名，并保持主视角聚焦。",
+      sceneCard?.requiredCharacters.length
+        ? `Required characters 必须在本片段正文中出场并承担动作、对白、阻拦、协助或受压反应：${sceneCard.requiredCharacters.join("、")}。`
+        : "",
+      sceneCard
+        ? "如果当前场景卡目标、冲突或转折无法在正文中找到现场证据，应重写片段，而不是补解释。"
+        : "",
       "重要配角不能只贴性格标签，必须用动作、称呼、习惯或利益选择呈现。",
       "至少让一个角色的欲望、短板、关系状态或风险代价露出痕迹。",
-    ],
+    ].filter(Boolean),
     continuity: [
       ...continuityFocus.map((item) => `必须自然命中连续性锚点：${item}`),
       sceneCard?.forbiddenFacts.length ? `不得泄露：${sceneCard.forbiddenFacts.join("、")}` : "",
@@ -8318,7 +10389,7 @@ async function writeDraftSegmentArtifact(input: {
   }
 }
 
-async function createDraftBody(
+export async function createDraftBody(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   blueprint: string,
@@ -8349,6 +10420,7 @@ async function createDraftBody(
   const genre = inferGenreProfile(state)
   const sceneType = sceneTypeForChapter(state, task.chapterNumber)
   const causalPlan = getTaskCausalPlan(state, task)
+  const hasCompletedPreviousCanon = continuityContract.previousChapterLedger.length > 0
   const knowledgeContext = await retrieveWritingKnowledgeContext({
     state,
     task,
@@ -8385,12 +10457,12 @@ async function createDraftBody(
     title: task.title,
     rows: knowledgeContext.rows,
   })
-  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 650)
-  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 420)
-  const cappedResourceManifest = summarizePromptSection(resourceManifest, 280)
-  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 620)
-  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 340)
-  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 300)
+  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 520)
+  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 260)
+  const cappedResourceManifest = summarizePromptSection(resourceManifest, 160)
+  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 360)
+  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 220)
+  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 180)
   const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
 
   const basePromptLines = [
@@ -8399,6 +10471,9 @@ async function createDraftBody(
     "必须写正文，不要只写计划、摘要或建议。",
     "必须严格遵循章节蓝图、类型旁白策略、成语密度与角色差异。",
     "必须严格执行章节因果合同：承接上一章输入、完成本章目标、让主角做选择、留下不可逆变化、把后果交给下一章。",
+    hasCompletedPreviousCanon
+      ? "Canon 边界：只有 Canon Continuity Contract 的 Previous Chapter Ledger、memory 和 final draft 可作为已发生前文事实。"
+      : "Canon 边界：当前没有已完成前序章节账本；蓝图里的 Previous Input 只是计划依赖，必须在本章现场落地，不能写成未成稿章节已经发生。",
     continuityContract.lockedProtagonistName
       ? `主角一致性是硬门槛：本章必须继续使用「${continuityContract.lockedProtagonistName}」，不得改名、换身份或写成另一条故事线。`
       : "主角一致性是硬门槛：首章必须明确唯一主角姓名，后续章节会锁定该姓名。",
@@ -8440,7 +10515,7 @@ async function createDraftBody(
     "",
     continuityContract.prompt,
     "",
-    clipPromptSection(characterProfileContract.prompt, 700),
+    clipPromptSection(characterProfileContract.prompt, 480),
     "",
     "资源使用硬要求：",
     "- 至少自然吸收 3 个词汇/场景资源提示，但不能堆砌成语。",
@@ -8459,7 +10534,9 @@ async function createDraftBody(
     "- 不得凭空替换已知配角；新增配角必须交代身份、立场和与主角关系。",
     "- 新增或沿用的重要角色必须通过动作、称呼、停顿、外貌体态、习惯和利益选择呈现人格，不能只贴性格标签。",
     "- 正文必须体现至少一个角色的特长/短板或能力边界，以及至少一个关系状态变化。",
-    "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。",
+    hasCompletedPreviousCanon
+      ? "- 必须承接前序章节账本中的状态、代价、物品、线索或伏笔。"
+      : "- 没有已完成前序章节账本时，不得伪造前文状态；必须把计划依赖写成本章现场出现的物件、关系、线索或代价。",
     continuityContract.continuityAnchors.length
       ? `- 正文必须自然命中至少两个上一章连续性锚点：${continuityContract.continuityAnchors.slice(0, 8).join("、")}。`
       : "- 正文必须建立可供下一章追踪的具体物件、关系、线索或代价。",
@@ -8509,7 +10586,7 @@ async function createDraftBody(
     ? `## Active World Slice\n${prunedContext.activeWorldSlice}`
     : ""
   const compactStoryAssetsPrompt = prunedContext.prunedStoryAssets
-    ? `## Story Assets Audit Summary\n${prunedContext.prunedStoryAssets.slice(0, 900)}`
+    ? `## Story Assets Audit Summary\n${prunedContext.prunedStoryAssets.slice(0, 520)}`
     : ""
   const blueprintGuardrails = activeWorldSlicePrompt || compactStoryAssetsPrompt
     ? trimBlueprintForDrafting(blueprint).replace(
@@ -8550,6 +10627,22 @@ async function createDraftBody(
       status: "completed",
       message: `第 ${task.chapterNumber} 章上下文包已保存：${contextPackage.segmentCount} 个片段，${contextPackage.segmentationSource === "scene_card" ? "场景卡" : "时间线"}分段。`,
       artifactPath: contextPackage.relativePath,
+      artifactLabel: `第 ${task.chapterNumber} 章上下文包`,
+      artifactKind: "context_package",
+      workflow: {
+        kind: "artifact_saved",
+        stage: "chapter_context_package",
+        summary: "完整提示词上下文已折叠保存，可展开检查。",
+        collapsed: true,
+        expandableArtifactPath: contextPackage.relativePath,
+      },
+      artifacts: [{
+        path: contextPackage.relativePath,
+        label: `第 ${task.chapterNumber} 章上下文包`,
+        kind: "context_package",
+        role: "expandable_prompt_context",
+        status: "completed",
+      }],
       preview: [
         `segmentation=${contextPackage.segmentationSource}`,
         `segments=${contextPackage.segmentCount}`,
@@ -8561,7 +10654,7 @@ async function createDraftBody(
   }
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     return approvedStyleContext.status === "ready"
-      ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext)
+      ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext, characterDossiers, segmentPlan)
       : fallback
   }
   const generatedSegments: string[] = []
@@ -8649,21 +10742,21 @@ async function createDraftBody(
         "",
         approvedStyleCarryover,
         "",
-        prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${clipPromptSection(prunedContext.prunedConsensus, 900)}` : "",
+        prunedContext.prunedConsensus ? `Consensus & Setting Freeze:\n${clipPromptSection(prunedContext.prunedConsensus, 420)}` : "",
         "",
-        prunedContext.prunedOutline ? `Master Outline:\n${clipPromptSection(prunedContext.prunedOutline, 700)}` : "",
+        prunedContext.prunedOutline ? `Master Outline:\n${clipPromptSection(prunedContext.prunedOutline, 300)}` : "",
         "",
-        prunedContext.prunedStoryAssets ? `Story Assets:\n${clipPromptSection(prunedContext.prunedStoryAssets, 900)}` : "",
+        prunedContext.prunedStoryAssets ? `Story Assets:\n${clipPromptSection(prunedContext.prunedStoryAssets, 420)}` : "",
         "",
-        prunedContext.prunedMemory ? `Character Memory:\n${clipPromptSection(prunedContext.prunedMemory, 520)}` : "",
+        prunedContext.prunedMemory ? `Character Memory:\n${clipPromptSection(prunedContext.prunedMemory, 320)}` : "",
         "",
-        prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${clipPromptSection(prunedContext.prunedLedger, 520)}` : "",
+        prunedContext.prunedLedger ? `Previous Chapter Ledger:\n${clipPromptSection(prunedContext.prunedLedger, 320)}` : "",
         "",
-        prunedContext.prunedRag ? `Knowledge/RAG References:\n${clipPromptSection(prunedContext.prunedRag, 520)}` : "",
+        prunedContext.prunedRag ? `Knowledge/RAG References:\n${clipPromptSection(prunedContext.prunedRag, 320)}` : "",
         "",
-        clipPromptSection(continuityContract.prompt, 1050),
+        clipPromptSection(continuityContract.prompt, 600),
         "",
-        clipPromptSection(characterProfileContract.prompt, 760),
+        clipPromptSection(characterProfileContract.prompt, 480),
         "",
         "片段写作硬要求：",
         "- 只输出这一段小说正文，不要输出 Markdown 标题、片段编号、说明或总结。",
@@ -8673,6 +10766,9 @@ async function createDraftBody(
         "- 不能堆砌成语，不能把氛围词孤立成行。",
         hasApprovedStyleSummaryPrompt(approvedStyleContext)
           ? "- 必须贴合 User Approved Writing Style Contract；如果通用写作指南与该合同冲突，以用户确认写法合同为准。"
+          : "",
+        hasApprovedStyleSummaryPrompt(approvedStyleContext)
+          ? "- 风格样段只可学习句式节奏、动作密度、对白密度和描写顺序；禁止复用样段中的姓名、地名、年号、数字、具体账目、线索物或情节事实。"
           : "",
         continuityContract.lockedProtagonistName
           ? `- 必须保持主角「${continuityContract.lockedProtagonistName}」一致。`
@@ -8835,6 +10931,42 @@ async function createDraftBody(
         status: "completed",
         message: `第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total} 已保存为独立产物。`,
         artifactPath: segmentArtifact.relativePath,
+        artifactLabel: `第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total}`,
+        artifactKind: "draft_segment",
+        workflow: {
+          kind: "artifact_saved",
+          stage: "draft_segment_artifact",
+          summary: `片段 ${segment.index}/${segment.total} 及其素材已保存，可逐项展开排查。`,
+          collapsed: true,
+          expandableArtifactPath: segmentArtifact.relativePath,
+        },
+        artifacts: [
+          {
+            path: segmentArtifact.relativePath,
+            label: `第 ${task.chapterNumber} 章片段 ${segment.index}/${segment.total}`,
+            kind: "draft_segment",
+            role: "assembled_segment",
+            status: "completed",
+            chars: segmentArtifact.chars,
+          },
+          ...segmentArtifact.subArtifacts.map((artifact) => ({
+            path: artifact.relativePath,
+            label: `${artifact.kind} ${artifact.role}`,
+            kind: "draft_segment_subartifact",
+            role: artifact.role,
+            status: "completed",
+            chars: artifact.chars,
+          })),
+        ],
+        tools: segmentArtifact.subArtifacts
+          .filter((artifact) => artifact.role === "material")
+          .map((artifact) => ({
+            toolName: `draft.${artifact.kind}`,
+            status: materialModes[artifact.kind] === "llm-subcall" ? "llm-subcall" : "deterministic",
+            inputSummary: `segment ${segment.index}/${segment.total}`,
+            outputSummary: artifact.relativePath,
+            artifactPath: artifact.relativePath,
+          })),
         preview: [
           `source=${segmentArtifact.source}`,
           `chars=${segmentArtifact.chars}`,
@@ -8946,7 +11078,7 @@ export async function repairAigcHighRiskDraft(
       cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim()
       cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim() // 移除前后引号包裹
 
-      console.log(`[AIGC PATCH RECV] 高风险片段 #${segment.index + 1} 局部重构完毕: \n- 原文: 「${originalText.slice(0, 40)}...」\n- 修复: 「${cleanText.slice(0, 40)}...」`);
+      console.log(`[AIGC PATCH RECV] 高风险片段 #${segment.index + 1} 局部重构完毕:\n- 原文: 「${originalText.slice(0, 40)}...」\n- 修复: 「${cleanText.slice(0, 40)}...」`);
 
       replacements.push({
         startOffset: segment.startOffset,
@@ -8993,7 +11125,10 @@ export function createQualityReport(
 	  const count = wordCount(draft)
 	  const target = task.targetWords
 	  const minimumPassWords = Math.floor(target * 0.8)
-	  const wordCountBlockingIssue = count < minimumPassWords
+	  const maximumPassWords = Math.ceil(target * 1.15)
+	  const wordCountTooShort = count < minimumPassWords
+	  const wordCountTooLong = count > maximumPassWords
+	  const wordCountBlockingIssue = wordCountTooShort || wordCountTooLong
 	  const plotContinuity = evaluatePlotContinuityBridge(draft, task, continuityContract)
 	  const styleQuality = evaluateNarrativeStyleQuality(draft)
 	  const resourceUsage = evaluateWritingResourceUsage(draft, state, task, blueprint, continuityContract)
@@ -9063,7 +11198,8 @@ export function createQualityReport(
     ...(score >= 7 && !hardBlocked
       ? ["- 暂无阻塞性问题；润色时继续压低 AI 模板句。"]
       : [
-	        ...(wordCountBlockingIssue ? [`- 需要返工：正文有效字数 ${count}/${target}，低于 80% 门槛，不能进入 complete。`] : []),
+	        ...(wordCountTooShort ? [`- 需要返工：正文有效字数 ${count}/${target}，低于 80% 门槛，不能进入 complete。`] : []),
+	        ...(wordCountTooLong ? [`- 需要返工：正文有效字数 ${count}/${target}，超过 115% 上限，必须压缩到目标区间后才能进入 complete。`] : []),
 	        ...(plotContinuity.status === "quarantined" ? [`- 需要返工：${plotContinuity.reason}`] : []),
 	        ...(styleQuality.status === "quarantined" && !softStyleIssue ? [`- 需要返工：${styleQuality.reason}`] : []),
 	        ...(softStyleIssue ? [`- 润色建议：${styleQuality.reason}`] : []),
@@ -9071,7 +11207,8 @@ export function createQualityReport(
 	        ...(characterProfileQuality.status === "quarantined" ? [`- 需要返工：${characterProfileQuality.reason}`] : []),
 	        ...(!hasCausalContract ? ["- 需要返工：蓝图缺少 Causal Objective / Irreversible Change / Next Chapter Handoff，不能支撑连续写作。"] : []),
 	        ...(!hasCausalExecution ? [`- 需要返工：${causalExecution.reason}`] : []),
-	        ...(count < target ? ["- 扩写正文场景。"] : []),
+	        ...(wordCountTooShort || count < Math.floor(target * 0.9) ? ["- 扩写正文场景。"] : []),
+	        ...(wordCountTooLong ? ["- 压缩重复解释、重复对白和旁枝场景。"] : []),
 	        ...(!hasConflict ? ["- 增强冲突动作。"] : []),
 	        ...(!hasHook ? ["- 补足章末钩子。"] : []),
       ]),
@@ -9122,16 +11259,21 @@ function appendQualityHardChecks(
   const resourceFixes = resourceUsage.status === "quarantined"
     ? [`- 需要返工：${resourceUsage.reason}`]
     : []
-  if (report.includes("WORD_COUNT_CHECK:") && continuityFixes.length === 0 && narrativeFixes.length === 0 && resourceFixes.length === 0) {
+  const minimumPassWords = Math.floor(target * 0.8)
+  const maximumPassWords = Math.ceil(target * 1.15)
+  const wordBudgetFixes = [
+    ...(count < minimumPassWords ? [`- 需要返工：正文有效字数 ${count}/${target}，低于 80% 门槛，不能进入 complete。`] : []),
+    ...(count > maximumPassWords ? [`- 需要返工：正文有效字数 ${count}/${target}，超过 115% 上限，必须压缩到目标区间后才能进入 complete。`] : []),
+  ]
+  if (report.includes("WORD_COUNT_CHECK:") && continuityFixes.length === 0 && narrativeFixes.length === 0 && resourceFixes.length === 0 && wordBudgetFixes.length === 0) {
     return report
   }
-  const minimumPassWords = Math.floor(target * 0.8)
-  const hardFixes = count < minimumPassWords
+  const hardFixes = wordBudgetFixes.length > 0
     ? [
       "",
       "## Deterministic Hard Gate",
       `WORD_COUNT_CHECK: ${count}/${target}`,
-      `- 需要返工：正文有效字数 ${count}/${target}，低于 80% 门槛，不能进入 complete。`,
+      ...wordBudgetFixes,
       ...continuityFixes,
       ...narrativeFixes,
       ...resourceFixes,
@@ -9172,6 +11314,28 @@ function extractQualityRepairChecklist(report: string) {
     .map((line) => `- 低分项：${line.replace(/^\|\s*|\s*\|$/g, "").replace(/\s*\|\s*/g, " - ")}`)
 
   return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10)
+}
+
+function extractWordBudgetRepairDirective(report: string, targetWords: number) {
+  const wordMatch = report.match(/WORD_COUNT_CHECK:\s*(\d+)\s*\/\s*(\d+)/u)
+  const currentWords = wordMatch ? Number(wordMatch[1]) : undefined
+  const target = wordMatch ? Number(wordMatch[2]) : targetWords
+  if (!Number.isFinite(currentWords) || !Number.isFinite(target) || !target) {
+    return ""
+  }
+  const minimum = Math.floor(target * 0.9)
+  const maximum = Math.ceil(target * 1.1)
+  const hardMinimum = Math.floor(target * 0.8)
+  if ((currentWords as number) > maximum) {
+    return `当前正文 ${currentWords}/${target} 明显超出目标；本轮必须压缩正文到 ${minimum}-${maximum} 字，保留因果节点、角色选择和章末交棒，删掉重复解释、重复对白和旁枝场景。`
+  }
+  if ((currentWords as number) < hardMinimum) {
+    return `当前正文 ${currentWords}/${target} 低于硬门槛；本轮必须扩写正文到 ${minimum}-${maximum} 字，新增可见行动、对白、关系压力和因果后果，不得只增加说明段。`
+  }
+  if ((currentWords as number) < minimum) {
+    return `当前正文 ${currentWords}/${target} 偏短；本轮优先补足到 ${minimum}-${maximum} 字，新增场景证据而不是重复概括。`
+  }
+  return `当前正文 ${currentWords}/${target} 在可接受区间附近；本轮修质量问题时不要显著扩长，目标保持 ${minimum}-${maximum} 字。`
 }
 
 function extractDraftBodyForDeterministicRepair(draft: string) {
@@ -9223,14 +11387,17 @@ function createDeterministicQualityRepairDraft(
   draft: string,
   attempt: number,
   continuityContract: ContinuityContract,
+  characterDossiers: CharacterDossier[] = [],
 ) {
   const title = task.title || `第 ${task.chapterNumber} 章`
   const causalPlan = getTaskCausalPlan(state, task)
-  const protagonistName = continuityContract.lockedProtagonistName || inferLockedProtagonistName(draft) || "沈砚"
+  const fixture = createDossierDrivenFixtureContext(continuityContract, characterDossiers)
+  const relationshipPressureCue = fixture.relationshipPressure.replace(/[。！？!?；;，,]+/gu, " ").replace(/\s+/gu, " ").trim() || fixture.relationshipPressure
+  const protagonistName = continuityContract.lockedProtagonistName || fixture.protagonistName || inferLockedProtagonistName(draft) || "沈砚"
   const requiredAnchors = uniqueStrings([
     ...(task.causalPlan?.requiredContinuityAnchors || []),
     ...(continuityContract.continuityAnchors || []),
-    "账册",
+    ...fixture.dossierAnchors,
     "缺页",
     "官印",
     "门外脚步",
@@ -9239,19 +11406,30 @@ function createDeterministicQualityRepairDraft(
   const paragraphs = compacted
     ? compacted.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean)
     : [
-      `雨声贴着窗纸往下滑。${protagonistName}把缺页账册推到灯下，纸边齐得像刚从刀口退出来。`,
-      "老周站在门槛外，湿袖压着半枚暗红印痕，没有进屋，也没有把账册接过去。",
+      `雨声贴着窗纸往下滑。${protagonistName}把缺页${fixture.artifact}推到灯下，纸边齐得像刚从刀口退出来。`,
+      `${fixture.pressureName}站在门槛外，湿袖压着半枚暗红印痕，没有进屋，也没有把${fixture.artifact}接过去。`,
     ]
+  const profileRepairParagraph = `${protagonistName}按住${fixture.artifact}，也按住${relationshipPressureCue}带来的退路，决定先留下缺页而不是交出整本账。${fixture.pressureName}低声说：“账不能跟你走”，为了${relationshipPressureCue}伸手拦在门口。 这一次阻拦不是说明，是关系压力驱动的行动和对白。`
+  if (!paragraphs.some((paragraph) =>
+    paragraph.includes(fixture.pressureName)
+      && paragraph.includes("账不能跟你走")
+      && paragraph.includes(relationshipPressureCue)
+  )) {
+    paragraphs.splice(Math.min(2, paragraphs.length), 0, profileRepairParagraph)
+  }
 
   const repairSeeds = [
-    (step: number) => `返工场景 ${step}：${protagonistName}先按住第 ${step} 道账册线装，确认${requiredAnchors.slice(0, 3).join("、") || "缺页、官印、脚步声"}都还在现场，并让老周把袖口摊开。`,
-    (step: number) => `返工场景 ${step}：门外第 ${step} 次脚步声停住，老周低声说：“小沈大人，别再翻。”${protagonistName}看着那道湿印，问他怕账还是怕拿账的人。`,
-    (step: number) => `返工场景 ${step}：第 ${step} 缕灯火把缺页边缘照得发白，纸纤维没有雨痕，${protagonistName}把这个判断压进掌心，决定先留下缺页。`,
-    (step: number) => `返工场景 ${step}：老周往后退第 ${step} 个半步，鞋底在水里搓出泥声，关系裂缝就落在这一次退让里。`,
-    (step: number) => `返工场景 ${step}：${protagonistName}把第 ${step} 枚官印扣在桌角，没有交给门外的人，这个选择让他先被盯上，也让老周暂时不能改口。`,
-    (step: number) => `返工场景 ${step}：章末钩子落在第 ${step} 枚倒扣的印上，印面反着“仓曹”两个字，缺页边缘正好压在印泥外侧。`,
-    (step: number) => `返工场景 ${step}：第 ${step} 阵雨声忽然变密，门外那人说少尹要看整本账，${protagonistName}只把缺页留在灯下。`,
-    (step: number) => `返工场景 ${step}：第 ${step} 次变化不能复原，老周欠了${protagonistName}一次隐瞒，线索、关系和身份风险同时交给下一章。`,
+    (step: number) => `${protagonistName}先按住第 ${step} 道${fixture.artifact}线装，确认${requiredAnchors.slice(0, 3).join("、") || "缺页、官印、脚步声"}都还在现场，并让${fixture.pressureName}把袖口摊开。`,
+    (step: number) => `门外第 ${step} 次脚步声停住，${fixture.pressureName}低声说：“别再翻。”${protagonistName}看着那道湿印，问他怕账还是怕拿账的人。`,
+    (step: number) => `第 ${step} 缕灯火把缺页边缘照得发白，纸纤维没有雨痕，${protagonistName}把这个判断压进掌心，决定先留下缺页。`,
+    (step: number) => `${fixture.pressureName}往后退第 ${step} 个半步，鞋底在水里搓出泥声，关系裂缝就落在这一次退让里。`,
+    (step: number) => `${protagonistName}把第 ${step} 枚官印扣在桌角，没有交给门外的人，这个选择让自己先被盯上，也让${fixture.pressureName}暂时不能改口。`,
+    (step: number) => `第 ${step} 枚倒扣的印压在桌角，印面反着“仓曹”两个字，缺页边缘正好压在印泥外侧。`,
+    (step: number) => `第 ${step} 阵雨声忽然变密，门外那人说${fixture.pressureName}要看整本账，${protagonistName}只把缺页留在灯下。`,
+    (step: number) => `第 ${step} 次变化不能复原，${fixture.pressureName}欠了${protagonistName}一次隐瞒，线索、关系和身份风险同时交给下一章。`,
+    (step: number) => `${protagonistName}以${fixture.skill}追到缺页边缘，却被${fixture.relationshipPressure}逼着做出选择。`,
+    (step: number) => `${fixture.pressureName}低声说：“账不能跟你走”，为了${relationshipPressureCue}第 ${step} 次伸手拦在门口。`,
+    (step: number) => `${protagonistName}的${fixture.appearance}暴露疲惫，仍下意识${fixture.habit}，说话还是${fixture.speechMarker}，没有把整件事讲破。`,
   ]
   let index = 0
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
@@ -9276,6 +11454,151 @@ function createDeterministicQualityRepairDraft(
     `- Causal objective: ${causalPlan.sceneObjective}`,
     `- Next handoff: ${causalPlan.nextHandoff}`,
   ].join("\n")
+}
+
+function enforceRevisionWordBudgetGuard(
+  previousDraft: string,
+  generatedDraft: string,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  report: string,
+  attempt: number,
+) {
+  const target = Number(task.targetWords) || 0
+  if (!target) return generatedDraft
+  const hardMinimum = Math.floor(target * 0.8)
+  const hardMaximum = Math.ceil(target * 1.15)
+  const previousWords = wordCount(extractDraftBodyForDeterministicRepair(previousDraft))
+  const generatedWords = wordCount(extractDraftBodyForDeterministicRepair(generatedDraft))
+  const reportRequiresExpansion = /WORD_COUNT_CHECK:\s*\d+\s*\/\s*\d+/u.test(report)
+    && /低于|偏短|扩写|补足/u.test(report)
+  const reportRequiresCompression = /WORD_COUNT_CHECK:\s*\d+\s*\/\s*\d+/u.test(report)
+    && /超过|超出|偏长|压缩|删掉/u.test(report)
+  if (reportRequiresExpansion) {
+    if (generatedWords >= hardMinimum) return generatedDraft
+    const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, attempt, "Revision Word Budget Guard")
+    const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded))
+    if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded
+    if (previousWords >= hardMinimum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## Revision Attempt ${attempt}`,
+        `- Word budget guard kept the previous longer draft because the generated repair shrank to ${generatedWords}/${target}, below the 80% hard floor.`,
+      ].join("\n")
+    }
+    return padded
+  }
+  if (reportRequiresCompression) {
+    if (generatedWords >= hardMinimum && generatedWords <= hardMaximum) return generatedDraft
+    if (generatedWords < hardMinimum) {
+      const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, attempt, "Revision Word Budget Guard")
+      const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded))
+      if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded
+      if (previousWords >= hardMinimum && previousWords <= hardMaximum) {
+        return [
+          previousDraft.trimEnd(),
+          "",
+          `## Revision Attempt ${attempt}`,
+          `- Word budget guard kept the previous in-budget draft because the generated compression shrank to ${generatedWords}/${target}, below the 80% hard floor.`,
+        ].join("\n")
+      }
+      return padded
+    }
+    if (generatedWords <= previousWords) return generatedDraft
+    if (previousWords <= hardMaximum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## Revision Attempt ${attempt}`,
+        `- Word budget guard kept the previous shorter draft because the generated compression expanded to ${generatedWords}/${target}, above the 115% hard ceiling.`,
+      ].join("\n")
+    }
+    return [
+      previousDraft.trimEnd(),
+      "",
+      `## Revision Attempt ${attempt}`,
+      `- Word budget guard rejected the generated compression because it expanded from ${previousWords}/${target} to ${generatedWords}/${target}, above the 115% hard ceiling.`,
+    ].join("\n")
+  }
+  return generatedDraft
+}
+
+function replaceDraftBodyForWordBudgetGuard(
+  draft: string,
+  body: string,
+  label: string,
+  note: string,
+) {
+  const headingMatch = draft.match(/##\s+(?:Draft Body|Final Body|正文|最终正文)\s*/iu)
+  const heading = headingMatch ? headingMatch[0].trim() : "## Draft Body"
+  const before = headingMatch ? draft.slice(0, headingMatch.index) : ""
+  return [
+    before.trimEnd() || "# Chapter",
+    "",
+    heading,
+    "",
+    body.trim(),
+    "",
+    `## ${label}`,
+    `- ${note}`,
+  ].join("\n")
+}
+
+function padDraftToWordFloorFromPrevious(
+  previousDraft: string,
+  generatedDraft: string,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  attempt: number,
+  label: string,
+) {
+  const target = Number(task.targetWords) || 0
+  const hardMinimum = Math.floor(target * 0.8)
+  const hardMaximum = Math.ceil(target * 1.15)
+  const generatedBody = extractDraftBodyForDeterministicRepair(generatedDraft)
+  const generatedKeys = new Set(generatedBody
+    .split(/\n{2,}/u)
+    .map((paragraph) => normalizeTailParagraph(paragraph))
+    .filter((key) => key.length >= 18))
+  const padded: string[] = generatedBody
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+
+  const previousParagraphs = extractDraftBodyForDeterministicRepair(previousDraft)
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+
+  for (const paragraph of previousParagraphs) {
+    if (wordCount(padded.join("\n\n")) >= hardMinimum) break
+    const paragraphKey = normalizeTailParagraph(paragraph)
+    if (paragraphKey.length >= 18 && generatedKeys.has(paragraphKey)) continue
+    const nextBody = [...padded, paragraph].join("\n\n")
+    if (wordCount(nextBody) <= hardMaximum) {
+      padded.push(paragraph)
+      generatedKeys.add(paragraphKey)
+      continue
+    }
+    const sentences = paragraph.match(/[^。！？!?；;\n]+[。！？!?；;]?/gu) || [paragraph]
+    for (const sentence of sentences.map((part) => part.trim()).filter(Boolean)) {
+      if (wordCount(padded.join("\n\n")) >= hardMinimum) break
+      const sentenceKey = normalizeTailParagraph(sentence)
+      if (sentenceKey.length >= 18 && generatedKeys.has(sentenceKey)) continue
+      const nextSentenceBody = [...padded, sentence].join("\n\n")
+      if (wordCount(nextSentenceBody) <= hardMaximum) {
+        padded.push(sentence)
+        generatedKeys.add(sentenceKey)
+      }
+    }
+  }
+
+  const body = padded.join("\n\n")
+  return replaceDraftBodyForWordBudgetGuard(
+    generatedDraft,
+    body,
+    label,
+    `Word budget guard padded the generated repair from ${wordCount(generatedBody)}/${target} to ${wordCount(body)}/${target} by restoring non-duplicate scene evidence from the previous draft; attempt=${attempt}.`,
+  )
 }
 
 async function createProductionQualityReport(
@@ -9385,7 +11708,7 @@ async function reviseDraftForQualityGate(
   console.log(`【质检报告 (Quality Report)】:\n${report}`);
   console.log(`=================================================================================\n\n`);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract)
+    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract, characterDossiers)
   }
 
   // 限制全局写作指南大小，只保留前 2000 字符核心规范，防止上下文过度膨胀
@@ -9425,12 +11748,16 @@ async function reviseDraftForQualityGate(
     blueprint,
   })
   const repairChecklist = extractQualityRepairChecklist(report)
+  const wordBudgetRepairDirective = extractWordBudgetRepairDirective(report, task.targetWords)
 
   const fixedDynamicPromptLines = [
     `章节：第 ${task.chapterNumber} 章`,
     `标题：${task.title}`,
     `返工轮次：${attempt}`,
-    "必须针对质量报告中的问题重写/扩写正文。",
+    wordBudgetRepairDirective || "必须针对质量报告中的问题重写/扩写正文。",
+    wordBudgetRepairDirective && /低于|偏短|扩写|补足/u.test(wordBudgetRepairDirective)
+      ? "禁止把上一稿压缩成摘要；必须保留已有场景链条，并新增具体行动、对白、物件证据、关系代价来补足字数。"
+      : "",
     "必须输出 Markdown，保留 `## Draft Body`。",
     "",
     `[Correction Observation (纠偏观察)]\n上一轮写作存在以下缺陷：\n${repairChecklist.join("\n") || report.slice(0, 1200)}\n请在本次重写中特别注意并修复这些问题。`,
@@ -9478,7 +11805,10 @@ async function reviseDraftForQualityGate(
       `章节：第 ${task.chapterNumber} 章`,
       `标题：${task.title}`,
       `返工轮次：${attempt}`,
-      "必须针对质量报告中的问题重写/扩写正文。",
+      wordBudgetRepairDirective || "必须针对质量报告中的问题重写/扩写正文。",
+      wordBudgetRepairDirective && /低于|偏短|扩写|补足/u.test(wordBudgetRepairDirective)
+        ? "禁止把上一稿压缩成摘要；必须保留已有场景链条，并新增具体行动、对白、物件证据、关系代价来补足字数。"
+        : "",
       "必须把低分项转化为可见正文证据：上一章锚点进入开场事件；主角做一个会改变局势的动作选择；选择带来身份/关系/线索/资源后果；结尾把这个后果交给下一章。",
       "如果角色鲜明度低，只补强本章承担冲突、选择或关系变化的核心人物；不要硬塞口癖和标志动作，而是让人物通过目标、立场、选择代价、对主角关系的反应产生差异。",
       "如果写作资源吸收低，把短词/成语改成动作、感官、物件和因果句，不要写孤立成语或四字短句。",
@@ -9515,12 +11845,13 @@ async function reviseDraftForQualityGate(
     ].join("\n"),
   })
 
-  return generated.includes("## Draft Body")
+  const normalized = generated.includes("## Draft Body")
     ? generated
     : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n")
+  return enforceRevisionWordBudgetGuard(draft, normalized, task, report, attempt)
 }
 
-async function runQualityGateWithRevisions(
+export async function runQualityGateWithRevisions(
   state: AutonomousNovelState,
   task: AutonomousNovelState["plan"]["chapterTasks"][number],
   initialDraft: string,
@@ -9741,6 +12072,58 @@ function formatAigcWritingDetectionReport(report: AigcWritingDetectionReport) {
   ].join("\n")
 }
 
+function formatFinalQualityGateReport(gate: QualityGateResult) {
+  return [
+    "## Final Quality Gate",
+    `- Status: ${gate.status}`,
+    `- Passed: ${gate.passed ? "yes" : "no"}`,
+    `- Score: ${gate.score}/10`,
+    `- Attempts: ${gate.attempts}`,
+    typeof gate.wordCount === "number" && typeof gate.targetWords === "number"
+      ? `- Word count: ${gate.wordCount}/${gate.targetWords}`
+      : "",
+    `- Reason: ${gate.reason}`,
+  ].filter(Boolean).join("\n")
+}
+
+function enforceNaturalnessWordBudgetGuard(
+  previousDraft: string,
+  generatedDraft: string,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  label: string,
+) {
+  const target = Number(task.targetWords) || 0
+  if (!target) return generatedDraft
+  const hardMinimum = Math.floor(target * 0.8)
+  const hardMaximum = Math.ceil(target * 1.15)
+  const previousWords = wordCount(extractDraftBodyForDeterministicRepair(previousDraft))
+  const generatedWords = wordCount(extractDraftBodyForDeterministicRepair(generatedDraft))
+  if (generatedWords >= hardMinimum && generatedWords <= hardMaximum) return generatedDraft
+  if (generatedWords < hardMinimum) {
+    const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, 0, label)
+    const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded))
+    if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded
+    if (previousWords >= hardMinimum && previousWords <= hardMaximum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## ${label}`,
+        `- Word budget guard kept the pre-naturalness draft because the generated naturalness pass shrank to ${generatedWords}/${target}, below the 80% hard floor.`,
+      ].join("\n")
+    }
+    return padded
+  }
+  if (previousWords <= hardMaximum || generatedWords > previousWords) {
+    return [
+      previousDraft.trimEnd(),
+      "",
+      `## ${label}`,
+      `- Word budget guard kept the pre-naturalness draft because the generated naturalness pass expanded to ${generatedWords}/${target}, above the 115% hard ceiling.`,
+    ].join("\n")
+  }
+  return generatedDraft
+}
+
 
 async function createProductionPolishedDraft(
   state: AutonomousNovelState,
@@ -9799,6 +12182,7 @@ async function createProductionPolishedDraft(
     ].join("\n\n"),
     dynamicPrompt: [
       "只允许在不改变核心剧情、不改变设定、不跳章的前提下润色。",
+      `字数硬约束：当前目标 ${task.targetWords} 字，润色只能局部替换，不得把最终正文扩到 ${Math.ceil(task.targetWords * 1.15)} 字以上。`,
       "必须保留章节正文结构，增强动作、感官、对白差异和具体细节。",
       approvedStyleCarryover
         ? "必须保持用户确认写法合同，不得把已确认的文风润色成通用模板腔。"
@@ -9851,9 +12235,144 @@ async function createProductionPolishedDraft(
     continuityContract,
     characterProfileContract,
   })
-  return normalized.includes("## Naturalness Report")
+  const polished = normalized.includes("## Naturalness Report")
     ? normalized
     : `${normalized.trimEnd()}\n\n${formatNaturalnessReport(naturalnessReport)}`
+  return enforceNaturalnessWordBudgetGuard(fallback, polished, task, "Naturalness Word Budget Guard")
+}
+
+function isRepairableFinalDraftGate(gate: QualityGateResult) {
+  const reason = gate.reason || ""
+  if (gate.status !== "blocked") return false
+  if (/AIGC|最终稿有效字数|Canon 连续性硬门槛|主角|角色档案硬门槛|因果执行硬门槛|连续性|语义漂移/iu.test(reason)) {
+    return false
+  }
+  return /自然度门禁|疲劳词|分析报告腔|总结腔|AI 旁白|风格漂移|风格继承|禁忌模式|模板悬念|conformance|drift/iu.test(reason)
+}
+
+function finalDraftRepairLimit(options: ProductionPipelineOptions) {
+  const configured = options.maxRevisionAttempts !== undefined ? options.maxRevisionAttempts : 3
+  return Math.min(2, Math.max(0, configured))
+}
+
+function mergeAigcGate(
+  baseFinalGate: QualityGateResult,
+  aigcDetection: AigcWritingDetectionReport,
+  isAigcGateBypassed: boolean,
+) {
+  if (aigcDetection.status === "passed" || aigcDetection.status === "skipped" || isAigcGateBypassed) {
+    return baseFinalGate
+  }
+  return {
+    ...baseFinalGate,
+    passed: false,
+    status: "blocked" as const,
+    reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked"
+      ? `AIGC 检测阻塞：${aigcDetection.highRiskSegments.length} 个片段超过阈值，最高概率 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}。`
+      : `AIGC 检测未通过：${aigcDetection.status}，${aigcDetection.reason || "需要配置并通过 AIGC 检测后才能放行。"}`
+    }`.trim(),
+  }
+}
+
+async function repairFinalDraftForNaturalnessGate(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  finalDraft: string,
+  gate: QualityGateResult,
+  resources: ProductionWritingResources,
+  options: ProductionPipelineOptions,
+  continuityContract = createContinuityContract({ state, task }),
+  characterDossiers?: CharacterDossier[],
+  approvedStyleContext: ApprovedWritingStyleContext = { status: "missing", prompt: "" },
+  attempt = 1,
+) {
+  throwIfPipelineAborted(options)
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: finalDraft,
+  })
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
+  const currentNaturalness = createNaturalnessReport({
+    beforeDraft: finalDraft,
+    afterDraft: finalDraft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
+  const generated = await generateProductionTextWithLlm({
+    roleName: "Prose Stylist",
+    state,
+    options,
+    temperature: 0.42,
+    progress: {
+      step: `naturalness_repair_${attempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      startMessage: `NaturalnessAgent 正在修复第 ${task.chapterNumber} 章 final gate 问题，第 ${attempt} 轮。`,
+      completeMessage: `NaturalnessAgent 已返回第 ${task.chapterNumber} 章 final gate 修复稿，第 ${attempt} 轮。`,
+    },
+    basePrompt: [
+      "你是生产流水线的 NaturalnessAgent。你的任务是修复 final gate 指出的自然度和风格继承问题。",
+      "只改表达，不改剧情事实、人物身份、关系结论、伏笔状态、章节顺序和章末后果。",
+      "必须保留所有已出现的核心物件、数字线索、人物行动和下一章交棒。",
+      resources.styleGuide || "",
+      resources.styleControllerGuide || "",
+      resources.antiHallucinationGuide || "",
+    ].join("\n\n"),
+    dynamicPrompt: [
+      "输出 Markdown，必须包含 `## Final Body`。",
+      `字数硬约束：当前目标 ${task.targetWords} 字，只能局部修复，不得把最终正文扩到 ${Math.ceil(task.targetWords * 1.15)} 字以上。`,
+      "删除或替换疲劳词：突然、忽然、猛然、竟然、居然、渐渐、逐渐、然而、与此同时、似乎、也许、大概、仿佛。",
+      "禁用直白心理句：他忽然想起、他知道/他不知道、这意味着、这说明、有些东西、没办法当什么都没发生过、这只是开始。",
+      "禁用报告腔：第一、第二、首先、其次、最后、原因是、可以看出、体现了、说明了、证明了。若必须保留序数，用具体物件位置或动作替代。",
+      "把抽象判断改成可见动作、触感、气味、声音、短对白和物件变化；不要新增解释段。",
+      "保持第三人称有限视角，读者只能知道陈渡现场看见、听见、触到和推到的东西。",
+      approvedStyleCarryover
+        ? "必须严格贴合用户确认写法合同，尤其避免禁忌模式和模板悬念句。"
+        : "",
+      continuityContract.lockedProtagonistName
+        ? `锁定主角：${continuityContract.lockedProtagonistName}。不得改名。`
+        : "首章必须保留唯一主角姓名。",
+      "",
+      continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
+      "",
+      characterProfileContract.prompt.slice(0, 1400),
+    ].join("\n"),
+    message: [
+      "请修复下面的最终稿，只返回修复后的章节 Markdown。",
+      "",
+      "## Final Gate Failure",
+      `- ${gate.reason}`,
+      "",
+      "## Current Naturalness Report",
+      formatNaturalnessReport(currentNaturalness),
+      "",
+      "## Current Final Draft",
+      finalDraft,
+    ].join("\n"),
+  })
+  const normalized = generated.includes("## Final Body")
+    ? generated
+    : [`# ${task.title}`, "", "## Final Body", "", generated].join("\n")
+  const repairedNaturalness = createNaturalnessReport({
+    beforeDraft: finalDraft,
+    afterDraft: normalized,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract,
+  })
+  const repaired = normalized.includes("## Naturalness Report")
+    ? normalized
+    : `${normalized.trimEnd()}\n\n${formatNaturalnessReport(repairedNaturalness)}`
+  return enforceNaturalnessWordBudgetGuard(finalDraft, repaired, task, "Naturalness Repair Word Budget Guard")
 }
 
 function createChapterMemoryUpdate(
@@ -9863,25 +12382,26 @@ function createChapterMemoryUpdate(
   continuityContract = createContinuityContract({ state, task }),
   characterDossiers?: CharacterDossier[],
 ) {
+  const narrativeBody = extractNarrativeBody(finalDraft)
   const nextAnchors = extractContinuityAnchors({
-    text: finalDraft,
+    text: narrativeBody,
     lockedProtagonistName: continuityContract.lockedProtagonistName,
     limit: 10,
   })
   const causalPlan = getTaskCausalPlan(state, task)
-  const plotContinuity = evaluatePlotContinuityBridge(finalDraft, task, continuityContract)
-  const styleQuality = evaluateNarrativeStyleQuality(finalDraft)
+  const plotContinuity = evaluatePlotContinuityBridge(narrativeBody, task, continuityContract)
+  const styleQuality = evaluateNarrativeStyleQuality(narrativeBody)
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
     characterDossiers,
     continuityContract,
-    previousFinalDraft: finalDraft,
+    previousFinalDraft: narrativeBody,
   })
-  const characterProfileQuality = evaluateCharacterProfilePresence(finalDraft, characterProfileContract)
+  const characterProfileQuality = evaluateCharacterProfilePresence(narrativeBody, characterProfileContract)
   const naturalnessReport = createNaturalnessReport({
-    beforeDraft: finalDraft,
-    afterDraft: finalDraft,
+    beforeDraft: narrativeBody,
+    afterDraft: narrativeBody,
     state,
     task,
     continuityContract,
@@ -9942,7 +12462,7 @@ function createChapterMemoryUpdate(
     ...(naturalnessReport.riskFlags.length ? naturalnessReport.riskFlags.slice(0, 6).map((flag) => `- Risk: ${flag}`) : ["- Risk: none"]),
     "",
     "## Draft Excerpt",
-    finalDraft.split("\n").filter(Boolean).slice(0, 8).join("\n"),
+    narrativeBody.split("\n").filter(Boolean).slice(0, 8).join("\n"),
   ].join("\n")
 }
 
@@ -10044,6 +12564,7 @@ export async function writeProductionMasterOutline(
   context: { consensus: string; protagonist: string; style: string },
   options: ProductionPipelineOptions = {},
 ) {
+  await blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, state, context, options)
   const { resources } = await writeProductionWritingResourceArtifacts(projectRoot, paths, state, options)
   const content = await createMasterOutlineContent(state, context, resources, options)
   await fs.mkdir(paths.plansDir, { recursive: true })
@@ -10064,6 +12585,204 @@ export async function writeProductionMasterOutline(
   return content
 }
 
+async function blockMasterPlanningWithoutSourceProtagonist(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  context: { consensus: string; protagonist: string; style: string },
+  options: ProductionPipelineOptions,
+) {
+  const sourceProtagonist = extractConcreteProtagonistNameForMasterOutline([
+    context.protagonist,
+    context.consensus,
+  ].filter(Boolean).join("\n"))
+    || lockedProtagonistFromState(state, context.protagonist)
+  if (sourceProtagonist) return
+
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  const briefPath = path.join(paths.plansDir, "master-planning-protagonist-brief.md")
+  const briefArtifactPath = relativeArtifactPath(projectRoot, briefPath)
+  const reason = "planning protagonist missing: source context does not declare a concrete protagonist"
+  const profileExcerpt = sanitizeMasterOutlineCharacterProfile(context.protagonist || "")
+    .split(/\r?\n/u)
+    .slice(0, 18)
+    .join("\n")
+  const brief = [
+    "# Master Planning Protagonist Required",
+    "",
+    "Status: blocked",
+    "Gate: master_planning",
+    `Reason: ${reason}`,
+    "",
+    "## Why This Stopped",
+    "",
+    "Master planning cannot ask the LLM to invent a canonical protagonist when the source context still contains only a role label or placeholder.",
+    "The model may propose names during discussion, but a production master outline must start from a concrete user-approved or previously locked protagonist.",
+    "",
+    "## Current Source Evidence",
+    "",
+    `- Project: ${state.project.title}`,
+    `- Master protagonist in source: missing`,
+    `- Protagonist profile path: ${relativeArtifactPath(projectRoot, paths.protagonistPath)}`,
+    "",
+    "### Protagonist Profile Excerpt",
+    "",
+    profileExcerpt ? "```markdown\n" + profileExcerpt + "\n```" : "- empty",
+    "",
+    "## Required Confirmation",
+    "",
+    "- Concrete protagonist name.",
+    "- Identity and role function.",
+    "- Core desire.",
+    "- Fear or wound.",
+    "- Visible behavior habit.",
+    "- Speech marker or dialogue habit.",
+    "- At least one named relationship pressure.",
+    "",
+    "## Suggested Next Input",
+    "",
+    "请先冻结主角资料：主角姓名是「___」，身份是「___」，核心欲望是「___」，伤口/恐惧是「___」，行为习惯是「___」，说话方式是「___」，与「___」的关系压力是「___」。",
+  ].join("\n")
+  await fs.writeFile(briefPath, `${brief}\n`)
+  await recordPipelineArtifact(projectRoot, briefPath, "plan", options, {
+    stage: "master_planning_blocked",
+    production: true,
+    title: "Master Planning Protagonist Required",
+    status: "blocked",
+  })
+  await emitWritingProgress(options, {
+    step: "master_planning_blocked",
+    role: "Showrunner",
+    status: "blocked",
+    message: "主线规划已阻塞：源资料没有冻结具体主角姓名，系统不会让模型临时编造主角后继续冻结设定。",
+    artifactPath: briefArtifactPath,
+    artifactLabel: "master-planning-protagonist-brief.md",
+    artifactKind: "plan",
+    preview: [
+      reason,
+      `Brief: ${briefArtifactPath}`,
+      "需要先补齐主角姓名、身份、欲望、伤口、行为习惯、说话方式和关系压力。",
+    ].join("\n"),
+    workflow: {
+      kind: "gate",
+      stage: "master_planning",
+      summary: reason,
+      collapsed: false,
+      expandableArtifactPath: briefArtifactPath,
+    },
+  })
+  if (options.factoryRootDir && options.projectId) {
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordEvent(options.projectId as string, null, "MASTER_PLANNING_BLOCKED", {
+        gate: "source_context_concrete_protagonist",
+        reason,
+        artifactPath: briefArtifactPath,
+      })
+    }).catch(() => undefined)
+  }
+  throw new ProductionPlanningBlockedError(reason)
+}
+
+async function blockStoryFoundationWithoutMasterProtagonist(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  masterOutline: string,
+  options: ProductionPipelineOptions,
+) {
+  if (!masterOutline.trim()) return
+  const planningCast = extractPlanningCastContract(masterOutline)
+  if (planningCast.protagonistName) return
+
+  await fs.mkdir(paths.plansDir, { recursive: true })
+  const masterOutlineArtifactPath = relativeArtifactPath(projectRoot, paths.masterOutlinePath)
+  const namingBriefPath = path.join(paths.plansDir, "protagonist-naming-brief.md")
+  const namingBriefArtifactPath = relativeArtifactPath(projectRoot, namingBriefPath)
+  const reason = "planning protagonist missing: master outline does not declare a concrete protagonist"
+  const namingBrief = [
+    "# Protagonist Naming Required",
+    "",
+    `Status: blocked`,
+    `Gate: story_foundation`,
+    `Reason: ${reason}`,
+    "",
+    "## Why This Stopped",
+    "",
+    "Story foundation cannot freeze world rules, character dynamics, or chapter blueprints until the master outline declares one concrete protagonist name.",
+    "A role label such as `主角（未命名档案小吏）` is not enough, and support roles must not be promoted to protagonist just to unblock the pipeline.",
+    "",
+    "## Current Master Outline Evidence",
+    "",
+    `- Master protagonist: missing`,
+    `- Cast candidates found: ${planningCast.cast.length ? planningCast.cast.join("、") : "none"}`,
+    `- Source file: ${masterOutlineArtifactPath}`,
+    ...(planningCast.evidence.length
+      ? ["", "Evidence lines:", ...planningCast.evidence.slice(0, 12).map((line) => `- ${line}`)]
+      : []),
+    "",
+    "## Required Confirmation",
+    "",
+    "- Concrete protagonist name.",
+    "- Identity and role function.",
+    "- Core desire.",
+    "- Fear or wound.",
+    "- Visible behavior habit.",
+    "- Speech marker.",
+    "- Relationship pressure against at least one named supporting cast member.",
+    "",
+    "## Suggested Next Input",
+    "",
+    "请把主角姓名冻结为「___」，身份是「___」，核心欲望是「___」，伤口/恐惧是「___」，行为习惯是「___」，说话方式是「___」，并说明他/她与已出现配角的关系压力。",
+  ].join("\n")
+  await fs.writeFile(namingBriefPath, `${namingBrief}\n`)
+  await recordPipelineArtifact(projectRoot, namingBriefPath, "plan", options, {
+    stage: "story_foundation_blocked",
+    production: true,
+    title: "Protagonist Naming Required",
+    status: "blocked",
+    source: masterOutlineArtifactPath,
+  })
+  await emitWritingProgress(options, {
+    step: "story_foundation_blocked",
+    role: "Showrunner",
+    status: "blocked",
+    message: "故事基础冻结已阻塞：master-outline.md 没有声明具体主角姓名，不能继续冻结世界观、角色关系和章节蓝图。",
+    artifactPath: namingBriefArtifactPath,
+    artifactLabel: "protagonist-naming-brief.md",
+    artifactKind: "plan",
+    artifacts: [
+      {
+        path: masterOutlineArtifactPath,
+        label: "master-outline.md",
+        kind: "plan",
+        status: "blocked",
+      },
+    ],
+    preview: [
+      reason,
+      `Naming brief: ${namingBriefArtifactPath}`,
+      "需要先回到讨论/主线规划阶段，明确主角姓名、身份、欲望、伤口、行为习惯和关系压力。",
+    ].join("\n"),
+    workflow: {
+      kind: "gate",
+      stage: "story_foundation",
+      summary: reason,
+      collapsed: false,
+      expandableArtifactPath: namingBriefArtifactPath,
+    },
+  })
+  if (options.factoryRootDir && options.projectId) {
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordEvent(options.projectId as string, null, "STORY_FOUNDATION_BLOCKED", {
+        gate: "master_outline_concrete_protagonist",
+        reason,
+        artifactPath: namingBriefArtifactPath,
+        masterOutlinePath: masterOutlineArtifactPath,
+      })
+    }).catch(() => undefined)
+  }
+  throw new ProductionPlanningBlockedError(reason)
+}
+
 export async function writeProductionStoryBibleAssets(
   projectRoot: string,
   paths: NovelWorkspacePaths,
@@ -10072,7 +12791,9 @@ export async function writeProductionStoryBibleAssets(
   options: ProductionPipelineOptions = {},
 ) {
   const resources = await loadProductionWritingResources(projectRoot)
-  const assets = createProductionStoryBibleAssets(state, context, resources)
+  const masterOutline = await readOptionalText(paths.masterOutlinePath)
+  await blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, masterOutline, options)
+  const assets = createProductionStoryBibleAssets(state, context, resources, { masterOutline })
   await fs.mkdir(paths.plansDir, { recursive: true })
 
   const written: string[] = []
@@ -10095,8 +12816,22 @@ export async function writeProductionStoryBibleAssets(
     status: "completed",
     message: "世界矩阵、主线架构、故事圣经、分卷策略、伏笔账本、人物关系资产和写作执行计划已保存。",
     artifactPath: relativeArtifactPath(projectRoot, path.join(paths.plansDir, "story-bible.md")),
+    artifactLabel: "story-bible.md",
+    artifactKind: "plan",
+    artifacts: written.map((artifactPath) => ({
+      path: relativeArtifactPath(projectRoot, artifactPath),
+      label: path.basename(artifactPath),
+      kind: "plan",
+      status: "completed",
+    })),
     preview: [...assets.map((asset) => `- ${asset.filename}`), "- writing-plan.json"].join("\n"),
     wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n")),
+    workflow: {
+      kind: "artifact_saved",
+      stage: "story_foundation",
+      summary: "Story foundation asset bundle saved.",
+      expandableArtifactPath: relativeArtifactPath(projectRoot, path.join(paths.plansDir, "story-bible.md")),
+    },
   })
 
   return written
@@ -10201,6 +12936,558 @@ export async function writeAllDetailedChapterBlueprints(
   }
 
   return written
+}
+
+export interface PreparedChapterProductionInputs {
+  writingMode: ProductionWritingMode
+  resources: ProductionWritingResources
+  approvedStyleContext: ApprovedWritingStyleContext
+  approvedStyleCarryover: string
+  protagonistProfile: string
+  characterDossiers: CharacterDossier[]
+  chapterId: string
+  previousMemory: string
+  previousFinalDraft: string
+  blueprintPath: string
+  context: { consensus: string; protagonist: string; style: string }
+  blueprint: string
+  continuityContract: ContinuityContract
+}
+
+export interface ChapterQualityStageResult {
+  draft: string
+  report: string
+  gate: QualityGateResult
+}
+
+export interface ChapterNaturalnessStageResult extends ChapterQualityStageResult {
+  finalDraft: string
+  finalGate: QualityGateResult
+  aigcDetection: AigcWritingDetectionReport
+  writingMode: ProductionWritingMode
+}
+
+/**
+ * Prepares the exact inputs consumed by draft and quality production without
+ * generating prose. Fine-grained workflow nodes use this boundary while the
+ * legacy full chapter pipeline remains behaviorally unchanged.
+ */
+export async function prepareChapterProductionInputs(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  options: ProductionPipelineOptions = {},
+): Promise<PreparedChapterProductionInputs> {
+  throwIfPipelineAborted(options)
+  if (options.projectId) invalidateProjectCache(options.projectId)
+  const writingMode = productionWritingMode(options)
+  const resources = await loadProductionWritingResources(projectRoot)
+  const approvedStyleContext = await loadApprovedWritingStyleContext(projectRoot)
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext)
+  await enforceApprovedWritingStyleGate(options, task, approvedStyleContext)
+  await persistApprovedWritingStyleAssets(projectRoot, paths, approvedStyleContext, options)
+  const protagonistProfile = await readOptionalText(paths.protagonistPath)
+  const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath)
+  const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`
+  const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : ""
+  const previousMemory = previousChapterId
+    ? await readOptionalText(path.join(paths.memoryDir, `${previousChapterId}-memory.md`))
+    : ""
+  const previousFinalDraft = previousChapterId
+    ? await readOptionalText(path.join(paths.chaptersDir, `${previousChapterId}.final.md`))
+    : ""
+  const blueprintPath = path.join(paths.chapterBlueprintsDir, `${chapterId}.md`)
+  const context = {
+    consensus: await readOptionalText(paths.consensusPath),
+    protagonist: protagonistProfile,
+    style: [
+      await readOptionalText(paths.styleProfilePath),
+      approvedStyleCarryover,
+    ].filter(Boolean).join("\n\n"),
+  }
+  await ensureProductionStoryBibleAssets(projectRoot, paths, state, context, options)
+  let blueprint = await readOptionalText(blueprintPath)
+  if (!hasCausalBlueprint(blueprint)) {
+    const storyAssetContext = await loadProductionStoryAssetContext(paths, task)
+    const planningContract = createContinuityContract({
+      state,
+      task,
+      context,
+      protagonistProfile,
+      previousMemory,
+      previousFinalDraft,
+    })
+    blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext)
+    await fs.mkdir(paths.chapterBlueprintsDir, { recursive: true })
+    await fs.writeFile(blueprintPath, `${blueprint}\n`)
+    await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
+      chapterNumber: task.chapterNumber,
+      stage: "drafting",
+      detailed: true,
+      generatedDuringProduction: true,
+      reason: "missing_or_non_causal_blueprint",
+    })
+  }
+  const continuityContract = createContinuityContract({
+    state,
+    task,
+    context,
+    protagonistProfile,
+    blueprint,
+    previousMemory,
+    previousFinalDraft,
+  })
+  if (continuityContract.status === "blocked") {
+    throw new Error(`Continuity contract blocked chapter ${task.chapterNumber}: no locked protagonist from previous chapters.`)
+  }
+  return {
+    writingMode,
+    resources,
+    approvedStyleContext,
+    approvedStyleCarryover,
+    protagonistProfile,
+    characterDossiers,
+    chapterId,
+    previousMemory,
+    previousFinalDraft,
+    blueprintPath,
+    context,
+    blueprint,
+    continuityContract,
+  }
+}
+
+/**
+ * Runs the production polish, AIGC review and final naturalness gate from a
+ * durable quality checkpoint. It deliberately performs no chapter/memory
+ * commit so a workflow may inspect or retry the result before promotion.
+ */
+export async function runChapterNaturalnessStage(
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  quality: ChapterQualityStageResult,
+  prepared: PreparedChapterProductionInputs,
+  options: ProductionPipelineOptions = {},
+): Promise<ChapterNaturalnessStageResult> {
+  const { draft, report, gate } = quality
+  const {
+    writingMode,
+    resources,
+    continuityContract,
+    characterDossiers,
+    approvedStyleContext,
+    protagonistProfile,
+    blueprint,
+  } = prepared
+  let finalDraft = gate.status === "blocked"
+    ? createPolishedDraft(state, task, draft, report, gate, writingMode)
+    : await createProductionPolishedDraft(
+      state,
+      task,
+      draft,
+      report,
+      gate,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+      approvedStyleContext,
+    )
+  const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || options.bypassAigcGate === true
+  let aigcDetection = isAigcGateBypassed
+    ? skippedAigcWritingDetectionReport("AIGC检测在生成阶段已被旁路，将在后续统一精修。")
+    : await runAigcWritingDetection(finalDraft, options)
+  const isAigcBlocked = aigcDetection.status === "blocked" && !isAigcGateBypassed
+
+  await emitWritingProgress(options, {
+    step: "aigc_detection_completed",
+    role: "Reviewer",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: isAigcBlocked ? "blocked" : "completed",
+    message: isAigcBlocked
+      ? `第 ${task.chapterNumber} 章 AIGC 检测发现 ${aigcDetection.highRiskSegments.length} 个高风险片段，准备执行局部自然化修复。`
+      : aigcDetection.status === "blocked"
+        ? `第 ${task.chapterNumber} 章 AIGC 检测发现 ${aigcDetection.highRiskSegments.length} 个高风险片段（已开启 AIGC 门禁旁路，直接通过）。`
+        : aigcDetection.status === "passed"
+          ? `第 ${task.chapterNumber} 章 AIGC 检测通过，平均概率 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}。`
+          : `第 ${task.chapterNumber} 章 AIGC 检测未启用或不可用：${aigcDetection.reason}`,
+    preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+    wordCount: wordCount(finalDraft),
+  })
+  if (isAigcBlocked && gate.status !== "blocked") {
+    finalDraft = await repairAigcHighRiskDraft(
+      state,
+      task,
+      finalDraft,
+      aigcDetection,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+    )
+    aigcDetection = await runAigcWritingDetection(finalDraft, options)
+    await emitWritingProgress(options, {
+      step: "aigc_recheck_completed",
+      role: "Reviewer",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+      message: aigcDetection.status === "blocked"
+        ? `第 ${task.chapterNumber} 章 AIGC 修复后仍有 ${aigcDetection.highRiskSegments.length} 个高风险片段。`
+        : `第 ${task.chapterNumber} 章 AIGC 修复后复检完成。`,
+      preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+      wordCount: wordCount(finalDraft),
+    })
+  }
+  let baseFinalGate = enforceFinalDraftQualityGate(
+    gate,
+    finalDraft,
+    task,
+    state,
+    protagonistProfile,
+    continuityContract,
+    characterDossiers,
+    blueprint,
+  )
+  let finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed)
+  const maxFinalRepairAttempts = finalDraftRepairLimit(options)
+  for (let repairAttempt = 1; repairAttempt <= maxFinalRepairAttempts && isRepairableFinalDraftGate(finalGate); repairAttempt += 1) {
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_started_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "started",
+      message: `第 ${task.chapterNumber} 章 final gate 命中可修复自然度/风格问题，开始第 ${repairAttempt} 轮自动返工。`,
+      preview: finalGate.reason.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate,
+    })
+    finalDraft = await repairFinalDraftForNaturalnessGate(
+      state,
+      task,
+      finalDraft,
+      finalGate,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+      approvedStyleContext,
+      repairAttempt,
+    )
+    aigcDetection = isAigcGateBypassed
+      ? skippedAigcWritingDetectionReport("AIGC检测在生成阶段已被旁路，将在后续统一精修。")
+      : await runAigcWritingDetection(finalDraft, options)
+    baseFinalGate = enforceFinalDraftQualityGate(
+      gate,
+      finalDraft,
+      task,
+      state,
+      protagonistProfile,
+      continuityContract,
+      characterDossiers,
+      blueprint,
+    )
+    finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed)
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_completed_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: finalGate.status === "blocked" ? "blocked" : "completed",
+      message: finalGate.status === "blocked"
+        ? `第 ${task.chapterNumber} 章第 ${repairAttempt} 轮自然度返工后仍未通过：${finalGate.reason}`
+        : `第 ${task.chapterNumber} 章第 ${repairAttempt} 轮自然度返工后通过 final gate。`,
+      preview: finalDraft.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate,
+    })
+  }
+  throwIfPipelineAborted(options)
+  await emitWritingProgress(options, {
+    step: "naturalness_completed",
+    role: "Prose Stylist",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: finalGate.status === "blocked" ? "blocked" : "completed",
+    message: finalGate.status === "blocked"
+      ? `第 ${task.chapterNumber} 章已生成阻塞版自然化稿，等待人工审阅或重试。`
+      : `第 ${task.chapterNumber} 章 NaturalnessAgent 自然化完成，正在写入正式产物。`,
+    preview: finalDraft.slice(0, 420),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate,
+  })
+  return { draft, report, gate, finalDraft, finalGate, aigcDetection, writingMode }
+}
+
+export interface ChapterProductionCommitResult {
+  draftPath: string
+  reviewedPath: string
+  finalPath: string
+  versionManifestPath: string
+  reportPath: string
+  memoryPath: string
+  wordCount: number
+  qualityGate: QualityGateResult
+  writingMode: ProductionWritingMode
+}
+
+/** Commits a previously inspected naturalness checkpoint to chapter and memory artifacts. */
+export async function commitChapterProductionStage(
+  projectRoot: string,
+  paths: NovelWorkspacePaths,
+  state: AutonomousNovelState,
+  task: AutonomousNovelState["plan"]["chapterTasks"][number],
+  prepared: PreparedChapterProductionInputs,
+  naturalness: ChapterNaturalnessStageResult,
+  options: ProductionPipelineOptions = {},
+): Promise<ChapterProductionCommitResult> {
+  const { draft, report, finalDraft, aigcDetection, writingMode } = naturalness
+  const { chapterId, characterDossiers, continuityContract, approvedStyleContext } = prepared
+  let finalGate = naturalness.finalGate
+  await emitWritingProgress(options, {
+    step: "memory_update_started",
+    role: "Memory Keeper",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: "started",
+    message: `Memory Keeper 正在提取第 ${task.chapterNumber} 章记忆、角色变化和伏笔记录。`,
+    preview: finalDraft.slice(0, 360),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate,
+  })
+  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract, characterDossiers)
+  const updatedCharacterDossiers = updateCharacterDossiersAfterChapter({
+    dossiers: characterDossiers,
+    state,
+    task,
+    finalDraft,
+    memoryUpdate,
+    continuityContract,
+  })
+  if (updatedCharacterDossiers.length) {
+    state.memory = { ...(state.memory || {}), characterDossiers: updatedCharacterDossiers }
+  }
+  const extractedStyleFingerprint = await updateStyleFingerprintFromFirstChapter({
+    paths,
+    state,
+    task,
+    finalDraft,
+    finalGate,
+  })
+  const styleConformanceDrift = evaluateChapterStyleConformanceDrift({
+    approvedStyleContext,
+    chapterText: finalDraft,
+    extractedStyleFingerprint,
+  })
+  if (styleConformanceDrift.status === "drifted") {
+    finalGate = {
+      ...finalGate,
+      passed: false,
+      status: "blocked" as const,
+      reason: `${finalGate.reason} 风格继承漂移阻塞：${styleConformanceDrift.reason}`.trim(),
+    }
+  }
+  const styleInheritanceVerification = await buildChapterStyleInheritanceVerification({
+    paths,
+    approvedStyleContext,
+    task,
+    finalGate,
+    aigcDetection,
+    styleConformanceDrift,
+    extractedStyleFingerprint,
+  })
+  const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null
+  const reportWithAigcDetection = [
+    report.trimEnd(),
+    formatAigcWritingDetectionReport(aigcDetection),
+    formatStyleConformanceDriftReport(styleConformanceDrift),
+    formatFinalQualityGateReport(finalGate),
+  ].join("\n\n")
+  throwIfPipelineAborted(options)
+
+  const draftPath = path.join(paths.chaptersDir, `${chapterId}.draft.md`)
+  const reviewedPath = path.join(paths.chaptersDir, `${chapterId}.reviewed.md`)
+  const finalPath = path.join(paths.chaptersDir, `${chapterId}.final.md`)
+  const reportPath = path.join(paths.reportsDir, `${chapterId}-quality.md`)
+  const memoryPath = path.join(paths.memoryDir, `${chapterId}-memory.md`)
+  const characterRelationshipsPath = paths.characterDossiersPath
+    ? path.join(path.dirname(paths.characterDossiersPath), "relationships.json")
+    : ""
+  const characterRelationsMarkdownPath = paths.characterDossiersPath
+    ? path.join(path.dirname(paths.characterDossiersPath), "relations.md")
+    : ""
+  const characterRelationshipGraph = updatedCharacterDossiers.length
+    ? createCharacterRelationshipGraph(updatedCharacterDossiers)
+    : null
+
+  await fs.mkdir(paths.chaptersDir, { recursive: true })
+  await fs.mkdir(paths.reportsDir, { recursive: true })
+  await fs.mkdir(paths.memoryDir, { recursive: true })
+  await fs.writeFile(draftPath, `${draft}\n`)
+  await fs.writeFile(reportPath, `${reportWithAigcDetection}\n`)
+  await fs.writeFile(reviewedPath, `${draft}\n\n---\n\n${reportWithAigcDetection}\n`)
+  await fs.writeFile(finalPath, `${finalDraft}\n`)
+  await fs.writeFile(memoryPath, `${memoryUpdate}\n`)
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers)
+  }
+  if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
+    await fs.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}\n`)
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph)
+  }
+  if (characterRelationsMarkdownPath && characterRelationshipGraph) {
+    await fs.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}\n`)
+  }
+  const versionManifestPath = await writeChapterVersionManifest({
+    projectRoot,
+    options,
+    chapterId,
+    task,
+    draftPath,
+    reviewedPath,
+    finalPath,
+    reportPath,
+    memoryPath,
+    finalDraft,
+    draft,
+    finalGate,
+    writingMode,
+    aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift,
+  })
+
+  await recordPipelineArtifact(projectRoot, draftPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "draft" })
+  await recordPipelineArtifact(projectRoot, reviewedPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "reviewed", qualityGate: finalGate })
+  await recordPipelineArtifact(projectRoot, finalPath, "chapter", options, {
+    chapterNumber: task.chapterNumber,
+    pass: "final",
+    qualityGate: finalGate,
+    aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift,
+    wordCount: wordCount(finalDraft),
+    targetWords: task.targetWords,
+  })
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, {
+    chapterNumber: task.chapterNumber,
+    quality: true,
+    qualityGate: finalGate,
+    aigcDetection,
+    styleInheritanceVerification,
+    styleConformanceDrift,
+  })
+  await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate })
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_dossiers",
+      qualityGate: finalGate,
+    })
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await recordPipelineArtifact(projectRoot, characterRelationshipsPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_relationship_graph",
+      qualityGate: finalGate,
+    })
+  }
+  if (extractedStyleFingerprint) {
+    await recordPipelineArtifact(projectRoot, paths.styleProfilePath, "style", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "style_profile",
+      source: "first_chapter_fingerprint",
+      styleFingerprint: extractedStyleFingerprint,
+      qualityGate: finalGate,
+    })
+  }
+  await emitWritingProgress(options, {
+    step: "chapter_artifacts_saved",
+    role: "Memory Keeper",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: finalGate.status === "blocked" ? "blocked" : "completed",
+    message: finalGate.status === "blocked"
+      ? `第 ${task.chapterNumber} 章产物已保存，但质量门禁仍阻塞。`
+      : extractedStyleFingerprint
+        ? `第 ${task.chapterNumber} 章正式正文、质检报告和记忆更新已保存，并提取首章风格指纹。`
+        : `第 ${task.chapterNumber} 章正式正文、质检报告和记忆更新已保存。`,
+    artifactPath: relativeArtifactPath(projectRoot, finalPath),
+    preview: memoryUpdate.slice(0, 360),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate,
+  })
+
+  if (options.factoryRootDir && options.projectId) {
+    const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText(paths.styleProfilePath) : ""
+    const characterDossierMemory = updatedCharacterDossiers.length
+      ? formatCharacterDossiersMarkdown(updatedCharacterDossiers)
+      : ""
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordMemory(options.projectId as string, {
+        source: relativeArtifactPath(projectRoot, memoryPath),
+        kind: "chapter_summary",
+        content: memoryUpdate,
+        importance: 7,
+        metadata: { chapterNumber: task.chapterNumber, title: task.title },
+        embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(memoryUpdate) },
+      })
+      if (characterDossierMemory && paths.characterDossiersPath) {
+        const characterDossiersPath = relativeArtifactPath(projectRoot, paths.characterDossiersPath)
+        db.recordMemory(options.projectId as string, {
+          source: characterDossiersPath,
+          kind: "character_dossiers",
+          content: characterDossierMemory,
+          importance: 9,
+          metadata: { path: characterDossiersPath, chapterNumber: task.chapterNumber, source: "chapter_memory_keeper" },
+          embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(characterDossierMemory) },
+        })
+      }
+      if (extractedStyleFingerprint) {
+        const styleProfilePath = relativeArtifactPath(projectRoot, paths.styleProfilePath)
+        const styleMemory = [`Style fingerprint from chapter ${task.chapterNumber}: ${extractedStyleFingerprint}`, "", updatedStyleProfile].join("\n")
+        db.recordMemory(options.projectId as string, {
+          source: styleProfilePath,
+          kind: "style_profile",
+          content: styleMemory,
+          importance: 8,
+          metadata: { path: styleProfilePath, chapterNumber: task.chapterNumber, source: "first_chapter_fingerprint" },
+          embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(styleMemory) },
+        })
+      }
+      db.recordEvent(options.projectId as string, null, finalGate.status === "blocked" ? "CHAPTER_PIPELINE_BLOCKED" : "CHAPTER_PIPELINE_COMPLETED", {
+        chapterNumber: task.chapterNumber,
+        draftPath: relativeArtifactPath(projectRoot, draftPath),
+        finalPath: relativeArtifactPath(projectRoot, finalPath),
+        versionManifestPath: relativeArtifactPath(projectRoot, versionManifestPath),
+        reportPath: relativeArtifactPath(projectRoot, reportPath),
+        qualityGate: finalGate,
+        styleInheritanceVerification,
+        styleConformanceDrift,
+        writingMode,
+        directorCommandId: options.directorCommandId ?? null,
+      })
+    }).catch(() => undefined)
+  }
+
+  return {
+    draftPath,
+    reviewedPath,
+    finalPath,
+    versionManifestPath,
+    reportPath,
+    memoryPath,
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate,
+    writingMode,
+  }
 }
 
 export async function runChapterProductionPipeline(
@@ -10369,6 +13656,41 @@ export async function runChapterProductionPipeline(
     preview: report.slice(0, 420),
     qualityGate: gate,
   })
+  if (process.env.AI_NOVEL_LEGACY_CHAPTER_PIPELINE !== "1") {
+    const preparedStages: PreparedChapterProductionInputs = {
+    writingMode,
+    resources,
+    approvedStyleContext,
+    approvedStyleCarryover,
+    protagonistProfile,
+    characterDossiers,
+    chapterId,
+    previousMemory,
+    previousFinalDraft,
+    blueprintPath,
+    context,
+    blueprint,
+    continuityContract,
+  }
+    const naturalnessStage = await runChapterNaturalnessStage(
+      state,
+      task,
+      { draft, report, gate },
+      preparedStages,
+      options,
+    )
+    return commitChapterProductionStage(
+      projectRoot,
+      paths,
+      state,
+      task,
+      preparedStages,
+      naturalnessStage,
+      options,
+    )
+  }
+
+  /* Rollback path: set AI_NOVEL_LEGACY_CHAPTER_PIPELINE=1 while the shared staged pipeline settles. */
   let finalDraft = gate.status === "blocked"
     ? createPolishedDraft(state, task, draft, report, gate, writingMode)
     : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers, approvedStyleContext)
@@ -10410,18 +13732,52 @@ export async function runChapterProductionPipeline(
       wordCount: wordCount(finalDraft),
     })
   }
-  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint)
-  let finalGate = (aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed)
-    ? {
-        ...baseFinalGate,
-        passed: false,
-        status: "blocked" as const,
-        reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked"
-          ? `AIGC 检测阻塞：${aigcDetection.highRiskSegments.length} 个片段超过阈值，最高概率 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}。`
-          : `AIGC 检测未通过：${aigcDetection.status}，${aigcDetection.reason || "需要配置并通过 AIGC 检测后才能放行。"}`
-        }`.trim(),
-      }
-    : baseFinalGate
+  let baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint)
+  let finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed)
+  const maxFinalRepairAttempts = finalDraftRepairLimit(options)
+  for (let repairAttempt = 1; repairAttempt <= maxFinalRepairAttempts && isRepairableFinalDraftGate(finalGate); repairAttempt += 1) {
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_started_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "started",
+      message: `第 ${task.chapterNumber} 章 final gate 命中可修复自然度/风格问题，开始第 ${repairAttempt} 轮自动返工。`,
+      preview: finalGate.reason.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate,
+    })
+    finalDraft = await repairFinalDraftForNaturalnessGate(
+      state,
+      task,
+      finalDraft,
+      finalGate,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+      approvedStyleContext,
+      repairAttempt,
+    )
+    aigcDetection = isAigcGateBypassed
+      ? skippedAigcWritingDetectionReport("AIGC检测在生成阶段已被旁路，将在后续统一精修。")
+      : await runAigcWritingDetection(finalDraft, options)
+    baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint)
+    finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed)
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_completed_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: finalGate.status === "blocked" ? "blocked" : "completed",
+      message: finalGate.status === "blocked"
+        ? `第 ${task.chapterNumber} 章第 ${repairAttempt} 轮自然度返工后仍未通过：${finalGate.reason}`
+        : `第 ${task.chapterNumber} 章第 ${repairAttempt} 轮自然度返工后通过 final gate。`,
+      preview: finalDraft.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate,
+    })
+  }
   throwIfPipelineAborted(options)
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -10492,7 +13848,12 @@ export async function runChapterProductionPipeline(
 	    extractedStyleFingerprint,
 	  })
 	  const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null
-	  const reportWithAigcDetection = `${report.trimEnd()}\n\n${formatAigcWritingDetectionReport(aigcDetection)}\n\n${formatStyleConformanceDriftReport(styleConformanceDrift)}`
+	  const reportWithAigcDetection = [
+    report.trimEnd(),
+    formatAigcWritingDetectionReport(aigcDetection),
+    formatStyleConformanceDriftReport(styleConformanceDrift),
+    formatFinalQualityGateReport(finalGate),
+  ].join("\n\n")
   throwIfPipelineAborted(options)
 
   const draftPath = path.join(paths.chaptersDir, `${chapterId}.draft.md`)

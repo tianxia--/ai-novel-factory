@@ -478,8 +478,8 @@ async function readResponseBody(response: Response): Promise<unknown> {
 }
 
 function normalizeAigcDetectionResult(raw: unknown, provider: AigcDetectorProvider, threshold = DEFAULT_THRESHOLD): AigcDetectionResult {
-  const score = findScore(raw)
   const label = findStringField(raw, ["label", "status", "result", "prediction", "class", "message"]) || inferLabel(raw)
+  const score = findAiProbabilityScore(raw, label)
   const normalizedScore = normalizeScore(score)
   const status = statusFromLabel(label) || (normalizedScore === null ? "uncertain" : scoreToStatus(normalizedScore, threshold))
   const confidence = normalizeScore(findNumberField(raw, ["confidence", "probability", "prob"])) ?? (
@@ -670,9 +670,8 @@ function createSessionHash(): string {
   return Math.random().toString(36).slice(2, 14)
 }
 
-function findScore(raw: unknown): number | null {
-  return findNumberField(raw, [
-    "score",
+function findAiProbabilityScore(raw: unknown, label = ""): number | null {
+  const explicitAiScore = findNumberField(raw, [
     "aiProbability",
     "aigcProbability",
     "ai_probability",
@@ -682,7 +681,23 @@ function findScore(raw: unknown): number | null {
     "ai_score",
     "aigc_score",
     "fakeProbability",
-  ]) ?? parseScoreFromText(raw)
+  ])
+  if (explicitAiScore !== null) {
+    return explicitAiScore
+  }
+
+  const genericScore = findGenericScore(raw)
+  if (genericScore !== null && statusFromLabel(label) === "human_likely") {
+    const normalizedGenericScore = normalizeScore(genericScore)
+    return normalizedGenericScore === null ? null : 1 - normalizedGenericScore
+  }
+  return genericScore
+}
+
+function findGenericScore(raw: unknown): number | null {
+  return findNumberField(raw, [
+    "score",
+    ]) ?? parseScoreFromText(raw)
 }
 
 function findNumberField(raw: unknown, names: string[]): number | null {

@@ -1687,6 +1687,7 @@ test("production acceptance runner writes resumable checkpoint reports", async (
   report.lastProgress = report.progress.at(-1)
   report.recovery = buildAcceptanceFailureRecovery(report, {
     autoApproveStyle: true,
+    autoApproveSettingReview: true,
     autoApproveFoundation: true,
   }, report.error)
   await writeAcceptanceCheckpoint(reportPath, report, {
@@ -1702,6 +1703,187 @@ test("production acceptance runner writes resumable checkpoint reports", async (
   assert.equal(failedSaved.recovery.failedPhase, "drafting_progress")
   assert.match(failedSaved.recovery.resumeCommand, /--resume-project-id project-123/)
   assert.match(failedSaved.recovery.resumeCommand, /--auto-approve-style/)
+  assert.match(failedSaved.recovery.resumeCommand, /--auto-approve-setting-review/)
+})
+
+test("planning interface audit catches thin cast and repeated blueprints", async () => {
+  const { runPlanningAssetConsistencyAudit } = await loadRunner()
+  const executionContract = {
+    chapterNumber: 1,
+    title: "重复章",
+    chapterPurpose: "沈渡查一页缺页账册。",
+    chapterRole: "证据异常",
+    foreshadowingOperation: "留下缺页伏笔。",
+    endingHook: "留下可被下一章追踪的画面、物件、线索或关系压力。",
+    nextChapterEntryState: "继续查缺页账册。",
+    chapterDifferentiators: {
+      pressureMode: "证据异常压迫",
+      sceneTexture: "狭窄室内",
+      evidenceMode: "账册边缘",
+      handoffMode: "关系压力外溢",
+      openingMove: "从一页顺序错误的档案开场",
+      keyProp: "缺页账册",
+      relationshipTurn: "沉默",
+      decisionShape: "扣下证据",
+      costShape: "身份风险",
+      exitImage: "灯下缺页",
+      focusCast: ["沈渡"],
+    },
+    characterParticipation: {
+      knownCast: ["沈渡"],
+      requiredSceneCharacters: ["沈渡"],
+    },
+    sceneCards: Array.from({ length: 5 }, (_, index) => ({
+      index: index + 1,
+      goal: "查缺页账册。",
+      conflict: "账册异常制造压力。",
+      turn: "沈渡扣下证据。",
+      endHook: "留下可被下一章追踪的画面、物件、线索或关系压力。",
+      requiredCharacters: ["沈渡"],
+      requiredFacts: ["缺页账册"],
+    })),
+  }
+  const blueprint = [
+    "# Detailed Chapter Blueprint",
+    "Canonical protagonist: 沈渡",
+    "## Chapter Execution Contract",
+    "```json",
+    JSON.stringify(executionContract, null, 2),
+    "```",
+  ].join("\n")
+  const audit = runPlanningAssetConsistencyAudit("planning", [
+    {
+      path: ".ai-novel/plans/master-outline.md",
+      openable: true,
+      content: [
+        "# Production Master Outline",
+        "## Character Spine",
+        "### 沈渡（主角）",
+        "- 身份：档案小吏。",
+      ].join("\n"),
+    },
+    {
+      path: ".ai-novel/plans/story-foundation-contract.json",
+      openable: true,
+      content: JSON.stringify({
+        project: { totalChapters: 3 },
+        canonicalPlanningCast: { protagonist: "沈渡", cast: ["沈渡"] },
+        plot: { chapters: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }] },
+        characters: { relationshipEntries: [] },
+      }),
+    },
+    {
+      path: ".ai-novel/plans/character-dynamics.md",
+      openable: true,
+      content: "主角：沈渡\n关系压力待补齐。",
+    },
+    {
+      path: ".ai-novel/plans/world-matrix.md",
+      openable: true,
+      content: "世界规则必须服务核心创意。不得临时改规则。",
+    },
+    {
+      path: ".ai-novel/plans/story-bible.md",
+      openable: true,
+      content: "故事合同必须服务核心创意。",
+    },
+    {
+      path: ".ai-novel/plans/plot-architecture.md",
+      openable: true,
+      content: "主线架构必须推进。",
+    },
+    {
+      path: ".ai-novel/plans/chapter-blueprints/chapter-001.md",
+      openable: true,
+      content: blueprint,
+    },
+    {
+      path: ".ai-novel/plans/chapter-blueprints/chapter-002.md",
+      openable: true,
+      content: blueprint.replace('"chapterNumber": 1', '"chapterNumber": 2'),
+    },
+  ])
+
+  assert.equal(audit.issues.some((issue) => /supporting cast 0 below required 2/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /relationship pressure entries are missing/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /blueprint repetition/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /canon boundary missing/.test(issue)), true)
+  assert.equal(audit.details.contentSpecificity.supportingCast.length, 0)
+  assert.ok(audit.details.contentSpecificity.blueprintSimilarity[0].ratio >= 0.82)
+  assert.equal(audit.details.contentSpecificity.blueprintAudits[1].canonBoundary, null)
+})
+
+test("foundation interface expectations preview master outline for cast lock audit", async () => {
+  const { stageInterfaceExpectations } = await loadRunner()
+  const expectations = stageInterfaceExpectations("foundation", { chapters: 3 })
+
+  assert.equal(
+    expectations.artifactPatterns.some((artifact) => artifact.id === "master_outline" && artifact.path === ".ai-novel/plans/master-outline.md"),
+    true,
+  )
+})
+
+test("planning interface audit accepts bold tagged protagonist headings", async () => {
+  const { runPlanningAssetConsistencyAudit } = await loadRunner()
+  const audit = runPlanningAssetConsistencyAudit("foundation", [
+    {
+      path: ".ai-novel/plans/master-outline.md",
+      openable: true,
+      content: [
+        "# Production Master Outline",
+        "",
+        "## Character Spine",
+        "**陈渡（主角）**：",
+        "- 身份：驿站账房，负责雨税往来账。",
+        "**许澜**：",
+        "- 身份：县衙书吏，陈渡的旧友。",
+      ].join("\n"),
+    },
+    {
+      path: ".ai-novel/plans/story-foundation-contract.json",
+      openable: true,
+      content: JSON.stringify({
+        project: { totalChapters: 3 },
+        canonicalPlanningCast: { protagonist: "陈渡", cast: ["陈渡", "许澜"] },
+        plot: { chapters: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }] },
+        characters: {
+          protagonist: "陈渡",
+          supportingCast: ["许澜"],
+          relationshipEntries: ["陈渡与许澜旧友关系因雨税账册被重新撕开。"],
+        },
+      }),
+    },
+  ])
+
+  assert.equal(audit.issues.some((issue) => /planning protagonist missing/.test(issue)), false)
+  assert.equal(audit.issues.some((issue) => /planning protagonist unsupported/.test(issue)), false)
+})
+
+test("planning interface audit catches automatic setting freeze semantics", async () => {
+  const { runPlanningAssetConsistencyAudit } = await loadRunner()
+  const audit = runPlanningAssetConsistencyAudit("planning", [
+    {
+      path: ".ai-novel/plans/setting-freeze.md",
+      openable: true,
+      content: [
+        "# Setting Freeze",
+        "",
+        "Project: 自动冻结示例",
+        "Discussion-backed consensus:",
+        "- 风会记忆文字。",
+        "",
+        "Open questions to resolve with the user before full drafting:",
+        "- 结局情绪是什么？",
+      ].join("\n"),
+    },
+  ])
+
+  assert.equal(audit.issues.some((issue) => /review_required status/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /approval artifact path/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /non-canon until approval/.test(issue)), true)
+  assert.equal(audit.issues.some((issue) => /automatic freeze/.test(issue)), true)
+  assert.equal(audit.details.settingReview.reviewRequired, false)
+  assert.equal(audit.details.settingReview.legacyFreezeTitle, true)
 })
 
 test("production acceptance runner preserves long-run options in recovery command", async () => {
@@ -1731,6 +1913,7 @@ test("production acceptance runner preserves long-run options in recovery comman
       timeoutMs: "45000",
     },
     autoApproveStyle: true,
+    autoApproveSettingReview: true,
     autoApproveFoundation: true,
     autoRepairStoryAssets: false,
     runtimeFreshnessCheck: false,
@@ -1754,6 +1937,7 @@ test("production acceptance runner preserves long-run options in recovery comman
   assert.match(recovery.resumeCommand, /--style-iterations 4/)
   assert.match(recovery.resumeCommand, /--style-max-requests 9/)
   assert.match(recovery.resumeCommand, /--style-candidates 3/)
+  assert.match(recovery.resumeCommand, /--auto-approve-setting-review/)
   assert.match(recovery.resumeCommand, /--aigc-detector-provider generic-json/)
   assert.match(recovery.resumeCommand, /--aigc-detector-url https:\/\/detector\.example\/check/)
   assert.match(recovery.resumeCommand, /--aigc-detector-threshold 0\.72/)

@@ -12,6 +12,7 @@ import {
   createManualRetryChapterCommand,
   type NovelDirectorCommand,
 } from "./novel-director"
+import { executeProductionAdvanceThroughKernel } from "./production-workflow"
 
 export type DirectorCommandEventType =
   | "DIRECTOR_COMMAND_DECIDED"
@@ -76,11 +77,19 @@ export async function executeManualAdvanceCommand(
   await recordDirectorCommandEvent(options, "DIRECTOR_COMMAND_DECIDED", command, basePayload)
   await recordDirectorCommandEvent(options, "DIRECTOR_COMMAND_STARTED", command, basePayload)
   try {
-    const state = await advanceAutonomousProject(rootDir, {
+    const { state } = await executeProductionAdvanceThroughKernel({
+      rootDir,
+      factoryRootDir: options.factoryRootDir || rootDir,
+      projectId: options.projectId as string,
+      state: beforeState,
+      executionMode: "manual",
+      externalRunId: command.id,
+      metadata: { directorCommandId: command.id, source: options.source || "manual" },
+    }, () => advanceAutonomousProject(rootDir, {
       factoryRootDir: options.factoryRootDir,
       projectId: options.projectId,
       directorCommandId: command.id,
-    })
+    }))
     await recordDirectorCommandEvent(options, "DIRECTOR_COMMAND_COMPLETED", command, {
       ...basePayload,
       resultingStage: state.runtime.stage,

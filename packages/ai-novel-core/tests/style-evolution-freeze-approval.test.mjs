@@ -78,6 +78,43 @@ function readyFreezerFixture(overrides = {}) {
   }
 }
 
+test("style contract extraction prompt caps list lengths for freeze preview", async () => {
+  const { buildStyleContractExtractionPrompt } = await loadCore()
+  const prompt = buildStyleContractExtractionPrompt({
+    sample: "雨线挂在门槛外。沈砚把缺页账本推到灯下，纸边齐得发亮。老周的手缩进袖口，没有接。",
+    prompt: "克制、冷感、白描，动作和物件推动悬疑。",
+    userStylePrompt: "避免大纲式叙述、模板悬念、解释性总结、僵硬AI措辞。",
+  })
+
+  assert.match(prompt.system, /每个数组最多 2 条/)
+  assert.match(prompt.system, /每条不超过 32 个中文字符/)
+  assert.match(prompt.system, /positiveExamples 只能抽取极短片段或动作范式/)
+})
+
+test("style contract parser accepts LLM contracts with empty forbidden patterns", async () => {
+  const { parseStyleContractFromText } = await loadCore()
+  const contract = parseStyleContractFromText(JSON.stringify({
+    voice: "冷静客观的叙事，以具体物象承载历史纵深。",
+    sentenceRhythm: "长短交替，细节铺陈后紧接短句收束。",
+    dialogueRules: ["对话简短，带潜台词。"],
+    descriptionRules: ["用环境物象映射情绪。"],
+    emotionRules: ["通过身体反应表现情绪。"],
+    pacingRules: ["慢速铺陈细节后加速。"],
+    povRules: ["紧贴主角有限第三人称。"],
+    openingRules: ["从具体场景和动作直接切入。"],
+    endingHookRules: ["以主角行动或目标收尾。"],
+    allowedDevices: ["比喻", "细节象征"],
+    forbiddenPatterns: [],
+    positiveExamples: ["雨水顺着瓦缝渗进库房西北角。"],
+    negativeExamples: [],
+  }))
+
+  assert.ok(contract)
+  assert.equal(contract.voice, "冷静客观的叙事，以具体物象承载历史纵深。")
+  assert.deepEqual(contract.forbiddenPatterns, [])
+  assert.ok(contract.positiveExamples.includes("雨水顺着瓦缝渗进库房西北角。"))
+})
+
 function createStyleRefinementForTest(overrides = {}) {
   return {
     source: "llm_critic",
@@ -95,6 +132,7 @@ test("freeze preview assets are persisted into approved style contract and chapt
   const { handleNovelStudioApi } = await loadStudioServer()
 
   let llmHits = 0
+  const receivedBodies = []
   let aigcServer = null
   const server = http.createServer((request, response) => {
     let rawBody = ""
@@ -103,6 +141,7 @@ test("freeze preview assets are persisted into approved style contract and chapt
       if (request.url === "/responses") {
         llmHits += 1
         const receivedBody = JSON.parse(rawBody)
+        receivedBodies.push(receivedBody)
         const instructions = String(receivedBody.instructions || "")
         response.writeHead(200, { "content-type": "application/json" })
         response.end(JSON.stringify({
@@ -206,6 +245,10 @@ test("freeze preview assets are persisted into approved style contract and chapt
     assert.equal(acceptedPreviewResponse.payload.freezePreview.freezeAdviceSource, "llm_critic")
     assert.ok(acceptedPreviewResponse.payload.freezePreview.positiveExamples.includes("老周的手缩进袖口，没有接。"))
     assert.ok(acceptedPreviewResponse.payload.freezePreview.inheritedRules.includes("正文必须延续当前冷感白描与短对白规则。"))
+    const extractionRequest = receivedBodies.find((body) => /写法合同提炼器/.test(String(body.instructions || "")))
+    const adviceRequest = receivedBodies.find((body) => /Style Contract Freeze Gate/.test(String(body.instructions || "")))
+    assert.equal(extractionRequest?.max_output_tokens, 4200)
+    assert.equal(adviceRequest?.max_output_tokens, 1800)
 
     const approveResponse = await handleNovelStudioApi(tempDir, "POST", "/api/style-evolution/approve", {
       projectId: created.project.id,

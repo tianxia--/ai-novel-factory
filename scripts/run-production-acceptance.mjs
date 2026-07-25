@@ -64,13 +64,17 @@ function usage() {
     "  --aigc-detector-threshold <n>   AIGC detector threshold. Default comes from settings.",
     "  --aigc-detector-timeout-ms <n>  AIGC detector timeout in ms.",
     "  --auto-approve-style           Explicitly approve the generated style candidate.",
+    "  --auto-approve-setting-review  Explicitly approve the setting review packet before planning.",
     "  --auto-approve-foundation      Explicitly approve story foundation after planning.",
     "  --no-story-repair              Do not call story asset repair if planning assets are weak.",
     "  --skip-runtime-freshness-check Skip dist-vs-source freshness preflight.",
     "  --skip-provider-health-check   Skip the lightweight real LLM connectivity check.",
     "  --plan-only                    Only validate config and print the intended flow.",
     "  --stop-after-style             Stop after Style Evolution gate.",
+    "  --stop-after-planning          Stop after planning reaches chapter task generation.",
     "  --stop-after-foundation        Stop after story foundation readiness.",
+    "  --stop-after-readiness         Alias for --stop-after-foundation.",
+    "  --stop-after-chapters <n>      Stop after at least this many chapters are complete.",
     "  --max-advance-steps <n>        Max Studio API advance calls.",
     "  --max-stale-steps <n>          Fail after this many steps without chapter progress. Default: 20.",
     "  --report <path>                JSON report path.",
@@ -109,13 +113,16 @@ function parseArgs(argv) {
       timeoutMs: process.env.AIGC_DETECTOR_TIMEOUT_MS || "",
     },
     autoApproveStyle: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_STYLE),
+    autoApproveSettingReview: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_SETTING_REVIEW),
     autoApproveFoundation: readBoolean(process.env.AI_NOVEL_ACCEPTANCE_AUTO_APPROVE_FOUNDATION),
     autoRepairStoryAssets: true,
     runtimeFreshnessCheck: !readBoolean(process.env.AI_NOVEL_ACCEPTANCE_SKIP_RUNTIME_FRESHNESS_CHECK),
     providerHealthCheck: !readBoolean(process.env.AI_NOVEL_ACCEPTANCE_SKIP_PROVIDER_HEALTH_CHECK),
     planOnly: false,
     stopAfterStyle: false,
+    stopAfterPlanning: false,
     stopAfterFoundation: false,
+    stopAfterChapters: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_STOP_AFTER_CHAPTERS, 0),
     maxAdvanceSteps: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_MAX_ADVANCE_STEPS, 0),
     maxStaleSteps: readPositiveInt(process.env.AI_NOVEL_ACCEPTANCE_MAX_STALE_STEPS, 20),
     reportPath: process.env.AI_NOVEL_ACCEPTANCE_REPORT || "",
@@ -170,6 +177,8 @@ function parseArgs(argv) {
       options.aigcDetector.timeoutMs = next().trim()
     } else if (arg === "--auto-approve-style") {
       options.autoApproveStyle = true
+    } else if (arg === "--auto-approve-setting-review") {
+      options.autoApproveSettingReview = true
     } else if (arg === "--auto-approve-foundation") {
       options.autoApproveFoundation = true
     } else if (arg === "--no-story-repair") {
@@ -182,8 +191,14 @@ function parseArgs(argv) {
       options.planOnly = true
     } else if (arg === "--stop-after-style") {
       options.stopAfterStyle = true
+    } else if (arg === "--stop-after-planning") {
+      options.stopAfterPlanning = true
     } else if (arg === "--stop-after-foundation") {
       options.stopAfterFoundation = true
+    } else if (arg === "--stop-after-readiness") {
+      options.stopAfterFoundation = true
+    } else if (arg === "--stop-after-chapters") {
+      options.stopAfterChapters = readPositiveInt(next(), options.stopAfterChapters)
     } else if (arg === "--max-advance-steps") {
       options.maxAdvanceSteps = readPositiveInt(next(), options.maxAdvanceSteps)
     } else if (arg === "--max-stale-steps") {
@@ -276,12 +291,15 @@ function buildAcceptanceResumeCommand(options = {}, projectId = "") {
     addValue("--aigc-detector-timeout-ms", options.aigcDetector.timeoutMs)
   }
   if (options.autoApproveStyle) args.push("--auto-approve-style")
+  if (options.autoApproveSettingReview) args.push("--auto-approve-setting-review")
   if (options.autoApproveFoundation) args.push("--auto-approve-foundation")
   if (options.autoRepairStoryAssets === false) args.push("--no-story-repair")
   if (options.runtimeFreshnessCheck === false) args.push("--skip-runtime-freshness-check")
   if (options.providerHealthCheck === false) args.push("--skip-provider-health-check")
   if (options.stopAfterStyle) args.push("--stop-after-style")
+  if (options.stopAfterPlanning) args.push("--stop-after-planning")
   if (options.stopAfterFoundation) args.push("--stop-after-foundation")
+  if (Number(options.stopAfterChapters || 0) > 0) addValue("--stop-after-chapters", options.stopAfterChapters)
   addValue("--max-advance-steps", options.maxAdvanceSteps)
   addValue("--max-stale-steps", options.maxStaleSteps)
   return args.map(quoteCommandArg).join(" ")
@@ -4536,6 +4554,1041 @@ async function getStatus(api, projectId) {
   return api("GET", `/api/status?projectId=${encodeURIComponent(projectId)}`, {}, projectId)
 }
 
+function parseAcceptanceJson(value, fallback = null) {
+  if (value && typeof value === "object") return value
+  if (typeof value !== "string" || !value.trim()) return fallback
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
+  }
+}
+
+function acceptanceArtifactPath(value) {
+  const row = parseAcceptanceJson(value, value)
+  if (!row || typeof row !== "object") return ""
+  const data = parseAcceptanceJson(row.data_json, row.data) || {}
+  const metadata = parseAcceptanceJson(row.metadata_json, row.metadata) || {}
+  return String(
+    row.path
+      || row.artifactPath
+      || data.path
+      || data.artifactPath
+      || data.expandableArtifactPath
+      || metadata.path
+      || metadata.artifactPath
+      || "",
+  ).trim()
+}
+
+function acceptanceMessageRows(messagesPayload) {
+  if (Array.isArray(messagesPayload?.messages)) return messagesPayload.messages
+  if (Array.isArray(messagesPayload?.entries)) return messagesPayload.entries
+  return []
+}
+
+function acceptanceMessageParts(row) {
+  if (!row || typeof row !== "object") return []
+  if (Array.isArray(row.parts)) return row.parts
+  if (Array.isArray(row.message_parts)) return row.message_parts
+  return []
+}
+
+function summarizeMessageInterface(messagesPayload) {
+  const rows = acceptanceMessageRows(messagesPayload)
+  const partTypes = {}
+  const artifactPaths = new Set()
+  for (const row of rows) {
+    const rowData = parseAcceptanceJson(row?.data_json, row?.data) || {}
+    const rowArtifactPath = acceptanceArtifactPath(row) || acceptanceArtifactPath(rowData)
+    if (rowArtifactPath) artifactPaths.add(rowArtifactPath)
+    for (const part of acceptanceMessageParts(row)) {
+      const type = String(part?.type || "unknown")
+      partTypes[type] = (partTypes[type] || 0) + 1
+      const partData = parseAcceptanceJson(part?.data_json, part?.data) || {}
+      const partArtifactPath = acceptanceArtifactPath(part) || acceptanceArtifactPath(partData)
+      if (partArtifactPath) artifactPaths.add(partArtifactPath)
+      const workflow = parseAcceptanceJson(partData.workflow, null)
+      const workflowArtifactPath = acceptanceArtifactPath(workflow)
+      if (workflowArtifactPath) artifactPaths.add(workflowArtifactPath)
+    }
+  }
+  return {
+    totalMessages: Number(messagesPayload?.pagination?.totalMessages || rows.length || 0),
+    returnedMessages: rows.length,
+    partTypes,
+    artifactPaths: Array.from(artifactPaths).sort(),
+  }
+}
+
+function summarizeStatusInterface(statusPayload) {
+  const factorySnapshot = statusPayload?.factorySnapshot || {}
+  const artifacts = [
+    ...(Array.isArray(statusPayload?.artifacts) ? statusPayload.artifacts : []),
+    ...(Array.isArray(factorySnapshot?.artifacts) ? factorySnapshot.artifacts : []),
+  ]
+  const artifactPaths = Array.from(new Set(artifacts.map(acceptanceArtifactPath).filter(Boolean))).sort()
+  const runtime = statusPayload?.state?.runtime || {}
+  const tasks = Array.isArray(statusPayload?.state?.plan?.chapterTasks)
+    ? statusPayload.state.plan.chapterTasks
+    : []
+  return {
+    stage: String(runtime.stage || "unknown"),
+    statusMessage: String(runtime.statusMessage || ""),
+    artifactCount: artifactPaths.length,
+    artifactPaths,
+    messageCount: Number(factorySnapshot?.messageCount || 0),
+    recentMessageCount: Array.isArray(factorySnapshot?.recentMessages) ? factorySnapshot.recentMessages.length : 0,
+    eventCount: Array.isArray(factorySnapshot?.latestEvents) ? factorySnapshot.latestEvents.length : 0,
+    chapterTasks: {
+      total: tasks.length,
+      complete: tasks.filter((task) => task?.status === "complete").length,
+      blocked: tasks.filter((task) => task?.status === "blocked").length,
+      inProgress: tasks.filter((task) => task?.status === "in_progress").length,
+      pending: tasks.filter((task) => task?.status === "pending").length,
+    },
+    productionReadiness: productionReadinessCodes(statusPayload),
+  }
+}
+
+export function stageInterfaceExpectations(stage, options = {}) {
+  const chapterStop = Math.max(1, Number(options.stopAfterChapters || 1))
+  const chapterId = `chapter-${String(chapterStop).padStart(3, "0")}`
+  const planningBlueprintArtifacts = Array.from({
+    length: Math.min(3, Math.max(1, Number(options.chapters || 1))),
+  }, (_, index) => {
+    const chapterNumber = index + 1
+    const blueprintId = `chapter-${String(chapterNumber).padStart(3, "0")}`
+    return {
+      id: `chapter_blueprint_${chapterNumber}`,
+      label: `${blueprintId}.md blueprint`,
+      match: new RegExp(`chapter-blueprints\\/${blueprintId}\\.md$`, "u"),
+      path: `.ai-novel/plans/chapter-blueprints/${blueprintId}.md`,
+    }
+  })
+  const expectations = {
+    style: {
+      minMessages: 1,
+      artifactPatterns: [],
+      directArtifactPaths: [
+        { id: "style_evolution_history", label: "style-evolution-history.json", path: ".ai-novel/style/evolution/style-evolution-history.json" },
+        { id: "style_loop_runtime", label: "style-loop-runtime.json", path: ".ai-novel/style/evolution/style-loop-runtime.json" },
+        { id: "style_loop_runs", label: "style-loop-runs.jsonl", path: ".ai-novel/style/evolution/style-loop-runs.jsonl" },
+        { id: "style_freeze_ledger", label: "style-freeze-ledger.json", path: ".ai-novel/style/evolution/style-freeze-ledger.json" },
+        { id: "style_contract", label: "style-contract.json", path: ".ai-novel/style/evolution/style-contract.json" },
+        ...(!options.stopAfterStyle ? [
+          { id: "approved_sample", label: "user-approved-sample.md", path: ".ai-novel/style/evolution/user-approved-sample.md" },
+        ] : []),
+      ],
+      messageArtifactPattern: null,
+      readinessRequired: false,
+      styleEvolutionRequired: true,
+      styleApprovalRequired: !options.stopAfterStyle,
+    },
+    planning: {
+      minMessages: 1,
+      artifactPatterns: [
+        { id: "setting_freeze", label: "setting-freeze.md", match: /setting-freeze\.md$/u },
+        { id: "master_outline", label: "master-outline.md", match: /master-outline\.md$/u },
+        { id: "story_bible", label: "story-bible.md", match: /story-bible\.md$/u, path: ".ai-novel/plans/story-bible.md" },
+        { id: "plot_architecture", label: "plot-architecture.md", match: /plot-architecture\.md$/u, path: ".ai-novel/plans/plot-architecture.md" },
+        { id: "character_dynamics", label: "character-dynamics.md", match: /character-dynamics\.md$/u, path: ".ai-novel/plans/character-dynamics.md" },
+        { id: "foreshadowing_ledger", label: "foreshadowing-ledger.md", match: /foreshadowing-ledger\.md$/u, path: ".ai-novel/plans/foreshadowing-ledger.md" },
+        { id: "story_foundation_contract", label: "story-foundation-contract.json", match: /story-foundation-contract\.json$/u, path: ".ai-novel/plans/story-foundation-contract.json" },
+        ...planningBlueprintArtifacts,
+      ],
+      directArtifactPaths: [],
+      messageArtifactPattern: /setting-freeze\.md|master-outline\.md|story-bible\.md|chapter-blueprints\/chapter-001\.md/u,
+      readinessRequired: false,
+    },
+    foundation: {
+      minMessages: 1,
+      artifactPatterns: [
+        { id: "master_outline", label: "master-outline.md", match: /master-outline\.md$/u, path: ".ai-novel/plans/master-outline.md" },
+        { id: "story_foundation_contract", label: "story-foundation-contract.json", match: /story-foundation-contract\.json$/u, path: ".ai-novel/plans/story-foundation-contract.json" },
+        { id: "story_bible", label: "story-bible.md", match: /story-bible\.md$/u, path: ".ai-novel/plans/story-bible.md" },
+        { id: "plot_architecture", label: "plot-architecture.md", match: /plot-architecture\.md$/u, path: ".ai-novel/plans/plot-architecture.md" },
+        { id: "character_dynamics", label: "character-dynamics.md", match: /character-dynamics\.md$/u, path: ".ai-novel/plans/character-dynamics.md" },
+        ...planningBlueprintArtifacts,
+      ],
+      directArtifactPaths: [],
+      messageArtifactPattern: /story-foundation-contract\.json|story-bible\.md|chapter-blueprints\/chapter-001\.md/u,
+      readinessRequired: true,
+    },
+    chapters: {
+      minMessages: 1,
+      artifactPatterns: [
+        { id: "final_chapter", label: `${chapterId}.final.md`, match: new RegExp(`${chapterId}\\.final\\.md$`, "u") },
+        { id: "chapter_memory", label: `${chapterId}-memory.md`, match: new RegExp(`${chapterId}-memory\\.md$`, "u") },
+      ],
+      directArtifactPaths: [],
+      messageArtifactPattern: new RegExp(`${chapterId}\\.final\\.md|${chapterId}-memory\\.md`, "u"),
+      readinessRequired: true,
+    },
+  }
+  return expectations[stage] || expectations.planning
+}
+
+function summarizeStyleEvolutionInterface(stylePayload, options = {}) {
+  const styleEvolution = stylePayload?.styleEvolution || {}
+  const contract = styleEvolution.contract || {}
+  const gate = styleEvolution.gate || {}
+  const history = Array.isArray(contract.evolutionHistory) ? contract.evolutionHistory : []
+  const latest = history.at(-1) || null
+  const candidateStatus = styleCandidateFreezeStatus(latest)
+  const fallbackSignals = collectStyleFallbackSignals(stylePayload)
+  const freezePackage = stylePayload?.styleEvolutionAssets?.freezePackage || {}
+  const requiredAssetKeys = [
+    ["freezeLedger", "style-freeze-ledger.json"],
+    ["loopRuntime", "style-loop-runtime.json"],
+    ["loopRuns", "style-loop-runs.jsonl"],
+    ...(!options.stopAfterStyle ? [["approvedSample", "user-approved-sample.md"]] : []),
+  ]
+  const assetChecks = requiredAssetKeys.map(([key, label]) => {
+    const asset = freezePackage?.[key] || {}
+    return {
+      id: key,
+      label,
+      path: asset.path || "",
+      exists: asset.exists === true,
+      chars: Number(asset.chars || 0),
+    }
+  })
+  const issues = []
+  if (!history.length) {
+    issues.push("style evolution history is empty")
+  }
+  if (!latest) {
+    issues.push("latest style candidate is missing")
+  } else if (!candidateStatus.ready) {
+    issues.push(`latest style candidate is not freezer-ready: verification=${candidateStatus.verificationStatus}; freezer=${candidateStatus.freezerVerdict}`)
+  }
+  if (fallbackSignals.length) {
+    issues.push(`style evolution contains fallback or heuristic traces: ${fallbackSignals.slice(0, 4).join("; ")}`)
+  }
+  for (const asset of assetChecks) {
+    if (!asset.exists) {
+      issues.push(`missing style evolution asset: ${asset.label}`)
+    } else if (asset.chars <= 0) {
+      issues.push(`style evolution asset is empty: ${asset.label}`)
+    }
+  }
+  if (options.stopAfterStyle) {
+    if (gate.canProceed === true || gate.status === "passed") {
+      issues.push("style gate passed during stop-after-style before explicit approval")
+    }
+  } else if (gate.canProceed !== true || gate.status !== "passed") {
+    issues.push(`style gate did not pass after approval: ${gate.status || "missing"}`)
+  }
+  if (!options.stopAfterStyle && contract.approval?.status !== "approved") {
+    issues.push(`style approval status is not approved: ${contract.approval?.status || "missing"}`)
+  }
+  return {
+    gateStatus: gate.status || "missing",
+    canProceed: gate.canProceed === true,
+    blockedReason: gate.blockedReason || "",
+    approvalStatus: contract.approval?.status || "missing",
+    latestVersion: Number(latest?.version || 0),
+    latestReady: candidateStatus.ready,
+    verificationStatus: candidateStatus.verificationStatus,
+    freezerVerdict: candidateStatus.freezerVerdict,
+    loopStatus: contract.loop?.status || "missing",
+    loopConvergence: contract.loop?.convergence || "missing",
+    fallbackSignals,
+    assetChecks,
+    issues,
+  }
+}
+
+async function previewAcceptanceArtifact(api, projectId, artifactPath) {
+  try {
+    const payload = await api(
+      "GET",
+      `/api/artifacts/preview?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(artifactPath)}`,
+      {},
+      projectId,
+    )
+    return {
+      path: artifactPath,
+      openable: true,
+      bytes: Buffer.byteLength(String(payload?.content || ""), "utf8"),
+      title: payload?.title || "",
+      content: String(payload?.content || "").slice(0, 30000),
+    }
+  } catch (error) {
+    return {
+      path: artifactPath,
+      openable: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+function acceptanceUniqueStrings(values = []) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
+}
+
+const ACCEPTANCE_CAST_SURNAME_CHARS = "李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢岳齐梅莫庄辛管祝左涂谷祁时舒耿牟卜詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂"
+
+function normalizeAcceptanceCastName(name = "") {
+  const raw = String(name || "").trim()
+  const parentheticalName = raw.match(new RegExp(`[（(]([${ACCEPTANCE_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})[）)]`, "u"))?.[1] || ""
+  if (parentheticalName) return parentheticalName
+  const compact = raw
+    .trim()
+    .split(/[·・]/u)[0]
+    .replace(/^\s*(?:库丞|书吏|临时书吏|记录郎|亡父|父亲|上司|旧友|同僚|副职|主角|审雨官|主人公|与|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]?/u, "")
+    .replace(/(?:关系|状态|线|互动|信任|债务|压力)$/u, "")
+    .trim()
+  if (compact.length <= 4) return compact
+  return compact.match(new RegExp(`([${ACCEPTANCE_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})$`, "u"))?.[1] || compact
+}
+
+function isAcceptanceCastNoise(name = "") {
+  const normalized = normalizeAcceptanceCastName(name)
+  if (!normalized) return true
+  if (new RegExp(`^[${ACCEPTANCE_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{0,2}(?:主簿|典簿|录事|掌固|县令|县丞|管事|书吏|小吏|司书|账房)$`, "u").test(normalized)) {
+    return false
+  }
+  return !normalized
+    || !/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)
+    || /角色|章节|主角|核心人物|Canonical|待定|待冻结|占位/u.test(normalized)
+    || /^(?:本章|必须|不得|不能|需要|进入|正文|主线|视角|沿用|主动|选择|核心欲望|核心渴望|内心矛盾|行为习惯|说话特征|体态特征|能力边界|功能|压力点|核心特征|注意)$/u.test(normalized)
+    || /(?:主视角|主动选择|必须沿用|必须主动|本章必须|本章主线|本章聚焦|视角和主线)$/u.test(normalized)
+    || /^(?:那些|这些|这个|那个|此人|那人|其人|有人|入侵者|追查者|知情者)/u.test(normalized)
+    || /[第次他她它我你这那]/u.test(normalized)
+    || /^(?:查出|向他|向她|向它|看向|站在|握住|低声|门外|窗外|章必须)/u.test(normalized)
+    || /(?:因为|这些|那些|错误年份|复制|按错误|不可能生存|查询路径)$/u.test(normalized)
+    || /^[\u4e00-\u9fff]{1,7}的$/u.test(normalized)
+    || /^(?:状态维度|身份安全性|对雨档的信仰|心理压力等级|手中筹码|证据持有状态|章前|章后|开端状态|结尾状态|用名|暂用名|核心渴望|初始创伤|中间矛盾|最终状态|弧线标记|总弧线|故事承诺|余味|属性|资产|资源|债务|威胁|核心物件状态|锚点|字数|位置|必须包含的要素|场景序列|景序列)$/u.test(normalized)
+    || /(?:状态|维度|安全性|信仰|压力等级|筹码|证据持有|职业安全感|身份安全|经济压力|社会声誉|完整性|父亲看法|档案库钥匙|钥匙|锚点|字数|位置|要素|场景序列|景序列)$/u.test(normalized)
+    || /(?:县|府|乡|镇|州|郡|司|局|库|册|录|簿|钥匙|印章|铜钱|手信|契据|税册)$/u.test(normalized)
+    || /(?:家|氏|粮铺|商号|衙门)$/u.test(normalized)
+    || /^(?:时再次|时再来)$/u.test(normalized)
+}
+
+function isAcceptanceIgnorablePlaceholderLock(name = "") {
+  const normalized = normalizeAcceptanceCastName(name)
+  return /待冻结|未显式命名|本章|必须|不得|不能|需要|主动选择|主视角|沿用/u.test(normalized)
+}
+
+function isDirectAcceptanceCastDeclaration(name = "") {
+  const normalized = normalizeAcceptanceCastName(name)
+  if (!normalized || isAcceptanceCastNoise(normalized)) return false
+  const cleaned = String(name || "")
+    .trim()
+    .replace(/^[-*#\s]+/u, "")
+    .replace(/\*\*/gu, "")
+    .trim()
+  return new RegExp(`^${escapeRegExp(normalized)}(?:$|\\s|[（(：:—-]|[·・])`, "u").test(cleaned)
+}
+
+function extractAcceptanceLedgerNames(text = "") {
+  const names = []
+  const structuralPatterns = [
+    /^(?:主角|主人公|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/u,
+    /^与\s*([\u4e00-\u9fff·]{2,8}?)(?:关系|状态|线|互动|信任|债务|压力)?$/u,
+    /^([\u4e00-\u9fff·]{2,8})(?:（[^）]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^）]*）|\([^)]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^)]*\))$/u,
+  ]
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed || /^\|[-\s|:]+$/u.test(trimmed)) continue
+    const tableCells = trimmed.includes("|")
+      ? trimmed.split("|").map((cell) => cell.trim()).filter(Boolean)
+      : []
+    const isCharacterHeader = tableCells.some((cell) => /^(?:章节|角色)$/u.test(cell))
+      && tableCells.some((cell) => /^与[\u4e00-\u9fff·]{2,8}/u.test(cell) || /^(?:主角|主人公|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\b/u.test(cell))
+    const cells = tableCells.length
+      ? isCharacterHeader
+        ? tableCells
+        : tableCells.length > 0 && !/^第?\s*[\d一二三四五六七八九十百千万]+\s*章/u.test(tableCells[0] || "")
+          ? [tableCells[0]]
+          : []
+      : [trimmed.replace(/^[-*]\s*/u, "")]
+    for (const rawCell of cells) {
+      const cell = rawCell.replace(/\*\*/gu, "").replace(/[：:]\s*.*$/u, "").trim()
+      for (const pattern of structuralPatterns) {
+        const match = cell.match(pattern)
+        if (match?.[1]) names.push(match[1])
+      }
+      if (/^[\u4e00-\u9fff·]{2,8}$/u.test(cell)) names.push(cell)
+    }
+  }
+  return names
+}
+
+function extractAcceptanceChineseNames(text = "", limit = 16) {
+  const raw = [
+    ...[...text.matchAll(/(?:Canonical Protagonist|主角|核心主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...text.matchAll(/^#{3,6}\s*([^（(\n]{2,32})(?:[（(][^）)]*(?:主角|protagonist|旧友|上司|配角|压力)[^）)]*[）)])?/gmu)].map((match) => match[1]),
+    ...[...text.matchAll(/^\*\*([^*\n]{2,32})\*\*[:：]?\s*$/gmu)].map((match) => match[1]),
+    ...[...text.matchAll(/^\|\s*([\u4e00-\u9fff·]{2,8})\s*\|/gmu)].map((match) => match[1]),
+    ...extractAcceptanceLedgerNames(text),
+    ...[...text.matchAll(/(?:Canonical Cast|核心人物)[:：]\s*([\u4e00-\u9fff·、，, ]{2,80})/gmu)]
+      .flatMap((match) => String(match[1] || "").split(/[、，,\s]+/u)),
+  ]
+  return acceptanceUniqueStrings(raw)
+    .map(normalizeAcceptanceCastName)
+    .filter((name) => !isAcceptanceCastNoise(name))
+    .slice(0, limit)
+}
+
+function extractAcceptancePlanningCast(masterOutline = "") {
+  const characterSpineMatch = masterOutline.match(/##\s+Character Spine\b([\s\S]*?)(?:\n##\s+|\s*$)/u)
+  const stateLedgerMatch = masterOutline.match(/##\s+Character State Ledger Plan\b([\s\S]*?)(?:\n##\s+|\s*$)/u)
+  const source = [characterSpineMatch?.[1] || "", stateLedgerMatch?.[1] || ""].filter(Boolean).join("\n\n") || masterOutline
+  const names = extractAcceptanceChineseNames(source, 12)
+  const taggedProtagonistNames = [
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,32})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/(?:Canonical Protagonist|主角|核心主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+  ]
+  const directDeclarations = [
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,32})(?:[（(][^）)]*[）)])?/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*\n]{2,32})\*\*[:：]?\s*$/gmu)].map((match) => match[1]),
+  ].filter(isDirectAcceptanceCastDeclaration)
+  const protagonist = acceptanceUniqueStrings([
+    ...taggedProtagonistNames,
+    ...directDeclarations.slice(0, 1),
+  ].map(normalizeAcceptanceCastName).filter((name) => !isAcceptanceCastNoise(name)))[0] || ""
+  return {
+    protagonist,
+    cast: names,
+  }
+}
+
+function collectPlanningAssetCastLocks(content = "", label = "artifact") {
+  const locks = []
+  const add = (field, value) => {
+    const values = Array.isArray(value) ? value : [value]
+    for (const item of values) {
+      const raw = String(item || "").trim()
+      if (!raw) continue
+      const normalized = normalizeAcceptanceCastName(raw)
+      if (isAcceptanceIgnorablePlaceholderLock(raw)) continue
+      locks.push({
+        label,
+        field,
+        raw,
+        normalized,
+        noisy: isAcceptanceCastNoise(raw),
+      })
+    }
+  }
+  const text = String(content || "")
+  if (!text.trim()) return locks
+  if (/^\s*[{[]/u.test(text)) {
+    try {
+      const parsed = JSON.parse(text)
+      const canonicalPlanningCast = parsed?.canonicalPlanningCast || parsed?.characters?.canonicalPlanningCast || {}
+      add("canonicalPlanningCast.protagonist", canonicalPlanningCast?.protagonist)
+      add("canonicalPlanningCast.cast", Array.isArray(canonicalPlanningCast?.cast) ? canonicalPlanningCast.cast : [])
+      add("characters.protagonist", parsed?.characters?.protagonist || parsed?.protagonist)
+      const relationshipEntries = Array.isArray(parsed?.characters?.relationshipEntries)
+        ? parsed.characters.relationshipEntries
+        : Array.isArray(parsed?.relationshipEntries)
+          ? parsed.relationshipEntries
+          : []
+      add("relationshipEntries.name", relationshipEntries.map((entry) => entry?.name))
+      return locks
+    } catch {
+      return locks
+    }
+  }
+  add("canonicalProtagonist", [...text.matchAll(/Canonical protagonist:\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]))
+  add("lockedProtagonist", [...text.matchAll(/Locked protagonist:\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]))
+  add("chineseProtagonist", [...text.matchAll(/^\s*-?\s*主角[:：]\s*([\u4e00-\u9fff·]{2,8})(?=\s*$|[（(、，,；;])/gmu)].map((match) => match[1]))
+  add("canonicalCast", [...text.matchAll(/(?:Canonical Cast|核心人物)[:：]\s*([^\n]+)/gmu)]
+    .flatMap((match) => String(match[1] || "").split(/[、，,;\s]+/u)))
+  return locks
+}
+
+function parseAcceptanceJsonObject(content = "") {
+  const text = String(content || "").trim()
+  if (!text.startsWith("{")) return null
+  try {
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const ACCEPTANCE_GENERIC_STORY_TERMS = new Set([
+  "必须", "不得", "不能", "需要", "故事", "角色", "主角", "章节", "蓝图", "世界",
+  "规则", "设定", "关系", "压力", "伏笔", "情节", "正文", "场景", "读者", "核心",
+  "创意", "目标", "生产", "执行", "资产", "状态", "计划", "具体", "可见", "推进",
+  "承接", "输出", "输入", "冻结", "确认", "质量", "报告", "合同", "当前", "后续",
+])
+
+function countSpecificPlanningSignals(...texts) {
+  const tokens = texts
+    .join("\n")
+    .match(/[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z_-]{3,}/gu) || []
+  const specific = acceptanceUniqueStrings(tokens
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+    .filter((token) => !ACCEPTANCE_GENERIC_STORY_TERMS.has(token))
+    .filter((token) => !/^(?:chapter|story|world|plot|character|contract|status|pending|source|target|rules?|assets?)$/iu.test(token))
+    .filter((token) => !/^(?:Canonical|Protagonist|Chapter|Project|Reader|Promise|Required)$/u.test(token)))
+  return specific.length
+}
+
+function extractBlueprintExecutionContractForAcceptance(content = "") {
+  const match = String(content || "").match(/## Chapter Execution Contract\s*```json\s*([\s\S]*?)\s*```/u)
+  if (!match?.[1]) return null
+  try {
+    const parsed = JSON.parse(match[1])
+    return parsed && typeof parsed === "object" ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function blueprintContractValuesForAcceptance(contract) {
+  if (!contract || typeof contract !== "object") return []
+  const differentiators = contract.chapterDifferentiators && typeof contract.chapterDifferentiators === "object"
+    ? contract.chapterDifferentiators
+    : {}
+  const sceneCards = Array.isArray(contract.sceneCards) ? contract.sceneCards : []
+  return acceptanceUniqueStrings([
+    contract.chapterPurpose,
+    contract.chapterRole,
+    contract.foreshadowingOperation,
+    contract.endingHook,
+    contract.nextChapterEntryState,
+    differentiators.pressureMode,
+    differentiators.sceneTexture,
+    differentiators.evidenceMode,
+    differentiators.handoffMode,
+    differentiators.openingMove,
+    differentiators.keyProp,
+    differentiators.relationshipTurn,
+    differentiators.decisionShape,
+    differentiators.costShape,
+    differentiators.exitImage,
+    ...(Array.isArray(differentiators.focusCast) ? differentiators.focusCast : []),
+    ...sceneCards.flatMap((card) => [
+      card?.goal,
+      card?.conflict,
+      card?.turn,
+      card?.endHook,
+      ...(Array.isArray(card?.requiredCharacters) ? card.requiredCharacters : []),
+      ...(Array.isArray(card?.requiredFacts) ? card.requiredFacts : []),
+    ]),
+  ].map((value) => String(value || "").trim().replace(/\s+/gu, " ")).filter((value) => value.length >= 4))
+}
+
+function commonBlueprintValueRatio(leftValues = [], rightValues = []) {
+  const left = new Set(leftValues)
+  const right = new Set(rightValues)
+  if (left.size < 4 || right.size < 4) return 0
+  let common = 0
+  for (const value of left) {
+    if (right.has(value)) common += 1
+  }
+  return common / Math.min(left.size, right.size)
+}
+
+function runSettingReviewArtifactAudit(stage, settingReviewContent = "") {
+  if (stage !== "planning" || !String(settingReviewContent || "").trim()) {
+    return { issues: [], details: null }
+  }
+  const content = String(settingReviewContent || "")
+  const issues = []
+  const reviewRequired = /Status:\s*review_required|review_required|待评审|待确认/iu.test(content)
+  const approvalPath = /setting-review-approval\.json|story-foundation-approval\.json/iu.test(content)
+  const nonCanonScope = /not final book canon|not treat[\s\S]{0,80}canon|draft-only|不是(?:最终)?(?:正文|全书)?canon|不得(?:直接)?视为(?:最终)?设定|不得.*canon/iu.test(content)
+  const openQuestions = /Open questions|待解决|未解决|unanswered questions/iu.test(content)
+  const approvalChecklist = /Approval checklist|确认清单|审批清单/iu.test(content)
+  const legacyFreezeTitle = /^#\s+Setting Freeze\b/mu.test(content)
+
+  if (!reviewRequired) {
+    issues.push("setting review weak: setting-freeze.md does not declare review_required status")
+  }
+  if (!approvalPath) {
+    issues.push("setting review weak: setting-freeze.md does not expose an approval artifact path")
+  }
+  if (!nonCanonScope) {
+    issues.push("setting review weak: setting-freeze.md does not say proposals are non-canon until approval")
+  }
+  if (!openQuestions) {
+    issues.push("setting review weak: setting-freeze.md does not preserve open questions")
+  }
+  if (!approvalChecklist) {
+    issues.push("setting review weak: setting-freeze.md does not include an approval checklist")
+  }
+  if (legacyFreezeTitle && (!reviewRequired || !nonCanonScope)) {
+    issues.push("setting review weak: setting-freeze.md still presents itself as an automatic freeze")
+  }
+
+  return {
+    issues,
+    details: {
+      reviewRequired,
+      approvalPath,
+      nonCanonScope,
+      openQuestions,
+      approvalChecklist,
+      legacyFreezeTitle,
+    },
+  }
+}
+
+function runPlanningContentSpecificityAudit(stage, contentByPath, masterCast) {
+  if (!["planning", "foundation"].includes(stage)) return { issues: [], details: null }
+  const findContent = (pattern) => {
+    for (const [artifactPath, content] of contentByPath.entries()) {
+      if (pattern.test(artifactPath)) return content
+    }
+    return ""
+  }
+  const findEntries = (pattern) => Array.from(contentByPath.entries())
+    .filter(([artifactPath]) => pattern.test(artifactPath))
+    .map(([path, content]) => ({ path, content }))
+    .sort((left, right) => left.path.localeCompare(right.path))
+
+  const storyFoundationContract = findContent(/story-foundation-contract\.json$/u)
+  const characterDynamics = findContent(/character-dynamics\.(?:md|json)$/u)
+  const worldMatrix = findContent(/world-matrix\.md$/u)
+  const storyBible = findContent(/story-bible\.md$/u)
+  const plotArchitecture = findContent(/plot-architecture\.md$/u)
+  const contract = parseAcceptanceJsonObject(storyFoundationContract) || {}
+  const canonicalPlanningCast = contract?.canonicalPlanningCast || contract?.characters?.canonicalPlanningCast || {}
+  const relationshipEntries = Array.isArray(contract?.characters?.relationshipEntries)
+    ? contract.characters.relationshipEntries
+    : Array.isArray(contract?.relationshipEntries)
+      ? contract.relationshipEntries
+      : []
+  const plotChapters = Array.isArray(contract?.plot?.chapters) ? contract.plot.chapters : []
+  const totalChapters = Number(contract?.project?.totalChapters || plotChapters.length || 0)
+  const canonicalCast = acceptanceUniqueStrings([
+    masterCast.protagonist,
+    canonicalPlanningCast?.protagonist,
+    ...(Array.isArray(canonicalPlanningCast?.cast) ? canonicalPlanningCast.cast : []),
+    ...extractAcceptanceChineseNames(characterDynamics, 16),
+  ].map(normalizeAcceptanceCastName).filter((name) => name && !isAcceptanceCastNoise(name)))
+  const protagonist = masterCast.protagonist || canonicalPlanningCast?.protagonist || canonicalCast[0] || ""
+  const supportingCast = canonicalCast.filter((name) => name !== protagonist)
+  const requiredSupporting = totalChapters > 1 ? Math.min(2, Math.max(1, totalChapters - 1)) : 0
+  const issues = []
+
+  if (requiredSupporting > 0 && supportingCast.length < requiredSupporting) {
+    issues.push(`planning content thin: supporting cast ${supportingCast.length} below required ${requiredSupporting}`)
+  }
+  if (requiredSupporting > 0 && relationshipEntries.length < 1) {
+    issues.push("planning content thin: character relationship pressure entries are missing")
+  }
+
+  const dossierSignals = [
+    /coreDesire|核心欲望|欲望/u,
+    /fearOrWound|伤口|恐惧|wound|fear/iu,
+    /behaviorHabit|行为习惯|习惯|habit/iu,
+    /speechMarker|说话方式|对白|speech|voice/iu,
+    /relationshipPressure|关系压力|关系|pressure/iu,
+  ].filter((pattern) => pattern.test(`${storyFoundationContract}\n${characterDynamics}`)).length
+  if (requiredSupporting > 0 && dossierSignals < 4) {
+    issues.push(`planning content thin: character dossier signals ${dossierSignals}/5 below required 4`)
+  }
+
+  const worldSpecificSignals = countSpecificPlanningSignals(worldMatrix, storyBible, plotArchitecture)
+  if (worldSpecificSignals < 10) {
+    issues.push(`planning content thin: world/story assets expose only ${worldSpecificSignals} concrete story signals`)
+  }
+
+  const blueprintEntries = findEntries(/chapter-blueprints\/chapter-\d+\.md$/u)
+  const blueprintAudits = blueprintEntries.map((entry) => {
+    const contract = extractBlueprintExecutionContractForAcceptance(entry.content)
+    const sceneCards = Array.isArray(contract?.sceneCards) ? contract.sceneCards : []
+    const chapterNumber = Number(contract?.chapterNumber || entry.path.match(/chapter-(\d+)\.md$/u)?.[1] || 0)
+    const canonBoundary = contract?.canonBoundary && typeof contract.canonBoundary === "object"
+      ? contract.canonBoundary
+      : null
+    const participation = contract?.characterParticipation && typeof contract.characterParticipation === "object"
+      ? contract.characterParticipation
+      : {}
+    const requiredSceneCharacters = Array.isArray(participation.requiredSceneCharacters)
+      ? participation.requiredSceneCharacters.filter(Boolean)
+      : []
+    const knownCast = Array.isArray(participation.knownCast) ? participation.knownCast.filter(Boolean) : []
+    const values = blueprintContractValuesForAcceptance(contract)
+    if (!contract) {
+      issues.push(`planning blueprint weak: ${entry.path} missing Chapter Execution Contract JSON`)
+    } else {
+      if (sceneCards.length < 5) {
+        issues.push(`planning blueprint weak: ${entry.path} has ${sceneCards.length} scene cards; expected at least 5`)
+      }
+      if (chapterNumber > 1 && !canonBoundary) {
+        issues.push(`planning blueprint canon boundary missing: ${entry.path} does not distinguish planned dependency from completed canon`)
+      }
+      if (chapterNumber > 1 && canonBoundary) {
+        const completedPreviousChapters = Number(canonBoundary.completedPreviousChapters || 0)
+        const previousInputStatus = String(canonBoundary.previousInputStatus || "")
+        if (completedPreviousChapters === 0 && previousInputStatus !== "planned_dependency") {
+          issues.push(`planning blueprint canon boundary invalid: ${entry.path} marks previous input as ${previousInputStatus || "missing"} without completed chapter evidence`)
+        }
+        if (!String(canonBoundary.rule || "").trim()) {
+          issues.push(`planning blueprint canon boundary weak: ${entry.path} missing boundary rule text`)
+        }
+      }
+      if (protagonist && !entry.content.includes(protagonist)) {
+        issues.push(`planning blueprint weak: ${entry.path} does not mention master protagonist ${protagonist}`)
+      }
+      if (requiredSupporting > 0 && knownCast.length < 1) {
+        issues.push(`planning blueprint weak: ${entry.path} has no known cast in participation contract`)
+      }
+      if (requiredSupporting > 0 && requiredSceneCharacters.length < 1) {
+        issues.push(`planning blueprint weak: ${entry.path} has no required scene characters`)
+      }
+      const uniqueEndHooks = new Set(sceneCards.map((card) => String(card?.endHook || "").trim()).filter(Boolean))
+      if (sceneCards.length >= 2 && uniqueEndHooks.size < Math.min(3, sceneCards.length)) {
+        issues.push(`planning blueprint weak: ${entry.path} scene end hooks are too repetitive`)
+      }
+    }
+    return {
+      path: entry.path,
+      sceneCards: sceneCards.length,
+      knownCast: knownCast.length,
+      requiredSceneCharacters: requiredSceneCharacters.length,
+      canonBoundary: canonBoundary
+        ? {
+          previousInputStatus: String(canonBoundary.previousInputStatus || ""),
+          completedPreviousChapters: Number(canonBoundary.completedPreviousChapters || 0),
+        }
+        : null,
+      valueCount: values.length,
+      values,
+    }
+  })
+
+  const blueprintSimilarity = []
+  for (let index = 1; index < blueprintAudits.length; index += 1) {
+    const previous = blueprintAudits[index - 1]
+    const current = blueprintAudits[index]
+    const ratio = commonBlueprintValueRatio(previous.values, current.values)
+    blueprintSimilarity.push({
+      left: previous.path,
+      right: current.path,
+      ratio: Number(ratio.toFixed(3)),
+    })
+    if (ratio >= 0.82) {
+      issues.push(`planning blueprint repetition: ${previous.path} and ${current.path} share ${ratio.toFixed(2)} of contract values`)
+    }
+  }
+
+  return {
+    issues,
+    details: {
+      totalChapters,
+      protagonist,
+      canonicalCast,
+      supportingCast,
+      relationshipEntries: relationshipEntries.length,
+      dossierSignals,
+      worldSpecificSignals,
+      blueprintAudits: blueprintAudits.map(({ values, ...audit }) => audit),
+      blueprintSimilarity,
+    },
+  }
+}
+
+export function runPlanningAssetConsistencyAudit(stage, previewChecks = []) {
+  if (!["planning", "foundation"].includes(stage)) return { issues: [], details: null }
+  const contentByPath = new Map(previewChecks.filter((preview) => preview.openable).map((preview) => [preview.path, preview.content || ""]))
+  const findContent = (pattern) => {
+    for (const [artifactPath, content] of contentByPath.entries()) {
+      if (pattern.test(artifactPath)) return content
+    }
+    return ""
+  }
+  const masterOutline = findContent(/master-outline\.md$/u)
+  const storyFoundationContract = findContent(/story-foundation-contract\.json$/u)
+  const characterDynamics = findContent(/character-dynamics\.(?:md|json)$/u)
+  const chapterBlueprint = findContent(/chapter-blueprints\/chapter-001\.md$/u)
+  const settingReview = findContent(/setting-freeze\.md$/u)
+  const masterCast = extractAcceptancePlanningCast(masterOutline)
+  const assetCastLocks = [
+    ...collectPlanningAssetCastLocks(storyFoundationContract, "story-foundation-contract.json"),
+    ...collectPlanningAssetCastLocks(characterDynamics, "character-dynamics"),
+    ...collectPlanningAssetCastLocks(chapterBlueprint, "chapter-001.md"),
+  ]
+  const noisyLocks = assetCastLocks.filter((lock) => lock.noisy)
+  const concreteProtagonistLocks = assetCastLocks.filter((lock) =>
+    /protagonist/i.test(lock.field || "") && !lock.noisy
+  )
+  const issues = []
+  for (const lock of noisyLocks.slice(0, 8)) {
+    issues.push(`planning cast noise: ${lock.label} ${lock.field} contains ${lock.raw}`)
+  }
+  if (!masterCast.protagonist && (storyFoundationContract || chapterBlueprint || characterDynamics)) {
+    if (concreteProtagonistLocks.length) {
+      for (const lock of concreteProtagonistLocks.slice(0, 4)) {
+        issues.push(`planning protagonist unsupported: ${lock.label} ${lock.field} locks ${lock.raw} but master outline does not declare a concrete protagonist`)
+      }
+    } else {
+      issues.push("planning protagonist missing: master outline does not declare a concrete protagonist")
+    }
+  }
+  if (masterCast.protagonist) {
+    if (characterDynamics && !characterDynamics.includes(masterCast.protagonist)) {
+      issues.push(`planning cast drift: character-dynamics does not include master protagonist ${masterCast.protagonist}`)
+    }
+    if (chapterBlueprint && !chapterBlueprint.includes(masterCast.protagonist)) {
+      issues.push(`planning cast drift: chapter-001 blueprint does not include master protagonist ${masterCast.protagonist}`)
+    }
+    const blueprintLockedName = chapterBlueprint.match(/Locked protagonist:\s*([\u4e00-\u9fff·]{2,8})/u)?.[1] || ""
+    if (blueprintLockedName && blueprintLockedName !== masterCast.protagonist) {
+      issues.push(`planning cast drift: blueprint locks ${blueprintLockedName} but master outline locks ${masterCast.protagonist}`)
+    }
+  }
+  const contentSpecificity = runPlanningContentSpecificityAudit(stage, contentByPath, masterCast)
+  issues.push(...contentSpecificity.issues)
+  const settingReviewAudit = runSettingReviewArtifactAudit(stage, settingReview)
+  issues.push(...settingReviewAudit.issues)
+  return {
+    issues,
+    details: {
+      masterProtagonist: masterCast.protagonist,
+      masterCast: masterCast.cast,
+      checkedArtifacts: {
+        masterOutline: Boolean(masterOutline),
+        storyFoundationContract: Boolean(storyFoundationContract),
+        characterDynamics: Boolean(characterDynamics),
+        chapterBlueprint: Boolean(chapterBlueprint),
+      },
+      noisyLocks,
+      concreteProtagonistLocks,
+      settingReview: settingReviewAudit.details,
+      contentSpecificity: contentSpecificity.details,
+    },
+  }
+}
+
+async function runStageInterfaceAudit(api, projectId, stage, options, report, checkpoint = null) {
+  const statusPayload = await getStatus(api, projectId)
+  const messagesPayload = await api(
+    "GET",
+    `/api/messages?projectId=${encodeURIComponent(projectId)}&limit=200`,
+    {},
+    projectId,
+  )
+  const status = summarizeStatusInterface(statusPayload)
+  const messages = summarizeMessageInterface(messagesPayload)
+  const expectations = stageInterfaceExpectations(stage, options)
+  const allArtifactPaths = Array.from(new Set([
+    ...status.artifactPaths,
+    ...messages.artifactPaths,
+  ])).sort()
+  const matchedArtifacts = expectations.artifactPatterns.map((expectation) => {
+    const path = allArtifactPaths.find((candidate) => expectation.match.test(candidate)) || expectation.path || ""
+    return {
+      id: expectation.id,
+      label: expectation.label,
+      path,
+      found: Boolean(path),
+      source: allArtifactPaths.some((candidate) => candidate === path) ? "message_or_status" : expectation.path ? "direct" : "",
+    }
+  })
+  for (const artifact of expectations.directArtifactPaths || []) {
+    matchedArtifacts.push({
+      id: artifact.id,
+      label: artifact.label,
+      path: artifact.path,
+      found: true,
+      source: "direct",
+    })
+  }
+  const previewChecks = []
+  for (const artifact of matchedArtifacts.filter((item) => item.found)) {
+    previewChecks.push(await previewAcceptanceArtifact(api, projectId, artifact.path))
+  }
+  const issues = []
+  if (messages.totalMessages < expectations.minMessages) {
+    issues.push(`message timeline has ${messages.totalMessages} messages; expected at least ${expectations.minMessages}`)
+  }
+  for (const artifact of matchedArtifacts) {
+    if (!artifact.found) {
+      issues.push(`missing artifact: ${artifact.label}`)
+    }
+  }
+  for (const preview of previewChecks) {
+    if (!preview.openable) {
+      issues.push(`artifact preview failed: ${preview.path}`)
+    } else if (Number(preview.bytes || 0) <= 0) {
+      issues.push(`artifact preview is empty: ${preview.path}`)
+    }
+  }
+  if (expectations.messageArtifactPattern) {
+    const visibleInMessages = messages.artifactPaths.some((candidate) => expectations.messageArtifactPattern.test(candidate))
+    if (!visibleInMessages) {
+      issues.push("expected generated artifact path is not visible in message parts")
+    }
+  }
+  if (expectations.readinessRequired && status.productionReadiness.canProceed !== true) {
+    issues.push(`production readiness is not passable: ${status.productionReadiness.status}`)
+  }
+  let styleEvolutionInterface = null
+  if (expectations.styleEvolutionRequired) {
+    try {
+      const stylePayload = await api(
+        "GET",
+        `/api/style-evolution?projectId=${encodeURIComponent(projectId)}`,
+        {},
+        projectId,
+      )
+      styleEvolutionInterface = summarizeStyleEvolutionInterface(stylePayload, options)
+      issues.push(...styleEvolutionInterface.issues)
+      const styleIssueCodes = status.productionReadiness.issueCodes.filter((code) => code.startsWith("style_") || code === "approved_sample_missing" || code === "anti_patterns_missing")
+      if (expectations.styleApprovalRequired && styleIssueCodes.length) {
+        issues.push(`style readiness still reports blockers after approval: ${styleIssueCodes.slice(0, 8).join(", ")}`)
+      }
+      if (!expectations.styleApprovalRequired && !styleIssueCodes.includes("style_approval_missing")) {
+        issues.push("style readiness does not explain that explicit style approval is missing")
+      }
+    } catch (error) {
+      issues.push(`style evolution payload failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  const planningConsistency = runPlanningAssetConsistencyAudit(stage, previewChecks)
+  issues.push(...planningConsistency.issues)
+  const previewCheckSummaries = previewChecks.map(({ content, ...preview }) => preview)
+
+  const audit = {
+    stage,
+    status: issues.length === 0 ? "passed" : "failed",
+    at: now(),
+    runtimeStage: status.stage,
+    statusMessage: status.statusMessage,
+    messages,
+    statusSummary: status,
+    expectedArtifacts: matchedArtifacts,
+    previewChecks: previewCheckSummaries,
+    styleEvolutionInterface,
+    planningConsistency,
+    issues,
+  }
+  if (!Array.isArray(report.stageInterfaceAudits)) {
+    report.stageInterfaceAudits = []
+  }
+  report.stageInterfaceAudits.push(audit)
+  report.steps.push({
+    step: `interface_audit_${stage}`,
+    status: audit.status,
+    at: audit.at,
+    runtimeStage: audit.runtimeStage,
+    artifactCount: allArtifactPaths.length,
+    messageCount: messages.totalMessages,
+    issues,
+  })
+  await maybeWriteCheckpoint(checkpoint, `interface_audit_${stage}`, { audit })
+  log(`Stage interface audit ${audit.status}.`, {
+    stage,
+    runtimeStage: audit.runtimeStage,
+    artifactCount: allArtifactPaths.length,
+    messageCount: messages.totalMessages,
+    issues: issues.slice(0, 8),
+  })
+  if (issues.length) {
+    throw new AcceptanceError(`Stage interface audit failed: ${stage}`, { audit })
+  }
+  return audit
+}
+
+function isRepairablePlanningStageAuditError(error, stage) {
+  if (stage !== "planning") return false
+  const audit = error instanceof AcceptanceError ? error.details?.audit : error?.details?.audit
+  const planningIssues = Array.isArray(audit?.planningConsistency?.issues)
+    ? audit.planningConsistency.issues
+    : []
+  if (!planningIssues.length) return false
+  const nonPlanningIssues = (Array.isArray(audit?.issues) ? audit.issues : [])
+    .filter((issue) => !planningIssues.includes(issue))
+  return nonPlanningIssues.length === 0
+}
+
+function isPlanningProtagonistBlockedError(error) {
+  const text = [
+    error?.name,
+    error?.code,
+    error?.message,
+    error?.details?.payload?.error,
+    error?.details?.payload?.message,
+    error?.details?.payload?.reason,
+  ].filter(Boolean).join(" ")
+  return /ProductionPlanningBlockedError|planning_protagonist_missing|planning protagonist missing|concrete protagonist/iu.test(text)
+}
+
+function isMasterPlanningProtagonistBlockedProgress(progress) {
+  const text = [
+    progress?.stage,
+    progress?.statusMessage,
+    progress?.blockedReason,
+  ].filter(Boolean).join(" ")
+  return /setting_review.+master planning.+concrete protagonist|master planning is blocked until a concrete protagonist|planning protagonist missing|concrete protagonist name/iu.test(text)
+}
+
+async function runStageInterfaceAuditWithRepair(api, projectId, stage, options, report, checkpoint = null) {
+  try {
+    return await runStageInterfaceAudit(api, projectId, stage, options, report, checkpoint)
+  } catch (error) {
+    if (!options.autoRepairStoryAssets || !isRepairablePlanningStageAuditError(error, stage)) {
+      throw error
+    }
+    const audit = error instanceof AcceptanceError ? error.details?.audit : error?.details?.audit
+    const issues = Array.isArray(audit?.planningConsistency?.issues) ? audit.planningConsistency.issues : []
+    log("Repairing planning assets after stage interface audit failure.", {
+      stage,
+      issueCount: issues.length,
+      issues: issues.slice(0, 8),
+    })
+    let repaired
+    try {
+      repaired = await api("POST", "/api/production/story-assets/repair", {
+        projectId,
+        reason: "planning_stage_interface_audit_failed",
+      }, projectId)
+    } catch (repairError) {
+      if (!isPlanningProtagonistBlockedError(repairError)) {
+        throw repairError
+      }
+      const reason = "planning protagonist missing: master outline does not declare a concrete protagonist"
+      report.steps.push({
+        step: "planning_assets_repair_after_audit",
+        status: "blocked",
+        at: now(),
+        issueCount: issues.length,
+        issues: issues.slice(0, 20),
+        blockedReason: reason,
+      })
+      await maybeWriteCheckpoint(checkpoint, "planning_assets_repair_blocked", {
+        issueCount: issues.length,
+        issues: issues.slice(0, 20),
+        blockedReason: reason,
+      })
+      throw new AcceptanceError("Planning repair blocked: master outline must declare a concrete protagonist before story foundation can freeze.", {
+        audit,
+        blockedReason: reason,
+      })
+    }
+    const repairedStoryAssets = Array.isArray(repaired?.repairedStoryAssets) ? repaired.repairedStoryAssets : []
+    report.steps.push({
+      step: "planning_assets_repair_after_audit",
+      status: "completed",
+      at: now(),
+      issueCount: issues.length,
+      repairedCount: repairedStoryAssets.length,
+      repairedStoryAssets: repairedStoryAssets.slice(0, 24),
+    })
+    await maybeWriteCheckpoint(checkpoint, "planning_assets_repair_after_audit", {
+      issueCount: issues.length,
+      repairedCount: repairedStoryAssets.length,
+      issues: issues.slice(0, 20),
+    })
+    return runStageInterfaceAudit(api, projectId, stage, options, report, checkpoint)
+  }
+}
+
 async function maybeWriteCheckpoint(checkpoint, phase, details = {}) {
   if (typeof checkpoint === "function") {
     await checkpoint(phase, details)
@@ -4552,11 +5605,6 @@ async function ensureStyleGate(api, projectId, options, report, checkpoint = nul
     return stylePayload
   }
 
-  log("Running Style Evolution through Studio API.", {
-    iterations: options.styleIterations,
-    maxRequests: options.styleMaxRequests,
-    candidates: options.styleCandidates,
-  })
   const maxStyleRequests = Math.max(1, options.styleMaxRequests)
   let generated = null
   let candidate = latestStyleCandidate(stylePayload.styleEvolution)
@@ -4564,58 +5612,71 @@ async function ensureStyleGate(api, projectId, options, report, checkpoint = nul
   let iterationFeedback = candidate && !candidateStatus.ready
     ? buildStyleIterationFeedback(candidate, candidateStatus)
     : ""
-  for (let attempt = 1; attempt <= maxStyleRequests; attempt += 1) {
-    generated = await api("POST", "/api/style-evolution/generate-candidate", {
-      projectId,
-      userStylePrompt: options.stylePrompt,
-      loopIterations: options.styleIterations,
-      candidateCount: options.styleCandidates,
-      iterationFeedback: iterationFeedback || undefined,
-    }, projectId)
-    const fallbackSignals = collectStyleFallbackSignals(generated)
-    if (fallbackSignals.length) {
-      throw new AcceptanceError("Style Evolution used heuristic/fallback results; production acceptance requires real LLM evaluator/refiner/freezer output.", {
-        fallbackSignals: fallbackSignals.slice(0, 12),
-        attempt,
-        loopRun: generated.loopRun ? {
-          runId: generated.loopRun.runId,
-          stopReason: generated.loopRun.stopReason,
-          completedIterations: generated.loopRun.completedIterations,
-        } : null,
-      })
-    }
-    candidate = latestStyleCandidate(generated.styleEvolution)
-    candidateStatus = styleCandidateFreezeStatus(candidate)
-    const version = Number(candidate?.version || generated.generatedCandidate?.version || 0)
-    report.steps.push({
-      step: "style_candidate_generated",
-      status: candidateStatus.ready ? "ready" : "continue",
-      at: now(),
-      attempt,
-      version,
-      verificationStatus: candidateStatus.verificationStatus,
-      freezerVerdict: candidateStatus.freezerVerdict,
-      reasons: candidateStatus.reasons,
-      modelRouting: generated.modelRouting || null,
-    })
-    await maybeWriteCheckpoint(checkpoint, "style_candidate_generated", {
-      attempt,
-      version,
-      ready: candidateStatus.ready,
-      verificationStatus: candidateStatus.verificationStatus,
-      freezerVerdict: candidateStatus.freezerVerdict,
-    })
-    log("Style candidate iteration completed.", {
-      attempt,
-      version,
+  if (candidateStatus.ready) {
+    log("Existing Style Evolution candidate is ready for freeze.", {
+      version: Number(candidate?.version || 0),
       verification: candidateStatus.verificationStatus,
       freezer: candidateStatus.freezerVerdict,
-      ready: candidateStatus.ready,
     })
-    if (candidateStatus.ready) {
-      break
+  } else {
+    log("Running Style Evolution through Studio API.", {
+      iterations: options.styleIterations,
+      maxRequests: options.styleMaxRequests,
+      candidates: options.styleCandidates,
+    })
+    for (let attempt = 1; attempt <= maxStyleRequests; attempt += 1) {
+      generated = await api("POST", "/api/style-evolution/generate-candidate", {
+        projectId,
+        userStylePrompt: options.stylePrompt,
+        loopIterations: options.styleIterations,
+        candidateCount: options.styleCandidates,
+        iterationFeedback: iterationFeedback || undefined,
+      }, projectId)
+      const fallbackSignals = collectStyleFallbackSignals(generated)
+      if (fallbackSignals.length) {
+        throw new AcceptanceError("Style Evolution used heuristic/fallback results; production acceptance requires real LLM evaluator/refiner/freezer output.", {
+          fallbackSignals: fallbackSignals.slice(0, 12),
+          attempt,
+          loopRun: generated.loopRun ? {
+            runId: generated.loopRun.runId,
+            stopReason: generated.loopRun.stopReason,
+            completedIterations: generated.loopRun.completedIterations,
+          } : null,
+        })
+      }
+      candidate = latestStyleCandidate(generated.styleEvolution)
+      candidateStatus = styleCandidateFreezeStatus(candidate)
+      const version = Number(candidate?.version || generated.generatedCandidate?.version || 0)
+      report.steps.push({
+        step: "style_candidate_generated",
+        status: candidateStatus.ready ? "ready" : "continue",
+        at: now(),
+        attempt,
+        version,
+        verificationStatus: candidateStatus.verificationStatus,
+        freezerVerdict: candidateStatus.freezerVerdict,
+        reasons: candidateStatus.reasons,
+        modelRouting: generated.modelRouting || null,
+      })
+      await maybeWriteCheckpoint(checkpoint, "style_candidate_generated", {
+        attempt,
+        version,
+        ready: candidateStatus.ready,
+        verificationStatus: candidateStatus.verificationStatus,
+        freezerVerdict: candidateStatus.freezerVerdict,
+      })
+      log("Style candidate iteration completed.", {
+        attempt,
+        version,
+        verification: candidateStatus.verificationStatus,
+        freezer: candidateStatus.freezerVerdict,
+        ready: candidateStatus.ready,
+      })
+      if (candidateStatus.ready) {
+        break
+      }
+      iterationFeedback = buildStyleIterationFeedback(candidate, candidateStatus)
     }
-    iterationFeedback = buildStyleIterationFeedback(candidate, candidateStatus)
   }
   const version = Number(candidate?.version || generated?.generatedCandidate?.version || 0)
   if (!version) {
@@ -4637,6 +5698,21 @@ async function ensureStyleGate(api, projectId, options, report, checkpoint = nul
   log("Style candidate ready for freeze.", { version, model: generated?.modelRouting?.modelName })
 
   if (!options.autoApproveStyle) {
+    if (options.stopAfterStyle) {
+      report.steps.push({
+        step: "style_gate",
+        status: "waiting_for_user_approval",
+        at: now(),
+        version,
+        nextCommand: `rtk node scripts/run-production-acceptance.mjs --resume-project-id ${projectId} --auto-approve-style --auto-approve-foundation`,
+      })
+      await maybeWriteCheckpoint(checkpoint, "style_waiting_for_user_approval", { projectId, version })
+      log("Style candidate generated and waiting for explicit user confirmation.", {
+        projectId,
+        version,
+      })
+      return generated || stylePayload
+    }
     throw new AcceptanceError("Style candidate generated, but style approval is waiting for explicit user confirmation.", {
       projectId,
       version,
@@ -4678,13 +5754,117 @@ async function advanceUntilPlanningReady(api, projectId, options, report, checkp
   let progress = chapterProgressFromStatus(status)
   const planningReadyStages = new Set(["chapter_task_generation", "drafting", "reviewing", "aigc_refinement", "complete"])
   let steps = 0
+  let settingReviewHandled = false
+  const protagonistBriefPath = ".ai-novel/plans/master-planning-protagonist-brief.md"
   while (!planningReadyStages.has(progress.stage) && steps < options.maxAdvanceSteps) {
+    if (progress.stage === "setting_review" && !settingReviewHandled) {
+      if (!options.autoApproveSettingReview) {
+        const nextCommand = buildAcceptanceResumeCommand({
+          ...options,
+          autoApproveSettingReview: true,
+        }, projectId)
+        report.steps.push({
+          step: "setting_review",
+          status: "waiting_for_user_approval",
+          at: now(),
+          progress,
+          nextCommand,
+        })
+        await maybeWriteCheckpoint(checkpoint, "setting_review_waiting_for_user_approval", { projectId, progress, nextCommand })
+        throw new AcceptanceError("Setting review packet generated, but needs explicit user approval before planning continues.", {
+          projectId,
+          progress,
+          nextCommand,
+        })
+      }
+      log("Approving setting review packet through Studio API.")
+      const approval = await api("POST", "/api/production/setting-review/approve", {
+        projectId,
+        note: "Production acceptance run approved the setting review packet before master planning.",
+        reviewedBy: "acceptance-runner",
+      }, projectId)
+      report.steps.push({
+        step: "setting_review_approval",
+        status: "completed",
+        at: now(),
+        reviewStatus: approval.settingReviewApproval?.status || "missing",
+        approvalPath: ".ai-novel/plans/setting-review-approval.json",
+      })
+      await maybeWriteCheckpoint(checkpoint, "setting_review_approved", {
+        reviewStatus: approval.settingReviewApproval?.status || "missing",
+        approvalPath: ".ai-novel/plans/setting-review-approval.json",
+      })
+      settingReviewHandled = true
+      status = await getStatus(api, projectId)
+      progress = chapterProgressFromStatus(status)
+    }
+    if (isMasterPlanningProtagonistBlockedProgress(progress)) {
+      report.steps.push({
+        step: "master_planning_protagonist_gate",
+        status: "blocked",
+        at: now(),
+        progress,
+        artifactPath: protagonistBriefPath,
+        requiredInput: [
+          "Concrete protagonist name",
+          "Identity and role function",
+          "Core desire",
+          "Fear or wound",
+          "Visible behavior habit",
+          "Speech marker",
+          "Named relationship pressure",
+        ],
+      })
+      await maybeWriteCheckpoint(checkpoint, "master_planning_protagonist_blocked", {
+        projectId,
+        progress,
+        artifactPath: protagonistBriefPath,
+      })
+      throw new AcceptanceError("Master planning is blocked until a concrete protagonist profile is confirmed.", {
+        projectId,
+        progress,
+        artifactPath: protagonistBriefPath,
+        requiredInput: "请先冻结主角姓名、身份、核心欲望、伤口/恐惧、行为习惯、说话方式和至少一个具名关系压力。",
+      })
+    }
     log("Advancing planning flow.", progress)
     await api("POST", "/api/advance", { projectId }, projectId)
     status = await getStatus(api, projectId)
     progress = chapterProgressFromStatus(status)
     steps += 1
     await maybeWriteCheckpoint(checkpoint, "planning_progress", { progress, advanceSteps: steps })
+    if (isMasterPlanningProtagonistBlockedProgress(progress)) {
+      report.steps.push({
+        step: "master_planning_protagonist_gate",
+        status: "blocked",
+        at: now(),
+        progress,
+        advanceSteps: steps,
+        artifactPath: protagonistBriefPath,
+        requiredInput: [
+          "Concrete protagonist name",
+          "Identity and role function",
+          "Core desire",
+          "Fear or wound",
+          "Visible behavior habit",
+          "Speech marker",
+          "Named relationship pressure",
+        ],
+      })
+      await maybeWriteCheckpoint(checkpoint, "master_planning_protagonist_blocked", {
+        projectId,
+        progress,
+        advanceSteps: steps,
+        artifactPath: protagonistBriefPath,
+      })
+      throw new AcceptanceError("Master planning is blocked until a concrete protagonist profile is confirmed.", {
+        projectId,
+        progress,
+        advanceSteps: steps,
+        artifactPath: protagonistBriefPath,
+        requiredInput: "请先冻结主角姓名、身份、核心欲望、伤口/恐惧、行为习惯、说话方式和至少一个具名关系压力。",
+      })
+    }
   }
 
   if (!planningReadyStages.has(progress.stage)) {
@@ -4715,7 +5895,9 @@ async function ensureStoryFoundation(api, projectId, options, report, checkpoint
     await maybeWriteCheckpoint(checkpoint, "story_assets_repair", { readiness })
   }
 
-  if (!readiness.canProceed && readiness.issueCodes.includes("story_foundation_approval_missing")) {
+  const foundationApprovalIssue = readiness.issueCodes.includes("story_foundation_approval_missing")
+    || readiness.issueCodes.includes("story_foundation_approval_stale")
+  if (!readiness.canProceed && foundationApprovalIssue) {
     if (!options.autoApproveFoundation) {
       throw new AcceptanceError("Story foundation is ready for review but needs explicit user approval.", {
         projectId,
@@ -4753,6 +5935,14 @@ async function runDraftingToCompletion(api, projectId, options, report, checkpoi
   let progress = chapterProgressFromStatus(status)
   let lastComplete = progress.complete
   let staleSteps = 0
+  const stopAfterChapters = Number(options.stopAfterChapters || 0)
+
+  if (stopAfterChapters > 0 && progress.complete >= stopAfterChapters) {
+    report.steps.push({ step: "drafting_stop_after_chapters", status: "completed", at: now(), progress, stopAfterChapters })
+    await maybeWriteCheckpoint(checkpoint, "drafting_stop_after_chapters", { progress, stopAfterChapters })
+    log("Stopped after requested chapter count by request.", { progress, stopAfterChapters })
+    return { status, stoppedAfterChapters: true, progress }
+  }
 
   for (let step = 1; step <= options.maxAdvanceSteps && progress.stage !== "complete"; step += 1) {
     log(`Advancing production step ${step}/${options.maxAdvanceSteps}.`, progress)
@@ -4777,6 +5967,12 @@ async function runDraftingToCompletion(api, projectId, options, report, checkpoi
     if (progress.blocked > 0) {
       throw new AcceptanceError("Chapter production has blocked chapters.", { progress })
     }
+    if (stopAfterChapters > 0 && progress.complete >= stopAfterChapters) {
+      report.steps.push({ step: "drafting_stop_after_chapters", status: "completed", at: now(), progress, stopAfterChapters })
+      await maybeWriteCheckpoint(checkpoint, "drafting_stop_after_chapters", { progress, stopAfterChapters })
+      log("Stopped after requested chapter count by request.", { progress, stopAfterChapters })
+      return { status, stoppedAfterChapters: true, progress }
+    }
     if (staleSteps >= options.maxStaleSteps) {
       throw new AcceptanceError("Chapter production made no chapter progress for too many steps.", {
         progress,
@@ -4796,7 +5992,7 @@ async function runDraftingToCompletion(api, projectId, options, report, checkpoi
   report.steps.push({ step: "drafting_complete", status: "completed", at: now(), progress })
   await maybeWriteCheckpoint(checkpoint, "drafting_complete", { progress })
   log("Drafting flow reached complete.", progress)
-  return status
+  return { status, stoppedAfterChapters: false, progress }
 }
 
 async function verifyReader(api, projectId, options, report, checkpoint = null) {
@@ -5231,6 +6427,7 @@ async function main() {
     finalResolutionAudit: null,
     finalContinuityAudit: null,
     finalRequirementCoverage: null,
+    stageInterfaceAudits: [],
     checkpoints: [],
     lastCheckpoint: null,
     lastSuccessfulCheckpoint: null,
@@ -5284,6 +6481,7 @@ async function main() {
       styleModel: modelInfo.styleConfig?.model_name,
       aigcDetectorProvider: detectorSettings.provider,
       autoApproveStyle: options.autoApproveStyle,
+      autoApproveSettingReview: options.autoApproveSettingReview,
       autoApproveFoundation: options.autoApproveFoundation,
     })
 
@@ -5326,6 +6524,7 @@ async function main() {
     }
 
     await ensureStyleGate(api, projectId, options, report, checkpoint)
+    await runStageInterfaceAudit(api, projectId, "style", options, report, checkpoint)
     if (options.stopAfterStyle) {
       report.status = "waiting_after_style"
       report.completedAt = now()
@@ -5335,7 +6534,17 @@ async function main() {
     }
 
     await advanceUntilPlanningReady(api, projectId, options, report, checkpoint)
+    await runStageInterfaceAuditWithRepair(api, projectId, "planning", options, report, checkpoint)
+    if (options.stopAfterPlanning) {
+      report.status = "waiting_after_planning"
+      report.completedAt = now()
+      await checkpoint("waiting_after_planning", { projectId })
+      log("Stopped after planning by request.", { reportPath: options.reportPath, projectId })
+      return
+    }
+
     await ensureStoryFoundation(api, projectId, options, report, checkpoint)
+    await runStageInterfaceAudit(api, projectId, "foundation", options, report, checkpoint)
     if (options.stopAfterFoundation) {
       report.status = "waiting_after_foundation"
       report.completedAt = now()
@@ -5344,7 +6553,24 @@ async function main() {
       return
     }
 
-    await runDraftingToCompletion(api, projectId, options, report, checkpoint)
+    const draftingResult = await runDraftingToCompletion(api, projectId, options, report, checkpoint)
+    if (draftingResult?.stoppedAfterChapters) {
+      await runStageInterfaceAudit(api, projectId, "chapters", options, report, checkpoint)
+      report.status = "waiting_after_chapters"
+      report.completedAt = now()
+      await checkpoint("waiting_after_chapters", {
+        projectId,
+        progress: draftingResult.progress,
+        stopAfterChapters: options.stopAfterChapters,
+      })
+      log("Stopped after chapter target by request.", {
+        reportPath: options.reportPath,
+        projectId,
+        progress: draftingResult.progress,
+      })
+      return
+    }
+    await runStageInterfaceAudit(api, projectId, "chapters", options, report, checkpoint)
     await verifyReader(api, projectId, options, report, checkpoint)
 
     report.status = "passed"

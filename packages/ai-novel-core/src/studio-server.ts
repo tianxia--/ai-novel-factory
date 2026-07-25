@@ -53,6 +53,8 @@ import {
   createContinuityContract,
   evaluateChapterStyleConformanceDrift,
   loadApprovedWritingStyleContext,
+  writeAllDetailedChapterBlueprints,
+  writeProductionMasterOutline,
   writeProductionStoryBibleAssets,
   type NovelWorkspacePaths,
 } from "./writing-pipeline"
@@ -411,6 +413,9 @@ function normalizeStylePreviewText(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
 
+const STYLE_FREEZE_CONTRACT_EXTRACTION_MAX_TOKENS = 4200
+const STYLE_FREEZE_ADVICE_MAX_TOKENS = 1800
+
 function buildLocalFallbackStyleContract(sample: string, prompt = "") {
   const shortSample = sample.replace(/\s+/g, " ").trim().slice(0, 120)
   const voice = prompt.match(/克制|冷感|轻松|幽默|热血|悬疑|古风|白描/u)?.[0]
@@ -447,6 +452,7 @@ function studioStyleEntryVerification(
   if (!entry) return buildStyleGenerationVerification({})
   return entry.verification || buildStyleGenerationVerification({
     evaluation: entry.evaluation as StyleEvolutionEvaluation | undefined,
+    sample: entry.sample,
     version: entry.version,
     checkedAt: entry.createdAt,
   })
@@ -516,6 +522,28 @@ async function readStyleEvolutionAssetSnapshot(projectRoot: string) {
       antiPatterns: await readAsset(path.join(styleRoot, "anti-patterns.md")),
     },
   }
+}
+
+function styleEvolutionArtifactItems(styleEvolutionAssets: Record<string, any> | null | undefined, options: { includeApprovedSample?: boolean } = {}) {
+  const freezePackage = styleEvolutionAssets?.freezePackage || {}
+  const fromSnapshot = (key: string, label: string, kind = "style") => {
+    const asset = freezePackage?.[key] || {}
+    return {
+      path: typeof asset.path === "string" && asset.path.trim() ? asset.path.trim() : "",
+      label,
+      kind,
+      status: asset.exists === false ? "missing" : "completed",
+      chars: typeof asset.chars === "number" ? asset.chars : undefined,
+    }
+  }
+  return [
+    { path: ".ai-novel/style/evolution/style-contract.json", label: "Style contract", kind: "style-contract", status: "completed" },
+    { path: ".ai-novel/style/evolution/style-evolution-history.json", label: "Style evolution history", kind: "style-history", status: "completed" },
+    fromSnapshot("freezeLedger", "Style freeze ledger", "style-freeze-ledger"),
+    fromSnapshot("loopRuntime", "Style loop runtime", "style-loop-runtime"),
+    fromSnapshot("loopRuns", "Style loop runs", "style-loop-runs"),
+    ...(options.includeApprovedSample ? [fromSnapshot("approvedSample", "User approved sample", "style-approved-sample")] : []),
+  ].filter((item) => item.path && item.status !== "missing")
 }
 
 async function buildStyleEvolutionWorkspacePayload(
@@ -624,7 +652,7 @@ async function buildStyleFreezePreview(input: {
         apiMode: textConfig.provider.apiMode,
         timeoutMs: textConfig.provider.timeoutMs,
         temperature: 0.1,
-        maxTokens: 1600,
+        maxTokens: STYLE_FREEZE_CONTRACT_EXTRACTION_MAX_TOKENS,
         messages: [
           { role: "system", content: extractionPrompt.system },
           { role: "user", content: extractionPrompt.user },
@@ -661,7 +689,7 @@ async function buildStyleFreezePreview(input: {
         apiMode: textConfig.provider.apiMode,
         timeoutMs: textConfig.provider.timeoutMs,
         temperature: 0.1,
-        maxTokens: 1200,
+        maxTokens: STYLE_FREEZE_ADVICE_MAX_TOKENS,
         messages: [
           { role: "system", content: freezePrompt.system },
           { role: "user", content: freezePrompt.user },
@@ -706,6 +734,7 @@ async function buildStyleFreezePreview(input: {
         : "如果现在冻结，将按当前样段冻结为全书统一写法合同。")
   const previewVerification = buildStyleGenerationVerification({
     evaluation: selected?.evaluation as StyleEvolutionEvaluation | undefined,
+    sample: sampleForExtraction,
     version: selected?.version,
     checkedAt: selected?.createdAt,
   })
@@ -752,6 +781,11 @@ async function runStyleEvolutionLoop(options: {
   maxIterations: number
   candidateCount: number
 }) {
+  const STYLE_EVALUATION_MAX_TOKENS = 2200
+  const STYLE_REFINEMENT_MAX_TOKENS = 2200
+  const STYLE_FREEZE_MAX_TOKENS = 1800
+  const STYLE_COMBINED_CRITIC_MAX_TOKENS = 2600
+  const STYLE_JSON_REPAIR_MAX_TOKENS = 2600
   let styleEvolution = await loadStyleEvolution(options.projectRoot)
   const iterations = []
   const loopRuntime = createStyleLoopRuntimeRecord({
@@ -775,6 +809,38 @@ async function runStyleEvolutionLoop(options: {
   const approvalMinRounds = Math.max(1, Number(retryPolicy.approvalMinRounds || 2))
   const maxForbiddenHitCount = Math.max(0, Number(retryPolicy.maxForbiddenHitCount || 1))
   let stopReason = "max_iterations_reached"
+  const repairStyleJson = async (kind: "evaluation" | "refinement" | "freezer", rawText: string) => requestLlmTextCompletion({
+    baseUrl: options.textConfig.provider.baseUrl,
+    apiKey: options.apiKey,
+    modelName: options.textConfig.provider.modelName,
+    apiMode: options.textConfig.provider.apiMode,
+    timeoutMs: options.textConfig.provider.timeoutMs,
+    temperature: 0,
+    maxTokens: STYLE_JSON_REPAIR_MAX_TOKENS,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "你是 JSON 修复器。只输出严格 JSON，不要解释。",
+          "不得新增评价观点，只能把输入中已有的信息整理进指定结构。",
+          "如果缺少字段，用空数组、空字符串或保守默认值补齐。",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          `目标结构：${kind}`,
+          kind === "evaluation"
+            ? "输出形如 {\"evaluation\":{\"verdict\":\"candidate|approve|reject\",\"summary\":\"...\",\"scores\":{\"overall\":0},\"strengths\":[],\"deviations\":[],\"forbiddenHits\":[],\"nextFocus\":[]}}"
+            : kind === "refinement"
+              ? "输出形如 {\"refinement\":{\"summary\":\"...\",\"promptAdjustments\":[],\"contractAdjustments\":[],\"nextPrompt\":\"\"}}"
+              : "输出形如 {\"freezeVerdict\":\"ready|continue|block\",\"freezeSummary\":\"...\",\"blockingReasons\":[],\"contractAdjustments\":[],\"forbiddenPatterns\":[],\"positiveExamples\":[],\"inheritedRules\":[]}",
+          "待修复文本：",
+          rawText,
+        ].join("\n\n"),
+      },
+    ],
+  })
 
   for (let iteration = 0; iteration < options.maxIterations; iteration += 1) {
     const latest = Array.isArray(styleEvolution.contract.evolutionHistory)
@@ -880,19 +946,30 @@ async function runStyleEvolutionLoop(options: {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 900,
+          maxTokens: STYLE_EVALUATION_MAX_TOKENS,
           messages: [
             { role: "system", content: evaluationPrompt.system },
             { role: "user", content: evaluationPrompt.user },
           ],
         })
-        const parsedEvaluation = parseStyleEvolutionEvaluationFromText(rawEvaluation)
+        let parsedEvaluation = parseStyleEvolutionEvaluationFromText(rawEvaluation)
+        if (!parsedEvaluation) {
+          try {
+            parsedEvaluation = parseStyleEvolutionEvaluationFromText(await repairStyleJson("evaluation", rawEvaluation))
+          } catch (repairError) {
+            fallbackReasons.push(`evaluation_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360))
+          }
+        }
+        if (!parsedEvaluation) {
+          fallbackReasons.push(`evaluation_parse_failed: ${rawEvaluation.slice(0, 180).replace(/\s+/gu, " ")}`)
+        }
         if (parsedEvaluation) {
           evaluation = mergeStyleEvaluationWithAigc(parsedEvaluation.evaluation, aigcSignal)
         }
 
         const directApprovalVerification = buildStyleGenerationVerification({
           evaluation,
+          sample,
           checkedAt: new Date().toISOString(),
         })
         if (isStyleEvaluatorDirectApproval({
@@ -935,13 +1012,23 @@ async function runStyleEvolutionLoop(options: {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 1400,
+            maxTokens: STYLE_REFINEMENT_MAX_TOKENS,
             messages: [
               { role: "system", content: refinementPrompt.system },
               { role: "user", content: refinementPrompt.user },
             ],
           })
-          const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement)
+          let parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement)
+          if (!parsedRefinement) {
+            try {
+              parsedRefinement = parseStyleEvolutionRefinementFromText(await repairStyleJson("refinement", rawRefinement))
+            } catch (repairError) {
+              fallbackReasons.push(`refinement_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360))
+            }
+          }
+          if (!parsedRefinement) {
+            fallbackReasons.push(`refinement_parse_failed: ${rawRefinement.slice(0, 180).replace(/\s+/gu, " ")}`)
+          }
           if (parsedRefinement) {
             refinement = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal)
           }
@@ -964,13 +1051,23 @@ async function runStyleEvolutionLoop(options: {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 800,
+            maxTokens: STYLE_FREEZE_MAX_TOKENS,
             messages: [
               { role: "system", content: freezePrompt.system },
               { role: "user", content: freezePrompt.user },
             ],
           })
           freezeAdvice = parseStyleFreezeAdviceFromText(rawFreezeAdvice)
+          if (!freezeAdvice) {
+            try {
+              freezeAdvice = parseStyleFreezeAdviceFromText(await repairStyleJson("freezer", rawFreezeAdvice))
+            } catch (repairError) {
+              fallbackReasons.push(`freezer_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360))
+            }
+          }
+          if (!freezeAdvice) {
+            fallbackReasons.push(`freezer_parse_failed: ${rawFreezeAdvice.slice(0, 180).replace(/\s+/gu, " ")}`)
+          }
           if (freezeAdvice) {
             refinement = {
               ...refinement,
@@ -1003,7 +1100,7 @@ async function runStyleEvolutionLoop(options: {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 1000,
+            maxTokens: STYLE_COMBINED_CRITIC_MAX_TOKENS,
             messages: [
               { role: "system", content: critiquePrompt.system },
               { role: "user", content: critiquePrompt.user },
@@ -1023,6 +1120,7 @@ async function runStyleEvolutionLoop(options: {
       }
       const verification = buildStyleGenerationVerification({
         evaluation,
+        sample,
         checkedAt: new Date().toISOString(),
       })
       const freezer = buildStyleFreezerGateRecord(freezeAdvice, { evaluation, verification })
@@ -1450,6 +1548,10 @@ function isJsonApiRequest(method: string | undefined, pathname: string) {
       "/api/init",
       "/api/advance",
       "/api/production/story-assets/repair",
+      "/api/production/protagonist-profile/confirm",
+      "/api/production/setting-review/approve",
+      "/api/production/setting-review/reject",
+      "/api/production/story-foundation/approve",
       "/api/chapters/retry",
       "/api/cover",
       "/api/provider-test",
@@ -1709,19 +1811,63 @@ function toolMessageParts(messageId: string, input: {
   error?: unknown
   content?: string
   createdAt: string
+  metadata?: Record<string, unknown>
 }): MessagePart[] {
+  const metadata = input.metadata || {}
+  const artifactItems = [
+    typeof metadata.artifactPath === "string" && metadata.artifactPath.trim()
+      ? {
+          path: metadata.artifactPath.trim(),
+          label: typeof metadata.artifactLabel === "string" && metadata.artifactLabel.trim()
+            ? metadata.artifactLabel.trim()
+            : metadata.artifactPath.trim(),
+          kind: typeof metadata.artifactKind === "string" && metadata.artifactKind.trim()
+            ? metadata.artifactKind.trim()
+            : "artifact",
+          status: input.status,
+        }
+      : null,
+    ...(Array.isArray(metadata.artifacts) ? metadata.artifacts : []),
+  ]
+    .filter((artifact): artifact is Record<string, unknown> => Boolean(artifact) && typeof artifact === "object")
+    .map((artifact) => ({
+      path: typeof artifact.path === "string" ? artifact.path.trim() : "",
+      label: typeof artifact.label === "string" ? artifact.label.trim() : "",
+      kind: typeof artifact.kind === "string" ? artifact.kind.trim() : "artifact",
+      status: typeof artifact.status === "string" ? artifact.status.trim() : input.status,
+      role: typeof artifact.role === "string" ? artifact.role.trim() : "",
+      chars: typeof artifact.chars === "number" ? artifact.chars : null,
+    }))
+    .filter((artifact, index, artifacts) =>
+      artifact.path
+      && artifacts.findIndex((candidate) => candidate.path === artifact.path) === index,
+    )
   const parts: MessagePart[] = [
     messagePart(messageId, 0, "markdown", { text: input.content || `${input.toolName}: ${input.status}` }, input.createdAt),
     messagePart(messageId, 1, "tool_call", {
       toolName: input.toolName,
       input: input.toolInput ?? null,
+      artifactPath: artifactItems[0]?.path || "",
+      artifacts: artifactItems,
     }, input.createdAt),
   ]
   parts.push(messagePart(messageId, 2, input.error ? "tool_result" : "tool_result", {
     status: input.status,
     output: input.output ?? null,
     error: input.error ?? null,
+    artifactPath: artifactItems[0]?.path || "",
+    artifacts: artifactItems,
   }, input.createdAt))
+  for (const artifact of artifactItems) {
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label || artifact.path,
+      kind: artifact.kind || "artifact",
+      status: artifact.status || input.status,
+      role: artifact.role || "",
+      chars: artifact.chars,
+    }, input.createdAt))
+  }
   return parts
 }
 
@@ -1762,6 +1908,7 @@ async function recordToolMessage(rootDir: string, input: {
     error: input.error,
     content: input.content,
     createdAt: message.createdAt,
+    metadata: input.metadata,
   }))).catch(() => undefined)
   return message
 }
@@ -1923,6 +2070,27 @@ async function writeWorkspaceText(rootDir: string, content: string, ...parts: st
   await fs.writeFile(targetPath, content, "utf8")
 }
 
+function extractConcreteProtagonistNameForRepair(source = "") {
+  const candidates = [
+    ...[...source.matchAll(/(?:Canonical Protagonist|核心主角|主角姓名)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\s*主角[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+  ].map((name) => String(name || "").trim())
+  return candidates.find((name) =>
+    /^[\u4e00-\u9fff·]{2,8}$/u.test(name)
+    && !/^(?:主角|主人公|待定|未命名|姓名|角色)$/u.test(name)
+  ) || ""
+}
+
+function extractVisibleMasterProtagonistNameForRepair(masterOutline = "") {
+  const characterSpineMatch = masterOutline.match(/##\s+Character Spine\b([\s\S]*?)(?:\n##\s+|\s*$)/u)
+  const stateLedgerMatch = masterOutline.match(/##\s+Character State Ledger Plan\b([\s\S]*?)(?:\n##\s+|\s*$)/u)
+  const source = [characterSpineMatch?.[1] || "", stateLedgerMatch?.[1] || ""].filter(Boolean).join("\n\n")
+  return extractConcreteProtagonistNameForRepair(source || masterOutline)
+}
+
 function getNovelWorkspacePaths(projectRoot: string): NovelWorkspacePaths {
   const workspaceDir = path.join(projectRoot, ".ai-novel")
   const styleDir = path.join(workspaceDir, "style")
@@ -1953,7 +2121,33 @@ function getNovelWorkspacePaths(projectRoot: string): NovelWorkspacePaths {
   }
 }
 
+const SETTING_REVIEW_APPROVAL_FILE = "setting-review-approval.json"
+const SETTING_REVIEW_FILE = "setting-freeze.md"
 const STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json"
+
+async function writeSettingReviewApproval(projectRoot: string, input: {
+  approved: boolean
+  reviewedBy?: string
+  note?: string
+  reason?: string
+}) {
+  const reviewedAt = new Date().toISOString()
+  const approval = {
+    version: 1,
+    status: input.approved ? "approved" : "rejected",
+    approved: input.approved,
+    reviewedAt,
+    reviewedBy: input.reviewedBy || "user",
+    note: input.note || (input.approved
+      ? "用户已确认当前 setting review packet 可作为后续主线规划的设定提案来源。"
+      : "用户拒绝当前 setting review packet；后续规划前必须先修正世界观、人物或主线假设。"),
+    rejectionReason: input.approved ? "" : input.reason || input.note || "用户拒绝当前 setting review packet。",
+    settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+    approvalScope: "setting_review",
+  }
+  await writeWorkspaceText(projectRoot, `${JSON.stringify(approval, null, 2)}\n`, "plans", SETTING_REVIEW_APPROVAL_FILE)
+  return approval
+}
 
 async function loadStoryFoundationApproval(projectRoot: string) {
   const approval = await readWorkspaceJson(projectRoot, "plans", STORY_FOUNDATION_APPROVAL_FILE)
@@ -1996,6 +2190,92 @@ async function writeStoryFoundationApproval(projectRoot: string, input: {
   }
   await writeWorkspaceText(projectRoot, `${JSON.stringify(approval, null, 2)}\n`, "plans", STORY_FOUNDATION_APPROVAL_FILE)
   return approval
+}
+
+function readProfileField(body: Record<string, unknown>, key: string, aliases: string[] = []) {
+  const source = body.protagonistProfile && typeof body.protagonistProfile === "object" && !Array.isArray(body.protagonistProfile)
+    ? body.protagonistProfile as Record<string, unknown>
+    : body
+  for (const field of [key, ...aliases]) {
+    const value = source[field]
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ""
+}
+
+function buildConfirmedProtagonistProfile(body: Record<string, unknown>) {
+  const profile = {
+    name: readProfileField(body, "name", ["protagonistName", "canonicalName"]),
+    identity: readProfileField(body, "identity", ["identityAndRole", "role"]),
+    coreDesire: readProfileField(body, "coreDesire", ["desire"]),
+    fearOrWound: readProfileField(body, "fearOrWound", ["wound", "fear"]),
+    behaviorHabit: readProfileField(body, "behaviorHabit", ["habit"]),
+    speechMarker: readProfileField(body, "speechMarker", ["speech", "dialogueHabit"]),
+    relationshipName: readProfileField(body, "relationshipName", ["pressureCharacter", "namedRelationship"]),
+    relationshipPressure: readProfileField(body, "relationshipPressure", ["pressure"]),
+    note: readProfileField(body, "note", ["sourceNote"]),
+    confirmedBy: readProfileField(body, "confirmedBy", ["reviewedBy"]) || "user",
+  }
+  const requiredFields = [
+    "name",
+    "identity",
+    "coreDesire",
+    "fearOrWound",
+    "behaviorHabit",
+    "speechMarker",
+    "relationshipName",
+    "relationshipPressure",
+  ] as const
+  const missingFields = requiredFields.filter((field) => !profile[field])
+  return { profile, missingFields }
+}
+
+function formatConfirmedProtagonistProfileMarkdown(input: {
+  name: string
+  identity: string
+  coreDesire: string
+  fearOrWound: string
+  behaviorHabit: string
+  speechMarker: string
+  relationshipName: string
+  relationshipPressure: string
+  note?: string
+  confirmedBy?: string
+}) {
+  const confirmedAt = new Date().toISOString()
+  return [
+    "# Confirmed Protagonist Profile",
+    "",
+    "Status: confirmed",
+    `Confirmed At: ${confirmedAt}`,
+    `Confirmed By: ${input.confirmedBy || "user"}`,
+    "",
+    `Canonical Protagonist: ${input.name}`,
+    `核心主角: ${input.name}`,
+    `主角姓名: ${input.name}`,
+    "",
+    `#### ${input.name}（主角 / protagonist）`,
+    "",
+    `- id: protagonist`,
+    `- role: protagonist`,
+    `- aliases: ${input.name}、主角`,
+    `- identity and role: ${input.identity}`,
+    `- core desire: ${input.coreDesire}`,
+    `- fear or wound: ${input.fearOrWound}`,
+    `- contradiction: ${input.name} 必须在「${input.coreDesire}」和「${input.fearOrWound}」之间持续做选择。`,
+    `- behavior habits: ${input.behaviorHabit}`,
+    `- speech markers: ${input.speechMarker}`,
+    `- named relationship pressure: ${input.relationshipName} - ${input.relationshipPressure}`,
+    "",
+    "## Production Contract",
+    "",
+    "- Master planning must use this concrete protagonist and must not replace the name with a role label.",
+    "- Story foundation and chapter blueprints must preserve the named relationship pressure above.",
+    "- Drafting may add minor scene characters only when the blueprint or quality gate allows them.",
+    input.note ? ["", "## User Note", "", input.note].join("\n") : "",
+  ].filter(Boolean).join("\n")
 }
 
 async function syncCurrentContextPacketState(
@@ -4770,12 +5050,14 @@ async function stopInProcessAutopilotBeforeProjectDelete(projectRoot: string) {
 }
 
 async function buildProjectSummary(rootDir: string, project: any): Promise<any> {
-  let dbSnapshot: any = null
-  try {
-    dbSnapshot = await withFactoryDb(rootDir, async (db) => db.getSnapshot(project.id)).catch(() => null)
-  } catch (e) {}
+  // 轻量路径：列表/刷新场景不需要 getSnapshot 的全量构建（artifacts/memory/graph 等）。
+  // 先取轻量摘要 + state_json 的 runtime/plan 摘要字段，仅在必要时回退到 getSnapshot。
+  const summaryMeta = await withFactoryDb(rootDir, async (db) => db.getProjectSummaryMeta(project.id)).catch(() => null)
 
-  const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null)
+  // state 从磁盘加载（避免 getSnapshot 读 2.75MB 的 state_json 全量解析）；
+  // tryLoadState 只解析需要的浅层字段。列表页不需要完整 state 对象。
+  const state = await tryLoadState(project.projectRoot).catch(() => null)
+  const dbSnapshot: any = null
   if (!state) {
     const projectRuntime = deriveProjectRuntimeState({
       state: null,
@@ -4800,46 +5082,28 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
   }
 
   const tasks: any[] = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : []
-  const chapterFacts: any[] = Array.isArray(dbSnapshot?.chapterFacts) ? dbSnapshot.chapterFacts : []
   const totalChapters = Number(state.plan?.totalChapters || project.totalChapters || tasks.length || 0)
 
-  const passedChapters = chapterFacts.length > 0
-    ? chapterFacts.filter((fact: any) => fact.status === "complete").length
-    : tasks.filter((task: any) => task.status === "complete").length
-
-  let contiguousCompletedChapters = 0
-  if (chapterFacts.length > 0) {
-    const factsByChapter = new Map(chapterFacts.map((fact: any) => [Number(fact.chapterNumber), fact]))
-    for (let ch = 1; ch <= totalChapters; ch += 1) {
-      const factRecord = factsByChapter.get(ch) as any
-      if (factRecord?.status !== "complete") break
-      contiguousCompletedChapters += 1
+  // 章节统计：优先用 DB 轻量摘要（实况），回退到 state.plan.chapterTasks。
+  const statusCount = (st: string): number => {
+    if (summaryMeta) {
+      const hit = summaryMeta.chapterStatusCounts.find((row: any) => row.status === st)
+      if (hit) return Number(hit.n)
+      return 0
     }
-  } else {
-    for (const task of tasks) {
-      if (task.status !== "complete") break
-      contiguousCompletedChapters += 1
-    }
+    return tasks.filter((task: any) => task.status === st).length
   }
-  const completedChapters = Math.min(passedChapters, contiguousCompletedChapters)
-
-  const inProgressChapters = chapterFacts.length > 0
-    ? chapterFacts.filter((fact: any) => fact.status === "in_progress").length
-    : tasks.filter((task: any) => task.status === "in_progress").length
-
-  const blockedChapters = chapterFacts.length > 0
-    ? chapterFacts.filter((fact: any) => fact.status === "blocked").length
-    : tasks.filter((task: any) => task.status === "blocked").length
-
+  const completedChapters = statusCount("complete")
+  const inProgressChapters = statusCount("in_progress")
+  const blockedChapters = statusCount("blocked")
   const pendingChapters = Math.max(0, totalChapters - completedChapters - inProgressChapters - blockedChapters)
   const progressPercent = totalChapters > 0
     ? Math.max(0, Math.min(100, Math.round((completedChapters / totalChapters) * 100)))
     : 0
 
-  const activeJobs = Array.isArray(dbSnapshot?.activeJobs) ? dbSnapshot.activeJobs.length : 0
-  const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0
+  const activeJobs = summaryMeta?.activeJobs || 0
+  const runnableJobs = summaryMeta?.runnableJobs || 0
 
-  const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null
   const projectRuntime = deriveProjectRuntimeState({
     state,
     factorySnapshot: dbSnapshot,
@@ -4847,7 +5111,7 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
   const progress = projectRuntime.chapterProgress
 
   return {
-    source: dbSnapshot ? "db" : "state",
+    source: summaryMeta ? "db" : "state",
     stage: projectRuntime.workflowStage,
     progressPercent: progress.progressPercent || progressPercent,
     totalChapters: progress.totalChapters || totalChapters,
@@ -4857,8 +5121,8 @@ async function buildProjectSummary(rootDir: string, project: any): Promise<any> 
     blockedChapters: progress.blockedChapters,
     activeJobs,
     runnableJobs,
-    latestEventType: latestEvent?.type || "",
-    latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
+    latestEventType: summaryMeta?.latestEventType || "",
+    latestEventAt: summaryMeta?.latestEventAt || "",
     updatedAt: state.runtime?.lastUpdatedAt || new Date().toISOString(),
     projectRuntime,
     coverStatus: state.assets?.cover?.status || "pending",
@@ -5406,6 +5670,7 @@ export async function handleNovelStudioApi(
     })
     const verification = buildStyleGenerationVerification({
       evaluation,
+      sample,
       checkedAt: new Date().toISOString(),
     })
     const freezer = buildStyleFreezerGateRecord(null, { evaluation, verification })
@@ -5419,6 +5684,30 @@ export async function handleNovelStudioApi(
       source: "manual",
     })
     const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+    const latest = Array.isArray(styleEvolution.contract.evolutionHistory)
+      ? styleEvolution.contract.evolutionHistory.at(-1)
+      : null
+    await recordToolMessage(rootDir, {
+      projectId: context.projectId,
+      conversationId: "workflow-control",
+      toolName: "style-evolution.candidate",
+      status: "completed",
+      input: { source: "manual", sampleChars: sample.length },
+      output: {
+        version: latest?.version,
+        verificationStatus: latest?.verification?.status || styleEvolution.contract.verification?.status || "missing",
+        freezerVerdict: latest?.freezer?.verdict || "missing",
+        gateStatus: styleEvolution.gate.status,
+      },
+      content: `Style candidate v${latest?.version || "?"} recorded for review.`,
+      metadata: {
+        source: "api_style_evolution_candidate",
+        artifactPath: ".ai-novel/style/evolution/style-contract.json",
+        artifactLabel: "Style contract",
+        artifactKind: "style-contract",
+        artifacts: styleEvolutionArtifactItems(styleEvolutionAssets),
+      },
+    })
     return {
       status: 200,
       payload: {
@@ -5492,12 +5781,43 @@ export async function handleNovelStudioApi(
     const latestIteration = loopRun.iterations.at(-1)
     if (!latestIteration?.sample?.trim()) {
       const allBlocked = loopRun.stopReason === "style_candidates_all_blocked"
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        runId: loopRun.loopRuntime.runId,
+        toolName: "style-evolution.generate-candidate",
+        status: allBlocked ? "completed" : "failed",
+        input: {
+          loopIterations: resolveStyleLoopIterations(body.loopIterations, 1),
+          candidateCount: resolveStyleCandidateCount(body.candidateCount, 1),
+          userStylePrompt: userStylePrompt || styleEvolution.contract.userStylePrompt || "",
+        },
+        output: {
+          stopReason: loopRun.stopReason,
+          completedIterations: loopRun.iterations.length,
+          finalLoopStatus: loopRun.loopRuntime.finalLoopStatus,
+          finalConvergence: loopRun.loopRuntime.finalConvergence,
+        },
+        error: allBlocked ? undefined : "style_candidate_empty_response",
+        content: allBlocked
+          ? "Style Evolution generated candidates, but all were blocked by Generation Verification Gate. The blocked candidates and reasons are available in the loop runtime artifact."
+          : "Style Evolution did not return a usable candidate sample.",
+        metadata: {
+          source: "api_style_evolution_generate_candidate",
+          artifactPath: ".ai-novel/style/evolution/style-loop-runtime.json",
+          artifactLabel: "Style loop runtime",
+          artifactKind: "style-loop-runtime",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets),
+        },
+      })
       return {
-        status: allBlocked ? 409 : 502,
+        status: allBlocked ? 200 : 502,
         payload: {
           error: allBlocked ? "style_candidates_all_blocked" : "style_candidate_empty_response",
+          status: allBlocked ? "blocked" : "failed",
           reason: allBlocked
-            ? "本轮所有候选都未通过 Generation Verification Gate，系统没有把失败样段写入正式候选历史。请调整风格要求、禁忌或 AIGC 配置后重试。"
+            ? "本轮所有候选都未通过 Generation Verification Gate，系统没有把失败样段写入正式候选历史；可根据 loopRun.iterations 中的候选与原因继续重试。"
             : undefined,
           activeProjectId: context.projectId,
           projects: context.projects,
@@ -5523,13 +5843,50 @@ export async function handleNovelStudioApi(
         },
       }
     }
+    const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+    const latest = Array.isArray(styleEvolution.contract.evolutionHistory)
+      ? styleEvolution.contract.evolutionHistory.at(-1)
+      : null
+    await recordToolMessage(rootDir, {
+      projectId: context.projectId,
+      conversationId: "workflow-control",
+      runId: loopRun.loopRuntime.runId,
+      toolName: "style-evolution.generate-candidate",
+      status: "completed",
+      input: {
+        loopIterations: resolveStyleLoopIterations(body.loopIterations, 1),
+        candidateCount: resolveStyleCandidateCount(body.candidateCount, 1),
+        userStylePrompt: userStylePrompt || styleEvolution.contract.userStylePrompt || "",
+      },
+      output: {
+        version: styleEvolution.contract.evolutionHistory?.at(-1)?.version,
+        candidateIndex: latestIteration.candidates?.[0]?.candidateIndex
+          ? latestIteration.candidates.find((entry) => entry.sample === latestIteration.sample)?.candidateIndex
+          : 1,
+        stopReason: loopRun.stopReason,
+        completedIterations: loopRun.iterations.length,
+        finalLoopStatus: loopRun.loopRuntime.finalLoopStatus,
+        finalConvergence: loopRun.loopRuntime.finalConvergence,
+        verificationStatus: latest?.verification?.status || latestIteration.verification?.status || "missing",
+        freezerVerdict: latest?.freezer?.verdict || latestIteration.freezer?.verdict || "missing",
+        modelName: textConfig.provider.modelName,
+      },
+      content: `Style Evolution candidate v${latest?.version || "?"} generated: ${loopRun.stopReason}.`,
+      metadata: {
+        source: "api_style_evolution_generate_candidate",
+        artifactPath: ".ai-novel/style/evolution/style-contract.json",
+        artifactLabel: "Style contract",
+        artifactKind: "style-contract",
+        artifacts: styleEvolutionArtifactItems(styleEvolutionAssets),
+      },
+    })
     return {
       status: 200,
       payload: {
         activeProjectId: context.projectId,
         projects: context.projects,
         styleEvolution,
-        styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+        styleEvolutionAssets,
         generatedCandidate: {
           prompt: latestIteration.prompt,
           sample: latestIteration.sample,
@@ -5601,13 +5958,36 @@ export async function handleNovelStudioApi(
         antiPatterns,
       })
       const styleEvolution = await loadStyleEvolution(context.projectRoot)
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.freeze-preview",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : undefined },
+        output: {
+          version: freezePreview.version,
+          contractExtractionSource: freezePreview.contractExtractionSource,
+          freezeAdviceSource: freezePreview.freezeAdviceSource,
+          llmFallbackUsed: freezePreview.llmFallbackUsed,
+          freezerVerdict: freezePreview.freezer?.verdict || "missing",
+        },
+        content: `Style freeze preview prepared for v${freezePreview.version || "?"}.`,
+        metadata: {
+          source: "api_style_evolution_freeze_preview",
+          artifactPath: ".ai-novel/style/evolution/style-contract.json",
+          artifactLabel: "Style contract",
+          artifactKind: "style-contract",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets),
+        },
+      })
       return {
         status: 200,
         payload: {
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           freezePreview,
           envStatus: getPublicProjectEnvStatus(rootDir),
         },
@@ -5693,7 +6073,36 @@ export async function handleNovelStudioApi(
         freezeSummary: freezePreview?.freezeSummary,
         positiveExamples: freezePreview?.positiveExamples,
         inheritedRules: freezePreview?.inheritedRules,
-        freezer: freezePreview?.freezer,
+        // 冻结预审在 approve 阶段仅作参考：候选已通过循环 ready 判定并被用户 accept，
+        // 预审的 continue 不应再否决用户确认（否则启发式评分低于阈值时 approve 会永久卡死），
+        // 回落到 undefined 让 approveStyleEvolutionSample 沿用候选自身的 ready 评审记录。
+        freezer: freezePreview?.freezer?.verdict === "ready" ? freezePreview.freezer : undefined,
+      })
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.approve",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : undefined },
+        output: {
+          version: styleEvolution.contract.approval?.approvedVersion || version,
+          approvalStatus: styleEvolution.contract.approval?.status || "missing",
+          gateStatus: styleEvolution.gate.status,
+          canProceed: styleEvolution.gate.canProceed,
+          contractExtractionSource: styleFreezeApproval.contractExtractionSource,
+          freezeAdviceSource: styleFreezeApproval.freezeAdviceSource,
+          llmFallbackUsed: styleFreezeApproval.llmFallbackUsed,
+          fallbackReasons: styleFreezeApproval.fallbackReasons,
+        },
+        content: `Style contract approved and frozen at v${styleEvolution.contract.approval?.approvedVersion || version || "?"}.`,
+        metadata: {
+          source: "api_style_evolution_approve",
+          artifactPath: ".ai-novel/style/evolution/user-approved-sample.md",
+          artifactLabel: "User approved sample",
+          artifactKind: "style-approved-sample",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets, { includeApprovedSample: true }),
+        },
       })
       return {
         status: 200,
@@ -5701,7 +6110,7 @@ export async function handleNovelStudioApi(
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           freezePreview,
           styleFreezeApproval,
           envStatus: getPublicProjectEnvStatus(rootDir),
@@ -5735,13 +6144,35 @@ export async function handleNovelStudioApi(
         version: Number.isFinite(version) ? version : undefined,
         acceptedAt: typeof body.acceptedAt === "string" ? body.acceptedAt : undefined,
       })
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot)
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.accept",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : undefined },
+        output: {
+          version: styleEvolution.contract.approval?.approvedVersion || version,
+          approvalStatus: styleEvolution.contract.approval?.status || "missing",
+          gateStatus: styleEvolution.gate.status,
+          canProceed: styleEvolution.gate.canProceed,
+        },
+        content: `Style candidate v${version || "?"} accepted for freeze review.`,
+        metadata: {
+          source: "api_style_evolution_accept",
+          artifactPath: ".ai-novel/style/evolution/style-freeze-ledger.json",
+          artifactLabel: "Style freeze ledger",
+          artifactKind: "style-freeze-ledger",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets),
+        },
+      })
       return {
         status: 200,
         payload: {
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           envStatus: getPublicProjectEnvStatus(rootDir),
         },
       }
@@ -6147,15 +6578,33 @@ export async function handleNovelStudioApi(
       protagonist: await readWorkspaceText(context.projectRoot, "memory", "characters", "core", "protagonist.md"),
       style: await readWorkspaceText(context.projectRoot, "style", "profile.md"),
     }
-    const written = await writeProductionStoryBibleAssets(context.projectRoot, paths, state, storyContext, {
+    const existingMasterOutline = await readWorkspaceText(context.projectRoot, "plans", "master-outline.md")
+    const masterProtagonist = extractVisibleMasterProtagonistNameForRepair(existingMasterOutline)
+    const profileProtagonist = extractConcreteProtagonistNameForRepair(storyContext.protagonist)
+    const repairedMasterOutlinePaths: string[] = []
+    if (!masterProtagonist && profileProtagonist) {
+      await writeProductionMasterOutline(context.projectRoot, paths, state, storyContext, {
+        factoryRootDir: rootDir,
+        projectId: context.projectId,
+        preferDeterministicPlanning: true,
+      })
+      repairedMasterOutlinePaths.push(paths.masterOutlinePath)
+    }
+    const storyAssetPaths = await writeProductionStoryBibleAssets(context.projectRoot, paths, state, storyContext, {
       factoryRootDir: rootDir,
       projectId: context.projectId,
     })
+    const blueprintPaths = await writeAllDetailedChapterBlueprints(context.projectRoot, paths, state, storyContext, {
+      factoryRootDir: rootDir,
+      projectId: context.projectId,
+      preferDeterministicPlanning: true,
+    })
+    const written = [...repairedMasterOutlinePaths, ...storyAssetPaths, ...blueprintPaths]
     await recordStatusMessage(rootDir, {
       projectId: context.mode === "managed" ? context.projectId : null,
       conversationId: "workflow-control",
-      title: "故事基建已补齐",
-      content: "世界矩阵、主线架构、故事圣经、分卷策略、伏笔账本和人物关系资产已重新生成。",
+      title: "故事基建与章节蓝图已补齐",
+      content: "世界矩阵、主线架构、故事圣经、分卷策略、伏笔账本、人物关系资产和详细章节蓝图已重新生成。",
       metadata: {
         source: "api_story_assets_repair",
         written: written.map((item) => path.relative(context.projectRoot as string, item).replaceAll("\\", "/")),
@@ -6177,6 +6626,240 @@ export async function handleNovelStudioApi(
         activeProjectId: context.projectId,
         projects: context.projects,
         repairedStoryAssets: written.map((item) => `.ai-novel/${path.relative(path.join(context.projectRoot as string, ".ai-novel"), item).replaceAll("\\", "/")}`),
+        ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
+        envStatus: getPublicProjectEnvStatus(rootDir),
+      },
+    }
+  }
+
+  if (
+    method === "POST"
+    && requestPathname === "/api/production/protagonist-profile/confirm"
+  ) {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null))
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+    const snapshotState = context.projectId
+      ? await withFactoryDb(rootDir, async (db) => db.getSnapshot(context.projectId as string).state).catch(() => null)
+      : null
+    const fileState = await tryLoadState(context.projectRoot)
+    const state = snapshotState ?? fileState
+    if (!state) {
+      return { status: 404, payload: { error: "workspace_not_initialized", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+
+    const { profile, missingFields } = buildConfirmedProtagonistProfile(body)
+    if (missingFields.length) {
+      return {
+        status: 400,
+        payload: {
+          error: "protagonist_profile_incomplete",
+          missingFields,
+          requiredInput: "name, identity, coreDesire, fearOrWound, behaviorHabit, speechMarker, relationshipName, relationshipPressure",
+          artifactPath: ".ai-novel/memory/characters/core/protagonist.md",
+          projects: context.projects,
+          envStatus: getPublicProjectEnvStatus(rootDir),
+        },
+      }
+    }
+
+    const profileMarkdown = formatConfirmedProtagonistProfileMarkdown(profile)
+    const profilePath = ".ai-novel/memory/characters/core/protagonist.md"
+    await writeWorkspaceText(context.projectRoot, `${profileMarkdown}\n`, "memory", "characters", "core", "protagonist.md")
+
+    state.runtime.statusMessage = `Protagonist profile confirmed for ${profile.name}. Master planning can now consume the locked profile.`
+    await saveAutonomousState(context.projectRoot, state)
+    if (context.mode === "managed" && context.projectId) {
+      await syncManagedProjectState(rootDir, context.projectId, state).catch(() => undefined)
+      await withFactoryDb(rootDir, async (db) => {
+        db.recordArtifact({
+          projectId: context.projectId as string,
+          kind: "memory",
+          path: profilePath,
+          status: "completed",
+          metadata: {
+            production: true,
+            stage: "protagonist_profile_confirmed",
+            source: "api_protagonist_profile_confirm",
+            protagonistName: profile.name,
+            relationshipName: profile.relationshipName,
+          },
+        })
+      }).catch(() => undefined)
+    }
+    await recordUserMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      content: [
+        `请冻结主角资料：主角姓名是「${profile.name}」。`,
+        `身份是「${profile.identity}」。`,
+        `核心欲望是「${profile.coreDesire}」。`,
+        `伤口/恐惧是「${profile.fearOrWound}」。`,
+        `行为习惯是「${profile.behaviorHabit}」。`,
+        `说话方式是「${profile.speechMarker}」。`,
+        `与「${profile.relationshipName}」的关系压力是「${profile.relationshipPressure}」。`,
+      ].join("\n"),
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath,
+      },
+    })
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: "主角资料已确认",
+      content: `主角「${profile.name}」的身份、欲望、伤口、行为习惯、说话方式和具名关系压力已写入角色核心档案；主线规划可以继续消费这个锁定档案。`,
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath,
+        protagonistName: profile.name,
+      },
+    })
+    await recordToolMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      toolName: "protagonist-profile.confirm",
+      status: "completed",
+      input: { projectId: context.projectId, protagonistName: profile.name },
+      output: {
+        protagonistName: profile.name,
+        artifactPath: profilePath,
+        relationshipName: profile.relationshipName,
+      },
+      content: "主角核心档案已写入生产记忆文件，并作为可预览 artifact 进入会话时间线。",
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath,
+        artifactKind: "character-profile",
+        artifactLabel: "protagonist.md",
+      },
+    })
+
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        protagonistProfile: {
+          ...profile,
+          path: profilePath,
+        },
+        ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
+        envStatus: getPublicProjectEnvStatus(rootDir),
+      },
+    }
+  }
+
+  if (
+    method === "POST"
+    && (requestPathname === "/api/production/setting-review/approve" || requestPathname === "/api/production/setting-review/reject")
+  ) {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null))
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+    const state = await tryLoadState(context.projectRoot)
+    if (!state) {
+      return { status: 404, payload: { error: "workspace_not_initialized", projects: context.projects, envStatus: getPublicProjectEnvStatus(rootDir) } }
+    }
+    const settingReviewText = await readWorkspaceText(context.projectRoot, "plans", SETTING_REVIEW_FILE)
+    if (!settingReviewText.trim()) {
+      return {
+        status: 409,
+        payload: {
+          error: "setting_review_missing",
+          message: "Setting review packet is missing. Run worldbuilding advance before approving or rejecting setting review.",
+          projects: context.projects,
+          envStatus: getPublicProjectEnvStatus(rootDir),
+        },
+      }
+    }
+
+    const approved = requestPathname.endsWith("/approve")
+    const note = typeof body.note === "string" ? body.note.trim() : undefined
+    const reviewedBy = typeof body.reviewedBy === "string" ? body.reviewedBy.trim() : undefined
+    const reason = typeof body.reason === "string" ? body.reason.trim() : undefined
+    const approval = await writeSettingReviewApproval(context.projectRoot, {
+      approved,
+      reviewedBy,
+      note,
+      reason,
+    })
+    if (context.mode === "managed" && context.projectId) {
+      await withFactoryDb(rootDir, async (db) => {
+        db.recordArtifact({
+          projectId: context.projectId as string,
+          kind: "plan",
+          path: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+          status: "completed",
+          metadata: {
+            production: true,
+            stage: "setting_review",
+            reviewStatus: approval.status,
+            approved: approval.approved,
+            settingReviewPath: approval.settingReviewPath,
+          },
+        })
+      }).catch(() => undefined)
+    }
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: approved ? "设定评审已确认" : "设定评审已退回",
+      content: approved
+        ? "用户已确认当前设定评审包；后续主线规划可以把它作为已审阅的提案来源。"
+        : "用户已退回当前设定评审包；继续规划前需要修正世界观、人物或主线假设。",
+      metadata: {
+        source: approved ? "api_setting_review_approve" : "api_setting_review_reject",
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+        reviewedAt: approval.reviewedAt,
+        reviewStatus: approval.status,
+      },
+    })
+    await recordToolMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      toolName: approved ? "setting-review.approve" : "setting-review.reject",
+      status: "completed",
+      input: { projectId: context.projectId, note, reason },
+      output: {
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+        reviewedAt: approval.reviewedAt,
+        reviewStatus: approval.status,
+      },
+      content: approved
+        ? "设定评审用户确认已写入生产审批文件。"
+        : "设定评审退回原因已写入生产审批文件。",
+      metadata: {
+        source: approved ? "api_setting_review_approve" : "api_setting_review_reject",
+        artifactPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        artifactKind: "setting-review-approval",
+        artifactLabel: "setting-review-approval.json",
+        artifacts: [
+          {
+            path: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+            label: "setting-review-approval.json",
+            kind: "setting-review-approval",
+            status: "completed",
+          },
+          {
+            path: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+            label: SETTING_REVIEW_FILE,
+            kind: "setting-review",
+            status: approval.status,
+          },
+        ],
+      },
+    })
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        settingReviewApproval: approval,
         ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
         envStatus: getPublicProjectEnvStatus(rootDir),
       },
@@ -7556,8 +8239,26 @@ export async function startNovelStudioServer(options: ServerOptions = {}) {
           job.listeners.add(listener)
         }
         let lastStreamSnapshotVersion = ""
+        let lastDirtyCheckAt = ""
         const writeSnapshot = async (options: { force?: boolean } = {}) => {
           if (response.writableEnded || response.destroyed || !response.writable) return
+          // 轻量脏标记探测：先查 projects.updated_at（走主键索引，<1ms），
+          // 只有项目更新时间变了，才重算昂贵的完整 snapshot。
+          // 这消除了"无活动时每 2s 仍全量重算 getSnapshot(3.9s)"的永久积压。
+          if (!options.force) {
+            const dirtyStamp = await withFactoryDb(rootDir, async (db) => {
+              return db.getProjectDirtyStamp(context.projectId as string)
+            }).catch(() => "")
+            if (dirtyStamp && dirtyStamp === lastDirtyCheckAt) {
+              if (!response.writableEnded && !response.destroyed && response.writable) {
+                try {
+                  response.write(`: snapshot unchanged ${new Date().toISOString()}\n\n`)
+                } catch {}
+              }
+              return
+            }
+            lastDirtyCheckAt = dirtyStamp
+          }
           const state = await tryLoadState(context.projectRoot as string)
           const snapshotPayload = {
             activeProjectId: context.projectId,

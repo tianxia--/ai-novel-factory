@@ -166,6 +166,37 @@ test("aigc detector normalizes a generic json detector response", async () => {
   }
 })
 
+test("aigc detector prefers aiProbability over human label confidence score", async () => {
+  const server = http.createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" })
+    response.end(JSON.stringify({
+      label: "人类",
+      score: 0.9737997651100159,
+      confidence: 0.9737997651100159,
+      aiProbability: 0.026200205087661743,
+      humanProbability: 0.9737997651100159,
+      model: "yuchuantian/AIGC_detector_zhv3short",
+    }))
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const { detectAigcText } = await loadCore()
+    const result = await detectAigcText("雨水沿着破瓦滴下来。", {
+      provider: "generic-json",
+      url: `${baseUrl}/detect`,
+      threshold: 0.8,
+    })
+
+    assert.equal(result.ok, true)
+    assert.equal(result.status, "human_likely")
+    assert.equal(result.score, 0.026200205087661743)
+    assert.equal(result.confidence, 0.9737997651100159)
+  } finally {
+    await close(server)
+  }
+})
+
 test("aigc detector splits long fiction text and reports risky segments", async () => {
   const requestedTexts = []
   const server = http.createServer(async (request, response) => {

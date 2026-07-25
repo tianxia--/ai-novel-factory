@@ -2794,6 +2794,12 @@ function renderWorkflow(model) {
           <button class="workflow-readiness-repair" type="button" data-repair-story-assets title="补齐故事基建资产">
             <i class="fa-solid fa-wand-magic-sparkles"></i>
           </button>
+          <button class="workflow-readiness-repair" type="button" data-approve-setting-review title="确认设定评审">
+            <i class="fa-solid fa-clipboard-check"></i>
+          </button>
+          <button class="workflow-readiness-repair" type="button" data-reject-setting-review title="退回设定评审">
+            <i class="fa-solid fa-rotate-left"></i>
+          </button>
           <button class="workflow-readiness-repair" type="button" data-approve-story-foundation title="确认故事基建">
             <i class="fa-solid fa-check"></i>
           </button>
@@ -9718,6 +9724,52 @@ async function approveStoryFoundation(button) {
   addLog("故事基建已确认，正文生产门禁会继续检查章节蓝图、Style Contract Freeze Gate 和记忆条件。")
 }
 
+async function submitSettingReview(action, button) {
+  if (!dashboardState.activeProjectId) {
+    addLog("请先选择一个小说项目。")
+    return
+  }
+  const isApprove = action === "approve"
+  const restoreIcon = isApprove ? "fa-clipboard-check" : "fa-rotate-left"
+  if (button) {
+    button.disabled = true
+    button.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`
+  }
+  addLog(isApprove ? "正在确认设定评审..." : "正在退回设定评审...")
+  let response
+  try {
+    response = await apiRequest(`/api/production/setting-review/${isApprove ? "approve" : "reject"}`, {
+      method: "POST",
+      body: {
+        projectId: dashboardState.activeProjectId,
+        ...(isApprove
+          ? { note: "用户已在工作台确认设定评审包。" }
+          : { reason: "用户从工作台退回设定评审包，需要继续补强世界观、人物或主线假设。" }),
+      },
+    })
+  } catch (error) {
+    addLog(`${isApprove ? "设定评审确认" : "设定评审退回"}失败：${networkErrorMessage(error)}。`)
+    if (button) {
+      button.disabled = false
+      button.innerHTML = `<i class="fa-solid ${restoreIcon}"></i>`
+    }
+    return
+  }
+  if (!response.ok) {
+    addLog(`${isApprove ? "设定评审确认" : "设定评审退回"}失败：${response.payload?.error || `HTTP ${response.status}`}。`)
+    if (button) {
+      button.disabled = false
+      button.innerHTML = `<i class="fa-solid ${restoreIcon}"></i>`
+    }
+    return
+  }
+  updateSnapshot(response.payload)
+  renderDashboard()
+  addLog(isApprove
+    ? "设定评审已确认，审批文件已写入会话时间线。"
+    : "设定评审已退回，退回记录已写入会话时间线。")
+}
+
 async function retryChapter(chapterNumber) {
   if (!dashboardState.activeProjectId) {
     addLog("请先选择一个小说项目。")
@@ -11109,6 +11161,16 @@ async function runComposerAction(action) {
     const repairButton = event.target.closest("[data-repair-story-assets]")
     if (repairButton) {
       repairStoryAssets(repairButton)
+      return
+    }
+    const approveSettingButton = event.target.closest("[data-approve-setting-review]")
+    if (approveSettingButton) {
+      submitSettingReview("approve", approveSettingButton)
+      return
+    }
+    const rejectSettingButton = event.target.closest("[data-reject-setting-review]")
+    if (rejectSettingButton) {
+      submitSettingReview("reject", rejectSettingButton)
       return
     }
     const approveButton = event.target.closest("[data-approve-story-foundation]")

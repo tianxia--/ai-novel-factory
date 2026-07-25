@@ -1,30 +1,24 @@
 import {
+  deriveProjectRuntimeState,
+  routeUserMessage
+} from "./chunk-ZEQLUYVF.js";
+import {
   createWorkerWorkspacePayload,
   getNovelAutopilotWorkerStatus,
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-XXAP2MOS.js";
-import {
-  deriveProjectRuntimeState,
-  routeUserMessage
-} from "./chunk-ZEQLUYVF.js";
+} from "./chunk-W2EYTL3W.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-M5VRL6NF.js";
+} from "./chunk-GJI2PIUA.js";
+import "./chunk-VOQWLW5S.js";
 import {
-  buildDirectorDiscussionMessage,
-  createFollowUpAdvanceCommand,
-  createManualAdvanceCommand,
-  createManualInterruptCommand,
-  createManualRetryChapterCommand,
-  decideNovelDirectorCommand,
-  isGenericAutopilotMessage,
-  shouldAdvanceBeforeDiscussion
-} from "./chunk-UIQAXZB3.js";
+  runMultiAgentDiscussion
+} from "./chunk-N2LAI6O4.js";
 import {
   advanceAutonomousProject,
   buildInitialSuperGraph,
@@ -49,7 +43,6 @@ import {
   resolveProjectEnvWritePath,
   retryChapterProduction,
   reviewInterruption,
-  runMultiAgentDiscussion,
   saveAutonomousState,
   saveSuperGraph,
   superGraphFromDbRows,
@@ -58,8 +51,9 @@ import {
   upsertDiscussionInSuperGraph,
   upsertProjectEnvValues,
   validateSuperGraph
-} from "./chunk-VZ57WIIL.js";
+} from "./chunk-EVOZRM5F.js";
 import {
+  ProductionPlanningBlockedError,
   ProductionReadinessBlockedError,
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -74,9 +68,11 @@ import {
   buildStyleEvolutionRefinementOnlyPrompt,
   buildStyleFreezeAdvicePrompt,
   buildStyleGenerationVerification,
+  commitChapterProductionStage,
   compactPreviousSegmentTail,
   createContinuityContract,
   createDetailedChapterBlueprint,
+  createDraftBody,
   createDraftBodyFromBlueprint,
   createDraftSegmentCompositionPlan,
   createDraftSegmentPlan,
@@ -94,10 +90,13 @@ import {
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateProductionReadiness,
+  evaluateSceneCardCharacterObligations,
   evaluateSemanticPreservation,
   evaluateStyleEvolutionCandidate,
   evaluateStyleEvolutionGate,
+  evaluateUnplannedCharacterDrift,
   evaluateWritingResourceUsage,
+  extractLlmUsageMetrics,
   formatApprovedWritingStylePrompt,
   generateAgentReply,
   getCachedActiveLlmConfig,
@@ -127,6 +126,7 @@ import {
   parseStyleFreezeAdviceFromText,
   persistStyleEvolutionRuntimeState,
   persistStyleLoopRuntime,
+  prepareChapterProductionInputs,
   rejectStyleEvolutionSample,
   repairAigcHighRiskDraft,
   requestLlmTextCompletion,
@@ -134,7 +134,10 @@ import {
   resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runAigcWritingDetection,
+  runChapterNaturalnessStage,
   runChapterProductionPipeline,
+  runQualityGateWithRevisions,
+  sanitizeKnownCastNames,
   setCachedActiveLlmConfig,
   skippedAigcWritingDetectionReport,
   testProviderConnectivity,
@@ -144,7 +147,8 @@ import {
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-JKZ4W4KL.js";
+} from "./chunk-PJFTMRLC.js";
+import "./chunk-ZWH2XUVC.js";
 import {
   createAigcDetectorClient,
   detectAigcSegments,
@@ -154,7 +158,8 @@ import {
   getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-QJPQANB5.js";
+} from "./chunk-5Z26A3S7.js";
+import "./chunk-DETBSEC6.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -165,11 +170,11 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-E4OGC67J.js";
+} from "./chunk-YV6Y5W7F.js";
 import {
   backfillPendingMemoryEmbeddings,
   createLocalTextEmbedding
-} from "./chunk-4A6LNSPI.js";
+} from "./chunk-YFTWM6FA.js";
 import {
   FactoryDb,
   evaluateChapterConsistency,
@@ -180,7 +185,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-JD3MNOTZ.js";
+} from "./chunk-CJRUVXRQ.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,
@@ -193,8 +198,19 @@ import {
   createToolMessage,
   createUserMessage
 } from "./chunk-GZKJNHMN.js";
+import {
+  buildDirectorDiscussionMessage,
+  createFollowUpAdvanceCommand,
+  createManualAdvanceCommand,
+  createManualInterruptCommand,
+  createManualRetryChapterCommand,
+  decideNovelDirectorCommand,
+  isGenericAutopilotMessage,
+  shouldAdvanceBeforeDiscussion
+} from "./chunk-UIQAXZB3.js";
 export {
   FactoryDb,
+  ProductionPlanningBlockedError,
   ProductionReadinessBlockedError,
   acceptStyleEvolutionCandidate,
   advanceAutonomousProject,
@@ -218,6 +234,7 @@ export {
   buildStyleGenerationVerification,
   buildSuperGraphIndex,
   chunkKnowledgeContent,
+  commitChapterProductionStage,
   compactPreviousSegmentTail,
   createAgentMessage,
   createAigcDetectorClient,
@@ -225,6 +242,7 @@ export {
   createBaseMessage,
   createContinuityContract,
   createDetailedChapterBlueprint,
+  createDraftBody,
   createDraftBodyFromBlueprint,
   createDraftSegmentCompositionPlan,
   createDraftSegmentPlan,
@@ -262,14 +280,17 @@ export {
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
   evaluateProductionReadiness,
+  evaluateSceneCardCharacterObligations,
   evaluateSemanticPreservation,
   evaluateStyleEvolutionCandidate,
   evaluateStyleEvolutionGate,
+  evaluateUnplannedCharacterDrift,
   evaluateWritingResourceUsage,
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   extractChinesePersonNames,
+  extractLlmUsageMetrics,
   formatApprovedWritingStylePrompt,
   formatKnowledgeForPrompt,
   formatStatus,
@@ -325,6 +346,7 @@ export {
   parseStyleFreezeAdviceFromText,
   persistStyleEvolutionRuntimeState,
   persistStyleLoopRuntime,
+  prepareChapterProductionInputs,
   prepareCoverGeneration,
   readProjectEnv,
   recordDirectorCommandEvent,
@@ -341,10 +363,13 @@ export {
   reviewInterruption,
   routeUserMessage,
   runAigcWritingDetection,
+  runChapterNaturalnessStage,
   runChapterProductionPipeline,
   runMultiAgentDiscussion,
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
+  runQualityGateWithRevisions,
+  sanitizeKnownCastNames,
   saveAutonomousState,
   saveSuperGraph,
   setCachedActiveLlmConfig,

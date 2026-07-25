@@ -6,7 +6,7 @@ import { saveAutonomousState } from "./orchestrator"
 import { upsertDiscussionInSuperGraph } from "./super-graph"
 import { FactoryDb, makeAgentTurnId, makeRunId, targetToArtifactKind } from "./factory-db"
 import { createLocalTextEmbedding } from "./embedding"
-import { createAgentMessage, type MessagePart } from "./messages"
+import { createAgentMessage, createArtifactMessage, type MessagePart } from "./messages"
 import type { AutonomousNovelState, CharacterDossier } from "./cli-types"
 import { throwIfStopped } from "./abort"
 import { formatKnowledgeForPrompt, retrieveKnowledge } from "./knowledge"
@@ -112,6 +112,43 @@ function summarizeDossiersForContext(dossiers: CharacterDossier[] = [], limit = 
   ].join("\n")).join("\n")
 }
 
+function extractDiscussionField(source: string, labels: string[]) {
+  const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")
+  const match = source.match(new RegExp(`(?:${labelPattern})\\s*(?:是|为|:|：)?\\s*[「“"]?([^，。；;\\n」”"]{2,80})`, "u"))
+  return match?.[1]?.trim() || ""
+}
+
+function extractConfirmedProtagonistDetails(message: string) {
+  const namePatterns = [
+    /主角(?:姓名|名字)?\s*(?:冻结|确定|定为|设为|叫|是|为|:|：)?\s*(?:为|成|:|：)?\s*[「“"]?([\u4e00-\u9fff·]{2,8})/u,
+    /(?:Canonical Protagonist|核心主角|主角姓名)[:：]\s*([\u4e00-\u9fff·]{2,8})/u,
+  ]
+  const rawName = namePatterns.map((pattern) => message.match(pattern)?.[1] || "").find(Boolean) || ""
+  const name = /^(?:姓名|名字|冻结|确定|待定|未命名|主角|角色)$/u.test(rawName) ? "" : rawName
+  if (!name) return null
+  return {
+    name,
+    identity: extractDiscussionField(message, ["身份", "身份是", "角色功能", "职业"]),
+    desire: extractDiscussionField(message, ["核心欲望", "欲望", "目标"]),
+    wound: extractDiscussionField(message, ["伤口/恐惧", "伤口", "恐惧"]),
+    habit: extractDiscussionField(message, ["行为习惯", "习惯"]),
+    speech: extractDiscussionField(message, ["说话方式", "对白习惯", "语言习惯"]),
+    relationship: extractDiscussionField(message, ["关系压力", "关系"]),
+  }
+}
+
+function formatProtagonistLockSection(details: NonNullable<ReturnType<typeof extractConfirmedProtagonistDetails>>) {
+  return [
+    `Canonical Protagonist: ${details.name}`,
+    details.identity ? `- identity: ${details.identity}` : "",
+    details.desire ? `- core desire: ${details.desire}` : "",
+    details.wound ? `- fear or wound: ${details.wound}` : "",
+    details.habit ? `- behavior habit: ${details.habit}` : "",
+    details.speech ? `- speech marker: ${details.speech}` : "",
+    details.relationship ? `- relationship pressure: ${details.relationship}` : "",
+  ].filter(Boolean).join("\n")
+}
+
 function updateCharacterDossiersFromDiscussion(input: {
   dossiers: CharacterDossier[]
   targetKind: string
@@ -125,11 +162,23 @@ function updateCharacterDossiersFromDiscussion(input: {
   const updatedAt = new Date().toISOString()
   const evidence = `discussion ${input.runId}: ${input.message}`.slice(0, 240)
   const continuityNote = `discussion ${input.runId}: ${input.summary.replace(/\s+/g, " ").slice(0, 220)}`
+  const protagonistDetails = extractConfirmedProtagonistDetails(input.message)
   return input.dossiers.map((dossier) => {
     const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist"
     if (!isProtagonist) return dossier
+    const aliases = protagonistDetails?.name
+      ? appendUnique(dossier.aliases || [], protagonistDetails.name, 6)
+      : dossier.aliases
     return {
       ...dossier,
+      canonicalName: protagonistDetails?.name || dossier.canonicalName,
+      aliases,
+      identityAndRole: protagonistDetails?.identity || dossier.identityAndRole,
+      coreDesire: protagonistDetails?.desire || dossier.coreDesire,
+      fearOrWound: protagonistDetails?.wound || dossier.fearOrWound,
+      behaviorHabits: protagonistDetails?.habit ? appendUnique(dossier.behaviorHabits || [], protagonistDetails.habit, 6) : dossier.behaviorHabits,
+      speechMarkers: protagonistDetails?.speech ? appendUnique(dossier.speechMarkers || [], protagonistDetails.speech, 6) : dossier.speechMarkers,
+      relationshipState: protagonistDetails?.relationship || dossier.relationshipState,
       currentChapterDelta: `discussion: ${input.message}`,
       continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
       evidence: appendUnique(dossier.evidence, evidence),
@@ -247,6 +296,34 @@ function discussionMessageParts(messageId: string, input: {
       source: "discussion_agent_turn",
     }, input.createdAt),
   ]
+}
+
+function discussionArtifactMessageParts(messageId: string, input: {
+  content: string
+  artifacts: Array<{ path: string; label: string; kind: string; status?: string }>
+  target: DiscussionTarget
+  currentStage: AutonomousNovelState["runtime"]["stage"]
+  createdAt: string
+  source: string
+}): MessagePart[] {
+  const parts: MessagePart[] = [
+    messagePart(messageId, 0, "markdown", { text: input.content }, input.createdAt),
+  ]
+  for (const artifact of input.artifacts) {
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label,
+      kind: artifact.kind,
+      status: artifact.status || "completed",
+    }, input.createdAt))
+  }
+  parts.push(messagePart(messageId, parts.length, "json", {
+    target: input.target,
+    currentStage: input.currentStage,
+    source: input.source,
+    artifacts: input.artifacts,
+  }, input.createdAt))
+  return parts
 }
 
 async function writeDiscussionConsensusArchive(
@@ -968,6 +1045,22 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
     await fs.appendFile(discussionLogPath, `Stage Guard: blocked\nReason: ${stageGuard.reason}\n\n`)
     await saveAutonomousState(rootDir, state)
     if (factoryDb && options.projectId) {
+      const blockedAt = new Date().toISOString()
+      const blockedMessageId = `${runId}:discussion-stage-guard-blocked`
+      const blockedArtifacts = [
+        {
+          path: ".ai-novel/chat/discussion-log.md",
+          label: "discussion-log.md",
+          kind: "transcript",
+          status: "blocked",
+        },
+        {
+          path: ".ai-novel/context/current-context.md",
+          label: "current-context.md",
+          kind: "context",
+          status: "completed",
+        },
+      ]
       factoryDb.updateProjectState(options.projectId, state)
       factoryDb.recordArtifact({
         projectId: options.projectId,
@@ -984,6 +1077,46 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
         contextPacketPath,
         directorCommandId: options.directorCommandId ?? null,
       })
+      factoryDb.recordMessage(
+        createArtifactMessage({
+          messageId: blockedMessageId,
+          conversationId: runId,
+          projectId: options.projectId,
+          runId,
+          artifactPath: ".ai-novel/chat/discussion-log.md",
+          label: "讨论被阶段守卫拦截",
+          content: [
+            "### 讨论被阶段守卫拦截",
+            "",
+            `目标：${discussionTarget.label}`,
+            `原因：${stageGuard.reason}`,
+            "",
+            "本轮讨论没有写入生产共识；已保留讨论日志和上下文包，方便展开检查。",
+          ].join("\n"),
+          status: "completed",
+          time: blockedAt,
+          metadata: {
+            target: discussionTarget,
+            source: "discussion_stage_guard_blocked",
+            reason: stageGuard.reason,
+          },
+        }),
+        discussionArtifactMessageParts(blockedMessageId, {
+          content: [
+            "### 讨论被阶段守卫拦截",
+            "",
+            `目标：${discussionTarget.label}`,
+            `原因：${stageGuard.reason}`,
+            "",
+            "本轮讨论没有写入生产共识；已保留讨论日志和上下文包，方便展开检查。",
+          ].join("\n"),
+          artifacts: blockedArtifacts,
+          target: discussionTarget,
+          currentStage: state.runtime.stage,
+          createdAt: blockedAt,
+          source: "discussion_stage_guard_blocked",
+        }),
+      )
       factoryDb.updateRun(runId, "blocked", { error: stageGuard.reason })
     }
 
@@ -1009,7 +1142,11 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
 
   const updatedConsensus = buildCompactConsensus(state, guardedSummary)
   const currentProtagonist = await readText(protagonistPath)
-  const updatedProtagonist = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate)
+  const protagonistDetails = extractConfirmedProtagonistDetails(message)
+  const updatedProtagonistBase = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate)
+  const updatedProtagonist = protagonistDetails
+    ? appendSection(updatedProtagonistBase, "Canonical protagonist lock", formatProtagonistLockSection(protagonistDetails))
+    : updatedProtagonistBase
   const currentDossiers = state.memory?.characterDossiers?.length
     ? state.memory.characterDossiers
     : await readCharacterDossiers(characterDossiersPath)
@@ -1123,6 +1260,82 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
       consensusArchivePath: consensusArchive.relativePath,
       directorCommandId: options.directorCommandId ?? null,
     })
+    const writebackAt = new Date().toISOString()
+    const writebackMessageId = `${runId}:discussion-writeback`
+    const writebackArtifacts = [
+      {
+        path: consensusArchive.relativePath,
+        label: "discussion consensus archive",
+        kind: "consensus",
+        status: "completed",
+      },
+      {
+        path: ".ai-novel/prompts/global-consensus.md",
+        label: "global-consensus.md",
+        kind: "consensus",
+        status: "completed",
+      },
+      {
+        path: discussionTarget.assetPath,
+        label: discussionTarget.label,
+        kind: targetToArtifactKind(discussionTarget),
+        status: "completed",
+      },
+      {
+        path: ".ai-novel/chat/discussion-log.md",
+        label: "discussion-log.md",
+        kind: "transcript",
+        status: "completed",
+      },
+      {
+        path: ".ai-novel/context/current-context.md",
+        label: "current-context.md",
+        kind: "context",
+        status: "completed",
+      },
+      ...(updatedDossiers.length ? [{
+        path: ".ai-novel/memory/characters/dossiers.json",
+        label: "character dossiers",
+        kind: "memory",
+        status: "completed",
+      }] : []),
+    ]
+    const writebackContent = [
+      "### 讨论产物已写入",
+      "",
+      `目标：${discussionTarget.label}`,
+      `阶段：${state.runtime.stage}`,
+      "",
+      "本轮讨论已形成可审核产物，后续世界观、角色、主线和章节蓝图只能从这些文件继续消费。",
+      "",
+      ...writebackArtifacts.map((artifact) => `- ${artifact.label}: ${artifact.path}`),
+    ].join("\n")
+    factoryDb.recordMessage(
+      createArtifactMessage({
+        messageId: writebackMessageId,
+        conversationId: runId,
+        projectId: options.projectId,
+        runId,
+        artifactPath: consensusArchive.relativePath,
+        label: "讨论产物已写入",
+        content: writebackContent,
+        status: "completed",
+        time: writebackAt,
+        metadata: {
+          target: discussionTarget,
+          source: "discussion_writeback_artifacts",
+          artifactCount: writebackArtifacts.length,
+        },
+      }),
+      discussionArtifactMessageParts(writebackMessageId, {
+        content: writebackContent,
+        artifacts: writebackArtifacts,
+        target: discussionTarget,
+        currentStage: state.runtime.stage,
+        createdAt: writebackAt,
+        source: "discussion_writeback_artifacts",
+      }),
+    )
   }
 
   try {

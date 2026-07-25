@@ -75,6 +75,39 @@ function defaultWritingStatusText(payload = {}) {
   return ""
 }
 
+function workflowTraceText(payload = {}) {
+  const workflow = payload.workflow && typeof payload.workflow === "object" ? payload.workflow : {}
+  const llm = payload.llm && typeof payload.llm === "object" ? payload.llm : {}
+  const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : []
+  const tools = Array.isArray(payload.tools) ? payload.tools : []
+  const lines = []
+  if (workflow.kind || workflow.summary) {
+    lines.push(`流程节点：${workflow.summary || workflow.kind}`)
+  }
+  if (workflow.expandableArtifactPath) {
+    lines.push(`展开上下文：${workflow.expandableArtifactPath}`)
+  }
+  if (llm.roleName) {
+    const requestChars = llm.requestChars || ((llm.basePromptChars || 0) + (llm.dynamicPromptChars || 0) + (llm.messageChars || 0))
+    const bits = [
+      `角色 ${llm.roleName}`,
+      requestChars ? `请求约 ${requestChars} 字符` : "",
+      llm.responseChars ? `响应约 ${llm.responseChars} 字符` : "",
+      llm.streamedChars ? `已流式返回 ${llm.streamedChars} 字符` : "",
+      llm.temperature !== undefined ? `temperature=${llm.temperature}` : "",
+      llm.attempt ? `attempt=${llm.attempt}/${llm.maxAttempts || "?"}` : "",
+    ].filter(Boolean)
+    if (bits.length) lines.push(`LLM：${bits.join(" · ")}`)
+  }
+  if (artifacts.length) {
+    lines.push(`产物：${artifacts.slice(0, 6).map((artifact) => artifact.label || artifact.path).filter(Boolean).join("、")}`)
+  }
+  if (tools.length) {
+    lines.push(`工具调用：${tools.slice(0, 6).map((tool) => `${tool.toolName || "tool"}${tool.status ? `/${tool.status}` : ""}`).join("、")}`)
+  }
+  return lines.length ? `\n\n${lines.map((line) => `- ${line}`).join("\n")}` : ""
+}
+
 function messagePart(messageId, index, type, data = {}, createdAt = "") {
   return {
     id: `${messageId}:part:${index}`,
@@ -123,6 +156,10 @@ function writingProgressParts(messageId, payload = {}, content = "") {
       wordCount: payload.wordCount || null,
       qualityGate: payload.qualityGate || null,
       knowledgeReferences: payload.knowledgeReferences || [],
+      workflow: payload.workflow || null,
+      llm: payload.llm || null,
+      artifacts: payload.artifacts || [],
+      tools: payload.tools || [],
     }, createdAt),
   ]
 
@@ -132,6 +169,33 @@ function writingProgressParts(messageId, payload = {}, content = "") {
       label: payload.artifactLabel || (payload.chapterNumber ? `第 ${payload.chapterNumber} 章产物` : "写作产物"),
       kind: payload.artifactKind || "chapter",
       status: payload.status || "completed",
+    }, createdAt))
+  }
+
+  for (const artifact of Array.isArray(payload.artifacts) ? payload.artifacts : []) {
+    if (!artifact?.path || artifact.path === payload.artifactPath) continue
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label || artifact.path,
+      kind: artifact.kind || payload.artifactKind || "artifact",
+      status: artifact.status || payload.status || "completed",
+      role: artifact.role || "",
+      chars: artifact.chars || null,
+    }, createdAt))
+  }
+
+  for (const tool of Array.isArray(payload.tools) ? payload.tools : []) {
+    parts.push(messagePart(messageId, parts.length, "tool_call", {
+      toolName: tool.toolName || "tool",
+      input: tool.inputSummary || "",
+      artifactPath: tool.artifactPath || "",
+      status: tool.status || "completed",
+    }, createdAt))
+    parts.push(messagePart(messageId, parts.length, "tool_result", {
+      toolName: tool.toolName || "tool",
+      status: tool.status || "completed",
+      output: tool.outputSummary || "",
+      artifactPath: tool.artifactPath || "",
     }, createdAt))
   }
 
@@ -155,6 +219,7 @@ function writingProgressContent(payload = {}) {
     const body = String(payload.streamText || payload.preview || "").trim()
     const statusText = defaultWritingStatusText(payload)
     const statusDetail = String(payload.statusDetail || "").trim()
+    const workflowLine = workflowTraceText(payload)
     const metadata = []
     if (payload.wordCount) {
       metadata.push(`- 估算字数：${payload.wordCount}`)
@@ -168,6 +233,7 @@ function writingProgressContent(payload = {}) {
       payload.message || "模型正在输出正文。",
       statusText ? `\n状态：${statusText}` : "",
       statusDetail ? `\n${statusDetail}` : "",
+      workflowLine,
       knowledgeLine,
       body ? `\n${body}\n` : "",
       metadata.length ? `\n---\n${metadata.join("\n")}` : "",
@@ -181,11 +247,13 @@ function writingProgressContent(payload = {}) {
     ? `\n\n质量门禁：${payload.qualityGate.status}，${payload.qualityGate.score}/10。${payload.qualityGate.reason || ""}`
     : ""
   const wordLine = payload.wordCount ? `\n\n估算字数：${payload.wordCount}` : ""
+  const workflowLine = workflowTraceText(payload)
   return [
     `### ${chapterLabel} · ${payload.step || "progress"}${statusLabel}`,
     "",
     payload.message || "写作流水线状态更新。",
     artifactLine,
+    workflowLine,
     knowledgeLine,
     qualityLine,
     wordLine,

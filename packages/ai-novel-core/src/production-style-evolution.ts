@@ -220,6 +220,12 @@ export interface StyleEvolutionCandidatePrompt {
   prompt: string
 }
 
+function stripStyleSampleLengthInstructions(value = "") {
+  return value
+    .replace(/(?:字数|长度|篇幅|控制在|不少于|不低于|至少|最多|约)\s*[0-9０-９]{2,5}\s*(?:[-—~至到]\s*[0-9０-９]{2,5})?\s*(?:字|个中文字符|字符|tokens?|词)?/giu, "样段长度服从本轮当前约束")
+    .replace(/[0-9０-９]{2,5}\s*(?:[-—~至到]\s*[0-9０-９]{2,5})\s*(?:字|个中文字符|字符|tokens?|词)/giu, "本轮指定长度")
+}
+
 export interface StyleEvolutionEvaluationScores {
   narrativeVoice: number
   sentenceRhythm: number
@@ -397,6 +403,7 @@ function styleGenerationVerificationFromEntry(
   })
   return buildStyleGenerationVerification({
     evaluation: entry.evaluation as StyleEvolutionEvaluation | undefined,
+    sample: entry.sample,
     version: entry.version,
     checkedAt: entry.createdAt,
   })
@@ -689,10 +696,12 @@ export function normalizeStyleAigcSignal(
 
 export function buildStyleGenerationVerification(input: {
   evaluation?: StyleEvolutionEvaluation
+  sample?: string
   version?: number
   checkedAt?: string
 }): StyleGenerationVerification {
   const evaluation = input.evaluation
+  const sample = normalizeText(input.sample)
   const forbiddenHitCount = Array.isArray(evaluation?.forbiddenHits) ? evaluation.forbiddenHits.length : 0
   const aigc = evaluation?.aigc
   const reasons: string[] = []
@@ -715,8 +724,13 @@ export function buildStyleGenerationVerification(input: {
   if (aigc?.reason) {
     reasons.push(aigc.reason)
   }
+  if (sample && sample.length >= 40 && !/[。！？!?」』”’）)\]》】"']$/u.test(sample)) {
+    reasons.push("样段疑似被截断：末尾不是完整句读或闭合符号。")
+  }
 
-  if (aigc?.status === "blocked" || forbiddenHitCount > 0) {
+  if (reasons.some((reason) => reason.includes("样段疑似被截断"))) {
+    status = "blocked"
+  } else if (aigc?.status === "blocked" || forbiddenHitCount > 0) {
     status = "blocked"
   } else if (aigc?.status === "passed" && forbiddenHitCount === 0) {
     status = "passed"
@@ -729,7 +743,7 @@ export function buildStyleGenerationVerification(input: {
   const summary = status === "passed"
     ? "Generation Verification Gate 已通过，当前样段的 AIGC 风险与禁忌命中处于可放行范围。"
     : status === "blocked"
-      ? "Generation Verification Gate 阻塞，当前样段仍存在 AIGC 风险或禁忌命中，不能直接冻结。"
+      ? "Generation Verification Gate 阻塞，当前样段仍存在 AIGC 风险、禁忌命中或完整性问题，不能直接冻结。"
       : "Generation Verification Gate 等待当前轮评估完成。"
 
   return {
@@ -802,6 +816,7 @@ function latestGenerationVerification(
   if (latest?.evaluation) {
     return buildStyleGenerationVerification({
       evaluation: latest.evaluation as StyleEvolutionEvaluation,
+      sample: latest.sample,
       version: latest.version,
       checkedAt: latest.createdAt,
     })
@@ -826,6 +841,7 @@ function approvedGenerationVerification(
   if (approvedEntry?.evaluation) {
     return buildStyleGenerationVerification({
       evaluation: approvedEntry.evaluation as StyleEvolutionEvaluation,
+      sample: approvedEntry.sample,
       version: approvedEntry.version,
       checkedAt: approvedEntry.createdAt,
     })
@@ -945,6 +961,7 @@ function computeStableWindowState(input: {
     && stableWindow.every((entry) => {
       const verification = entry.verification || buildStyleGenerationVerification({
         evaluation: entry.evaluation as StyleEvolutionEvaluation | undefined,
+        sample: entry.sample,
         version: entry.version,
         checkedAt: entry.createdAt,
       })
@@ -2052,7 +2069,21 @@ export function parseStyleContractFromText(
     negativeExamples: coerceStringArray(payload.negativeExamples),
   }
 
-  if (!contract.voice || !contract.sentenceRhythm || contract.forbiddenPatterns.length === 0) {
+  const hasRuleEvidence = [
+    contract.dialogueRules,
+    contract.descriptionRules,
+    contract.emotionRules,
+    contract.pacingRules,
+    contract.povRules,
+    contract.openingRules,
+    contract.endingHookRules,
+    contract.allowedDevices,
+    contract.forbiddenPatterns,
+    contract.positiveExamples,
+    contract.negativeExamples,
+  ].some((items) => items.length > 0)
+
+  if (!contract.voice || !contract.sentenceRhythm || !hasRuleEvidence) {
     return null
   }
   return contract
@@ -2072,6 +2103,10 @@ export function buildStyleContractExtractionPrompt(input: StyleContractExtractio
       "JSON 字段必须包含：voice, sentenceRhythm, dialogueRules, descriptionRules, emotionRules, pacingRules, povRules, openingRules, endingHookRules, allowedDevices, forbiddenPatterns, positiveExamples, negativeExamples。",
       "除 voice 与 sentenceRhythm 为字符串外，其余字段必须是字符串数组。",
       "规则必须可操作，面向后续章节正文生成和质检。",
+      "voice 和 sentenceRhythm 各不超过 60 个中文字符。",
+      "每个数组最多 2 条，每条不超过 32 个中文字符。",
+      "positiveExamples 只能抽取极短片段或动作范式，不要整句复述样段。",
+      "negativeExamples 必须输出空数组，除非样段中真的出现禁忌写法。",
     ].join("\n"),
     user: [
       userStylePrompt ? `用户风格要求：\n${userStylePrompt.slice(0, 1200)}` : "",
@@ -2099,6 +2134,10 @@ export function buildStyleFreezeAdvicePrompt(input: StyleFreezeAdvicePromptInput
       "只输出 JSON 对象，不要输出 Markdown、解释或多余文本。",
       "JSON 字段必须包含：freezeVerdict, freezeSummary, blockingReasons, contractAdjustments, forbiddenPatterns, positiveExamples, inheritedRules。",
       "freezeVerdict 只能是 block / continue / ready；只有当前样段已经适合作为整本书后续章节写法底盘时才允许 ready。",
+      "判断对象是“写法合同是否稳定可继承”，不是下一场剧情是否已经写完。",
+      "如果评估分数已达冻结阈值、无禁忌命中、样段完整、人物习惯/对白/描写规则已经清晰可复用，应给 ready。",
+      "不要因为“还可以深化下一场关系、证据冲突、剧情内容、世界观信息”而继续；这些属于正文生产，不属于冻结阻塞。",
+      "只有存在写法漂移、样段不完整、禁忌命中、明显模板腔、角色声音不可继承时才给 continue 或 block。",
       "freezeSummary 必须是字符串，blockingReasons 和其余字段必须是字符串数组。",
       "blockingReasons 要说明为什么暂时不能冻结；ready 时可以为空数组。",
       "contractAdjustments 要说明 style contract 还应如何收紧。",
@@ -2273,12 +2312,13 @@ export function buildStyleEvolutionRefinementOnlyPrompt(input: {
 export function buildStyleEvolutionCandidatePrompt(input: StyleEvolutionCandidatePromptInput): StyleEvolutionCandidatePrompt {
   const projectTitle = normalizeText(input.projectTitle) || "Untitled Novel"
   const idea = normalizeText(input.idea) || "未填写核心创意"
-  const userStylePrompt = normalizeText(input.userStylePrompt) || "用户尚未补充风格要求。"
+  const userStylePrompt = stripStyleSampleLengthInstructions(normalizeText(input.userStylePrompt)) || "用户尚未补充风格要求。"
   const referenceText = normalizeText(input.referenceText)
   const seedProtocol = buildSeedPromptProtocol(input)
   const seedPrompt = normalizeText(input.seedPrompt)
   const priorSample = normalizeText(input.priorSample)
-  const iterationFeedback = normalizeText(input.iterationFeedback)
+  const iterationFeedback = stripStyleSampleLengthInstructions(normalizeText(input.iterationFeedback))
+  const styleGuidanceOnly = stripStyleSampleLengthInstructions(seedPrompt)
   const prompt = [
     `为《${projectTitle}》生成一版可供用户确认的小说写法样段。`,
     `核心创意：${idea}`,
@@ -2293,7 +2333,10 @@ export function buildStyleEvolutionCandidatePrompt(input: StyleEvolutionCandidat
     "你是 Style Evolution Engine 的 Candidate Generator，只负责生成一段可评估的正文样段。",
     "目标是帮助用户确认整本书的基础叙述声音、句式节奏、对白规则、描写密度和情绪留白。",
     "必须只输出小说正文样段，不要输出标题、解释、列表、计划、Markdown 或自我评价。",
-    "样段长度控制在 500-900 个中文字符。",
+    "样段长度控制在 500-700 个中文字符，宁可短而完整，不要长到被截断。",
+    "必须写成一个完整片段，最后一个字符必须是完整句读或闭合符号：。！？!?」』）)",
+    "最后一段必须完成一个动作收束和下一步行动，不得停在未完成短语、人物名、逗号、冒号、破折号或未闭合引号。",
+    "如果旧 prompt、参考文本或上一轮反馈出现不同字数要求，一律忽略旧字数，以本轮 500-700 个中文字符为准。",
     "必须有具体场景、人物动作、感官细节、关系压力和一个可追踪钩子。",
     "不要写系统提示、不要提到 prompt、不要总结创作意图。",
   ].join("\n")
@@ -2304,11 +2347,13 @@ export function buildStyleEvolutionCandidatePrompt(input: StyleEvolutionCandidat
     seedProtocol.referenceWorks.length ? `\n参考作品（借鉴声音、节奏和张力，不照抄情节与句子）：\n${seedProtocol.referenceWorks.join("\n")}` : "",
     seedProtocol.desiredVibes.length ? `\n目标气质：\n${seedProtocol.desiredVibes.join("\n")}` : "",
     seedProtocol.seedForbiddenPatterns.length ? `\n必须主动规避的写法禁忌：\n${seedProtocol.seedForbiddenPatterns.join("\n")}` : "",
-    seedPrompt ? `\n初始写法 prompt：\n${seedPrompt.slice(0, 1800)}` : "",
+    seedPrompt ? `\n旧写法 prompt（只继承风格、禁忌、关系/动作要求；忽略其中任何字数、篇幅或 tokens 要求）：\n${styleGuidanceOnly.slice(0, 1800)}` : "",
     referenceText ? `\n用户参考文本：\n${referenceText.slice(0, 1800)}` : "",
     priorSample ? `\n上一版候选样段：\n${priorSample.slice(0, 1200)}\n\n请在保留优点的基础上更接近用户要求。` : "",
     iterationFeedback ? `\n本轮必须响应的用户反馈：\n${iterationFeedback.slice(0, 1200)}` : "",
     "\n请特别注意：当前样段未来需要被提炼为 base writing prompt、style contract、forbidden patterns、positive examples 和 retry policy 的来源。",
+    "\n硬性输出边界：只写 500-700 个中文字符的完整小说正文样段；最多 6 个自然段；不得在逗号、冒号、破折号、未闭合引号、人物名或半句话处结束。",
+    "\n末尾要求：最后两句必须分别完成「当前场景收束」和「下一步行动」，最后一个字符必须是 。！？!?」』）) 之一。",
     "\n现在输出一段新的小说正文样段。",
   ]
 
@@ -2419,6 +2464,7 @@ export async function appendStyleEvolutionCandidate(
     fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
+      sample,
       version,
       checkedAt: createdAt,
     }),
@@ -2454,6 +2500,7 @@ export async function appendStyleEvolutionCandidate(
     fallbackReasons,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
+      sample,
       version,
       checkedAt: createdAt,
     }),
@@ -2471,6 +2518,7 @@ export async function appendStyleEvolutionCandidate(
       : currentContract.freezer,
     verification: buildStyleGenerationVerification({
       evaluation: input.evaluation,
+      sample,
       version,
       checkedAt: createdAt,
     }),

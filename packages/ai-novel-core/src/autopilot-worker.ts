@@ -23,6 +23,7 @@ import { recordDirectorCommandEvent, type DirectorCommandEventType } from "./dir
 import { createFollowUpAdvanceCommand, decideNovelDirectorCommand, isGenericAutopilotMessage, type NovelDirectorCommand } from "./novel-director"
 import { createAutopilotStopError, isAutopilotStopError, throwIfStopped } from "./abort"
 import type { MessageStatus } from "./messages"
+import { executeProductionAdvanceThroughKernel } from "./production-workflow"
 
 export interface AutopilotEvent {
   type: string
@@ -1017,7 +1018,15 @@ async function runAutopilotBackground(
           statusMessage: "当前阶段已有足够上下文，正在优先推进生产状态机。",
         }, autopilotStateStore(rootDir, projectId))
 
-        const advanced = await advanceAutonomousProject(projectRoot, {
+        const { state: advanced } = await executeProductionAdvanceThroughKernel({
+          rootDir: projectRoot,
+          factoryRootDir: rootDir,
+          projectId: projectId as string,
+          state: beforeDiscussion,
+          executionMode: "production",
+          externalRunId: directorCommand.id,
+          metadata: { directorCommandId: directorCommand.id, source: "autopilot-advance-first" },
+        }, () => advanceAutonomousProject(projectRoot, {
           factoryRootDir: rootDir,
           projectId,
           directorCommandId: directorCommand.id,
@@ -1026,7 +1035,7 @@ async function runAutopilotBackground(
           onProgress: async (event) => {
             emitAutopilotEvent(projectRoot, "writing_progress", event)
           },
-        })
+        }))
         const advanceCheckpoint = await writeAutopilotCheckpoint(projectRoot, advanced, `advance-${advanced.runtime.stage}`, {
           previousStage: beforeDiscussion.runtime.stage,
           advanceFirst: directorCommand.advanceFirst,
@@ -1238,7 +1247,15 @@ async function runAutopilotBackground(
         statusMessage: "讨论结论已写回，正在自动推进工作流。",
       }, autopilotStateStore(rootDir, projectId))
 
-      const advanced = await advanceAutonomousProject(projectRoot, {
+      const { state: advanced } = await executeProductionAdvanceThroughKernel({
+        rootDir: projectRoot,
+        factoryRootDir: rootDir,
+        projectId: projectId as string,
+        state: afterDiscussion,
+        executionMode: "production",
+        externalRunId: followUpAdvanceCommand.id,
+        metadata: { directorCommandId: followUpAdvanceCommand.id, source: "autopilot-after-discussion" },
+      }, () => advanceAutonomousProject(projectRoot, {
         factoryRootDir: rootDir,
         projectId,
         directorCommandId: followUpAdvanceCommand.id,
@@ -1247,7 +1264,7 @@ async function runAutopilotBackground(
         onProgress: async (event) => {
           emitAutopilotEvent(projectRoot, "writing_progress", event)
         },
-      })
+      }))
       const advanceCheckpoint = await writeAutopilotCheckpoint(projectRoot, advanced, `advance-${advanced.runtime.stage}`, {
         previousStage: afterDiscussion.runtime.stage,
         directorCommandId: followUpAdvanceCommand.id,

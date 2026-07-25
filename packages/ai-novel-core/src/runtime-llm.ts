@@ -12,6 +12,8 @@ interface AgentReplyOptions {
   discussionStage?: "opening_brief" | "specialist_turn" | "closing_synthesis"
   priorTranscript?: string
   onDelta?: (delta: string) => void | Promise<void>
+  onProviderActivity?: () => void | Promise<void>
+  onUsage?: (usage: LlmUsageMetrics) => void | Promise<void>
   discussionTarget?: {
     kind: string
     label: string
@@ -21,8 +23,10 @@ interface AgentReplyOptions {
   preferredLanguage?: "zh-CN" | "en-US"
   currentStage?: string
   stageInstruction?: string
+  responseMode?: "discussion" | "drafting" | "artifact"
   envRootDir?: string
   temperature?: number
+  providerOverride?: ProviderOverrideOptions
 }
 
 interface ProviderOverrideOptions {
@@ -30,6 +34,7 @@ interface ProviderOverrideOptions {
   apiKey?: string
   modelName?: string
   apiMode?: LlmApiMode
+  timeoutMs?: number
 }
 
 interface LlmTextMessage {
@@ -49,6 +54,18 @@ interface LlmTextCompletionOptions {
   maxTokens?: number
   signal?: AbortSignal
   onDelta?: (delta: string) => void | Promise<void>
+  onProviderActivity?: () => void | Promise<void>
+  onUsage?: (usage: LlmUsageMetrics) => void | Promise<void>
+}
+
+export interface LlmUsageMetrics {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cachedTokens: number
+  cacheMissTokens: number
+  reasoningTokens: number
+  cacheHitRate: number
 }
 
 const AUTONOMOUS_DISCUSSION_PROTOCOL = [
@@ -85,7 +102,9 @@ function extractTextContent(value: unknown): string {
     return ""
   }
   const record = value as Record<string, unknown>
-  const direct = [record.text, record.output_text, record.reasoning_content, record.content]
+  // 不读取 reasoning_content：推理模型（如 DeepSeek）的思维链不是正式回答，
+  // 拼接进正文会污染样章/章节文本；content 为空时应显式报错而不是回退到思维链。
+  const direct = [record.text, record.output_text, record.content]
     .map((item) => extractTextContent(item))
     .join("")
   if (direct) {
@@ -214,13 +233,73 @@ async function emitFakeReplyInChunks(reply: string, onDelta: NonNullable<AgentRe
   }
 }
 
+function finiteTokenCount(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : 0
+}
+
+export function extractLlmUsageMetrics(payload: unknown): LlmUsageMetrics | null {
+  if (!payload || typeof payload !== "object") return null
+  const record = payload as Record<string, unknown>
+  const response = record.response && typeof record.response === "object" && !Array.isArray(record.response)
+    ? record.response as Record<string, unknown>
+    : null
+  const usage = (record.usage && typeof record.usage === "object" && !Array.isArray(record.usage)
+    ? record.usage
+    : response?.usage && typeof response.usage === "object" && !Array.isArray(response.usage)
+      ? response.usage
+      : null) as Record<string, unknown> | null
+  if (!usage) return null
+  const promptDetails = usage.prompt_tokens_details && typeof usage.prompt_tokens_details === "object" && !Array.isArray(usage.prompt_tokens_details)
+    ? usage.prompt_tokens_details as Record<string, unknown>
+    : {}
+  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === "object" && !Array.isArray(usage.input_tokens_details)
+    ? usage.input_tokens_details as Record<string, unknown>
+    : {}
+  const completionDetails = usage.completion_tokens_details && typeof usage.completion_tokens_details === "object" && !Array.isArray(usage.completion_tokens_details)
+    ? usage.completion_tokens_details as Record<string, unknown>
+    : {}
+  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === "object" && !Array.isArray(usage.output_tokens_details)
+    ? usage.output_tokens_details as Record<string, unknown>
+    : {}
+  const promptTokens = finiteTokenCount(usage.prompt_tokens ?? usage.input_tokens)
+  const completionTokens = finiteTokenCount(usage.completion_tokens ?? usage.output_tokens)
+  const totalTokens = finiteTokenCount(usage.total_tokens) || promptTokens + completionTokens
+  const cachedTokens = finiteTokenCount(
+    promptDetails.cached_tokens
+      ?? inputDetails.cached_tokens
+      ?? usage.prompt_cache_hit_tokens
+      ?? usage.cache_read_input_tokens,
+  )
+  const explicitMissTokens = finiteTokenCount(usage.prompt_cache_miss_tokens ?? usage.cache_creation_input_tokens)
+  const cacheMissTokens = explicitMissTokens || Math.max(0, promptTokens - cachedTokens)
+  const reasoningTokens = finiteTokenCount(completionDetails.reasoning_tokens ?? outputDetails.reasoning_tokens)
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cachedTokens,
+    cacheMissTokens,
+    reasoningTokens,
+    cacheHitRate: promptTokens > 0 ? Number((cachedTokens / promptTokens).toFixed(4)) : 0,
+  }
+}
+
+async function reportLlmUsage(usage: LlmUsageMetrics | null, onUsage?: LlmTextCompletionOptions["onUsage"]) {
+  if (!usage) return
+  console.log(`[LLM CACHE] 输入 ${usage.promptTokens} tokens，命中 ${usage.cachedTokens}，未命中 ${usage.cacheMissTokens}，命中率 ${(usage.cacheHitRate * 100).toFixed(1)}%，推理 ${usage.reasoningTokens} tokens`)
+  await onUsage?.(usage)
+}
+
 async function streamOpenAiCompatibleResponse(
   response: Response,
   onDelta: NonNullable<AgentReplyOptions["onDelta"]>,
   options: {
     signal: AbortSignal
     markActivity: () => void
+    onProviderActivity?: LlmTextCompletionOptions["onProviderActivity"]
     requestStartTime?: number
+    onUsage?: LlmTextCompletionOptions["onUsage"]
   },
 ) {
   if (!response.body) {
@@ -236,6 +315,7 @@ async function streamOpenAiCompatibleResponse(
   let buffer = ""
   let content = ""
   let firstTokenReceived = false
+  let usageMetrics: LlmUsageMetrics | null = null
 
   const readNextChunk = async () => {
     if (options.signal.aborted) {
@@ -269,6 +349,7 @@ async function streamOpenAiCompatibleResponse(
       }
 
       options.markActivity()
+      await options.onProviderActivity?.()
       buffer += decoder.decode(value, { stream: true })
 
       while (buffer.includes("\n\n")) {
@@ -288,6 +369,7 @@ async function streamOpenAiCompatibleResponse(
           }
 
           const payload = JSON.parse(payloadText)
+          usageMetrics = extractLlmUsageMetrics(payload) || usageMetrics
           const delta = extractStreamingDelta(payload)
           if (!delta) {
             continue
@@ -311,6 +393,7 @@ async function streamOpenAiCompatibleResponse(
   const totalStreamTime = Date.now() - streamStartTime
   const totalRequestTime = Date.now() - baseTime
   console.log(`[LLM STREAM END] 数据流读取完成。流传输耗时: ${totalStreamTime}ms，从发起请求到完成总耗时: ${totalRequestTime}ms，接收字数: ${content.length}`)
+  await reportLlmUsage(usageMetrics, options.onUsage)
   console.log(`\n========== [LLM RESPONSE START] ==========\n${content.trim()}\n========== [LLM RESPONSE END] ==========\n`)
 
   return content.trim()
@@ -458,6 +541,7 @@ export async function requestLlmTextCompletion(options: LlmTextCompletionOptions
         model: options.modelName,
         temperature: selectedTemperature,
         stream: effectiveStream,
+        stream_options: effectiveStream ? { include_usage: true } : undefined,
         max_tokens: options.maxTokens,
         messages,
       }
@@ -483,14 +567,16 @@ export async function requestLlmTextCompletion(options: LlmTextCompletionOptions
     }
     markActivity()
 
-    if (effectiveStream && options.onDelta) {
+    if (effectiveStream) {
       return streamOpenAiCompatibleResponse(response, async (delta) => {
         markActivity()
         await options.onDelta?.(delta)
       }, {
         signal,
         markActivity,
+        onProviderActivity: options.onProviderActivity,
         requestStartTime,
+        onUsage: options.onUsage,
       })
     }
 
@@ -504,6 +590,7 @@ export async function requestLlmTextCompletion(options: LlmTextCompletionOptions
 
     const totalTime = Date.now() - requestStartTime
     console.log(`[LLM REQUEST END] 非流式请求完成。总耗时: ${totalTime}ms，返回内容长度: ${content.length}`)
+    await reportLlmUsage(extractLlmUsageMetrics(payload), options.onUsage)
     console.log(`\n========== [LLM RESPONSE START] ==========\n${content.trim()}\n========== [LLM RESPONSE END] ==========\n`)
 
     if (options.stream && options.onDelta && content) {
@@ -523,18 +610,38 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     return reply
   }
 
-  let config = await loadLlmConfigForCapability(options.envRootDir, "text")
-  const apiKey = config?._dbApiKey || ""
+  const override = options.providerOverride
+  const completeOverride = Boolean(
+    override?.baseUrl?.trim()
+    && override.apiKey?.trim()
+    && override.modelName?.trim(),
+  )
+  const config = completeOverride ? null : await loadLlmConfigForCapability(options.envRootDir, "text")
+  const baseUrl = override?.baseUrl?.trim() || config?.provider.baseUrl || ""
+  const apiKey = override?.apiKey?.trim() || config?._dbApiKey || ""
+  const modelName = override?.modelName?.trim() || config?.provider.modelName || ""
+  const apiMode = override?.apiMode || config?.provider.apiMode || "chat"
+  const timeoutMs = Number(override?.timeoutMs) > 0 ? Number(override?.timeoutMs) : (config?.provider.timeoutMs || 120000)
 
-  if (!config || !apiKey) {
+  if (!baseUrl || !apiKey || !modelName) {
     throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.")
   }
 
 
-  const isDrafting = options.currentStage === "drafting"
+  const responseMode = options.responseMode || (options.currentStage === "drafting" ? "drafting" : "discussion")
+  const isDrafting = responseMode === "drafting"
+  const isArtifact = responseMode === "artifact"
   const protocol = isDrafting
     ? "正文创作协议：你负责执行小说章节的初稿创作、质量返工或自然度润色，必须输出具体的文学正文，且严禁输出讨论过程或无关废话。"
-    : AUTONOMOUS_DISCUSSION_PROTOCOL
+    : isArtifact
+      ? [
+        "生产资产生成协议：",
+        "- 你负责生成当前请求指定的生产资产，而不是进行圆桌讨论。",
+        "- 严格遵守用户消息中的输出格式、章节数、字段和资产边界。",
+        "- 不要输出寒暄、角色自称、解释自己刚完成了什么、或对用户说话的开场白。",
+        "- 除非当前任务明确要求章节正文，否则不得输出正文内容。",
+      ].join("\n")
+      : AUTONOMOUS_DISCUSSION_PROTOCOL
 
   const systemBlocks: string[] = []
   if (isDrafting) {
@@ -561,36 +668,38 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     options.discussionTarget
       ? `Discussion target: ${options.discussionTarget.label}\nTarget kind: ${options.discussionTarget.kind}\nTarget asset: ${options.discussionTarget.assetPath}\nTarget instruction: ${options.discussionTarget.instruction}`
       : "",
-    "Response contract:\n" + [
-      "- 必须使用简体中文输出。",
-      isDrafting ? "- 必须按照章节格式要求输出章节正文内容。" : "- 给出实质性讨论内容，不能只说一句拒绝。",
-      isDrafting ? "- 必须遵循小说人物档案，保证人名与情节的连续性。" : "- 可以使用简短 markdown 小节与列表。",
-      "- 必须停留在当前 target 内。",
-      isDrafting ? "" : "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
-      isDrafting ? "" : "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
-      isDrafting ? "" : "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
-    ].filter(Boolean).join("\n"),
+	    "Response contract:\n" + [
+	      "- 必须使用简体中文输出。",
+	      isDrafting ? "- 必须按照章节格式要求输出章节正文内容。" : isArtifact ? "- 必须严格输出当前请求指定的生产资产。" : "- 给出实质性讨论内容，不能只说一句拒绝。",
+	      isDrafting ? "- 必须遵循小说人物档案，保证人名与情节的连续性。" : isArtifact ? "- 不要输出寒暄、对话式开场、元叙述或执行过程说明。" : "- 可以使用简短 markdown 小节与列表。",
+	      "- 必须停留在当前 target 内。",
+	      isDrafting ? "" : "- 除非明确进入 drafting 阶段，否则不能产出脱离阶段的章节正文。",
+	      isDrafting || isArtifact ? "" : "- Specialists 必须先给一个明确风险/批评/失败模式，再给建议。",
+	      isDrafting || isArtifact ? "" : "- Final synthesis 必须包含 `Final Consensus`、`Remaining Risk`、`Next Step`。",
+	    ].filter(Boolean).join("\n"),
     (!isDrafting && options.priorTranscript?.trim()) ? `Prior roundtable transcript:\n${options.priorTranscript.trim()}` : "",
   )
 
   const system = systemBlocks.filter(Boolean).join("\n\n")
 
-  const selectedTemperature = options.temperature !== undefined ? options.temperature : config.provider.temperature
+  const selectedTemperature = options.temperature !== undefined ? options.temperature : (config?.provider.temperature || 0.1)
   console.log(`\n========== [LLM SYSTEM PROMPT START] ==========\n${system}\n========== [LLM SYSTEM PROMPT END] ==========\n`)
   if (options.message) {
     console.log(`\n========== [LLM USER MESSAGE START] ==========\n${options.message}\n========== [LLM USER MESSAGE END] ==========\n`)
   }
 
   const content = await requestLlmTextCompletion({
-    baseUrl: config.provider.baseUrl,
+    baseUrl,
     apiKey,
-    modelName: config.provider.modelName,
-    apiMode: config.provider.apiMode,
-    timeoutMs: config.provider.timeoutMs,
+    modelName,
+    apiMode,
+    timeoutMs,
     temperature: selectedTemperature,
     stream: Boolean(options.onDelta),
     signal: options.signal,
     onDelta: options.onDelta,
+    onProviderActivity: options.onProviderActivity,
+    onUsage: options.onUsage,
     messages: [
       { role: "system", content: system },
       { role: "user", content: options.message },
@@ -600,9 +709,10 @@ export async function generateAgentReply(options: AgentReplyOptions) {
     throw new Error("LLM response did not include message content.")
   }
 
-  if (
-    options.currentStage &&
-    options.currentStage !== "drafting" &&
+	  if (
+	    !isArtifact &&
+	    options.currentStage &&
+	    options.currentStage !== "drafting" &&
     STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))
   ) {
     return [
@@ -701,7 +811,7 @@ export async function testProviderConnectivity(
         modelName,
         apiMode,
         message: fallbackErrorMessage
-          ? `Provider test failed with status ${response.status}; generation fallback failed: ${fallbackErrorMessage}`
+          ? `Generation fallback failed: ${fallbackErrorMessage} (/models returned ${response.status} ${response.statusText || "unsupported"}).`
           : `Provider test failed with status ${response.status}.`,
       }
     }

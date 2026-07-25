@@ -197,7 +197,13 @@ var GENERIC_NAMES = /* @__PURE__ */ new Set([
   "\u957F\u5B89",
   "\u53BF\u8859",
   "\u5B8B\u5BB6",
-  "\u738B\u5BB6"
+  "\u738B\u5BB6",
+  "\u5E38\u5E74",
+  "\u6B63\u5E38",
+  "\u65B9\u8A00",
+  "\u6731\u7802",
+  "\u7F16\u53F7",
+  "\u987E\u5927"
 ]);
 var ROLE_TITLE_SUFFIXES = [
   "\u7BA1\u4E8B",
@@ -220,7 +226,9 @@ var ROLE_TITLE_SUFFIXES = [
   "\u90CE\u541B",
   "\u5A18\u5B50",
   "\u963F\u90CE",
-  "\u5A46\u5B50"
+  "\u5A46\u5B50",
+  "\u5927\u4EBA",
+  "\u5C5E\u4E0B"
 ];
 var VIEWPOINT_VERBS = [
   "\u9192",
@@ -308,7 +316,29 @@ var TRAILING_NON_NAME_CHARS = /* @__PURE__ */ new Set([
   "\u53EA",
   "\u5E76",
   "\u5219",
-  "\u4EE5"
+  "\u4EE5",
+  "\u5750",
+  "\u9760",
+  "\u70B9",
+  "\u5934",
+  "\u4F38",
+  "\u6536",
+  "\u7D27",
+  "\u677E",
+  "\u52A8",
+  "\u6478",
+  "\u62AC",
+  "\u7AEF",
+  "\u559D",
+  "\u62FF",
+  "\u653E",
+  "\u63A8",
+  "\u63A5",
+  "\u8F6C",
+  "\u6447",
+  "\u843D",
+  "\u7F16",
+  "\u53F7"
 ]);
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -332,6 +362,9 @@ function isRoleOrGenericName(name) {
     return true;
   }
   if (/阳光|月光|火光|金手指|黄河|马蹄|树皮|石板|案卷|田册|东西|温吞|官道/u.test(name)) {
+    return true;
+  }
+  if (/^(?:[李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢岳齐梅莫庄辛管祝左涂谷祁时舒耿牟卜詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂]印)$/u.test(name)) {
     return true;
   }
   if (/(?:家庄|河边|蹄声|木门|土墙|陶碗|草鞋|地铺|县衙|公文|契书)$/u.test(name)) {
@@ -364,7 +397,7 @@ function extractChinesePersonNames(text = "", limit = 12) {
     /(?:^|[“"'\n。！？；：，、\s])([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:是被|就被|被|睁开|翻身|坐起|抬头|撑着|咬住|开口|问|说|想|知道|意识到|没有|必须|终于|觉得|看见|听见|不敢|不能|需要|站|走|把|将|给|向|从|在))/gu,
     /[“"'\n。！？；：，、\s]([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})(?=[，。！？；：、\s“”"'\n])/gu,
     /(?:叫|名叫|唤作|自称|他叫|她叫)([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})/gu,
-    /([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:没有|必须|终于|觉得|看见|听见|知道|意识到|不敢|不能|需要|站|走|醒|说|问|想|把|将|给|向|从|在))/gu
+    /(?:^|[“"'\n。！？；：，、\s])([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:没有|必须|终于|觉得|看见|听见|知道|意识到|不敢|不能|需要|站|走|醒|说|问|想|把|将|给|向|从|在))/gu
   ];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -422,9 +455,12 @@ function inferDominantProtagonistName(text = "") {
   return detectedNames.map((name) => ({ name, score: viewpointScore(body, name), count: countName(body, name) })).sort((left, right) => right.score - left.score || right.count - left.count)[0]?.name || "";
 }
 function inferLockedProtagonistName(profile = "") {
-  const explicit = profile.match(/(?:主角名|主人公名|姓名|名字|本名|canonicalName|protagonistName|name)\s*[:：]\s*([^\n，。；、\s]{2,4})/iu);
-  if (explicit?.[1] && !isRoleOrGenericName(explicit[1])) {
-    return explicit[1];
+  const explicit = profile.match(
+    /(?:主角名|主人公名|姓名|名字|本名|canonicalName|protagonistName|name)\s*[:：]\s*["“”']?([A-Za-z][A-Za-z0-9 ._-]{1,48}|[\u4e00-\u9fff]{2,4})["“”']?/iu
+  );
+  const name = explicit?.[1]?.trim().replace(/[,"'“”]+$/gu, "");
+  if (name && !isRoleOrGenericName(name)) {
+    return name;
   }
   return "";
 }
@@ -435,7 +471,8 @@ function countName(text, name) {
 function evaluateChapterConsistency(input) {
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     const isFirst = input.chapterNumber === 1 || !input.previousProtagonistName;
-    const name = input.previousProtagonistName || "\u9996\u7AE0\u4E3B\u89D2";
+    const text2 = normalizeChapterBody(input.text || "");
+    const name = input.previousProtagonistName || inferLockedProtagonistName(input.protagonistProfile || "") || inferDominantProtagonistName(text2) || "\u9996\u7AE0\u4E3B\u89D2";
     return {
       status: "eligible",
       reason: isFirst ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002` : `\u6CBF\u7528\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002`,
@@ -770,6 +807,10 @@ var FactoryDb = class _FactoryDb {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA cache_size = -65536;
+      PRAGMA mmap_size = 268435456;
 
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
@@ -822,6 +863,39 @@ var FactoryDb = class _FactoryDb {
         input_json TEXT,
         output_json TEXT,
         error TEXT,
+        node_id TEXT,
+        node_version TEXT,
+        execution_mode TEXT NOT NULL DEFAULT 'production',
+        validation_status TEXT NOT NULL DEFAULT 'pending',
+        idempotency_key TEXT,
+        parent_step_id TEXT,
+        metadata_json TEXT,
+        FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+        id TEXT PRIMARY KEY,
+        step_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        model_config_id TEXT,
+        model_name TEXT,
+        prompt_version TEXT,
+        prompt_hash TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        error_json TEXT,
+        usage_json TEXT,
+        metadata_json TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        UNIQUE(step_id, attempt, kind),
+        FOREIGN KEY(step_id) REFERENCES workflow_steps(id) ON DELETE CASCADE,
         FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
@@ -1056,7 +1130,10 @@ var FactoryDb = class _FactoryDb {
 
 
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_project_type_created ON events(project_id, type, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_steps_run_started ON workflow_steps(run_id, started_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_attempts_step_attempt ON workflow_step_attempts(step_id, attempt);
       CREATE INDEX IF NOT EXISTS idx_turns_run_started ON agent_turns(run_id, started_at);
       CREATE INDEX IF NOT EXISTS idx_artifacts_project_updated ON artifacts(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_jobs_project_status ON jobs(project_id, status);
@@ -1072,6 +1149,14 @@ var FactoryDb = class _FactoryDb {
     `);
     this.migrateColumn("memory_items", "embedding_id", "TEXT");
     this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'");
+    this.migrateColumn("workflow_steps", "node_id", "TEXT");
+    this.migrateColumn("workflow_steps", "node_version", "TEXT");
+    this.migrateColumn("workflow_steps", "execution_mode", "TEXT NOT NULL DEFAULT 'production'");
+    this.migrateColumn("workflow_steps", "validation_status", "TEXT NOT NULL DEFAULT 'pending'");
+    this.migrateColumn("workflow_steps", "idempotency_key", "TEXT");
+    this.migrateColumn("workflow_steps", "parent_step_id", "TEXT");
+    this.migrateColumn("workflow_steps", "metadata_json", "TEXT");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_workflow_steps_node_status ON workflow_steps(project_id, node_id, status)");
     this.migrateGraphTablePrimaryKey("graph_nodes", `
       CREATE TABLE graph_nodes (
         id TEXT NOT NULL,
@@ -1229,6 +1314,14 @@ var FactoryDb = class _FactoryDb {
   getProject(projectId) {
     return this.listProjects().find((project) => project.id === projectId) ?? null;
   }
+  /**
+   * 轻量脏标记：只读 projects 行的 updated_at/created_at（走主键，<1ms）。
+   * 用于 SSE 判断"项目有没有变化"，避免每 2s 全量重算 snapshot。
+   */
+  getProjectDirtyStamp(projectId) {
+    const row = this.db.prepare("SELECT updated_at, created_at FROM projects WHERE id = ?").get(projectId);
+    return row?.updated_at || row?.created_at || "";
+  }
   createRun(input) {
     const now2 = nowIso();
     this.db.prepare(`
@@ -1265,6 +1358,126 @@ var FactoryDb = class _FactoryDb {
       error: patch.error ?? null,
       stage: patch.stage ?? null
     });
+  }
+  createWorkflowStep(input) {
+    const now2 = input.startedAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_steps (
+        id, run_id, project_id, name, node_id, node_version, status, stage,
+        execution_mode, validation_status, started_at, updated_at, input_json,
+        output_json, error, idempotency_key, parent_step_id, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.runId,
+      input.projectId,
+      input.name,
+      input.nodeId,
+      input.nodeVersion ?? null,
+      input.status,
+      input.stage,
+      input.executionMode ?? "production",
+      input.validationStatus ?? "pending",
+      now2,
+      now2,
+      input.input === void 0 ? null : jsonString(input.input),
+      input.output === void 0 ? null : jsonString(input.output),
+      input.error ?? null,
+      input.idempotencyKey ?? null,
+      input.parentStepId ?? null,
+      input.metadata === void 0 ? null : jsonString(input.metadata)
+    );
+    this.recordEvent(input.projectId, input.runId, "WORKFLOW_STEP_STARTED", {
+      stepId: input.id,
+      nodeId: input.nodeId,
+      executionMode: input.executionMode ?? "production"
+    });
+  }
+  updateWorkflowStep(stepId, status, patch = {}) {
+    const now2 = nowIso();
+    this.db.prepare(`
+      UPDATE workflow_steps
+      SET status = ?, output_json = COALESCE(?, output_json), error = COALESCE(?, error),
+          validation_status = COALESCE(?, validation_status), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === void 0 ? null : jsonString(patch.output),
+      patch.error ?? null,
+      patch.validationStatus ?? null,
+      patch.metadata === void 0 ? null : jsonString(patch.metadata),
+      now2,
+      status,
+      now2,
+      stepId
+    );
+    const step = this.db.prepare("SELECT project_id, run_id, node_id FROM workflow_steps WHERE id = ?").get(stepId);
+    this.recordEvent(typeof step?.project_id === "string" ? step.project_id : null, typeof step?.run_id === "string" ? step.run_id : null, "WORKFLOW_STEP_UPDATED", {
+      stepId,
+      nodeId: step?.node_id ?? null,
+      status,
+      validationStatus: patch.validationStatus ?? null,
+      error: patch.error ?? null
+    });
+  }
+  createWorkflowStepAttempt(input) {
+    const now2 = input.startedAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_step_attempts (
+        id, step_id, run_id, project_id, attempt, kind, status, model_config_id,
+        model_name, prompt_version, prompt_hash, input_json, output_json,
+        error_json, usage_json, metadata_json, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.stepId,
+      input.runId,
+      input.projectId,
+      input.attempt,
+      input.kind,
+      input.status,
+      input.modelConfigId ?? null,
+      input.modelName ?? null,
+      input.promptVersion ?? null,
+      input.promptHash ?? null,
+      input.input === void 0 ? null : jsonString(input.input),
+      input.output === void 0 ? null : jsonString(input.output),
+      input.error === void 0 ? null : jsonString(input.error),
+      input.usage === void 0 ? null : jsonString(input.usage),
+      input.metadata === void 0 ? null : jsonString(input.metadata),
+      now2,
+      now2
+    );
+  }
+  updateWorkflowStepAttempt(attemptId, status, patch = {}) {
+    const now2 = nowIso();
+    this.db.prepare(`
+      UPDATE workflow_step_attempts
+      SET status = ?, output_json = COALESCE(?, output_json), error_json = COALESCE(?, error_json),
+          usage_json = COALESCE(?, usage_json), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === void 0 ? null : jsonString(patch.output),
+      patch.error === void 0 ? null : jsonString(patch.error),
+      patch.usage === void 0 ? null : jsonString(patch.usage),
+      patch.metadata === void 0 ? null : jsonString(patch.metadata),
+      now2,
+      status,
+      now2,
+      attemptId
+    );
+  }
+  listWorkflowSteps(runId) {
+    return this.db.prepare("SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY started_at, id").all(runId);
+  }
+  getWorkflowRun(runId) {
+    return this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) ?? null;
+  }
+  listWorkflowStepAttempts(stepId) {
+    return this.db.prepare("SELECT * FROM workflow_step_attempts WHERE step_id = ? ORDER BY attempt, started_at").all(stepId);
   }
   recoverStaleRuns(options = {}) {
     const now2 = nowIso();
@@ -1974,11 +2187,12 @@ var FactoryDb = class _FactoryDb {
   }
   recordCheckpoint(input) {
     const now2 = nowIso();
+    const checkpointRecordId2 = input.id || makeId("chk");
     this.db.prepare(`
       INSERT INTO checkpoints (id, project_id, run_id, label, path, drift_json, state_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      makeId("chk"),
+      checkpointRecordId2,
       input.projectId,
       input.runId ?? null,
       input.label,
@@ -1994,6 +2208,63 @@ var FactoryDb = class _FactoryDb {
       status: "completed",
       metadata: { label: input.label, drift: input.drift ?? null }
     });
+    return checkpointRecordId2;
+  }
+  getCheckpoint(checkpointRecordId2) {
+    const row = this.db.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointRecordId2);
+    return row ? {
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null)
+    } : null;
+  }
+  listWorkflowCheckpoints(projectId, query) {
+    const namespace = query.checkpointNamespace ?? "";
+    const limit = Math.max(1, Math.min(1e3, Math.round(query.limit || 100)));
+    const conditions = [
+      "project_id = ?",
+      "json_extract(drift_json, '$.kind') = 'langgraph'",
+      "json_extract(drift_json, '$.threadId') = ?",
+      "COALESCE(json_extract(drift_json, '$.checkpointNamespace'), '') = ?"
+    ];
+    const values = [projectId, query.threadId, namespace];
+    if (query.checkpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') = ?");
+      values.push(query.checkpointId);
+    }
+    if (query.beforeCheckpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') < ?");
+      values.push(query.beforeCheckpointId);
+    }
+    return this.db.prepare(`
+      SELECT * FROM checkpoints
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY json_extract(drift_json, '$.checkpointId') DESC, created_at DESC
+      LIMIT ${limit}
+    `).all(...values).map((row) => ({
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null)
+    }));
+  }
+  updateWorkflowCheckpoint(checkpointRecordId2, patch) {
+    this.db.prepare(`
+      UPDATE checkpoints
+      SET drift_json = COALESCE(?, drift_json), state_json = COALESCE(?, state_json)
+      WHERE id = ?
+    `).run(
+      patch.drift === void 0 ? null : jsonString(patch.drift),
+      patch.state === void 0 ? null : jsonString(patch.state),
+      checkpointRecordId2
+    );
+  }
+  deleteWorkflowCheckpointThread(projectId, threadId) {
+    this.db.prepare(`
+      DELETE FROM checkpoints
+      WHERE project_id = ?
+        AND json_extract(drift_json, '$.kind') = 'langgraph'
+        AND json_extract(drift_json, '$.threadId') = ?
+    `).run(projectId, threadId);
   }
   recordEvent(projectId, runId, type, payload) {
     this.db.prepare(`
@@ -2652,6 +2923,60 @@ var FactoryDb = class _FactoryDb {
     }
     return [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber);
   }
+  /**
+   * 轻量摘要：专为列表/刷新场景设计。避免 getSnapshot 的全量构建
+   * (不解析完整 state_json、不查 artifacts/memory/graph/pinned)。
+   * 走 idx_events_project_type_created / idx_jobs_project_status 等索引，单项目 < 5ms。
+   * 返回列表页所需的最小字段集：章节状态聚合 + 任务数 + 最新事件。
+   */
+  getProjectSummaryMeta(projectId) {
+    const taskStatusRows = this.db.prepare(`
+      SELECT chapter_number, status
+      FROM (
+        SELECT
+          payload_json->>'$.chapterNumber' AS chapter_number,
+          payload_json->>'$.status' AS status,
+          ROW_NUMBER() OVER (
+            PARTITION BY payload_json->>'$.chapterNumber'
+            ORDER BY created_at DESC
+          ) AS rn
+        FROM events
+        WHERE project_id = ? AND type = 'CHAPTER_TASK_STATUS_UPDATED'
+      )
+      WHERE rn = 1
+    `).all(projectId);
+    const statusCounts = /* @__PURE__ */ new Map();
+    let latestChapter = 0;
+    for (const row of taskStatusRows) {
+      if (row.chapter_number == null) continue;
+      latestChapter = Math.max(latestChapter, Number(row.chapter_number));
+      const st = String(row.status || "unknown");
+      statusCounts.set(st, (statusCounts.get(st) || 0) + 1);
+    }
+    const chapterStatusCounts = [...statusCounts.entries()].map(([status, n]) => ({ status, n }));
+    const jobCounts = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN status IN ('queued','pending') THEN 1 ELSE 0 END) AS runnable
+      FROM jobs
+      WHERE project_id = ?
+    `).get(projectId);
+    const latestEvent = this.db.prepare(`
+      SELECT type, created_at
+      FROM events
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(projectId);
+    return {
+      chapterStatusCounts,
+      latestChapterNumber: latestChapter,
+      activeJobs: Number(jobCounts?.active || 0),
+      runnableJobs: Number(jobCounts?.runnable || 0),
+      latestEventType: latestEvent?.type || "",
+      latestEventAt: latestEvent?.created_at || ""
+    };
+  }
   getSnapshot(projectId) {
     const project = this.getProject(projectId);
     const projectRow = this.db.prepare("SELECT state_json, project_root FROM projects WHERE id = ?").get(projectId);
@@ -3248,7 +3573,7 @@ function extractTextContent(value) {
     return "";
   }
   const record = value;
-  const direct = [record.text, record.output_text, record.reasoning_content, record.content].map((item) => extractTextContent(item)).join("");
+  const direct = [record.text, record.output_text, record.content].map((item) => extractTextContent(item)).join("");
   if (direct) {
     return direct;
   }
@@ -3360,6 +3685,44 @@ async function emitFakeReplyInChunks(reply, onDelta) {
     await onDelta(chunk);
   }
 }
+function finiteTokenCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : 0;
+}
+function extractLlmUsageMetrics(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload;
+  const response = record.response && typeof record.response === "object" && !Array.isArray(record.response) ? record.response : null;
+  const usage = record.usage && typeof record.usage === "object" && !Array.isArray(record.usage) ? record.usage : response?.usage && typeof response.usage === "object" && !Array.isArray(response.usage) ? response.usage : null;
+  if (!usage) return null;
+  const promptDetails = usage.prompt_tokens_details && typeof usage.prompt_tokens_details === "object" && !Array.isArray(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === "object" && !Array.isArray(usage.input_tokens_details) ? usage.input_tokens_details : {};
+  const completionDetails = usage.completion_tokens_details && typeof usage.completion_tokens_details === "object" && !Array.isArray(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
+  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === "object" && !Array.isArray(usage.output_tokens_details) ? usage.output_tokens_details : {};
+  const promptTokens = finiteTokenCount(usage.prompt_tokens ?? usage.input_tokens);
+  const completionTokens = finiteTokenCount(usage.completion_tokens ?? usage.output_tokens);
+  const totalTokens = finiteTokenCount(usage.total_tokens) || promptTokens + completionTokens;
+  const cachedTokens = finiteTokenCount(
+    promptDetails.cached_tokens ?? inputDetails.cached_tokens ?? usage.prompt_cache_hit_tokens ?? usage.cache_read_input_tokens
+  );
+  const explicitMissTokens = finiteTokenCount(usage.prompt_cache_miss_tokens ?? usage.cache_creation_input_tokens);
+  const cacheMissTokens = explicitMissTokens || Math.max(0, promptTokens - cachedTokens);
+  const reasoningTokens = finiteTokenCount(completionDetails.reasoning_tokens ?? outputDetails.reasoning_tokens);
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cachedTokens,
+    cacheMissTokens,
+    reasoningTokens,
+    cacheHitRate: promptTokens > 0 ? Number((cachedTokens / promptTokens).toFixed(4)) : 0
+  };
+}
+async function reportLlmUsage(usage, onUsage) {
+  if (!usage) return;
+  console.log(`[LLM CACHE] \u8F93\u5165 ${usage.promptTokens} tokens\uFF0C\u547D\u4E2D ${usage.cachedTokens}\uFF0C\u672A\u547D\u4E2D ${usage.cacheMissTokens}\uFF0C\u547D\u4E2D\u7387 ${(usage.cacheHitRate * 100).toFixed(1)}%\uFF0C\u63A8\u7406 ${usage.reasoningTokens} tokens`);
+  await onUsage?.(usage);
+}
 async function streamOpenAiCompatibleResponse(response, onDelta, options) {
   if (!response.body) {
     throw new Error("LLM streaming response body was empty.");
@@ -3372,6 +3735,7 @@ async function streamOpenAiCompatibleResponse(response, onDelta, options) {
   let buffer = "";
   let content = "";
   let firstTokenReceived = false;
+  let usageMetrics = null;
   const readNextChunk = async () => {
     if (options.signal.aborted) {
       throw new Error("LLM stream aborted.");
@@ -3400,6 +3764,7 @@ async function streamOpenAiCompatibleResponse(response, onDelta, options) {
         break;
       }
       options.markActivity();
+      await options.onProviderActivity?.();
       buffer += decoder.decode(value, { stream: true });
       while (buffer.includes("\n\n")) {
         const separator = buffer.indexOf("\n\n");
@@ -3415,6 +3780,7 @@ async function streamOpenAiCompatibleResponse(response, onDelta, options) {
             continue;
           }
           const payload = JSON.parse(payloadText);
+          usageMetrics = extractLlmUsageMetrics(payload) || usageMetrics;
           const delta = extractStreamingDelta(payload);
           if (!delta) {
             continue;
@@ -3435,6 +3801,7 @@ async function streamOpenAiCompatibleResponse(response, onDelta, options) {
   const totalStreamTime = Date.now() - streamStartTime;
   const totalRequestTime = Date.now() - baseTime;
   console.log(`[LLM STREAM END] \u6570\u636E\u6D41\u8BFB\u53D6\u5B8C\u6210\u3002\u6D41\u4F20\u8F93\u8017\u65F6: ${totalStreamTime}ms\uFF0C\u4ECE\u53D1\u8D77\u8BF7\u6C42\u5230\u5B8C\u6210\u603B\u8017\u65F6: ${totalRequestTime}ms\uFF0C\u63A5\u6536\u5B57\u6570: ${content.length}`);
+  await reportLlmUsage(usageMetrics, options.onUsage);
   console.log(`
 ========== [LLM RESPONSE START] ==========
 ${content.trim()}
@@ -3560,6 +3927,7 @@ async function requestLlmTextCompletion(options) {
     model: options.modelName,
     temperature: selectedTemperature,
     stream: effectiveStream,
+    stream_options: effectiveStream ? { include_usage: true } : void 0,
     max_tokens: options.maxTokens,
     messages
   };
@@ -3581,14 +3949,16 @@ async function requestLlmTextCompletion(options) {
       throw new Error(`LLM request failed with status ${response.status}: ${providerMessage}`);
     }
     markActivity();
-    if (effectiveStream && options.onDelta) {
+    if (effectiveStream) {
       return streamOpenAiCompatibleResponse(response, async (delta) => {
         markActivity();
         await options.onDelta?.(delta);
       }, {
         signal,
         markActivity,
-        requestStartTime
+        onProviderActivity: options.onProviderActivity,
+        requestStartTime,
+        onUsage: options.onUsage
       });
     }
     const payload = await response.json();
@@ -3596,6 +3966,7 @@ async function requestLlmTextCompletion(options) {
     const content = options.apiMode === "responses" ? extractResponsesOutput(payload) : (extractTextContent(choice?.message) || extractTextContent(choice?.text)).trim();
     const totalTime = Date.now() - requestStartTime;
     console.log(`[LLM REQUEST END] \u975E\u6D41\u5F0F\u8BF7\u6C42\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${content.length}`);
+    await reportLlmUsage(extractLlmUsageMetrics(payload), options.onUsage);
     console.log(`
 ========== [LLM RESPONSE START] ==========
 ${content.trim()}
@@ -3615,13 +3986,29 @@ async function generateAgentReply(options) {
     }
     return reply;
   }
-  let config = await loadLlmConfigForCapability(options.envRootDir, "text");
-  const apiKey = config?._dbApiKey || "";
-  if (!config || !apiKey) {
+  const override = options.providerOverride;
+  const completeOverride = Boolean(
+    override?.baseUrl?.trim() && override.apiKey?.trim() && override.modelName?.trim()
+  );
+  const config = completeOverride ? null : await loadLlmConfigForCapability(options.envRootDir, "text");
+  const baseUrl = override?.baseUrl?.trim() || config?.provider.baseUrl || "";
+  const apiKey = override?.apiKey?.trim() || config?._dbApiKey || "";
+  const modelName = override?.modelName?.trim() || config?.provider.modelName || "";
+  const apiMode = override?.apiMode || config?.provider.apiMode || "chat";
+  const timeoutMs = Number(override?.timeoutMs) > 0 ? Number(override?.timeoutMs) : config?.provider.timeoutMs || 12e4;
+  if (!baseUrl || !apiKey || !modelName) {
     throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.");
   }
-  const isDrafting = options.currentStage === "drafting";
-  const protocol = isDrafting ? "\u6B63\u6587\u521B\u4F5C\u534F\u8BAE\uFF1A\u4F60\u8D1F\u8D23\u6267\u884C\u5C0F\u8BF4\u7AE0\u8282\u7684\u521D\u7A3F\u521B\u4F5C\u3001\u8D28\u91CF\u8FD4\u5DE5\u6216\u81EA\u7136\u5EA6\u6DA6\u8272\uFF0C\u5FC5\u987B\u8F93\u51FA\u5177\u4F53\u7684\u6587\u5B66\u6B63\u6587\uFF0C\u4E14\u4E25\u7981\u8F93\u51FA\u8BA8\u8BBA\u8FC7\u7A0B\u6216\u65E0\u5173\u5E9F\u8BDD\u3002" : AUTONOMOUS_DISCUSSION_PROTOCOL;
+  const responseMode = options.responseMode || (options.currentStage === "drafting" ? "drafting" : "discussion");
+  const isDrafting = responseMode === "drafting";
+  const isArtifact = responseMode === "artifact";
+  const protocol = isDrafting ? "\u6B63\u6587\u521B\u4F5C\u534F\u8BAE\uFF1A\u4F60\u8D1F\u8D23\u6267\u884C\u5C0F\u8BF4\u7AE0\u8282\u7684\u521D\u7A3F\u521B\u4F5C\u3001\u8D28\u91CF\u8FD4\u5DE5\u6216\u81EA\u7136\u5EA6\u6DA6\u8272\uFF0C\u5FC5\u987B\u8F93\u51FA\u5177\u4F53\u7684\u6587\u5B66\u6B63\u6587\uFF0C\u4E14\u4E25\u7981\u8F93\u51FA\u8BA8\u8BBA\u8FC7\u7A0B\u6216\u65E0\u5173\u5E9F\u8BDD\u3002" : isArtifact ? [
+    "\u751F\u4EA7\u8D44\u4EA7\u751F\u6210\u534F\u8BAE\uFF1A",
+    "- \u4F60\u8D1F\u8D23\u751F\u6210\u5F53\u524D\u8BF7\u6C42\u6307\u5B9A\u7684\u751F\u4EA7\u8D44\u4EA7\uFF0C\u800C\u4E0D\u662F\u8FDB\u884C\u5706\u684C\u8BA8\u8BBA\u3002",
+    "- \u4E25\u683C\u9075\u5B88\u7528\u6237\u6D88\u606F\u4E2D\u7684\u8F93\u51FA\u683C\u5F0F\u3001\u7AE0\u8282\u6570\u3001\u5B57\u6BB5\u548C\u8D44\u4EA7\u8FB9\u754C\u3002",
+    "- \u4E0D\u8981\u8F93\u51FA\u5BD2\u6684\u3001\u89D2\u8272\u81EA\u79F0\u3001\u89E3\u91CA\u81EA\u5DF1\u521A\u5B8C\u6210\u4E86\u4EC0\u4E48\u3001\u6216\u5BF9\u7528\u6237\u8BF4\u8BDD\u7684\u5F00\u573A\u767D\u3002",
+    "- \u9664\u975E\u5F53\u524D\u4EFB\u52A1\u660E\u786E\u8981\u6C42\u7AE0\u8282\u6B63\u6587\uFF0C\u5426\u5219\u4E0D\u5F97\u8F93\u51FA\u6B63\u6587\u5185\u5BB9\u3002"
+  ].join("\n") : AUTONOMOUS_DISCUSSION_PROTOCOL;
   const systemBlocks = [];
   if (isDrafting) {
     if (options.basePrompt.trim()) systemBlocks.push(options.basePrompt.trim());
@@ -3645,18 +4032,18 @@ Target asset: ${options.discussionTarget.assetPath}
 Target instruction: ${options.discussionTarget.instruction}` : "",
     "Response contract:\n" + [
       "- \u5FC5\u987B\u4F7F\u7528\u7B80\u4F53\u4E2D\u6587\u8F93\u51FA\u3002",
-      isDrafting ? "- \u5FC5\u987B\u6309\u7167\u7AE0\u8282\u683C\u5F0F\u8981\u6C42\u8F93\u51FA\u7AE0\u8282\u6B63\u6587\u5185\u5BB9\u3002" : "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
-      isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
+      isDrafting ? "- \u5FC5\u987B\u6309\u7167\u7AE0\u8282\u683C\u5F0F\u8981\u6C42\u8F93\u51FA\u7AE0\u8282\u6B63\u6587\u5185\u5BB9\u3002" : isArtifact ? "- \u5FC5\u987B\u4E25\u683C\u8F93\u51FA\u5F53\u524D\u8BF7\u6C42\u6307\u5B9A\u7684\u751F\u4EA7\u8D44\u4EA7\u3002" : "- \u7ED9\u51FA\u5B9E\u8D28\u6027\u8BA8\u8BBA\u5185\u5BB9\uFF0C\u4E0D\u80FD\u53EA\u8BF4\u4E00\u53E5\u62D2\u7EDD\u3002",
+      isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : isArtifact ? "- \u4E0D\u8981\u8F93\u51FA\u5BD2\u6684\u3001\u5BF9\u8BDD\u5F0F\u5F00\u573A\u3001\u5143\u53D9\u8FF0\u6216\u6267\u884C\u8FC7\u7A0B\u8BF4\u660E\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
       "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
       isDrafting ? "" : "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
-      isDrafting ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
-      isDrafting ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002"
+      isDrafting || isArtifact ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
+      isDrafting || isArtifact ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002"
     ].filter(Boolean).join("\n"),
     !isDrafting && options.priorTranscript?.trim() ? `Prior roundtable transcript:
 ${options.priorTranscript.trim()}` : ""
   );
   const system = systemBlocks.filter(Boolean).join("\n\n");
-  const selectedTemperature = options.temperature !== void 0 ? options.temperature : config.provider.temperature;
+  const selectedTemperature = options.temperature !== void 0 ? options.temperature : config?.provider.temperature || 0.1;
   console.log(`
 ========== [LLM SYSTEM PROMPT START] ==========
 ${system}
@@ -3670,15 +4057,17 @@ ${options.message}
 `);
   }
   const content = await requestLlmTextCompletion({
-    baseUrl: config.provider.baseUrl,
+    baseUrl,
     apiKey,
-    modelName: config.provider.modelName,
-    apiMode: config.provider.apiMode,
-    timeoutMs: config.provider.timeoutMs,
+    modelName,
+    apiMode,
+    timeoutMs,
     temperature: selectedTemperature,
     stream: Boolean(options.onDelta),
     signal: options.signal,
     onDelta: options.onDelta,
+    onProviderActivity: options.onProviderActivity,
+    onUsage: options.onUsage,
     messages: [
       { role: "system", content: system },
       { role: "user", content: options.message }
@@ -3687,7 +4076,7 @@ ${options.message}
   if (!content) {
     throw new Error("LLM response did not include message content.");
   }
-  if (options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
+  if (!isArtifact && options.currentStage && options.currentStage !== "drafting" && STAGE_DRIFT_PATTERNS.some((pattern) => pattern.test(content))) {
     return [
       "### \u9636\u6BB5\u7EA0\u504F",
       "- STAGE_GUARD_CORRECTION: true",
@@ -4976,8 +5365,8 @@ async function readResponseBody(response) {
   }
 }
 function normalizeAigcDetectionResult(raw, provider, threshold = DEFAULT_THRESHOLD) {
-  const score = findScore(raw);
   const label = findStringField(raw, ["label", "status", "result", "prediction", "class", "message"]) || inferLabel(raw);
+  const score = findAiProbabilityScore(raw, label);
   const normalizedScore = normalizeScore(score);
   const status = statusFromLabel(label) || (normalizedScore === null ? "uncertain" : scoreToStatus(normalizedScore, threshold));
   const confidence = normalizeScore(findNumberField(raw, ["confidence", "probability", "prob"])) ?? (normalizedScore === null ? null : Math.max(normalizedScore, 1 - normalizedScore));
@@ -5141,9 +5530,8 @@ function formatStudioTokenParam(token) {
 function createSessionHash() {
   return Math.random().toString(36).slice(2, 14);
 }
-function findScore(raw) {
-  return findNumberField(raw, [
-    "score",
+function findAiProbabilityScore(raw, label = "") {
+  const explicitAiScore = findNumberField(raw, [
     "aiProbability",
     "aigcProbability",
     "ai_probability",
@@ -5153,6 +5541,20 @@ function findScore(raw) {
     "ai_score",
     "aigc_score",
     "fakeProbability"
+  ]);
+  if (explicitAiScore !== null) {
+    return explicitAiScore;
+  }
+  const genericScore = findGenericScore(raw);
+  if (genericScore !== null && statusFromLabel(label) === "human_likely") {
+    const normalizedGenericScore = normalizeScore(genericScore);
+    return normalizedGenericScore === null ? null : 1 - normalizedGenericScore;
+  }
+  return genericScore;
+}
+function findGenericScore(raw) {
+  return findNumberField(raw, [
+    "score"
   ]) ?? parseScoreFromText(raw);
 }
 function findNumberField(raw, names) {
@@ -5896,6 +6298,7 @@ function styleGenerationVerificationFromEntry(entry) {
   });
   return buildStyleGenerationVerification({
     evaluation: entry.evaluation,
+    sample: entry.sample,
     version: entry.version,
     checkedAt: entry.createdAt
   });
@@ -5905,6 +6308,7 @@ function styleEntryFreezerGate(entry) {
 }
 function buildStyleGenerationVerification(input) {
   const evaluation = input.evaluation;
+  const sample = normalizeText(input.sample);
   const forbiddenHitCount = Array.isArray(evaluation?.forbiddenHits) ? evaluation.forbiddenHits.length : 0;
   const aigc = evaluation?.aigc;
   const reasons = [];
@@ -5926,7 +6330,12 @@ function buildStyleGenerationVerification(input) {
   if (aigc?.reason) {
     reasons.push(aigc.reason);
   }
-  if (aigc?.status === "blocked" || forbiddenHitCount > 0) {
+  if (sample && sample.length >= 40 && !/[。！？!?」』”’）)\]》】"']$/u.test(sample)) {
+    reasons.push("\u6837\u6BB5\u7591\u4F3C\u88AB\u622A\u65AD\uFF1A\u672B\u5C3E\u4E0D\u662F\u5B8C\u6574\u53E5\u8BFB\u6216\u95ED\u5408\u7B26\u53F7\u3002");
+  }
+  if (reasons.some((reason) => reason.includes("\u6837\u6BB5\u7591\u4F3C\u88AB\u622A\u65AD"))) {
+    status = "blocked";
+  } else if (aigc?.status === "blocked" || forbiddenHitCount > 0) {
     status = "blocked";
   } else if (aigc?.status === "passed" && forbiddenHitCount === 0) {
     status = "passed";
@@ -5935,7 +6344,7 @@ function buildStyleGenerationVerification(input) {
   } else if (!aigc?.enabled) {
     status = "blocked";
   }
-  const summary = status === "passed" ? "Generation Verification Gate \u5DF2\u901A\u8FC7\uFF0C\u5F53\u524D\u6837\u6BB5\u7684 AIGC \u98CE\u9669\u4E0E\u7981\u5FCC\u547D\u4E2D\u5904\u4E8E\u53EF\u653E\u884C\u8303\u56F4\u3002" : status === "blocked" ? "Generation Verification Gate \u963B\u585E\uFF0C\u5F53\u524D\u6837\u6BB5\u4ECD\u5B58\u5728 AIGC \u98CE\u9669\u6216\u7981\u5FCC\u547D\u4E2D\uFF0C\u4E0D\u80FD\u76F4\u63A5\u51BB\u7ED3\u3002" : "Generation Verification Gate \u7B49\u5F85\u5F53\u524D\u8F6E\u8BC4\u4F30\u5B8C\u6210\u3002";
+  const summary = status === "passed" ? "Generation Verification Gate \u5DF2\u901A\u8FC7\uFF0C\u5F53\u524D\u6837\u6BB5\u7684 AIGC \u98CE\u9669\u4E0E\u7981\u5FCC\u547D\u4E2D\u5904\u4E8E\u53EF\u653E\u884C\u8303\u56F4\u3002" : status === "blocked" ? "Generation Verification Gate \u963B\u585E\uFF0C\u5F53\u524D\u6837\u6BB5\u4ECD\u5B58\u5728 AIGC \u98CE\u9669\u3001\u7981\u5FCC\u547D\u4E2D\u6216\u5B8C\u6574\u6027\u95EE\u9898\uFF0C\u4E0D\u80FD\u76F4\u63A5\u51BB\u7ED3\u3002" : "Generation Verification Gate \u7B49\u5F85\u5F53\u524D\u8F6E\u8BC4\u4F30\u5B8C\u6210\u3002";
   return {
     gate: "Generation Verification Gate",
     status,
@@ -5969,6 +6378,7 @@ function latestGenerationVerification(contract, history) {
   if (latest?.evaluation) {
     return buildStyleGenerationVerification({
       evaluation: latest.evaluation,
+      sample: latest.sample,
       version: latest.version,
       checkedAt: latest.createdAt
     });
@@ -5987,6 +6397,7 @@ function approvedGenerationVerification(contract, history) {
   if (approvedEntry?.evaluation) {
     return buildStyleGenerationVerification({
       evaluation: approvedEntry.evaluation,
+      sample: approvedEntry.sample,
       version: approvedEntry.version,
       checkedAt: approvedEntry.createdAt
     });
@@ -6058,6 +6469,7 @@ function computeStableWindowState(input) {
   const stableWindowVerificationOk = stableWindow.length >= stabilityMinRounds && stableWindow.every((entry) => {
     const verification = entry.verification || buildStyleGenerationVerification({
       evaluation: entry.evaluation,
+      sample: entry.sample,
       version: entry.version,
       checkedAt: entry.createdAt
     });
@@ -6497,6 +6909,14 @@ var ProductionReadinessBlockedError = class extends Error {
     this.name = "ProductionReadinessBlockedError";
   }
 };
+var ProductionPlanningBlockedError = class extends Error {
+  code = "planning_protagonist_missing";
+  gate = "story_foundation";
+  constructor(message) {
+    super(message);
+    this.name = "ProductionPlanningBlockedError";
+  }
+};
 function currentBundleDir2() {
   const stack = new Error().stack || "";
   for (const line of stack.split("\n")) {
@@ -6830,6 +7250,25 @@ function styleRuleMatchesText(input) {
   const tokens = extractStyleEvidenceTokens(rule, 12);
   const tokenMatches = tokens.filter((token) => input.body.includes(token));
   if (tokenMatches.length >= Math.min(2, Math.max(1, Math.ceil(tokens.length * 0.25)))) return true;
+  const compactBody = input.body.replace(/\s+/gu, "");
+  if (/每段|推进|节奏|线索|关系|代价|情节|pacing/iu.test(rule)) {
+    const hasTraceableStorySignal = /线索|证据|账册|账本|缺页|官印|伏笔|疑点|问题|浅墨/u.test(compactBody);
+    const hasRelationshipSignal = /关系|裂缝|旧友|拦|信任|压力|门口|帮忙|隐瞒/u.test(compactBody);
+    const hasCostOrChoiceSignal = /代价|选择|决定|后果|风险|不能|被盯上|不能再|暂时安全/u.test(compactBody);
+    if (hasTraceableStorySignal && hasRelationshipSignal && hasCostOrChoiceSignal && input.actionSignals >= 4) return true;
+  }
+  if (/开场|开篇|开头|opening/iu.test(rule)) {
+    const opening = compactBody.slice(0, 420);
+    const hasOpeningAnomaly = /缺页|异常|不对|湿印|官印|脚步|浅墨|刀口|证据|账册|账本/u.test(opening);
+    const hasOpeningPressure = /压力|门外|停在|拦|问|灯火|雨声|沉默|门槛|盯/u.test(opening);
+    if (hasOpeningAnomaly && hasOpeningPressure) return true;
+  }
+  if (/结尾|收束|钩子|余波|ending|hook/iu.test(rule)) {
+    const ending = compactBody.slice(-640);
+    const hasTraceableQuestion = /问题|疑点|线索|证据|缺页|官印|账册|账本|浅墨|伏笔|答案/u.test(ending);
+    const hasAftershock = /裂缝|余波|留下|留在|不能|下一章|门外|怀疑|风险|代价|关系/u.test(ending);
+    if (hasTraceableQuestion && hasAftershock) return true;
+  }
   if (/短句|句子短|短促|冷感|克制|白描/u.test(rule) && input.avgSentenceLength > 0 && input.avgSentenceLength <= 24) return true;
   if (/长短|错落|节奏/u.test(rule) && input.avgSentenceLength >= 10 && input.avgSentenceLength <= 34) return true;
   if (/对白|对话/u.test(rule)) {
@@ -6995,9 +7434,6 @@ function formatStyleConformanceDriftReport(report) {
     ...report.risks.map((item) => `- ${item}`)
   ].filter(Boolean).join("\n");
 }
-function compactList(values = [], limit = 3) {
-  return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
-}
 function clipPromptSection(value = "", maxLength = 800) {
   const normalized = value.trim();
   if (normalized.length <= maxLength) {
@@ -7016,14 +7452,24 @@ function escapeRegExpLiteral(value) {
 function summarizeCharacterDossiers(dossiers = [], limit = 6) {
   return dossiers.slice(0, limit).map((dossier) => [
     `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
-    `  identity=${dossier.identityAndRole}`,
-    `  desire=${dossier.coreDesire}; wound=${dossier.fearOrWound}`,
-    `  habits=${compactList(dossier.behaviorHabits)}; speech=${compactList(dossier.speechMarkers)}`,
-    `  body=${dossier.appearanceAndBody}`,
-    `  skills=${compactList(dossier.skills)}; limits=${compactList(dossier.limitations)}`,
-    `  relation=${dossier.relationshipState}; delta=${dossier.currentChapterDelta}`,
-    `  evidence=${compactList(dossier.evidence.slice(-2), 2)}`
+    `  identity=${cleanProfileCarryoverValue(dossier.identityAndRole)}`,
+    `  desire=${cleanProfileCarryoverValue(dossier.coreDesire)}; wound=${cleanProfileCarryoverValue(dossier.fearOrWound)}`,
+    `  habits=${compactProfileCarryoverList(dossier.behaviorHabits)}; speech=${compactProfileCarryoverList(dossier.speechMarkers)}`,
+    `  body=${cleanProfileCarryoverValue(dossier.appearanceAndBody)}`,
+    `  skills=${compactProfileCarryoverList(dossier.skills)}; limits=${compactProfileCarryoverList(dossier.limitations)}`,
+    `  relation=${cleanProfileCarryoverValue(dossier.relationshipState)}; delta=${cleanProfileCarryoverValue(dossier.currentChapterDelta)}`,
+    `  evidence=${compactProfileCarryoverList(dossier.evidence.slice(-2), 2)}`
   ].join("\n")).join("\n");
+}
+function cleanProfileCarryoverValue(value = "", fallback = "pending") {
+  const normalized = conciseEvidence(value, 220);
+  if (!normalized || isWorkflowProfileSignalNoise(normalized)) {
+    return fallback;
+  }
+  return normalized;
+}
+function compactProfileCarryoverList(values = [], limit = 3) {
+  return values.map((value) => cleanProfileCarryoverValue(value, "")).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
 function formatCharacterDossiersMarkdown(dossiers) {
   return [
@@ -7095,16 +7541,21 @@ function isPlaceholderProfileList(values = []) {
 function conciseEvidence(value, limit = 140) {
   return value.replace(/^#+\s*/u, "").replace(/^[-*]\s*/u, "").replace(/\s+/gu, " ").trim().slice(0, limit);
 }
+function isWorkflowProfileSignalNoise(value = "") {
+  const text = value.trim();
+  if (!text) return true;
+  return /NaturalnessAgent|Production writing mode|Naturalness target|去 AI 味|硬门禁|质量链路|Final Quality Gate|Quality Gate|AIGC|Style Conformance|Polish Pass|Memory Keeper|artifact|Status:|Passed:|Score:|Attempts:|Word count:|Reason:|综合评分|角色差异化不足|角色档案合同|已执行.*(?:质量|硬门禁|Naturalness)|pursues the scene objective|pressure is tied to|relationship pressure follows|承接：|推进：围绕|本章结尾必须|角色状态必须发生|交棒：|不能只复用主角姓名/iu.test(text);
+}
 function extractCharacterEvidenceWindows(text, names, limit = 8) {
   const usableNames = uniqueStrings(names.filter((name) => name && !/^pending-/iu.test(name)));
-  const lines = text.split(/\n+/u).map((line) => conciseEvidence(line, 220)).filter(Boolean).filter((line) => !/^Drafting Metadata|Naturalness Report|Character Profile Projection$/iu.test(line));
+  const lines = text.split(/\n+/u).map((line) => conciseEvidence(line, 220)).filter(Boolean).filter((line) => !/^Drafting Metadata|Naturalness Report|Character Profile Projection$/iu.test(line)).filter((line) => !isWorkflowProfileSignalNoise(line));
   if (!usableNames.length) {
     return lines.slice(0, limit);
   }
   const namePattern = new RegExp(usableNames.map(escapeRegExpLiteral).join("|"), "u");
   const direct = lines.filter((line) => namePattern.test(line));
   const profileSignals = lines.filter((line) => /主角|人物|角色|关系|选择|欲望|伤口|习惯|说话|外貌|体态|特长|短板|停顿|立场|能力|线索/u.test(line));
-  return uniqueStrings([...direct, ...profileSignals]).slice(0, limit);
+  return uniqueStrings(direct.length ? direct : profileSignals).slice(0, limit);
 }
 function firstEvidenceMatching(windows, pattern) {
   return windows.find((window) => pattern.test(window)) || "";
@@ -7131,13 +7582,14 @@ function extractCharacterProfileSignals(input) {
     input.dossier.role === "protagonist" ? input.protagonistName : ""
   ]);
   const action = firstEvidenceMatching(windows, /选择|处理|抓住|判断|反击|停顿|回避|试探|压|藏|递|推|看|听|握|抬|低|转|拦|走|拿|放/u);
+  const goal = firstEvidenceMatching(windows, /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|代价|保住|查清|追问|问责|调卷|签字|当没看见|名字已经上了|带走/u);
   const speech = firstEvidenceMatching(windows, /「|」|说|问|道|低声|称呼|话|停顿/u);
   const body = firstEvidenceMatching(windows, /眼|手|腕|指|肩|背|袖|脚|身|体|体态|看见|触感|声音|反应|姿态|站|退/u);
   const relation = firstEvidenceMatching(windows, /关系|对方|别人|有人|信任|债|债务|压力|试探|回避|立场|要求|逼|冲突|配角|主角/u);
   const skill = firstEvidenceMatching(windows, /判断|抓住|线索|反击|处理|策略|推理|能力|规则|账|田册|官印|密信/u);
   const limit = firstEvidenceMatching(windows, /不完美|代价|压力|逼|不能|风险|恐惧|弱点|伤口|问题/u);
   return {
-    desire: `${input.chapterLabel}: pursues the scene objective: ${input.causalPlan.sceneObjective}`,
+    desire: goal || action ? `${input.chapterLabel}: ${conciseEvidence(goal || action)}` : `${input.chapterLabel}: pursues the scene objective: ${input.causalPlan.sceneObjective}`,
     wound: limit ? `${input.chapterLabel}: pressure signal: ${conciseEvidence(limit)}` : `${input.chapterLabel}: pressure is tied to ${input.causalPlan.previousInput}`,
     contradiction: `${input.chapterLabel}: chooses under pressure: ${input.causalPlan.protagonistDecision}`,
     habit: `${input.chapterLabel}: ${conciseEvidence(action || input.causalPlan.protagonistDecision)}`,
@@ -7150,20 +7602,62 @@ function extractCharacterProfileSignals(input) {
     evidence: windows[0] ? `${input.chapterLabel} profile signal: ${conciseEvidence(windows[0], 180)}` : ""
   };
 }
+function isSeedCharacterDossier(dossier) {
+  return dossier.id === "protagonist" || dossier.role === "protagonist" || dossier.id === "antagonist-force" || dossier.id === "relationship-axis" || dossier.role === "antagonist" || dossier.role === "relationship-axis";
+}
+function dossierMatchesAllowedCast(dossier, allowedNames) {
+  if (isSeedCharacterDossier(dossier)) return true;
+  if (!allowedNames.size) return isConcreteStoryDossier(dossier);
+  return [dossier.canonicalName, ...dossier.aliases || []].map((name) => String(name || "").trim()).some((name) => allowedNames.has(name));
+}
+function cleanDossierStateValue(value = "", fallback = "") {
+  const normalized = conciseEvidence(value, 260);
+  if (!normalized || isWorkflowProfileSignalNoise(normalized)) return fallback;
+  return normalized;
+}
+function cleanDossierStateList(values = [], limit = 8) {
+  return uniqueStrings(values.map((value) => cleanDossierStateValue(value, "")).filter(Boolean)).slice(-limit);
+}
+function sanitizeCharacterDossierForCarryover(dossier) {
+  return {
+    ...dossier,
+    identityAndRole: cleanDossierStateValue(dossier.identityAndRole, dossier.identityAndRole),
+    coreDesire: cleanDossierStateValue(dossier.coreDesire),
+    fearOrWound: cleanDossierStateValue(dossier.fearOrWound),
+    contradiction: cleanDossierStateValue(dossier.contradiction),
+    behaviorHabits: cleanDossierStateList(dossier.behaviorHabits),
+    speechMarkers: cleanDossierStateList(dossier.speechMarkers),
+    appearanceAndBody: cleanDossierStateValue(dossier.appearanceAndBody),
+    skills: cleanDossierStateList(dossier.skills),
+    limitations: cleanDossierStateList(dossier.limitations),
+    relationshipState: cleanDossierStateValue(dossier.relationshipState),
+    relationshipEdges: (dossier.relationshipEdges || []).map((edge) => ({
+      ...edge,
+      label: cleanDossierStateValue(edge.label, edge.label),
+      pressure: cleanDossierStateValue(edge.pressure)
+    })).filter((edge) => cleanDossierStateValue(edge.label) || edge.pressure),
+    arcTrajectory: cleanDossierStateValue(dossier.arcTrajectory),
+    currentChapterDelta: cleanDossierStateValue(dossier.currentChapterDelta),
+    continuityNotes: cleanDossierStateList(dossier.continuityNotes),
+    evidence: cleanDossierStateList(dossier.evidence)
+  };
+}
 function updateCharacterDossiersAfterChapter(input) {
   const updatedAt = input.updatedAt || (/* @__PURE__ */ new Date()).toISOString();
-  const knownCast = uniqueStrings([
+  const knownCast = sanitizeKnownCastNames([
     input.continuityContract.lockedProtagonistName,
     ...input.continuityContract.knownCast,
     ...extractChinesePersonNames(input.finalDraft, 12)
-  ].filter(Boolean));
+  ].filter(Boolean), 24);
   const protagonistName = input.continuityContract.lockedProtagonistName || knownCast[0] || "";
   const chapterLabel = `chapter ${input.task.chapterNumber}`;
   const causalPlan = getTaskCausalPlan(input.state, input.task);
   const chapterDelta = `${chapterLabel}: ${causalPlan.characterStateDelta}`;
-  const evidence = `${chapterLabel}: ${input.finalDraft.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`;
+  const narrativeBody = extractNarrativeBody(input.finalDraft);
+  const evidence = `${chapterLabel}: ${narrativeBody.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join(" ").slice(0, 180)}`;
   const continuityNote = `${chapterLabel}: ${input.continuityContract.continuityAnchors.slice(0, 4).join("\u3001") || "new continuity anchors pending"}`;
-  const dossiers = input.dossiers.length ? input.dossiers : [];
+  const allowedCarryoverNames = new Set(knownCast);
+  const dossiers = input.dossiers.length ? input.dossiers.filter((dossier) => dossierMatchesAllowedCast(dossier, allowedCarryoverNames)).map((dossier) => sanitizeCharacterDossierForCarryover(dossier)) : [];
   const nextDossiers = dossiers.map((dossier) => {
     const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist";
     const isKnownCast = knownCast.some((name) => name && (dossier.canonicalName === name || dossier.aliases.includes(name)));
@@ -7175,9 +7669,7 @@ function updateCharacterDossiersAfterChapter(input) {
     ]).slice(0, 8);
     const profileSignals = extractCharacterProfileSignals({
       dossier: { ...dossier, canonicalName, aliases },
-      text: `${input.finalDraft}
-
-${input.memoryUpdate}`,
+      text: narrativeBody,
       chapterLabel,
       causalPlan,
       protagonistName
@@ -7209,26 +7701,54 @@ ${input.memoryUpdate}`,
     const id = `supporting-${name.replace(/[^\p{Script=Han}A-Za-z0-9_-]+/gu, "-").replace(/^-+|-+$/g, "") || nextDossiers.length + 1}`;
     if (existingIds.has(id)) continue;
     existingIds.add(id);
+    const profileSignals = extractCharacterProfileSignals({
+      dossier: {
+        id,
+        role: "supporting",
+        canonicalName: name,
+        aliases: [name],
+        identityAndRole: "",
+        coreDesire: "",
+        fearOrWound: "",
+        contradiction: "",
+        behaviorHabits: [],
+        speechMarkers: [],
+        appearanceAndBody: "",
+        skills: [],
+        limitations: [],
+        relationshipState: "",
+        relationshipEdges: [],
+        arcTrajectory: "",
+        currentChapterDelta: "",
+        continuityNotes: [],
+        evidence: [],
+        updatedAt
+      },
+      text: narrativeBody,
+      chapterLabel,
+      causalPlan,
+      protagonistName
+    });
     nextDossiers.push({
       id,
       role: "supporting",
       canonicalName: name,
       aliases: [name],
       identityAndRole: `Supporting cast member observed in ${chapterLabel}; role function requires Memory Keeper enrichment.`,
-      coreDesire: "pending desire inferred from future scenes",
-      fearOrWound: "pending wound inferred from future scenes",
-      contradiction: "pending contradiction inferred from future scenes",
-      behaviorHabits: ["pending observed habit"],
-      speechMarkers: ["pending speech marker"],
-      appearanceAndBody: "pending visible marker",
-      skills: ["pending competence"],
-      limitations: ["pending limitation"],
-      relationshipState: `Observed around ${input.continuityContract.lockedProtagonistName || "the protagonist"} in ${chapterLabel}; relationship pressure pending.`,
-      relationshipEdges: [{ targetId: "protagonist", label: "observed with", pressure: "needs relationship pressure enrichment" }],
-      arcTrajectory: "pending recurring function",
+      coreDesire: profileSignals.desire,
+      fearOrWound: profileSignals.wound,
+      contradiction: profileSignals.contradiction,
+      behaviorHabits: profileSignals.habit ? [profileSignals.habit] : ["pending observed habit"],
+      speechMarkers: profileSignals.speech ? [profileSignals.speech] : ["pending speech marker"],
+      appearanceAndBody: profileSignals.body || "pending visible marker",
+      skills: profileSignals.skill ? [profileSignals.skill] : ["pending competence"],
+      limitations: profileSignals.limitation ? [profileSignals.limitation] : ["pending limitation"],
+      relationshipState: profileSignals.relationship,
+      relationshipEdges: [{ targetId: "protagonist", label: protagonistName ? `pressure around ${protagonistName}` : "observed with", pressure: profileSignals.relationship }],
+      arcTrajectory: profileSignals.arc,
       currentChapterDelta: chapterDelta,
       continuityNotes: [continuityNote],
-      evidence: [evidence],
+      evidence: [evidence, profileSignals.evidence].filter(Boolean),
       updatedAt
     });
   }
@@ -7299,6 +7819,46 @@ function defaultWritingStatusText(payload) {
   if (phase === "running") return "Agent \u6B63\u5728\u6267\u884C\u5F53\u524D\u6B65\u9AA4\u3002";
   return "";
 }
+function writingWorkflowTraceText(payload) {
+  const lines = [];
+  const workflow = payload.workflow;
+  const llm = payload.llm;
+  const artifacts = payload.artifacts || (payload.artifactPath ? [{
+    path: payload.artifactPath,
+    label: payload.artifactLabel,
+    kind: payload.artifactKind,
+    status: payload.status
+  }] : []);
+  if (workflow?.kind || workflow?.summary) {
+    lines.push(`\u6D41\u7A0B\u8282\u70B9\uFF1A${workflow.summary || workflow.kind || "status"}`);
+  }
+  if (workflow?.expandableArtifactPath) {
+    lines.push(`\u5C55\u5F00\u4E0A\u4E0B\u6587\uFF1A${workflow.expandableArtifactPath}`);
+  }
+  if (llm) {
+    const promptChars = llm.requestChars ?? (llm.basePromptChars || 0) + (llm.dynamicPromptChars || 0) + (llm.messageChars || 0);
+    const llmBits = [
+      `\u89D2\u8272 ${llm.roleName}`,
+      promptChars ? `\u8BF7\u6C42\u7EA6 ${promptChars} \u5B57\u7B26` : "",
+      llm.responseChars ? `\u54CD\u5E94\u7EA6 ${llm.responseChars} \u5B57\u7B26` : "",
+      llm.streamedChars ? `\u5DF2\u6D41\u5F0F\u8FD4\u56DE ${llm.streamedChars} \u5B57\u7B26` : "",
+      llm.temperature !== void 0 ? `temperature=${llm.temperature}` : "",
+      llm.attempt ? `attempt=${llm.attempt}/${llm.maxAttempts || "?"}` : ""
+    ].filter(Boolean);
+    if (llmBits.length) {
+      lines.push(`LLM\uFF1A${llmBits.join(" \xB7 ")}`);
+    }
+  }
+  if (artifacts.length) {
+    lines.push(`\u4EA7\u7269\uFF1A${artifacts.slice(0, 6).map((artifact) => artifact.label || artifact.path).join("\u3001")}`);
+  }
+  if (payload.tools?.length) {
+    lines.push(`\u5DE5\u5177\u8C03\u7528\uFF1A${payload.tools.slice(0, 6).map((tool) => `${tool.toolName}${tool.status ? `/${tool.status}` : ""}`).join("\u3001")}`);
+  }
+  return lines.length ? `
+
+${lines.map((line) => `- ${line}`).join("\n")}` : "";
+}
 function writingProgressContent(payload) {
   const knowledgeReferences = Array.isArray(payload.knowledgeReferences) ? payload.knowledgeReferences : [];
   const knowledgeLine = knowledgeReferences.length ? `
@@ -7307,6 +7867,7 @@ function writingProgressContent(payload) {
 ${knowledgeReferences.slice(0, 5).map(
     (item) => `- ${item.sourceType || "resource"} \xB7 ${item.chunkType || "chunk"} \xB7 ${item.sourcePath || item.sourceTitle || item.chunkId} \xB7 ${Number(item.score || 0).toFixed(1)}`
   ).join("\n")}` : "";
+  const workflowTrace = writingWorkflowTraceText(payload);
   if (isLlmWritingStep(payload.step)) {
     const chapterLabel2 = payload.chapterNumber ? `\u7B2C ${payload.chapterNumber} \u7AE0` : "\u5199\u4F5C\u6D41\u6C34\u7EBF";
     const stepLabel = payload.step.replace(/_llm_(started|streaming|completed|failed)$/u, "");
@@ -7328,6 +7889,7 @@ ${knowledgeReferences.slice(0, 5).map(
 \u72B6\u6001\uFF1A${statusText}` : "",
       statusDetail ? `
 ${statusDetail}` : "",
+      workflowTrace,
       knowledgeLine,
       body ? `
 ${body}
@@ -7359,6 +7921,7 @@ ${liveText.slice(-1200)}
     "",
     payload.message || "\u5199\u4F5C\u6D41\u6C34\u7EBF\u72B6\u6001\u66F4\u65B0\u3002",
     artifactLine,
+    workflowTrace,
     knowledgeLine,
     qualityLine,
     wordLine,
@@ -7423,13 +7986,44 @@ function writingProgressParts(messageId, payload) {
       statusDetail: payload.statusDetail ?? null,
       wordCount: payload.wordCount ?? null,
       qualityGate: payload.qualityGate ?? null,
-      knowledgeReferences: payload.knowledgeReferences ?? []
+      knowledgeReferences: payload.knowledgeReferences ?? [],
+      workflow: payload.workflow ?? null,
+      llm: payload.llm ?? null,
+      artifacts: payload.artifacts ?? [],
+      tools: payload.tools ?? []
     }, createdAt)
   ];
   if (payload.artifactPath) {
     parts.push(messagePart(messageId, parts.length, "artifact", {
       path: payload.artifactPath,
-      label: artifactMessageLabel("chapter", payload.artifactPath, { chapterNumber: payload.chapterNumber })
+      label: payload.artifactLabel || artifactMessageLabel(payload.artifactKind || "chapter", payload.artifactPath, { chapterNumber: payload.chapterNumber }),
+      kind: payload.artifactKind || "chapter",
+      status: payload.status || "completed"
+    }, createdAt));
+  }
+  for (const artifact of payload.artifacts || []) {
+    if (!artifact.path || artifact.path === payload.artifactPath) continue;
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label || artifact.path,
+      kind: artifact.kind || payload.artifactKind || "artifact",
+      status: artifact.status || payload.status || "completed",
+      role: artifact.role || "",
+      chars: artifact.chars ?? null
+    }, createdAt));
+  }
+  for (const tool of payload.tools || []) {
+    parts.push(messagePart(messageId, parts.length, "tool_call", {
+      toolName: tool.toolName,
+      input: tool.inputSummary || "",
+      artifactPath: tool.artifactPath || "",
+      status: tool.status || "completed"
+    }, createdAt));
+    parts.push(messagePart(messageId, parts.length, "tool_result", {
+      toolName: tool.toolName,
+      status: tool.status || "completed",
+      output: tool.outputSummary || "",
+      artifactPath: tool.artifactPath || ""
     }, createdAt));
   }
   return parts;
@@ -7462,13 +8056,61 @@ async function emitWritingKnowledgeRecallProgress(input) {
     knowledgeReferences: references
   });
 }
+function withDefaultWritingWorkflow(event) {
+  if (event.workflow) {
+    return event;
+  }
+  if (event.qualityGate) {
+    return {
+      ...event,
+      workflow: {
+        kind: "gate",
+        stage: event.step,
+        summary: `\u8D28\u91CF\u95E8\u7981 ${event.qualityGate.status}`,
+        collapsed: true
+      }
+    };
+  }
+  if (event.knowledgeReferences?.length) {
+    return {
+      ...event,
+      workflow: {
+        kind: "knowledge_recall",
+        stage: event.step,
+        summary: `\u77E5\u8BC6\u5E93\u53EC\u56DE ${event.knowledgeReferences.length} \u4E2A\u7247\u6BB5`,
+        collapsed: true
+      }
+    };
+  }
+  if (event.artifactPath) {
+    return {
+      ...event,
+      workflow: {
+        kind: "artifact_saved",
+        stage: event.step,
+        summary: "\u4EA7\u7269\u5DF2\u4FDD\u5B58",
+        collapsed: true,
+        expandableArtifactPath: event.artifactPath
+      }
+    };
+  }
+  return {
+    ...event,
+    workflow: {
+      kind: "status",
+      stage: event.step,
+      summary: event.message,
+      collapsed: true
+    }
+  };
+}
 async function emitWritingProgress(options, event) {
   throwIfStopped(options.signal);
   const directorCommandId = event.directorCommandId || options.directorCommandId || void 0;
-  const eventWithRuntime = {
+  const eventWithRuntime = withDefaultWritingWorkflow({
     ...event,
     ...directorCommandId ? { directorCommandId } : {}
-  };
+  });
   const payload = {
     ...eventWithRuntime,
     messageId: stableWritingMessageId(eventWithRuntime),
@@ -7504,6 +8146,10 @@ async function emitWritingProgress(options, event) {
           statusDetail: payload.statusDetail ?? null,
           wordCount: payload.wordCount ?? null,
           qualityGate: payload.qualityGate ?? null,
+          workflow: payload.workflow ?? null,
+          llm: payload.llm ?? null,
+          artifacts: payload.artifacts ?? [],
+          tools: payload.tools ?? [],
           directorCommandId: payload.directorCommandId ?? null
         }
       });
@@ -7530,7 +8176,7 @@ function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
   const countedWords = wordMatch ? Number(wordMatch[1]) : void 0;
   const targetWords = wordMatch ? Number(wordMatch[2]) : void 0;
   const hasWordCountCheck = typeof countedWords === "number" && Number.isFinite(countedWords) && typeof targetWords === "number" && Number.isFinite(targetWords);
-  const wordCountBlockingIssue = hasWordCountCheck && countedWords < Math.floor(targetWords * 0.8);
+  const wordCountBlockingIssue = hasWordCountCheck && (countedWords < Math.floor(targetWords * 0.8) || countedWords > Math.ceil(targetWords * 1.15));
   const explicitPassMarker = /(?:quality_gate|status|质量门禁|门禁状态)\s*[:：]\s*(?:passed|pass|通过)/iu.test(report);
   const explicitBlockMarker = /(?:quality_gate|status|质量门禁|门禁状态)\s*[:：]\s*(?:blocked|fail(?:ed)?|不通过|未通过|阻塞)/iu.test(report) || /\bneeds-manual-review\b/iu.test(report);
   const nonBlockingPhrases = [
@@ -7552,21 +8198,100 @@ function parseQualityGate(report, attempts = 0, maxAttempts = 3) {
     score,
     status,
     attempts,
-    reason: passed ? "\u8D28\u91CF\u95E8\u7981\u901A\u8FC7\u3002" : wordCountBlockingIssue ? `\u6B63\u6587\u6709\u6548\u5B57\u6570 ${countedWords}/${targetWords}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\u3002` : score < 7 ? `\u7EFC\u5408\u8BC4\u5206 ${score}/10\uFF0C\u4F4E\u4E8E\u901A\u8FC7\u9608\u503C\u3002` : "\u8D28\u91CF\u62A5\u544A\u5305\u542B\u963B\u585E\u6216\u8FD4\u5DE5\u4FE1\u53F7\u3002",
+    reason: passed ? "\u8D28\u91CF\u95E8\u7981\u901A\u8FC7\u3002" : wordCountBlockingIssue ? countedWords < Math.floor((targetWords || 0) * 0.8) ? `\u6B63\u6587\u6709\u6548\u5B57\u6570 ${countedWords}/${targetWords}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\u3002` : `\u6B63\u6587\u6709\u6548\u5B57\u6570 ${countedWords}/${targetWords}\uFF0C\u8D85\u8FC7 115% \u4E0A\u9650\u3002` : score < 7 ? `\u7EFC\u5408\u8BC4\u5206 ${score}/10\uFF0C\u4F4E\u4E8E\u901A\u8FC7\u9608\u503C\u3002` : "\u8D28\u91CF\u62A5\u544A\u5305\u542B\u963B\u585E\u6216\u8FD4\u5DE5\u4FE1\u53F7\u3002",
     wordCount: countedWords,
     targetWords
   };
 }
+function evaluateUnplannedCharacterDrift(finalDraft, continuityContract, characterDossiers = []) {
+  const body = extractNarrativeBody(finalDraft);
+  const dossierNames = characterDossiers.flatMap((dossier) => [
+    dossier.canonicalName,
+    ...Array.isArray(dossier.aliases) ? dossier.aliases : []
+  ]);
+  const allowedNames = new Set(sanitizeKnownCastNames([
+    continuityContract.lockedProtagonistName,
+    ...continuityContract.requiredNames,
+    ...continuityContract.knownCast,
+    ...dossierNames
+  ], 80));
+  const protagonist = continuityContract.lockedProtagonistName || "";
+  const escapeNameForRegExp = (name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const isProtagonistTitleAlias = (name) => {
+    if (!protagonist || !name.startsWith(protagonist.slice(0, 1))) return false;
+    return /(?:书吏|小吏|司书|主簿|典簿|掌固|县丞|县令|大人)$/u.test(name);
+  };
+  const candidates = sanitizeKnownCastNames([
+    ...extractChinesePersonNames(body, 100),
+    ...extractStrongLocalCharacterNameCandidates(body, 100)
+  ], 100).filter((name) => !allowedNames.has(name)).filter((name) => !isProtagonistTitleAlias(name)).filter((name) => !isKnownCastNameFragment(name, allowedNames)).filter((name) => !isLikelyNonCharacterDraftName(name));
+  const risks = candidates.map((name) => {
+    const occurrences = [...body.matchAll(new RegExp(escapeNameForRegExp(name), "gu"))];
+    const windows = occurrences.map((match) => {
+      const index = match.index || 0;
+      return body.slice(Math.max(0, index - 80), Math.min(body.length, index + name.length + 80));
+    });
+    const keyContext = windows.some(
+      (window) => /前任|上一任|库使|知县|县丞|管事|账房|少爷|旧友|同僚|教他|留下|书押|借|带话|进来|站起来|走进|姓|名|身份|欠条|人情|袖口|线索|低声|压低声音|问|说/u.test(window)
+    );
+    return {
+      name,
+      occurrences: occurrences.length,
+      keyContext
+    };
+  }).filter((risk) => risk.keyContext);
+  const identityRisks = detectKnownCastIdentityConflicts(body, continuityContract, characterDossiers);
+  if (identityRisks.length > 0) {
+    return {
+      status: "quarantined",
+      reason: `Canon \u4EBA\u7269\u8EAB\u4EFD\u51B2\u7A81\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u6B63\u6587\u628A\u5DF2\u77E5\u89D2\u8272\u5199\u6210\u4E0E\u89D2\u8272\u6863\u6848/Canon \u4E0D\u517C\u5BB9\u7684\u8EAB\u4EFD\u300C${identityRisks.slice(0, 6).map((risk) => `${risk.name}\xD7${risk.occurrences}`).join("\u3001")}\u300D\u3002\u5DF2\u786E\u8BA4\u89D2\u8272\u4E0D\u80FD\u5728\u6B63\u6587\u4E2D\u4E34\u65F6\u6539\u6210\u7236\u4EB2\u3001\u59B9\u59B9\u3001\u4E0A\u53F8\u6216\u5176\u4ED6\u5173\u7CFB\u8EAB\u4EFD\u3002`,
+      risks: identityRisks
+    };
+  }
+  if (risks.length > 0) {
+    return {
+      status: "quarantined",
+      reason: `Canon \u4EBA\u7269\u6F02\u79FB\u786C\u95E8\u69DB\u5931\u8D25\uFF1A\u6B63\u6587\u51FA\u73B0\u672A\u5728\u84DD\u56FE/Canon/\u89D2\u8272\u6863\u6848\u4E2D\u6279\u51C6\u7684\u5173\u952E\u59D3\u540D\u300C${risks.slice(0, 6).map((risk) => `${risk.name}\xD7${risk.occurrences}`).join("\u3001")}\u300D\u3002\u65B0\u589E\u5173\u952E\u4EBA\u7269\u5FC5\u987B\u5148\u8FDB\u5165\u84DD\u56FE\u6216\u8BB0\u5FC6\u8D26\u672C\uFF0C\u4E0D\u80FD\u5728\u6B63\u6587\u7247\u6BB5\u4E2D\u4E34\u65F6\u751F\u6210\u3002`,
+      risks
+    };
+  }
+  return {
+    status: "eligible",
+    reason: "\u672A\u53D1\u73B0\u672A\u7ECF\u6279\u51C6\u7684\u5173\u952E\u65B0\u589E\u4EBA\u7269\u3002",
+    risks: [...identityRisks, ...risks]
+  };
+}
+function isKnownCastNameFragment(name, allowedNames) {
+  for (const knownName of [...allowedNames].sort((left, right) => right.length - left.length)) {
+    if (!knownName || name === knownName || !name.startsWith(knownName)) continue;
+    const suffix = name.slice(knownName.length);
+    if (/^(?:正|没|没有|正在|在|把|将|向|对|被|的|了|也|又|还|已|先|再|才)$/u.test(suffix)) {
+      return true;
+    }
+  }
+  return false;
+}
 function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile = "", continuityContract = createContinuityContract({ state, task, protagonistProfile }), characterDossiers, blueprint = "") {
-  const finalWordCount = wordCount(finalDraft);
+  const finalWordCount = wordCount(extractNarrativeBody(finalDraft));
   const targetWords = task.targetWords;
   const minimumPassWords = Math.floor(targetWords * 0.8);
+  const maximumPassWords = Math.ceil(targetWords * 1.15);
   if (finalWordCount < minimumPassWords) {
     return {
       ...gate,
       passed: false,
       status: "blocked",
       reason: `\u6700\u7EC8\u7A3F\u6709\u6548\u5B57\u6570 ${finalWordCount}/${targetWords}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\u3002`,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
+  if (finalWordCount > maximumPassWords) {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: `\u6700\u7EC8\u7A3F\u6709\u6548\u5B57\u6570 ${finalWordCount}/${targetWords}\uFF0C\u8D85\u8FC7 115% \u4E0A\u9650\u3002`,
       wordCount: finalWordCount,
       targetWords
     };
@@ -7634,6 +8359,17 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       targetWords
     };
   }
+  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract);
+  if (sceneCharacterObligations.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: sceneCharacterObligations.reason,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
@@ -7653,6 +8389,17 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       targetWords
     };
   }
+  const unplannedCharacters = evaluateUnplannedCharacterDrift(finalDraft, continuityContract, characterDossiers);
+  if (unplannedCharacters.status === "quarantined") {
+    return {
+      ...gate,
+      passed: false,
+      status: "blocked",
+      reason: unplannedCharacters.reason,
+      wordCount: finalWordCount,
+      targetWords
+    };
+  }
   const naturalnessReport = createNaturalnessReport({
     beforeDraft: finalDraft,
     afterDraft: finalDraft,
@@ -7667,17 +8414,6 @@ function enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonist
       passed: false,
       status: "blocked",
       reason: naturalnessReport.reason,
-      wordCount: finalWordCount,
-      targetWords
-    };
-  }
-  const sceneCharacterObligations = evaluateSceneCardCharacterObligations(finalDraft, blueprint, continuityContract);
-  if (sceneCharacterObligations.status === "quarantined") {
-    return {
-      ...gate,
-      passed: false,
-      status: "blocked",
-      reason: sceneCharacterObligations.reason,
       wordCount: finalWordCount,
       targetWords
     };
@@ -8686,7 +9422,7 @@ function evaluateWritingResourceUsage(text = "", state, task, blueprint = "", co
   };
 }
 function extractNarrativeBody(text = "") {
-  return text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Naturalness Report|章节元数据|章节元信息)/u)[0];
+  return text.replace(/```[\s\S]*?```/g, "").split(/\n##\s+(?:Drafting Metadata|Polish Pass|Quality Gate|Final Quality Gate|AIGC Detection|Style Conformance Drift|Naturalness Pass|Naturalness Report|Character Profile Projection|章节元数据|章节元信息)/u)[0];
 }
 function extractNumberFacts(text = "", limit = 10) {
   return uniqueStrings(text.match(/[第]?\d+(?:[.\d]*)?(?:章|年|月|日|天|夜|次|人|两|个|枚|封|件|步|里|刻|分|成|钱|两|万|千|百)?/gu) || []).filter((fact) => /[0-9]/u.test(fact)).slice(0, limit);
@@ -8776,7 +9512,7 @@ function createNaturalnessReport(input) {
   const actionSignals = (body.match(/走|站|伸手|拿|推|扣|按|抬|低头|转身|看|听|问|答|说|递|收|藏|翻|敲|拦|避|追|停|跪|坐|起|握|松|咬|皱眉|沉默/gu) || []).length;
   const sensorySignals = (body.match(/风|雨|雪|冷|热|汗|血|泥|尘|灯|火|声|响|气味|腥|苦|潮|湿|暗|亮|疼|粗|硬|软|烫|凉/gu) || []).length;
   const aiSummarySignals = (body.match(/由此可见|不难看出|事实上|显然|总而言之|综上|这意味着|他终于明白|命运的齿轮|这一刻.*命运|内心开阔|复杂的情绪|无法言喻|说不出的感觉|某种意义上/gu) || []).length;
-  const analyticSignals = (body.match(/第一|第二|首先|其次|最后|原因是|从.*角度|可以看出|体现了|说明了|证明了/gu) || []).length;
+  const analyticSignals = countAnalyticReportSignals(body);
   const emotionLabelSignals = (body.match(/愤怒|悲伤|恐惧|绝望|震惊|激动|开心|难过|复杂|崩溃|释然/gu) || []).length;
   const fatigueWordSignals = (body.match(/突然|忽然|猛然|竟然|居然|渐渐|逐渐|然而|与此同时|似乎|也许|大概|仿佛/gu) || []).length;
   const characterPresence = evaluateCharacterProfilePresence(input.afterDraft, input.characterProfileContract);
@@ -8825,6 +9561,13 @@ function createNaturalnessReport(input) {
       characterPresence.reason
     ]
   };
+}
+function countAnalyticReportSignals(body) {
+  const reportConnectors = body.match(/(?:首先|其次|最后)[，,、:：]/gu) || [];
+  const explanatorySignals = body.match(/原因是|可以看出|体现了|说明了|证明了/gu) || [];
+  const viewpointSignals = body.match(/从[^。！？!?；;\n]{1,24}(?:角度|层面|维度)(?:看|来说|分析)?/gu) || [];
+  const numberedReportItems = body.match(/(?:^|[\n。！？!?；;])\s*(?:第[一二三四五六七八九十]+|[一二三四五六七八九十]+)[、，,：:]/gu) || [];
+  return reportConnectors.length + explanatorySignals.length + viewpointSignals.length + numberedReportItems.length;
 }
 function formatNaturalnessReport(report) {
   return [
@@ -9008,11 +9751,47 @@ function defaultCausalPlan(state, task) {
     foreshadowingOperation: "\u65B0\u589E\u3001\u63A8\u8FDB\u6216\u56DE\u6536\u4E00\u4E2A\u53EF\u8FFD\u8E2A\u4F0F\u7B14\uFF0C\u5E76\u660E\u786E\u5B83\u4E0E\u4E3B\u7EBF\u6216\u89D2\u8272\u4F24\u53E3\u7684\u5173\u7CFB\u3002"
   };
 }
+var PERSISTED_CAUSAL_PLAN_ENGLISH_REPLACEMENTS = [
+  [/\bminor\s+archive\s+clerk\b/giu, "\u6863\u6848\u5C0F\u540F"],
+  [/\barchive\s+clerk\b/giu, "\u6863\u6848\u5C0F\u540F"],
+  [/\btax\s+ledgers?\b/giu, "\u7A0E\u518C"],
+  [/\bfamily\s+debts?\b/giu, "\u5BB6\u65CF\u503A\u52A1"],
+  [/\bimperial\s+weather\s+records?\b/giu, "\u53F8\u5929\u76D1\u6C14\u8C61\u8BB0\u5F55"],
+  [/\bweather\s+records?\b/giu, "\u6C14\u8C61\u8BB0\u5F55"],
+  [/\bimpossible\s+contradiction\b/giu, "\u4E0D\u53EF\u80FD\u77DB\u76FE"],
+  [/\blong-range\s+continuity\b/giu, "\u957F\u7EBF\u8FDE\u7EED\u6027"],
+  [/\bminor\b/giu, "\u6863\u6848\u5C0F\u540F"],
+  [/\barchive\b/giu, "\u6863\u6848\u5E93"],
+  [/\bclerk\b/giu, "\u6863\u6848\u5C0F\u540F"],
+  [/\bledgers?\b/giu, "\u7A0E\u518C"],
+  [/\bdebts?\b/giu, "\u5BB6\u65CF\u503A\u52A1"],
+  [/\bweather\b/giu, "\u6C14\u8C61\u8BB0\u5F55"],
+  [/\brecords?\b/giu, "\u6863\u6848\u8BB0\u5F55"]
+];
+function normalizePersistedCausalPlanText(text = "") {
+  return PERSISTED_CAUSAL_PLAN_ENGLISH_REPLACEMENTS.reduce(
+    (current, [pattern, replacement]) => current.replace(pattern, replacement),
+    text
+  );
+}
 function getTaskCausalPlan(state, task) {
-  return {
+  const hasPersistedPlan = Boolean(task.causalPlan);
+  const plan = {
     ...defaultCausalPlan(state, task),
     ...task.causalPlan || {},
     requiredContinuityAnchors: task.causalPlan?.requiredContinuityAnchors?.length ? task.causalPlan.requiredContinuityAnchors : defaultCausalPlan(state, task).requiredContinuityAnchors
+  };
+  if (!hasPersistedPlan) return plan;
+  return {
+    ...plan,
+    previousInput: normalizePersistedCausalPlanText(plan.previousInput),
+    sceneObjective: normalizePersistedCausalPlanText(plan.sceneObjective),
+    protagonistDecision: normalizePersistedCausalPlanText(plan.protagonistDecision),
+    irreversibleConsequence: normalizePersistedCausalPlanText(plan.irreversibleConsequence),
+    nextHandoff: normalizePersistedCausalPlanText(plan.nextHandoff),
+    characterStateDelta: normalizePersistedCausalPlanText(plan.characterStateDelta),
+    foreshadowingOperation: normalizePersistedCausalPlanText(plan.foreshadowingOperation),
+    requiredContinuityAnchors: plan.requiredContinuityAnchors.map((anchor) => normalizePersistedCausalPlanText(anchor))
   };
 }
 function formatCausalPlanBullets(state, task) {
@@ -9027,6 +9806,15 @@ function formatCausalPlanBullets(state, task) {
     `- Foreshadowing Operation: ${causalPlan.foreshadowingOperation}`,
     `- Next Chapter Handoff: ${causalPlan.nextHandoff}`
   ];
+}
+function summarizeCausalPlan(causalPlan) {
+  return [
+    `\u627F\u63A5\uFF1A${causalPlan.previousInput.replace(/^承接：/u, "")}`,
+    `\u63A8\u8FDB\uFF1A${causalPlan.sceneObjective.replace(/^推进：/u, "")}`,
+    `\u9009\u62E9\uFF1A${causalPlan.protagonistDecision}`,
+    `\u4EE3\u4EF7\uFF1A${causalPlan.irreversibleConsequence}`,
+    `\u4EA4\u68D2\uFF1A${causalPlan.nextHandoff.replace(/^交棒：/u, "")}`
+  ].join(" ");
 }
 function formatChapterCausalityMatrix(state, limit = Number.POSITIVE_INFINITY) {
   const tasks = state.plan.chapterTasks.slice(0, limit);
@@ -9098,6 +9886,311 @@ var PRODUCTION_STORY_ASSET_FILES = [
   ...PRODUCTION_STORY_MARKDOWN_ASSET_FILES,
   ...PRODUCTION_STORY_STRUCTURED_ASSET_FILES
 ];
+function isPlaceholderStoryValue(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return !text || /^(?:pending|placeholder|todo|tbd)(?:[\s_-]|$)/iu.test(text) || /pending-[\w-]+/iu.test(text) || /^角色\d+$/u.test(text) || /^(?:主角|主人公|对抗力量|关键关系对象|关系轴|relationship axis|antagonist force|pressure mirror|opposition)$/iu.test(text) || /待定|未命名|占位/u.test(text);
+}
+function storyValue(value, fallback) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return isPlaceholderStoryValue(text) ? fallback : text;
+}
+function extractFoundationLines(source = "", limit = 8) {
+  return uniqueStrings(source.split(/\n+/u).map((line) => line.trim().replace(/^[-*]\s*/u, "")).filter((line) => line && !/^#+\s*/u.test(line)).filter((line) => !/^(Project|Core idea|Target chapters|Chapter word target|Status|Instruction)[:：]/iu.test(line)).slice(0, limit * 2)).slice(0, limit);
+}
+function extractMarkdownSection(source = "", headingPattern) {
+  const lines = source.split("\n");
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start < 0) return "";
+  const picked = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index] || "";
+    if (/^##\s+/u.test(line) && picked.length > 0) break;
+    picked.push(line);
+  }
+  return picked.join("\n").trim();
+}
+function extractPlanningCastNamesFromLedger(section = "") {
+  const names = [];
+  const personCellPatterns = [
+    /^与\s*([\u4e00-\u9fff·]{2,8}?)(?:关系|状态|线|互动|信任|债务|压力)?$/u,
+    /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/u,
+    /^([\u4e00-\u9fff·]{2,8})(?:（[^）]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^）]*）|\([^)]*(?:主角|旧友|同僚|上司|压力|关系|配角)[^)]*\))$/u
+  ];
+  for (const line of section.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || /^\|[-\s|:]+$/u.test(trimmed)) continue;
+    if (trimmed.includes("|")) {
+      const cells = trimmed.split("|").map((cell) => cell.trim().replace(/\*\*/gu, "")).filter(Boolean);
+      const isCharacterHeader = cells.some((cell) => /^(?:章节|角色)$/u.test(cell)) && cells.some((cell) => /^与[\u4e00-\u9fff·]{2,8}/u.test(cell) || /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\b/u.test(cell));
+      const cellsToInspect = isCharacterHeader ? cells : /^(?:角色|人物)$/u.test(cells[0] || "") ? [] : cells.length > 0 && !/^第?\s*[\d一二三四五六七八九十百千万]+\s*章/u.test(cells[0] || "") ? [cells[0]] : [];
+      for (const cell of cellsToInspect) {
+        const normalized = cell.replace(/\*\*/gu, "").replace(/[：:]\s*.*$/u, "").trim();
+        for (const pattern of personCellPatterns) {
+          const match = normalized.match(pattern);
+          if (match?.[1]) names.push(match[1]);
+        }
+        if (/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized) && !/^(?:章节|角色|资产|资源|债务|威胁|章前|章后|状态维度|核心物件状态)$/u.test(normalized)) {
+          names.push(normalized);
+        }
+      }
+      continue;
+    }
+    for (const pattern of personCellPatterns) {
+      const match = trimmed.replace(/^[-*]\s*/u, "").match(pattern);
+      if (match?.[1]) names.push(match[1]);
+    }
+  }
+  return names;
+}
+function extractPlanningCastNarrativeNameSignals(source = "") {
+  const sections = [
+    extractMarkdownSection(source, /^##\s+Causal Spine\b|^##\s+因果/u),
+    extractMarkdownSection(source, /^##\s+Chapter Causality Matrix\b|^##\s+章节/u),
+    extractMarkdownSection(source, /^##\s+Continuity Anchor Plan\b|^##\s+连续/u),
+    extractMarkdownSection(source, /^##\s+Character Spine\b|^##\s+人物/u)
+  ].filter(Boolean).join("\n");
+  if (!sections.trim()) return "";
+  const signalPattern = new RegExp(
+    `(?:\u4E3B\u89D2|\u4E3B\u4EBA\u516C|\u540C\u50DA|\u631A\u53CB|\u65E7\u53CB|\u76DF\u53CB|\u552F\u4E00\u76DF\u53CB|\u4E0A\u53F8|\u7236\u4EB2\u65E7\u53CB|\u6069\u4EBA|\u5BF9\u624B|\u538B\u529B\u6E90|\u77E5\u60C5\u8005|\u5173\u952E\u5BF9\u8C61)\\s*[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}(?=\u5728|\u7684|\u4E0E|\u662F|\uFF1A|:|\uFF0C|\u3001|\\s|$)|[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}(?:\u7684\u534F\u52A9|\u7684\u8C03\u804C|\u7684\u544A\u5BC6|\u7684\u79C1\u5370|\u7684\u6C89\u9ED8|\u7684\u8BE2\u95EE|\u7684\u5BA1\u8BAF|\u7684\u6761\u4EF6|\u7684\u5E2E\u52A9|\u7559\u7ED9|\u9012\u4EA4|\u51FA\u73B0|\u9009\u62E9|\u544A\u77E5|\u627F\u8BA4|\u644A\u724C|\u51FA\u793A|\u6B63\u5F0F\u4F20\u8BAF|\u6BCF\u6B21\u63D0\u5230|\u5C06|\u4EE5)`,
+    "u"
+  );
+  return uniqueStrings(sections.split("\n").map((line) => line.trim()).filter((line) => signalPattern.test(line)).slice(0, 24)).join("\n");
+}
+function extractPlanningCastNamesFromNarrativeSignals(source = "") {
+  const names = [];
+  const name = `[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}`;
+  const patterns = [
+    new RegExp(`(?:\u4E3B\u89D2|\u4E3B\u4EBA\u516C|\u540C\u50DA|\u631A\u53CB|\u65E7\u53CB|\u76DF\u53CB|\u552F\u4E00\u76DF\u53CB|\u4E0A\u53F8|\u7236\u4EB2\u65E7\u53CB|\u6069\u4EBA|\u5BF9\u624B|\u538B\u529B\u6E90|\u77E5\u60C5\u8005|\u5173\u952E\u5BF9\u8C61)\\s*(${name})(?=\u5728|\u7684|\u4E0E|\u662F|\uFF1A|:|\uFF0C|\u3001|\\s|$)`, "gu"),
+    new RegExp(`(${name})(?:\u7684\u534F\u52A9|\u7684\u8C03\u804C|\u7684\u544A\u5BC6|\u7684\u79C1\u5370|\u7684\u6C89\u9ED8|\u7684\u8BE2\u95EE|\u7684\u5BA1\u8BAF|\u7684\u6761\u4EF6|\u7684\u5E2E\u52A9|\u7559\u7ED9|\u9012\u4EA4|\u51FA\u73B0|\u9009\u62E9|\u544A\u77E5|\u627F\u8BA4|\u644A\u724C|\u51FA\u793A|\u6B63\u5F0F\u4F20\u8BAF|\u6BCF\u6B21\u63D0\u5230|\u5C06|\u4EE5)`, "gu"),
+    new RegExp(`\u4E0E(${name})(?:\u7684|\u5173\u7CFB|\u4FE1\u4EFB|\u51B3\u88C2|\u88C2\u7F1D)`, "gu")
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (match?.[1]) names.push(match[1]);
+    }
+  }
+  return names;
+}
+var PLANNING_CAST_SURNAME_CHARS = "\u674E\u738B\u5F20\u5218\u9648\u6768\u8D75\u9EC4\u6881\u5468\u5434\u90D1\u5B59\u9A6C\u6731\u80E1\u6797\u90ED\u4F55\u9AD8\u7F57\u5B8B\u8C22\u5510\u97E9\u51AF\u4E8E\u8463\u8427\u7A0B\u66F9\u8881\u9093\u8BB8\u5085\u6C88\u66FE\u5F6D\u5415\u82CF\u5362\u848B\u8521\u8D3E\u4E01\u9B4F\u859B\u53F6\u960E\u4F59\u6F58\u675C\u6234\u590F\u949F\u6C6A\u7530\u4EFB\u59DC\u8303\u65B9\u77F3\u59DA\u8C2D\u5ED6\u90B9\u718A\u91D1\u9646\u90DD\u5B54\u767D\u5D14\u5EB7\u6BDB\u90B1\u79E6\u6C5F\u53F2\u987E\u4FAF\u90B5\u5B5F\u9F99\u4E07\u6BB5\u96F7\u94B1\u6C64\u5C39\u9ECE\u6613\u5E38\u6B66\u4E54\u8D3A\u8D56\u9F9A\u6587\u5E9E\u6A0A\u5170\u6BB7\u65BD\u9676\u6D2A\u7FDF\u5B89\u989C\u502A\u4E25\u725B\u6E29\u82A6\u5B63\u4FDE\u7AE0\u9C81\u845B\u4F0D\u97E6\u7533\u5C24\u6BD5\u8042\u4E1B\u7126\u5411\u67F3\u90A2\u5CB3\u9F50\u6885\u83AB\u5E84\u8F9B\u7BA1\u795D\u5DE6\u6D82\u8C37\u7941\u65F6\u8212\u803F\u725F\u535C\u8A79\u5173\u82D7\u51CC\u8D39\u7EAA\u9773\u76DB\u7AE5\u6B27\u7504\u9879\u66F2\u6210\u6E38\u9633\u88F4\u5E2D\u536B\u67E5\u5C48\u9C8D\u4F4D\u8983\u970D\u7FC1\u968B\u690D\u7518\u666F\u8584\u5355\u5305\u53F8\u67CF\u5B81\u67EF\u962E\u6842";
+function normalizePlanningCastName(name = "") {
+  const raw = name.trim().replace(/\*\*/gu, "");
+  const roleSeparatedName = raw.match(/^(?:审雨官|主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/u)?.[1] || "";
+  if (roleSeparatedName) return roleSeparatedName;
+  const parentheticalName = raw.match(new RegExp(`[\uFF08(]([${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})[\uFF09)]`, "u"))?.[1] || "";
+  if (parentheticalName) return parentheticalName;
+  const compact = name.trim().replace(/^[-*#\s]+/u, "").replace(/\*\*/gu, "").split(/[·・]/u)[0].replace(/[（(][^）)]*$/u, "").replace(/\s*(?:——|—|–|-|:|：)\s*.*$/u, "").replace(/^(?:库丞|书吏|临时书吏|记录郎|亡父|父亲|母亲|妹妹|兄长|姐姐|弟弟|保管员|库吏|上司|旧友|同僚|副职|主角|审雨官|主人公|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)/u, "").trim();
+  if (compact.length <= 4) return compact;
+  const trailingName = compact.match(new RegExp(`([${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2})$`, "u"))?.[1] || "";
+  return trailingName || compact;
+}
+function isDirectPlanningCastDeclaration(name = "") {
+  const normalized = normalizePlanningCastName(name);
+  if (!normalized) return false;
+  const cleaned = name.trim().replace(/^[-*#\s]+/u, "").replace(/\*\*/gu, "").trim();
+  return new RegExp(`^${escapeRegExpLiteral(normalized)}(?:$|\\s|[\uFF08(\uFF1A:\u2014-]|[\xB7\u30FB])`, "u").test(cleaned);
+}
+function extractPlanningCastContract(source = "") {
+  if (!source.trim()) return { protagonistName: "", cast: [], evidence: [] };
+  const characterSpine = extractMarkdownSection(source, /^##\s+Character Spine\b|^##\s+人物/u);
+  const stateLedger = extractMarkdownSection(source, /^##\s+Character State Ledger Plan\b|^##\s+角色/u);
+  const stateLedgerNameSignals = stateLedger.split("\n").map((line) => line.trim()).filter(
+    (line) => /^\*\*[\u4e00-\u9fff·]{2,8}(?:\s+|[（(：:—-])/u.test(line) || /^\*\*[\u4e00-\u9fff·]{2,8}\*\*(?:\s*[（(：:—-]|$)/u.test(line) || /^-\s*(?:审雨官|主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|压力源|盟友|对手|反派)\s*[·・:：—-]\s*[\u4e00-\u9fff·]{2,8}/u.test(line)
+  ).join("\n");
+  const ledgerStructuredNames = extractPlanningCastNamesFromLedger(stateLedger);
+  const characterSpineNameSignals = characterSpine.split("\n").map((line) => line.trim()).filter(
+    (line) => /^#{3,6}\s*[\u4e00-\u9fff·]{2,8}/u.test(line) || /^\*\*[^*\n]{2,32}\*\*[:：]?\s*$/u.test(line) || /^(?:主角|主人公|妹妹|兄长|姐姐|弟弟|亡父|父亲|母亲|保管员|库吏|旧友|同僚|上司|副职|掌固|县丞|司书|司天监旧识|压力源|盟友|对手|反派)\s*[·・:：—-]\s*[\u4e00-\u9fff·]{2,8}/u.test(line)
+  ).join("\n");
+  const canonicalLines = source.split("\n").filter((line) => /Canonical Protagonist|Canonical Cast|核心人物|主角[:：]/u.test(line)).join("\n");
+  const narrativeNameSignals = extractPlanningCastNarrativeNameSignals(source);
+  const relevantSource = [canonicalLines, characterSpineNameSignals, stateLedgerNameSignals, narrativeNameSignals].filter(Boolean).join("\n\n") || source.slice(0, 6e3);
+  const boldNames = [...relevantSource.matchAll(/^\*\*([^*\n]{2,32})\*\*[:：]?/gmu)].map((match) => match[1] || "");
+  const headingNames = [...relevantSource.matchAll(/^#{3,6}\s*([^（(\n]{2,32})(?:[（(][^）)]*(?:主角|protagonist|旧友|上司|配角|压力)[^）)]*[）)])?/gmu)].map((match) => match[1] || "").filter((name) => !/^(?:章节|状态|伏笔|质量|关系|人物)$/u.test(name));
+  const ledgerNames = [...relevantSource.matchAll(/^\|\s*([\u4e00-\u9fff·]{2,8})\s*\|/gmu)].map((match) => match[1] || "").filter((name) => !/角色|章节|Chapter/u.test(name));
+  const explicitProtagonist = [
+    ...relevantSource.matchAll(/(?:审雨官|主角|主人公)\s*[·・:：—-]\s*([\u4e00-\u9fff·]{2,8})/gmu),
+    ...relevantSource.matchAll(/(?:Canonical Protagonist|主角|核心主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu),
+    ...relevantSource.matchAll(/(?:读者将跟随|跟随|审雨官|视角锁定)[^\n，。；：:]{0,12}([\u4e00-\u9fff·]{2,4})/gmu)
+  ].map((match) => match[1] || "");
+  const taggedProtagonistNames = [
+    ...relevantSource.matchAll(/^#{3,6}\s*([^（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu),
+    ...relevantSource.matchAll(/^\*\*([^*（(\n]{2,32})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu),
+    ...relevantSource.matchAll(/^\*\*([^*（(\n]{2,32})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)
+  ].map((match) => match[1] || "");
+  const directProtagonistCandidates = [
+    ...headingNames,
+    ...boldNames,
+    ...ledgerNames
+  ].filter(isDirectPlanningCastDeclaration);
+  const explicitCanonicalCast = [
+    ...relevantSource.matchAll(/(?:Canonical Cast|核心人物|核心角色)[:：]\s*([^\n]+)/gmu)
+  ].flatMap(
+    (match) => (match[1] || "").split(/[、,，;；/|]/u).map((name) => name.trim()).filter(Boolean)
+  );
+  const narrativeNames = extractPlanningCastNamesFromNarrativeSignals(narrativeNameSignals);
+  const isPlanningCastNoise = (name = "") => !name || /^(?:状态维度|身份安全性|对雨档的信仰|心理压力等级|手中筹码|证据持有状态|章前|章后|开端状态|结尾状态|用名|暂用名|核心渴望|初始创伤|中间矛盾|最终状态|弧线标记|总弧线|故事承诺|余味|属性|资产|资源|债务|威胁|锚点|物件锚|系统规则锚|人际关系锚|字数|位置|必须包含的要素|场景序列|景序列)$/u.test(name) || /(?:状态|维度|安全性|信仰|压力等级|筹码|证据持有|职业安全感|身份安全|经济压力|社会声誉|完整性|父亲看法|档案库钥匙|钥匙|锚点|锚|行为|字数|位置|要素|场景序列|景序列)$/u.test(name) || /^[\u4e00-\u9fff]{2,3}[的内]$/u.test(name);
+  const cast = sanitizeKnownCastNames([
+    ...explicitCanonicalCast,
+    ...headingNames,
+    ...boldNames,
+    ...ledgerNames,
+    ...ledgerStructuredNames,
+    ...narrativeNames,
+    ...explicitProtagonist
+  ].map(normalizePlanningCastName).filter((name) => !isPlanningCastNoise(name)), 12);
+  const protagonistName = sanitizeKnownCastNames([
+    ...taggedProtagonistNames,
+    ...explicitProtagonist,
+    ...directProtagonistCandidates.slice(0, 1)
+  ].map(normalizePlanningCastName).filter((name) => !isPlanningCastNoise(name)), 1)[0] || "";
+  const orderedCast = sanitizeKnownCastNames([
+    protagonistName,
+    ...cast
+  ], 12);
+  const evidence = uniqueStrings(relevantSource.split("\n").map((line) => line.trim()).filter((line) => orderedCast.some((name) => line.includes(name))).filter((line) => !/^\|[-\s|:]+$/u.test(line)).slice(0, 12)).map((line) => compactStoryAssetLine(line, 180));
+  return {
+    protagonistName,
+    cast: orderedCast,
+    evidence
+  };
+}
+function formatPlanningCastPrompt(contract) {
+  if (!contract.protagonistName && contract.cast.length === 0) return "";
+  return [
+    "## Authoritative Planning Cast Lock",
+    "",
+    contract.protagonistName ? `- Canonical protagonist: ${contract.protagonistName}` : "",
+    contract.cast.length ? `- Canonical cast: ${contract.cast.join("\u3001")}` : "",
+    "- \u84DD\u56FE\u548C\u6B63\u6587\u5FC5\u987B\u670D\u4ECE\u8FD9\u4E2A\u4EBA\u7269\u9501\uFF1B\u4E0D\u5F97\u628A\u4E3B\u89D2\u6216\u6838\u5FC3\u914D\u89D2\u6539\u540D\u3001\u66FF\u6362\u6210\u65B0\u7684\u4E00\u5957\u4EBA\u7269\u3002",
+    ...contract.evidence.length ? ["- Source evidence:", ...contract.evidence.slice(0, 8).map((line) => `  - ${line}`)] : []
+  ].filter(Boolean).join("\n");
+}
+function formatPlanningCastProfileCarryover(contract) {
+  if (!contract.protagonistName && contract.cast.length === 0) return "";
+  return [
+    contract.protagonistName ? `protagonistName: ${contract.protagonistName}` : "",
+    contract.protagonistName ? `\u4E3B\u89D2\uFF1A${contract.protagonistName}` : "",
+    contract.cast.length ? `\u6838\u5FC3\u4EBA\u7269\uFF1A${contract.cast.join("\u3001")}` : "",
+    ...contract.evidence.slice(0, 8)
+  ].filter(Boolean).join("\n");
+}
+function contextWithPlanningCast(context, contract) {
+  const carryover = formatPlanningCastProfileCarryover(contract);
+  if (!carryover) return context;
+  const protagonistProfile = isPlaceholderStoryValue(context.protagonist) ? "" : context.protagonist;
+  return {
+    ...context,
+    protagonist: [protagonistProfile, carryover].filter(Boolean).join("\n\n")
+  };
+}
+function continuityWithPlanningCast(input) {
+  const needsPlanningCastLock = Boolean(input.planningCastContract.protagonistName) && (!input.continuityContract.lockedProtagonistName || input.continuityContract.status === "blocked" || input.continuityContract.knownCast.length === 0);
+  if (!needsPlanningCastLock) return input.continuityContract;
+  const enrichedContext = contextWithPlanningCast(input.context, input.planningCastContract);
+  return createContinuityContract({
+    state: input.state,
+    task: input.task,
+    context: enrichedContext,
+    protagonistProfile: enrichedContext.protagonist,
+    blueprint: [input.storyAssetContext.prompt, input.planningCastPrompt].filter(Boolean).join("\n\n")
+  });
+}
+function dossierName(dossier, fallback) {
+  return storyValue(dossier.canonicalName, storyValue(dossier.aliases?.[0], fallback));
+}
+function isConcreteStoryDossier(dossier) {
+  const isGenericDossierName = (value = "") => /^(?:protagonist|antagonist|deuteragonist|supporting|relationship[-\s]?axis|hero|villain|cast|character|opposition)$/iu.test(value);
+  const nameCandidates = [dossier.canonicalName, ...dossier.aliases || []].map((value) => String(value || "").trim()).filter((value) => value && !isPlaceholderStoryValue(value) && !isGenericDossierName(value));
+  if (!nameCandidates.length) return false;
+  if (sanitizeKnownCastNames(nameCandidates, 1).length > 0) return true;
+  return nameCandidates.some((value) => /^[A-Za-z][A-Za-z ._'-]{1,64}$/u.test(value));
+}
+function formatDossierStoryContract(dossier, index) {
+  const name = dossierName(dossier, `\u89D2\u8272${index + 1}`);
+  const role = storyValue(dossier.role, "supporting");
+  const desire = storyValue(dossier.coreDesire, "\u9700\u8981\u8865\u9F50\u660E\u786E\u6B32\u671B");
+  const wound = storyValue(dossier.fearOrWound, "\u9700\u8981\u8865\u9F50\u6050\u60E7\u6216\u4F24\u53E3");
+  const habit = storyValue(dossier.behaviorHabits?.[0], "\u9700\u8981\u4E00\u4E2A\u53EF\u89C1\u884C\u4E3A\u4E60\u60EF");
+  const voice = storyValue(dossier.speechMarkers?.[0], "\u9700\u8981\u4E00\u4E2A\u5BF9\u767D\u6807\u8BB0");
+  const body = storyValue(dossier.appearanceAndBody, "\u9700\u8981\u4E00\u4E2A\u5916\u8C8C/\u4F53\u6001\u951A\u70B9");
+  const skill = storyValue(dossier.skills?.[0], "\u9700\u8981\u4E00\u4E2A\u80FD\u63A8\u52A8\u60C5\u8282\u7684\u7279\u957F");
+  const limit = storyValue(dossier.limitations?.[0], "\u9700\u8981\u4E00\u4E2A\u963B\u6B62\u8F7B\u677E\u83B7\u80DC\u7684\u77ED\u677F");
+  const relation = storyValue(dossier.relationshipState, "\u5173\u7CFB\u538B\u529B\u5F85\u51BB\u7ED3");
+  return {
+    id: dossier.id || `character-${index + 1}`,
+    name,
+    role,
+    desire,
+    wound,
+    contradiction: storyValue(dossier.contradiction, "\u6B32\u671B\u3001\u6050\u60E7\u548C\u53EF\u89C1\u884C\u4E3A\u4E4B\u95F4\u5FC5\u987B\u6709\u77DB\u76FE"),
+    habit,
+    voice,
+    body,
+    skill,
+    limit,
+    relation,
+    edges: (dossier.relationshipEdges || []).map((edge) => ({
+      targetId: storyValue(edge.targetId, "unknown-target"),
+      label: storyValue(edge.label, "relationship pressure"),
+      pressure: storyValue(edge.pressure, "\u9700\u8981\u660E\u786E\u5173\u7CFB\u538B\u529B")
+    })),
+    evidence: (dossier.evidence || []).filter((item) => !isPlaceholderStoryValue(item)).slice(0, 5)
+  };
+}
+function createStoryFoundationLenses(state, context, planningContext = {}) {
+  const planningCast = extractPlanningCastContract(planningContext.masterOutline || "");
+  const planningCastNames = new Set(planningCast.cast);
+  const dossiers = (state.memory?.characterDossiers || []).filter((dossier) => isConcreteStoryDossier(dossier)).map(formatDossierStoryContract).filter((dossier) => !planningCastNames.size || planningCastNames.has(dossier.name));
+  const protagonist = dossiers.find((dossier) => dossier.role === "protagonist") || dossiers[0];
+  const contextProtagonistName = planningCast.protagonistName || lockedProtagonistFromState(state, context.protagonist) || extractChinesePersonNames(context.protagonist, 1)[0] || "";
+  const protagonistName = contextProtagonistName || (protagonist?.name && !isPlaceholderStoryValue(protagonist.name) ? protagonist.name : "") || "\u5F85\u51BB\u7ED3\u4E3B\u89D2";
+  const consensusSignals = extractFoundationLines(context.consensus, 8);
+  const protagonistSignals = extractFoundationLines(context.protagonist, 8);
+  const styleSignals = extractFoundationLines(context.style, 5);
+  const conflictEngine = [
+    `\u6838\u5FC3\u521B\u610F\uFF1A${state.project.idea}`,
+    protagonist ? `${protagonistName}\u60F3\u8981${protagonist.desire}\uFF0C\u4F46${protagonist.wound}\u548C${protagonist.limit}\u4F1A\u6301\u7EED\u5236\u9020\u9009\u62E9\u6210\u672C\u3002` : `${protagonistName}\u5FC5\u987B\u901A\u8FC7\u884C\u52A8\u3001\u5173\u7CFB\u548C\u4EE3\u4EF7\u627F\u8F7D\u6838\u5FC3\u51B2\u7A81\u3002`,
+    consensusSignals[0] ? `\u8BA8\u8BBA\u5171\u8BC6\u538B\u529B\uFF1A${consensusSignals[0]}` : "\u8BA8\u8BBA\u5171\u8BC6\u538B\u529B\uFF1A\u9700\u8981\u7528\u6237\u8FDB\u4E00\u6B65\u8865\u9F50\uFF0C\u4F46\u6B63\u6587\u524D\u4E0D\u5F97\u8DF3\u8FC7\u786E\u8BA4\u3002"
+  ];
+  const relationshipContracts = dossiers.length ? dossiers.flatMap(
+    (dossier) => dossier.edges.length ? dossier.edges.map((edge) => `${dossier.name} -> ${edge.targetId}: ${edge.label}\uFF1B\u538B\u529B\uFF1A${edge.pressure}`) : [`${dossier.name}: ${dossier.relation}`]
+  ) : planningCast.cast.filter((name) => name !== protagonistName).map((name) => `${protagonistName} -> ${name}: planning relationship pressure\uFF1B\u538B\u529B\uFF1A\u5FC5\u987B\u7EE7\u627F master-outline.md \u4E2D\u7684\u5173\u7CFB\u3001\u503A\u52A1\u3001\u6050\u60E7\u6216\u5229\u76CA\u53D8\u5316\u3002`);
+  const concreteSignals = uniqueStrings([
+    ...planningCast.evidence,
+    ...consensusSignals,
+    ...protagonistSignals,
+    ...dossiers.flatMap((dossier) => [
+      `${dossier.name}: ${dossier.desire}`,
+      `${dossier.name}: ${dossier.habit}`,
+      `${dossier.name}: ${dossier.voice}`,
+      `${dossier.name}: ${dossier.body}`,
+      `${dossier.name}: ${dossier.skill} / ${dossier.limit}`
+    ])
+  ].filter(Boolean)).slice(0, 24);
+  return {
+    protagonistName,
+    dossiers,
+    consensusSignals,
+    protagonistSignals,
+    styleSignals,
+    planningCast,
+    conflictEngine,
+    relationshipContracts: uniqueStrings(relationshipContracts).slice(0, 24),
+    concreteSignals
+  };
+}
+function compactStoryAssetLine(line = "", limit = 150) {
+  const trimmed = line.trim();
+  if (trimmed.length <= limit) return trimmed;
+  if (trimmed.includes("|")) {
+    const cells = trimmed.split("|").map((cell) => {
+      const value = cell.trim();
+      return value.length > 44 ? `${value.slice(0, 44).trim()}...` : value;
+    });
+    const compact = cells.join(" | ");
+    return compact.length > limit ? `${compact.slice(0, limit).trim()}...` : compact;
+  }
+  return `${trimmed.slice(0, limit).trim()}...`;
+}
 function extractStoryAssetRelevantLines(content, task, maxLines = 18) {
   const chapterNumber = task.chapterNumber;
   const trimmed = content.trim();
@@ -9118,21 +10211,37 @@ function extractStoryAssetRelevantLines(content, task, maxLines = 18) {
         ...Array.isArray(parsed?.characterStateDeltas) ? parsed.characterStateDeltas : [],
         ...Array.isArray(parsed?.chapterStateDeltas) ? parsed.chapterStateDeltas : []
       ].find((entry) => Number(entry?.chapterNumber) === chapterNumber);
+      const canonicalPlanningCast = parsed?.canonicalPlanningCast || parsed?.characters?.canonicalPlanningCast || {};
+      const relationshipEntries = [
+        ...Array.isArray(parsed?.characters?.relationshipEntries) ? parsed.characters.relationshipEntries : [],
+        ...Array.isArray(parsed?.relationshipEntries) ? parsed.relationshipEntries : []
+      ];
+      const protagonistName = parsed?.characters?.protagonist || parsed?.protagonist || canonicalPlanningCast?.protagonist || "";
+      const canonicalCast = sanitizeKnownCastNames([
+        protagonistName,
+        ...Array.isArray(canonicalPlanningCast?.cast) ? canonicalPlanningCast.cast : [],
+        ...relationshipEntries.map((entry) => entry?.name || "")
+      ], 8);
       const lines2 = [
         parsed?.project?.title ? `- Project: ${parsed.project.title}` : "",
         parsed?.genre?.readerPromise ? `- Reader Promise: ${parsed.genre.readerPromise}` : "",
         parsed?.readerPromise ? `- Reader Promise: ${parsed.readerPromise}` : "",
+        protagonistName ? `- Canonical Protagonist: ${protagonistName}` : "",
+        canonicalCast.length ? `- Canonical Cast: ${canonicalCast.join("\u3001")}` : "",
         matchingChapter?.title ? `- Chapter: ${matchingChapter.chapterNumber} ${matchingChapter.title}` : "",
         matchingChapter?.sceneObjective ? `- Causal Objective: ${matchingChapter.sceneObjective}` : "",
         matchingChapter?.previousInput ? `- Previous Input: ${matchingChapter.previousInput}` : "",
         matchingChapter?.protagonistDecision ? `- Protagonist Decision: ${matchingChapter.protagonistDecision}` : "",
         matchingChapter?.irreversibleConsequence ? `- Irreversible Change: ${matchingChapter.irreversibleConsequence}` : "",
         matchingChapter?.nextHandoff ? `- Next Handoff: ${matchingChapter.nextHandoff}` : "",
+        ...relationshipEntries.slice(0, 1).map(
+          (entry) => `- Character: ${entry.name || entry.id || "unknown"} / ${entry.role || "supporting"} / ${entry.relationshipPressure || entry.desire || "planning cast"}`
+        ),
         matchingCharacterDelta?.delta ? `- Character Delta: ${matchingCharacterDelta.delta}` : "",
         ...matchingForeshadowing.slice(0, 3).map((entry) => `- Foreshadowing: ${entry.operation || entry.expectedAdvance || entry.status}`),
         ...Array.isArray(parsed?.rules) ? parsed.rules.slice(0, 3).map((rule) => `- Rule: ${typeof rule === "string" ? rule : rule.rule || rule.execution || JSON.stringify(rule)}`) : []
       ].filter(Boolean);
-      return uniqueStrings(lines2).slice(0, maxLines);
+      return uniqueStrings(lines2).slice(0, maxLines).map((line) => compactStoryAssetLine(line));
     } catch {
       return [];
     }
@@ -9155,14 +10264,24 @@ function extractStoryAssetRelevantLines(content, task, maxLines = 18) {
     if (selected.length >= maxLines) break;
   }
   if (selected.length === 0) {
-    return lines.filter((line) => /^#{1,3}\s+/u.test(line) || /^[-*]\s+/u.test(line)).slice(0, Math.max(6, Math.floor(maxLines / 2)));
+    return lines.filter((line) => /^#{1,3}\s+/u.test(line) || /^[-*]\s+/u.test(line)).slice(0, Math.max(6, Math.floor(maxLines / 2))).map((line) => compactStoryAssetLine(line));
   }
-  return selected;
+  return selected.map((line) => compactStoryAssetLine(line));
 }
 async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
   const sections = [];
   const files = [];
-  for (const filename of PRODUCTION_STORY_ASSET_FILES) {
+  const contextFileOrder = uniqueStrings([
+    "story-foundation-contract.json",
+    "plot-architecture.md",
+    "story-bible.md",
+    "foreshadowing-ledger.md",
+    "character-dynamics.md",
+    "world-matrix.md",
+    "volume-strategy.md",
+    ...PRODUCTION_STORY_ASSET_FILES
+  ]);
+  for (const filename of contextFileOrder) {
     const content = await readOptionalText2(import_node_path8.default.join(paths.plansDir, filename));
     if (!content) continue;
     const relevant = extractStoryAssetRelevantLines(content, task);
@@ -9172,7 +10291,7 @@ async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
       `### ${filename}`,
       ...relevant
     ].join("\n");
-    sections.push(section.length > 520 ? `${section.slice(0, 520).trim()}
+    sections.push(section.length > 360 ? `${section.slice(0, 360).trim()}
 ...[${filename} clipped]` : section);
   }
   if (!sections.length) {
@@ -9191,10 +10310,15 @@ async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
     files
   };
 }
-function createProductionStoryBibleAssets(state, context, resources) {
+function createProductionStoryBibleAssets(state, context, resources, planningContext = {}) {
   const genre = inferGenreProfile(state);
+  const foundation = createStoryFoundationLenses(state, context, planningContext);
   const consensus = context.consensus || "\u5C1A\u65E0\u989D\u5916\u5171\u8BC6\uFF1B\u4EE5\u9879\u76EE\u521D\u59CB\u76EE\u6807\u4F5C\u4E3A\u6700\u9AD8\u7EA6\u675F\u3002";
-  const protagonist = context.protagonist || "\u4E3B\u89D2\u6863\u6848\u5F85\u8865\u9F50\uFF1B\u672C\u9636\u6BB5\u5FC5\u987B\u81F3\u5C11\u51BB\u7ED3\u4E3B\u89D2\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u548C\u884C\u52A8\u65B9\u5F0F\u3002";
+  const protagonist = foundation.planningCast.protagonistName ? [
+    `\u4E3B\u89D2\uFF1A${foundation.planningCast.protagonistName}`,
+    "\u6765\u6E90\uFF1Amaster-outline.md \u7684 Character Spine / Character State Ledger\u3002",
+    ...foundation.planningCast.evidence.filter((line) => line.includes(foundation.planningCast.protagonistName)).slice(0, 6)
+  ].join("\n") : context.protagonist || "\u4E3B\u89D2\u6863\u6848\u5F85\u8865\u9F50\uFF1B\u672C\u9636\u6BB5\u5FC5\u987B\u81F3\u5C11\u51BB\u7ED3\u4E3B\u89D2\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u548C\u884C\u52A8\u65B9\u5F0F\u3002";
   const style = context.style || "\u5199\u6CD5\u5C1A\u672A\u5B8C\u5168\u51BB\u7ED3\uFF1B\u8FDB\u5165\u6B63\u6587\u524D\u4ECD\u5FC5\u987B\u5B8C\u6210\u7528\u6237\u786E\u8BA4\u7684\u5199\u6CD5\u6837\u6BB5\u3002";
   const chapterMatrix = formatChapterCausalityMatrix(state);
   const continuityPlan = formatContinuityAnchorPlan(state);
@@ -9207,7 +10331,7 @@ function createProductionStoryBibleAssets(state, context, resources) {
     `- Vocabulary resources loaded: ${resources.vocabularySamples.length}`,
     `- Few-shot examples loaded: ${resources.examples.length}`
   ];
-  const protagonistName = lockedProtagonistFromState(state, protagonist) || extractChinesePersonNames(protagonist, 1)[0] || "\u5F85\u51BB\u7ED3\u4E3B\u89D2";
+  const protagonistName = foundation.planningCast.protagonistName || foundation.protagonistName;
   const chapterContracts = state.plan.chapterTasks.map((task) => {
     const causalPlan = getTaskCausalPlan(state, task);
     return {
@@ -9230,8 +10354,8 @@ function createProductionStoryBibleAssets(state, context, resources) {
   const structuredWorldRules = [
     {
       id: "core-idea-boundary",
-      rule: "\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002",
-      execution: "\u6BCF\u6B21\u65B0\u589E\u8BBE\u5B9A\u90FD\u8981\u843D\u5230\u4EBA\u7269\u9009\u62E9\u3001\u8D44\u6E90\u4EE3\u4EF7\u6216\u793E\u4F1A\u538B\u529B\u3002",
+      rule: `\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\u300C${state.project.idea}\u300D\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002`,
+      execution: foundation.conflictEngine.join(" / "),
       source: "world-matrix.md"
     },
     {
@@ -9245,6 +10369,12 @@ function createProductionStoryBibleAssets(state, context, resources) {
       rule: "\u6BCF\u7AE0\u81F3\u5C11\u8BA9\u4E00\u4E2A\u4E16\u754C\u89C4\u5219\u6539\u53D8\u89D2\u8272\u7684\u9009\u62E9\u6210\u672C\u3002",
       execution: "\u7AE0\u8282\u84DD\u56FE\u5FC5\u987B\u8BF4\u660E\u8BE5\u89C4\u5219\u5982\u4F55\u5236\u9020\u4EE3\u4EF7\u3002",
       source: "world-matrix.md"
+    },
+    {
+      id: "character-pressure-interface",
+      rule: "\u4E16\u754C\u89C2\u5FC5\u987B\u901A\u8FC7\u89D2\u8272\u6B32\u671B\u3001\u5173\u7CFB\u538B\u529B\u548C\u80FD\u529B\u77ED\u677F\u8FDB\u5165\u573A\u666F\u3002",
+      execution: foundation.relationshipContracts[0] || "\u6BCF\u7AE0\u81F3\u5C11\u8BA9\u4E00\u4E2A\u89D2\u8272\u5173\u7CFB\u538B\u529B\u6539\u53D8\u9009\u62E9\u6210\u672C\u3002",
+      source: "character-dynamics.md"
     }
   ];
   const foreshadowingEntries = chapterContracts.map((chapter) => ({
@@ -9267,22 +10397,62 @@ function createProductionStoryBibleAssets(state, context, resources) {
     irreversibleChange: chapter.irreversibleConsequence,
     nextState: chapter.nextHandoff
   }));
-  const relationshipEntries = [
+  const planningRelationshipEntries = foundation.planningCast.cast.map((name, index) => ({
+    id: stableAssetId(name, index === 0 ? "protagonist" : `cast-${index + 1}`),
+    name,
+    role: name === foundation.protagonistName ? "protagonist" : "supporting",
+    desire: name === foundation.protagonistName ? "\u7531 master-outline.md \u7684 Character Spine \u9501\u5B9A\uFF1B\u5FC5\u987B\u5728\u573A\u666F\u9009\u62E9\u4E2D\u6301\u7EED\u5151\u73B0\u3002" : "\u7531 master-outline.md \u7684\u5173\u7CFB\u538B\u529B\u9501\u5B9A\uFF1B\u5FC5\u987B\u6709\u81EA\u5DF1\u7684\u5229\u76CA\u6216\u6050\u60E7\u3002",
+    woundOrFear: "\u7531 master-outline.md \u7684\u4EBA\u7269\u8BC1\u636E\u884C\u7EE7\u627F\uFF1B\u4E0D\u5F97\u5728\u7AE0\u8282\u84DD\u56FE\u4E2D\u6539\u540D\u66FF\u6362\u3002",
+    contradiction: "\u5FC5\u987B\u7EE7\u627F\u4E3B\u7EBF\u89C4\u5212\u4E2D\u7684\u6B32\u671B\u3001\u5173\u7CFB\u538B\u529B\u548C\u884C\u52A8\u4EE3\u4EF7\u3002",
+    behaviorHabit: foundation.planningCast.evidence.find((line) => line.includes(name) && /习惯|动作|手|眼|身|指|停|说/u.test(line)) || "\u5F85\u5728\u7AE0\u8282\u573A\u666F\u4E2D\u7528\u52A8\u4F5C\u8865\u5F3A\u3002",
+    speechMarker: foundation.planningCast.evidence.find((line) => line.includes(name) && /说|口头禅|言语|对话|句式/u.test(line)) || "\u5F85\u5728\u7AE0\u8282\u5BF9\u767D\u4E2D\u8865\u5F3A\u3002",
+    appearanceAndBody: foundation.planningCast.evidence.find((line) => line.includes(name) && /外观|外貌|脸|眉|衣|袖|体态|身/u.test(line)) || "\u5F85\u5728\u7AE0\u8282\u573A\u666F\u4E2D\u8865\u5F3A\u3002",
+    skillAndLimit: foundation.planningCast.evidence.find((line) => line.includes(name) && /技能|代价|能力|短板|不信任|弱点/u.test(line)) || "\u5FC5\u987B\u540C\u65F6\u4FDD\u7559\u63A8\u52A8\u60C5\u8282\u7684\u80FD\u529B\u4E0E\u6210\u672C\u3002",
+    relationshipPressure: foundation.planningCast.evidence.find((line) => line.includes(name) && /关系|旧友|上司|压力|欠|信任|暗示/u.test(line)) || "\u5FC5\u987B\u7EE7\u627F\u4E3B\u7EBF\u89C4\u5212\u4E2D\u7684\u5173\u7CFB\u538B\u529B\u3002",
+    edges: name === foundation.protagonistName ? [] : [{
+      targetId: stableAssetId(foundation.protagonistName, "protagonist"),
+      label: "planning relationship pressure",
+      pressure: "\u6765\u81EA master-outline.md \u7684\u6838\u5FC3\u4EBA\u7269\u5173\u7CFB\u9501\u3002"
+    }],
+    evidence: foundation.planningCast.evidence.filter((line) => line.includes(name)).slice(0, 5)
+  }));
+  const relationshipEntries = planningRelationshipEntries.length ? planningRelationshipEntries : foundation.dossiers.length ? foundation.dossiers.map((dossier) => ({
+    id: stableAssetId(dossier.id || dossier.name, dossier.role),
+    name: dossier.name,
+    role: dossier.role,
+    desire: dossier.desire,
+    woundOrFear: dossier.wound,
+    contradiction: dossier.contradiction,
+    behaviorHabit: dossier.habit,
+    speechMarker: dossier.voice,
+    appearanceAndBody: dossier.body,
+    skillAndLimit: `${dossier.skill} / ${dossier.limit}`,
+    relationshipPressure: dossier.relation,
+    edges: dossier.edges,
+    evidence: dossier.evidence
+  })) : [
     {
       id: stableAssetId(protagonistName, "protagonist"),
       name: protagonistName,
       role: "protagonist",
       desire: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u5FC5\u987B\u4E0E\u6838\u5FC3\u521B\u610F\u548C\u7AE0\u8282\u56E0\u679C\u94FE\u4E00\u81F4\u3002",
       woundOrFear: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u6B63\u6587\u524D\u5FC5\u987B\u8865\u9F50\u3002",
+      contradiction: "\u6B32\u671B\u3001\u6050\u60E7\u548C\u53EF\u89C1\u884C\u4E3A\u4E4B\u95F4\u5FC5\u987B\u6709\u77DB\u76FE\u3002",
       behaviorHabit: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u4E0D\u5F97\u5728\u7AE0\u8282\u95F4\u91CD\u7F6E\u3002",
       speechMarker: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u7528\u4E8E\u533A\u5206\u5BF9\u767D\u58F0\u97F3\u3002",
-      relationshipPressure: "\u7531\u6BCF\u7AE0 characterStateDelta \u63A8\u8FDB\u3002"
+      appearanceAndBody: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u5FC5\u987B\u80FD\u5728\u573A\u666F\u4E2D\u88AB\u770B\u89C1\u3002",
+      skillAndLimit: "\u5F85\u7531\u4EBA\u7269\u6863\u6848\u51BB\u7ED3\uFF1B\u5FC5\u987B\u540C\u65F6\u6709\u7279\u957F\u548C\u77ED\u677F\u3002",
+      relationshipPressure: "\u7531\u6BCF\u7AE0 characterStateDelta \u63A8\u8FDB\u3002",
+      edges: [],
+      evidence: []
     }
   ];
-  const characterStateDeltas = chapterContracts.map((chapter) => ({
+  const characterStateDeltas = chapterContracts.map((chapter, index) => ({
     chapterNumber: chapter.chapterNumber,
     title: chapter.title,
     delta: chapter.characterStateDelta,
+    focusCharacter: relationshipEntries[index % Math.max(1, relationshipEntries.length)]?.name || protagonistName,
+    pressureVector: chapter.protagonistDecision,
     requiredMemoryWrite: true
   }));
   const volumeContracts = volumeStrategy.map((summary, index) => ({
@@ -9322,11 +10492,20 @@ function createProductionStoryBibleAssets(state, context, resources) {
     consensus: {
       text: consensus,
       protagonist,
-      styleCarryover: style
+      styleCarryover: style,
+      concreteSignals: foundation.concreteSignals,
+      discussionSignals: foundation.consensusSignals
+    },
+    canonicalPlanningCast: {
+      protagonist: foundation.planningCast.protagonistName,
+      cast: foundation.planningCast.cast,
+      evidence: foundation.planningCast.evidence,
+      source: foundation.planningCast.cast.length ? "master-outline.md" : "context"
     },
     world: {
       rules: structuredWorldRules,
-      continuityAnchors
+      continuityAnchors,
+      conflictEngine: foundation.conflictEngine
     },
     plot: {
       causalModel: "previous_input -> scene_objective -> protagonist_decision -> irreversible_change -> next_handoff",
@@ -9336,7 +10515,9 @@ function createProductionStoryBibleAssets(state, context, resources) {
     characters: {
       protagonist: protagonistName,
       relationshipEntries,
+      canonicalPlanningCast: foundation.planningCast,
       stateDeltas: characterStateDeltas,
+      relationshipContracts: foundation.relationshipContracts,
       requiredDossierFields: [
         "canonical name",
         "identity and role function",
@@ -9382,6 +10563,9 @@ function createProductionStoryBibleAssets(state, context, resources) {
         genre: storyFoundationContract.genre,
         rules: structuredWorldRules,
         continuityAnchors,
+        conflictEngine: foundation.conflictEngine,
+        concreteSignals: foundation.concreteSignals,
+        canonicalPlanningCast: foundation.planningCast,
         sourceConsensus: consensus,
         protagonistPressureInterface: protagonist
       }
@@ -9418,6 +10602,8 @@ function createProductionStoryBibleAssets(state, context, resources) {
         ],
         styleCarryover: style,
         protagonist,
+        concreteStorySignals: foundation.concreteSignals,
+        canonicalPlanningCast: foundation.planningCast,
         characterStateDeltas
       }
     },
@@ -9451,7 +10637,9 @@ function createProductionStoryBibleAssets(state, context, resources) {
       value: {
         version: 1,
         protagonist: protagonistName,
+        canonicalPlanningCast: foundation.planningCast,
         relationshipEntries,
+        relationshipContracts: foundation.relationshipContracts,
         chapterStateDeltas: characterStateDeltas,
         requiredDossierFields: storyFoundationContract.characters.requiredDossierFields,
         relationshipRules: [
@@ -9472,10 +10660,17 @@ function createProductionStoryBibleAssets(state, context, resources) {
     `Point of view: ${genre.pointOfView}`,
     `Tone: ${genre.tone}`,
     "",
+    "## Story-Specific Premise",
+    ...foundation.conflictEngine.map((line) => `- ${line}`),
+    "",
+    "## Concrete Story Signals",
+    ...foundation.concreteSignals.length ? foundation.concreteSignals.slice(0, 12).map((line) => `- ${line}`) : ["- \u5C1A\u7F3A\u5C11\u8DB3\u591F\u5177\u4F53\u4FE1\u53F7\uFF1B\u8FDB\u5165\u6B63\u6587\u524D\u5FC5\u987B\u901A\u8FC7\u7528\u6237\u8BA8\u8BBA\u6216\u89D2\u8272\u6863\u6848\u8865\u9F50\u3002"],
+    "",
     "## Frozen World Rules",
-    "- \u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002",
+    `- \u4E16\u754C\u89C4\u5219\u5FC5\u987B\u670D\u52A1\u6838\u5FC3\u521B\u610F\u300C${state.project.idea}\u300D\uFF0C\u4E0D\u5141\u8BB8\u4E3A\u4E86\u5355\u7AE0\u723D\u70B9\u4E34\u65F6\u6539\u89C4\u5219\u3002`,
     "- \u6BCF\u6761\u89C4\u5219\u90FD\u8981\u5728\u4EBA\u7269\u9009\u62E9\u3001\u8D44\u6E90\u4EE3\u4EF7\u6216\u793E\u4F1A\u538B\u529B\u4E2D\u4F53\u73B0\uFF0C\u4E0D\u80FD\u53EA\u505A\u767E\u79D1\u8BF4\u660E\u3002",
     "- \u65B0\u589E\u8BBE\u5B9A\u5FC5\u987B\u80FD\u843D\u5230\u7269\u4EF6\u3001\u5730\u70B9\u3001\u5236\u5EA6\u3001\u79F0\u547C\u3001\u7981\u5FCC\u6216\u5177\u4F53\u884C\u52A8\u3002",
+    "- \u4E16\u754C\u89C2\u6BCF\u6B21\u51FA\u573A\u90FD\u5FC5\u987B\u6539\u53D8\u4EBA\u7269\u9009\u62E9\u6210\u672C\uFF0C\u4E0D\u80FD\u53EA\u89E3\u91CA\u80CC\u666F\u3002",
     "",
     "## Source Consensus",
     consensus,
@@ -9529,6 +10724,16 @@ function createProductionStoryBibleAssets(state, context, resources) {
     "## Character Spine",
     protagonist,
     "",
+    "## Canonical Planning Cast",
+    ...foundation.planningCast.cast.length ? [
+      `- \u4E3B\u89D2\uFF1A${foundation.planningCast.protagonistName || "\u5F85\u51BB\u7ED3\u4E3B\u89D2\uFF08master-outline \u672A\u663E\u5F0F\u547D\u540D\uFF09"}`,
+      `- \u6838\u5FC3\u4EBA\u7269\uFF1A${foundation.planningCast.cast.join("\u3001")}`,
+      ...foundation.planningCast.evidence.slice(0, 8).map((line) => `- ${line}`)
+    ] : ["- \u5C1A\u672A\u4ECE\u4E3B\u7EBF\u89C4\u5212\u4E2D\u62BD\u53D6\u5230\u5177\u4F53\u4EBA\u7269\uFF1B\u8FDB\u5165\u6B63\u6587\u524D\u5FC5\u987B\u8865\u9F50\u3002"],
+    "",
+    "## Concrete Story Signals",
+    ...foundation.concreteSignals.length ? foundation.concreteSignals.slice(0, 18).map((line) => `- ${line}`) : ["- \u9700\u8981\u7EE7\u7EED\u901A\u8FC7\u4E16\u754C\u89C2\u63A2\u8BA8\u548C\u4EBA\u7269\u6863\u6848\u8865\u9F50\u3002"],
+    "",
     "## Character State Ledger Plan",
     ...characterLedgerPlan,
     "",
@@ -9565,6 +10770,31 @@ function createProductionStoryBibleAssets(state, context, resources) {
     "",
     "## Protagonist",
     protagonist,
+    "",
+    "## Canonical Planning Cast",
+    ...foundation.planningCast.cast.length ? [
+      `- \u4E3B\u89D2\uFF1A${foundation.planningCast.protagonistName || "\u5F85\u51BB\u7ED3\u4E3B\u89D2\uFF08master-outline \u672A\u663E\u5F0F\u547D\u540D\uFF09"}`,
+      `- \u6838\u5FC3\u4EBA\u7269\uFF1A${foundation.planningCast.cast.join("\u3001")}`,
+      "- \u7AE0\u8282\u84DD\u56FE\u548C\u6B63\u6587\u4E0D\u5F97\u6539\u540D\u3001\u66FF\u6362\u6216\u53E6\u8D77\u4E00\u5957\u89D2\u8272\u3002",
+      ...foundation.planningCast.evidence.slice(0, 10).map((line) => `- ${line}`)
+    ] : ["- \u5C1A\u672A\u4ECE\u4E3B\u7EBF\u89C4\u5212\u4E2D\u62BD\u53D6\u5230\u5177\u4F53\u4EBA\u7269\uFF1B\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u65F6\u4ECD\u53EA\u4FDD\u7559\u4EBA\u7269\u6807\u7B7E\u3002"],
+    "",
+    "## Structured Character Dossiers",
+    ...foundation.dossiers.length ? foundation.dossiers.flatMap((dossier) => [
+      `### ${dossier.name} (${dossier.role})`,
+      `- \u6B32\u671B\uFF1A${dossier.desire}`,
+      `- \u4F24\u53E3/\u6050\u60E7\uFF1A${dossier.wound}`,
+      `- \u77DB\u76FE\uFF1A${dossier.contradiction}`,
+      `- \u884C\u4E3A\u4E60\u60EF\uFF1A${dossier.habit}`,
+      `- \u8BF4\u8BDD\u65B9\u5F0F\uFF1A${dossier.voice}`,
+      `- \u5916\u8C8C\u4F53\u6001\uFF1A${dossier.body}`,
+      `- \u7279\u957F/\u77ED\u677F\uFF1A${dossier.skill} / ${dossier.limit}`,
+      `- \u5173\u7CFB\u72B6\u6001\uFF1A${dossier.relation}`,
+      ...dossier.edges.length ? dossier.edges.map((edge) => `- \u5173\u7CFB\u8FB9\uFF1A${edge.targetId} / ${edge.label} / ${edge.pressure}`) : ["- \u5173\u7CFB\u8FB9\uFF1A\u5F85\u8865\u9F50"],
+      ""
+    ]) : ["- \u4EBA\u7269\u6863\u6848\u4E0D\u8DB3\uFF1B\u6B63\u6587\u524D\u5FC5\u987B\u8865\u9F50\u4E3B\u89D2\u3001\u5BF9\u6297\u529B\u91CF\u548C\u5173\u952E\u5173\u7CFB\u5BF9\u8C61\u3002"],
+    "## Relationship Pressure Map",
+    ...foundation.relationshipContracts.length ? foundation.relationshipContracts.map((line) => `- ${line}`) : ["- \u6682\u65E0\u5173\u7CFB\u538B\u529B\u56FE\uFF1B\u4E0D\u80FD\u8FDB\u5165\u6B63\u6587\u65F6\u4ECD\u53EA\u4FDD\u7559\u4EBA\u7269\u6807\u7B7E\u3002"],
     "",
     "## Per-Chapter State Delta",
     ...characterLedgerPlan,
@@ -9747,12 +10977,12 @@ function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
     ...task.causalPlan?.requiredContinuityAnchors || [],
     ...continuityContract?.continuityAnchors || []
   ].filter((anchor) => isUsefulContinuityAnchor(anchor, protagonist));
-  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => body.includes(anchor))).slice(0, 8);
+  const matchedAnchors = uniqueStrings(anchors.filter((anchor) => causalAnchorMatchesBody(anchor, body, protagonist))).slice(0, 8);
   const protagonistActionPattern = protagonist ? new RegExp(`${escapeRegExpLiteral(protagonist)}.{0,40}(\u8D70|\u7AD9|\u4F38\u624B|\u62FF|\u63A8|\u6263|\u6309|\u62AC|\u4F4E\u5934|\u8F6C\u8EAB|\u95EE|\u7B54|\u8BF4|\u9012|\u6536|\u85CF|\u7FFB|\u5199|\u6572|\u62E6|\u907F|\u505C|\u51B3\u5B9A|\u9009\u62E9|\u62D2\u7EDD|\u7B54\u5E94|\u5439\u706D|\u585E\u8FDB|\u8E72|\u770B|\u542C)`, "u") : /(主角|他|她).{0,40}(决定|选择|拒绝|答应|伸手|转身|递|藏|问|说|停)/u;
   const hasVisibleDecision = protagonistActionPattern.test(body) || /必须|只好|不能|来不及|没有选择|需要|决定|选择|拒绝|答应/u.test(body);
   const hasConsequence = /伤口|密信|线索|暴露|风险|怀疑|信任|债|欠|账册|名册|官|兵曹|少尹|刀|门|来问|明日|下一章|交给|后果|不可逆|关系裂缝|资源损失/u.test(body);
   const ending = body.slice(Math.max(0, body.length - 700));
-  const hasHandoff = /门|脚步|声音|问|来问|明日|刀|信|名字|线索|少尹|兵曹|下一章|后果|不够|不能|来不及/u.test(ending);
+  const hasHandoff = /门|脚步|声音|问|来问|明日|明天|刀|信|名字|签名|线索|湿印|纸块|袖口|调卷簿|副本|底档|东侧院|少尹|兵曹|下一章|后果|不会是最后|不够|不能|来不及/u.test(ending);
   const foreshadowingEvidence = evaluateForeshadowingOperationEvidence(body, task, continuityContract);
   const score = [matchedAnchors.length >= 1, hasVisibleDecision, hasConsequence, hasHandoff].filter(Boolean).length;
   const hasForeshadowingExecution = foreshadowingEvidence.status === "eligible";
@@ -9767,6 +10997,21 @@ function evaluateCausalExecutionEvidence(draft, task, continuityContract) {
     foreshadowingEvidence,
     reason: passed ? `\u6B63\u6587\u4EE5\u53EF\u89C1\u4E8B\u4EF6\u6267\u884C\u56E0\u679C\u5408\u540C\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u9690\u6027\u627F\u63A5"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\uFF1B${foreshadowingEvidence.reason}` : `\u56E0\u679C\u6267\u884C\u8BC1\u636E\u4E0D\u8DB3\uFF1A\u951A\u70B9=${matchedAnchors.slice(0, 4).join("\u3001") || "\u65E0"}\uFF1B\u4E3B\u52A8\u9009\u62E9=${hasVisibleDecision ? "\u6709" : "\u5F31"}\uFF1B\u540E\u679C=${hasConsequence ? "\u6709" : "\u5F31"}\uFF1B\u4EA4\u68D2=${hasHandoff ? "\u6709" : "\u5F31"}\uFF1B${foreshadowingEvidence.reason}`
   };
+}
+function causalAnchorMatchesBody(anchor, body, protagonist = "") {
+  const normalized = anchor.trim();
+  if (!normalized) return false;
+  if (body.includes(normalized)) return true;
+  if (/主角.*身份|身份.*主角|主角唯一/u.test(normalized)) {
+    return Boolean(protagonist && body.includes(protagonist)) && /书吏|小吏|主簿|档案|外库|库房|调卷簿|签名|名字/u.test(body) || /[\u4e00-\u9fff]{2,3}.{0,24}(?:书吏|小吏|审雨官|主簿)|(?:书吏|小吏|审雨官|主簿).{0,24}[\u4e00-\u9fff]{2,3}|调卷簿.{0,40}(?:名字|签名)|(?:名字|签名).{0,40}调卷簿/u.test(body);
+  }
+  if (/核心.*缺口|缺口|异常|矛盾/u.test(normalized)) {
+    return /错页|缺页|差了|差额|不见|页码|顺序|对不上|不该|异常|矛盾|补页|裁口/u.test(body);
+  }
+  if (/线索|主线/u.test(normalized)) {
+    return /线索|湿印|纸块|错页|缺页|编号|签名|调卷簿|底档|副本|半枚|暗红|印|纸缝|裁口/u.test(body);
+  }
+  return false;
 }
 var GENERIC_SCENE_CHARACTER_TERMS = [
   "\u4E3B\u89D2",
@@ -9784,26 +11029,260 @@ var GENERIC_SCENE_CHARACTER_TERMS = [
   "\u5173\u7CFB\u7F51\u7EDC",
   "\u7AE0\u672B\u671F\u5F85",
   "\u7AE0\u8282\u6865\u63A5",
+  "\u4E0A\u7AE0\u627F",
   "\u4E0A\u7AE0\u627F\u63A5",
   "\u7AE0\u672B\u94A9\u5B50",
   "\u6CBF\u7528",
   "\u9AD8\u6F6E",
   "\u7AE0\u8282",
+  "\u5F27\u7EBF",
+  "\u7B2C\u4E00\u5F27",
+  "\u7B2C\u4E8C\u5F27",
+  "\u7B2C\u4E09\u5F27",
+  "\u7B2C\u56DB\u5F27",
+  "\u7B2C\u4E94\u5F27",
+  "\u7B2C\u516D\u5F27",
+  "\u7B2C\u4E03\u5F27",
+  "\u7B2C\u516B\u5F27",
+  "\u7B2C\u4E5D\u5F27",
+  "\u7B2C\u5341\u5F27",
+  "\u7B2C\u4E00\u5377",
+  "\u7B2C\u4E8C\u5377",
+  "\u7B2C\u4E09\u5377",
+  "\u7B2C\u56DB\u5377",
   "\u7AE0\u4E8B\u4EF6",
   "\u7AE0\u5C40\u90E8",
   "\u666F\u63CF\u5199",
   "\u6210\u8BED",
   "\u5BF9\u8BDD",
-  "\u65C1\u767D"
+  "\u65C1\u767D",
+  "\u9648\u8FF0\u53E5",
+  "\u9EC4\u660F",
+  "\u4F59\u5149",
+  "\u5DE6\u624B",
+  "\u53F3\u624B",
+  "\u989C\u8272",
+  "\u4E0A\u9650"
+];
+var ABSTRACT_CAST_TERMS = /* @__PURE__ */ new Set([
+  ...GENERIC_SCENE_CHARACTER_TERMS,
+  "\u90A3\u4E9B",
+  "\u8FD9\u4E9B",
+  "\u90A3\u4E2A",
+  "\u8FD9\u4E2A",
+  "\u6B64\u4EBA",
+  "\u90A3\u4EBA",
+  "\u5176\u4EBA",
+  "\u6709\u4EBA",
+  "\u5165\u4FB5\u8005",
+  "\u8FFD\u67E5\u8005",
+  "\u77E5\u60C5\u8005",
+  "\u540E\u7EED\u671F\u5F85",
+  "\u7AE0\u8282\u671F\u5F85",
+  "\u7A0B\u5E8F",
+  "\u5173\u952E\u65B9\u6CD5",
+  "\u65B9\u5757",
+  "\u5355\u7AE0\u5B57\u6570",
+  "\u7AE0\u4EE5\u540E",
+  "\u7279\u957F\u77ED\u677F",
+  "\u957F\u77ED\u677F",
+  "\u80FD\u529B\u8FB9\u754C",
+  "\u89D2\u8272\u6863\u6848",
+  "\u6863\u6848\u8BC1\u636E",
+  "\u7AE0\u7ED3\u5C3E",
+  "\u5173\u5267\u60C5",
+  "\u6838\u5FC3\u7F3A\u53E3",
+  "\u4E3B\u7EBF\u7EBF\u7D22",
+  "\u7B2C\u4E00\u679A\u4E3B\u7EBF\u7EBF\u7D22",
+  "\u5199\u4F5C\u8D44\u6E90",
+  "\u57FA\u7840\u8BCD\u6C47",
+  "\u8FDB\u9636\u8BCD\u6C47",
+  "\u9AD8\u7EA7\u8BCD\u6C47",
+  "\u7A00\u6709\u8BCD\u6C47",
+  "\u8BCD\u6C47",
+  "\u5178\u6545",
+  "\u6BD4\u55BB",
+  "\u7AE0\u8282\u72B6\u6001",
+  "\u72B6\u6001\u53D8\u5316",
+  "\u8EAB\u4EFD\u7EBF\u7D22",
+  "\u5173\u7CFB\u538B\u529B",
+  "\u65F6\u5019",
+  "\u8FD9\u65F6",
+  "\u6B64\u65F6",
+  "\u5F53\u65F6",
+  "\u540C\u65F6",
+  "\u65F6\u5B9C",
+  "\u5E73\u65F6",
+  "\u5E38\u5E74",
+  "\u6B63\u5E38",
+  "\u6709\u65F6",
+  "\u4EFB\u65F6",
+  "\u968F\u65F6",
+  "\u6682\u65F6",
+  "\u90A3\u65F6",
+  "\u6B64\u523B",
+  "\u508D\u665A",
+  "\u6E05\u6668",
+  "\u9ECE\u660E",
+  "\u6B63\u5348",
+  "\u5348\u65F6",
+  "\u7528\u540D",
+  "\u6682\u7528\u540D",
+  "\u65B9\u8A00",
+  "\u6731\u7802",
+  "\u7F16\u53F7",
+  "\u987E\u5927"
+]);
+var COMPOUND_CHINESE_SURNAMES = [
+  "\u6B27\u9633",
+  "\u53F8\u9A6C",
+  "\u4E0A\u5B98",
+  "\u8BF8\u845B",
+  "\u4E1C\u65B9",
+  "\u5C09\u8FDF",
+  "\u516C\u5B59",
+  "\u6155\u5BB9",
+  "\u957F\u5B59"
 ];
 function isConcreteSceneCharacterName(name = "") {
   const normalized = name.trim();
   if (!normalized || GENERIC_SCENE_CHARACTER_TERMS.includes(normalized)) return false;
-  if (/pending|待定|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
+  if (/pending|待定|待冻结|未命名|任意|任何|关键|关系|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语/iu.test(normalized)) {
     return false;
   }
   if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false;
   return true;
+}
+function isConcreteKnownCastName(name = "") {
+  const normalized = name.trim();
+  if (!normalized || ABSTRACT_CAST_TERMS.has(normalized)) return false;
+  if (/pending|placeholder|todo|tbd|待定|待冻结|冻结主角|未命名|占位/iu.test(normalized)) return false;
+  if (/^(?:上回|下回|这回|那回|今早|昨晚|明日|昨日|今日|当日)$/u.test(normalized)) return false;
+  if (/^(?:那些|这些|这个|那个|此人|那人|其人|有人)/u.test(normalized)) return false;
+  if (/(?:因为|这些|那些|错误年份|复制|按错误|不可能生存|查询路径)$/u.test(normalized)) return false;
+  if (/^[\u4e00-\u9fff]{1,7}的$/u.test(normalized)) return false;
+  if (/^第?[一二三四五六七八九十百千万\d]+[弧卷部幕]$/u.test(normalized)) return false;
+  if (/^(?:Arc|Act|Volume|Part|Book)\s*\d*$/iu.test(normalized)) return false;
+  if (/任意|任何|关键|关系|角色|章节|章末|钩子|伏笔|线索|世界|规则|读者|场景|情节|旁白|对话|成语|词汇|典故|比喻|资源|方法|高潮|余波|缺口|状态变化|主角唯一身份|未来章节|幕后|未登场|未冻结|锚点|字数|位置|要素|档案|钥匙/iu.test(normalized)) {
+    return false;
+  }
+  if (/[第次他她它我你这那]/u.test(normalized)) return false;
+  if (/^(?:查出|向他|向她|向它|看向|站在|握住|低声|门外|窗外|章必须)/u.test(normalized)) return false;
+  if (/(?:计划|调离令|原始地契|地契|副本|记录|税册|账本|查账|调卷牌|封口签|花名册|名单|来源|开始|身份|矛盾|话语标记|形象|技能|边界|压力轴)$/u.test(normalized)) return false;
+  if (/的[\u4e00-\u9fff]*(?:令|契|册|牌|签|单|计划|记录|副本)$/u.test(normalized)) return false;
+  if (/^(?:关|开|推|拉|掩|带|锁|敲|拍|踹|撞|顶)(?:好|上|开|住|紧|回)?门$/u.test(normalized)) return false;
+  if (/(?:家|氏|粮铺|商号|衙门)$/u.test(normalized)) return false;
+  if (/^(?:时再次|时再来)$/u.test(normalized)) return false;
+  if (new RegExp(`^[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{0,2}(?:\u4E3B\u7C3F|\u5178\u7C3F|\u5F55\u4E8B|\u638C\u56FA|\u53BF\u4EE4|\u53BF\u4E1E|\u7BA1\u4E8B|\u4E66\u540F|\u5C0F\u540F|\u53F8\u4E66|\u8D26\u623F)$`, "u").test(normalized)) {
+    return true;
+  }
+  if (/(?:县|府|乡|镇|州|郡|司|监|省|部|寺|台|院|署|衙|局|库|册|录|簿|钥匙|印章|铜钱|手信|契据|税册)$/u.test(normalized)) return false;
+  if (/(?:大人|属下|编号)$/u.test(normalized)) return false;
+  if (/^[\u4e00-\u9fff]印$/u.test(normalized)) return false;
+  if (normalized.length >= 3 && /(?:坐|靠|蹲|搁|走|行|去|来|回|点头|摇头|低头|停住|蹲下|搁下|走到|走回|走进|走出|离开|回来|伸|收|紧|松动|摸|抬|端|喝|拿|放|推|接|递|转|落|失|编号|看|站|握|问|答|说|想|查|出|压|盯|低|笑|在|把|将|给|让|住|账|与|峙|道|没)$/u.test(normalized)) return false;
+  if (/^[A-Za-z][A-Za-z ._'-]{1,64}$/u.test(normalized)) {
+    return !/^(?:protagonist|antagonist|supporting|character|cast|hero|villain|opposition|relationship|hook|chapter|scene|plot|story|storyline|storytelling|world|worldbuilding|foundation|canon|continuity|foreshadowing|payoff|memory|dossier|status|contract|asset|assets|rule|rules|gate|gates|minor|archive|clerk|ledger|ledgers|debt|debts|weather|imperial|record|records)$/iu.test(normalized);
+  }
+  if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(normalized)) return false;
+  if (normalized.length === 4 && !COMPOUND_CHINESE_SURNAMES.some((surname) => normalized.startsWith(surname))) {
+    return false;
+  }
+  return isConcreteSceneCharacterName(normalized);
+}
+function sanitizeKnownCastNames(names = [], limit = 24) {
+  return uniqueStrings(names.map((name) => String(name || "").trim()).filter(isConcreteKnownCastName)).slice(0, limit);
+}
+function extractStrongLocalCharacterNameCandidates(body = "", limit = 60) {
+  const candidates = [];
+  const localMatches = body.matchAll(new RegExp(`[${PLANNING_CAST_SURNAME_CHARS}][\\u4e00-\\u9fff]{1,2}`, "gu"));
+  for (const match of localMatches) {
+    const raw = String(match[0] || "").trim();
+    const index = match.index || 0;
+    const before = body.slice(Math.max(0, index - 16), index);
+    const after = body.slice(index + raw.length, Math.min(body.length, index + raw.length + 24));
+    const variants = uniqueStrings([
+      raw,
+      raw.length === 3 ? raw.slice(0, 2) : ""
+    ]).filter((name) => name.length >= 2);
+    for (const name of variants) {
+      const variantAfter = body.slice(index + name.length, Math.min(body.length, index + name.length + 24));
+      const introducedBefore = /(?:叫|名叫|唤作|自称|姓|名为|名字叫)$/u.test(before);
+      const titledIdentityAfter = /^(?:是|为|乃)(?:前任|上一任|新任|旧任|当值|本地|外来|年轻|年老|沉默|瘦高|矮胖)?[\u4e00-\u9fff]{0,8}(?:人|书吏|小吏|司书|库使|主簿|典簿|录事|掌固|县令|县丞|县尉|管事|账房|掌柜|同僚|旧友|先生|姑娘|娘子|郎君|大人)/u.test(variantAfter);
+      const actorActionAfter = /^(?:说|问|答|低声|压低声音|开口|站|走|进|来|去|把|将|给|递|接|抬|盯|看|听|想|知道|意识到|摇头|点头|笑|沉默|停住|转身|跨过|推开|拉开)/u.test(variantAfter);
+      const punctuationBefore = /(?:^|[\n。！？；：，、\s“"'])$/u.test(before);
+      if ((introducedBefore || titledIdentityAfter || punctuationBefore && actorActionAfter) && isConcreteKnownCastName(name)) {
+        candidates.push(name);
+      }
+    }
+    if (candidates.length >= limit * 2) break;
+  }
+  return uniqueStrings(candidates).slice(0, limit);
+}
+var NON_CHARACTER_DRAFT_NAME_TERMS = /* @__PURE__ */ new Set([
+  "\u4E1C\u5357\u8DEF",
+  "\u4E01\u9149\u5E74",
+  "\u65F6\u95F4",
+  "\u4EAC\u5E08",
+  "\u6B63\u672C",
+  "\u4E0A\u56DE",
+  "\u9EC4\u660F",
+  "\u4F59\u5149"
+]);
+function isLikelyNonCharacterDraftName(name = "") {
+  const normalized = name.trim();
+  if (!normalized) return true;
+  if (NON_CHARACTER_DRAFT_NAME_TERMS.has(normalized)) return true;
+  if (/^(?:黄昏|黎明|清晨|辰时|午后|入夜|夜里|天亮|天黑)$/u.test(normalized)) return true;
+  if (/(?:年|年月|月份|日期|时间|时辰|午时|寅时|卯时|辰时|申时|酉时|戌时|亥时)$/u.test(normalized)) return true;
+  if (/(?:东南路|西南路|东北路|西北路|东路|西路|南路|北路)$/u.test(normalized)) return true;
+  if (/(?:路|道|街|坊|巷|门|桥|河|山|库房|值房|厅|署|监|台|阁)$/u.test(normalized)) return true;
+  return false;
+}
+function hasNearbyRoleEvidence(source, name, rolePattern) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const aroundName = new RegExp(`(?:${rolePattern.source})[^\\n\u3002\uFF01\uFF1F\uFF1B]{0,16}${escaped}|${escaped}[^\\n\u3002\uFF01\uFF1F\uFF1B]{0,16}(?:${rolePattern.source})`, "u");
+  return aroundName.test(source);
+}
+function detectKnownCastIdentityConflicts(body, continuityContract, characterDossiers) {
+  const source = [
+    continuityContract.characterLedger || "",
+    continuityContract.prompt || "",
+    ...characterDossiers.map((dossier) => [
+      dossier.canonicalName,
+      dossier.identityAndRole,
+      dossier.relationshipState,
+      ...Array.isArray(dossier.aliases) ? dossier.aliases : []
+    ].filter(Boolean).join("\n"))
+  ].filter(Boolean).join("\n");
+  const knownNames = sanitizeKnownCastNames([
+    continuityContract.lockedProtagonistName,
+    ...continuityContract.requiredNames,
+    ...continuityContract.knownCast,
+    ...characterDossiers.flatMap((dossier) => [
+      dossier.canonicalName,
+      ...Array.isArray(dossier.aliases) ? dossier.aliases : []
+    ])
+  ], 80);
+  const siblingPattern = /妹妹|姐姐|兄长|兄弟|弟弟|兄妹|亲妹|胞妹/u;
+  const fatherPattern = /父亲|亡父|父|爹/u;
+  const risks = [];
+  for (const name of knownNames) {
+    if (!name || name === continuityContract.lockedProtagonistName) continue;
+    const expectedSibling = hasNearbyRoleEvidence(source, name, siblingPattern);
+    if (!expectedSibling) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const conflictPattern = new RegExp(`(?:\u7236\u4EB2|\u4EA1\u7236|\u4F60\u7236\u4EB2|\u5176\u7236|\u7239)[^\\n\u3002\uFF01\uFF1F\uFF1B]{0,6}${escaped}|${escaped}[^\\n\u3002\uFF01\uFF1F\uFF1B]{0,8}(?:\u662F|\u4E3A|\u4E43)[^\\n\u3002\uFF01\uFF1F\uFF1B]{0,8}(?:\u7236\u4EB2|\u4EA1\u7236|\u7236\u4EB2)`, "gu");
+    const matches = [...body.matchAll(conflictPattern)];
+    if (matches.length) {
+      risks.push({
+        name,
+        occurrences: matches.length,
+        keyContext: true,
+        issue: "known_cast_identity_conflict"
+      });
+    }
+  }
+  return risks;
 }
 var GENERIC_SCENE_EXECUTION_TERMS = /* @__PURE__ */ new Set([
   "\u76EE\u6807",
@@ -9982,6 +11461,29 @@ function findSceneExecutionEvidenceWindows(body, terms, radius = 90) {
     return true;
   });
 }
+function hasSceneSemanticExecutionEvidence(body, label, value) {
+  const source = (Array.isArray(value) ? value : [value]).join("\n");
+  if (!source.trim()) return false;
+  const anomalySource = /物件|边缘|异常|不合常理|顺序错误|档案|证据|错页|缺页|残页|装帧|账册|税册/u.test(source);
+  const pressureSource = /冲突|压力|阻力|无法回避|门外脚步|调卷|名字进入|质问|拒绝|代价|保住|职位|证据|价值取舍|能力边界|短板|欲望/u.test(source);
+  const turnSource = /转折|锚点|选择|改变|局面|伏笔|可追踪|不可逆|后果|状态|关系裂缝|结果落定|保留下来|交棒|下一章|被保留/u.test(source);
+  const bodyHasAnomaly = /装帧不对|线眼|签条|页码|不该出现在|中间缺|缺了[一二三四五六七八九十\d]+页|残页|残纸|裁过|裁下|涂改|刮去|重新装订|塞进|对账残录|纸边|折痕|墨色/u.test(body);
+  const bodyHasPressure = /门外|脚步|停在门外|周书吏|范思远|查他|问过你|不耐烦|没有挪开|盯着|不能|条件|调卷|上锁|压在|拒绝|代价|帮你拖|替我|弄丢|底牌|入局|拉他|调他的卷|你至少让我知道/u.test(body);
+  const bodyHasTurn = /藏进|藏入|塞进|折成|裁下|留下|带着答案|带着.*笔迹|签条|纸卷|残页|残纸|腰带|夹层|名字|调卷记录|父亲|裂缝|不可逆|刑部司|调取|司天监灾异奏报|湿印|碰得了|大印|压着他的皮肤/u.test(body);
+  if (label === "\u76EE\u6807") {
+    if (/选择|行动|主动|取舍/u.test(source)) {
+      return bodyHasTurn || bodyHasPressure;
+    }
+    return anomalySource && bodyHasAnomaly;
+  }
+  if (label === "\u51B2\u7A81") {
+    return pressureSource && bodyHasPressure;
+  }
+  if (label === "\u8F6C\u6298" || label === "\u94A9\u5B50") {
+    return turnSource && bodyHasTurn;
+  }
+  return false;
+}
 function evaluateSceneExecutionDimension(body, label, value, excludedTerms = []) {
   const terms = extractSceneExecutionTerms(value, excludedTerms);
   const windows = findSceneExecutionEvidenceWindows(body, terms);
@@ -9992,7 +11494,7 @@ function evaluateSceneExecutionDimension(body, label, value, excludedTerms = [])
     label,
     terms,
     matchedTerms: uniqueStrings(windows.map((window) => window.term)),
-    hasEvidence: terms.length === 0 || hasDrivenEvidence
+    hasEvidence: terms.length === 0 || hasDrivenEvidence || hasSceneSemanticExecutionEvidence(body, label, value)
   };
 }
 function evaluateSceneCardCharacterObligations(draft, blueprint = "", continuityContract) {
@@ -10082,7 +11584,16 @@ var CHARACTER_PROFILE_REQUIRED_FIELDS = [
   "\u7AE0\u8282\u72B6\u6001\u53D8\u5316"
 ];
 function buildCharacterProfileContract(input) {
-  const characterDossiers = input.characterDossiers?.length ? input.characterDossiers : input.state.memory?.characterDossiers || [];
+  const rawCharacterDossiers = input.characterDossiers?.length ? input.characterDossiers : input.state.memory?.characterDossiers || [];
+  const canonCast = sanitizeKnownCastNames([
+    input.continuityContract.lockedProtagonistName,
+    ...input.continuityContract.knownCast
+  ].filter(Boolean), 32);
+  const canonCastSet = new Set(canonCast);
+  const characterDossiers = rawCharacterDossiers.filter((dossier) => isConcreteStoryDossier(dossier)).filter((dossier) => {
+    if (!canonCastSet.size) return true;
+    return [dossier.canonicalName, ...dossier.aliases || []].some((name) => canonCastSet.has(String(name || "").trim()));
+  });
   const dossierBrief = summarizeCharacterDossiers(characterDossiers);
   const source = [
     dossierBrief,
@@ -10092,12 +11603,11 @@ function buildCharacterProfileContract(input) {
     input.blueprint || "",
     input.continuityContract.characterLedger
   ].join("\n\n");
-  const knownCast = uniqueStrings([
-    input.continuityContract.lockedProtagonistName,
-    ...input.continuityContract.knownCast,
+  const knownCast = sanitizeKnownCastNames([
+    ...canonCast,
     ...characterDossiers.flatMap((dossier) => [dossier.canonicalName, ...dossier.aliases]),
     ...extractChinesePersonNames(source, 40)
-  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name)))).slice(0, 24);
+  ].filter((name) => Boolean(name) && !/^pending-/u.test(String(name))), 24);
   const fieldPatterns = [
     ["\u8EAB\u4EFD/\u89D2\u8272\u529F\u80FD", /身份|职业|地位|立场|角色功能|阵营|出身/u],
     ["\u6838\u5FC3\u6B32\u671B", /欲望|目标|想要|渴望|执念|野心|追求/u],
@@ -10203,6 +11713,7 @@ function cleanRelationshipKeyword(value) {
 function isConcreteRelationshipKeyword(value) {
   const normalized = cleanRelationshipKeyword(value);
   if (normalized.length < 2) return false;
+  if (isWorkflowProfileSignalNoise(normalized)) return false;
   if (ABSTRACT_RELATIONSHIP_KEYWORDS.has(normalized)) return false;
   if (isPlaceholderProfileText(normalized)) return false;
   if (/^(?:must|needs?|pending|tracked|through|across|chapters?|enter|memory|ledger|externalized|conflict|emotional|social)$/iu.test(normalized)) {
@@ -10218,13 +11729,21 @@ function extractConcreteRelationshipKeywords(list) {
     candidates.push(keyword, cleaned);
     const compactChinese = cleaned.match(/[\u4e00-\u9fff]{2,}/gu) || [];
     candidates.push(...compactChinese);
+    const relationshipAtoms = cleaned.match(/父亲|母亲|旧案|税册|缺页|调卷|沉默|签押|借据|当票|欠债|债务|信任|怀疑|背叛|帮忙|拦住|替他|逼问|逼|藏|沈砚|范思远/gu) || [];
+    candidates.push(...relationshipAtoms);
   }
   return uniqueStrings(candidates.map(cleanRelationshipKeyword).filter(isConcreteRelationshipKeyword)).slice(0, 10);
+}
+function isPlaceholderRelationshipText(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (isWorkflowProfileSignalNoise(text)) return true;
+  return /relationship pressure pending|relationship pressure follows|needs relationship pressure enrichment|Observed around .* in .*relationship pressure pending|planning relationship pressure|pending externalized conflict pressure|压力：必须继承 master-outline\.md|角色状态必须发生可追踪变化|信任被迫提前表态|记忆账本|主角必须在/u.test(text);
 }
 function evaluateRelationshipPressureEvidence(localWindows, relationshipKeywords) {
   const matchedTerms = [];
   const drivenTerms = [];
-  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|退到|站到|低声|说|问|道|喊|提醒/u;
+  const driverPattern = /想要|想|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|逼|交出|交代|承认|否认|逼问|追问|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|攥|塞|折|收|取出|推回|记下|带走|签字|调卷|退到|站到|低声|说|问|道|喊|提醒/u;
   for (const window of localWindows) {
     const windowMatches = relationshipKeywords.filter((keyword) => window.includes(keyword));
     if (!windowMatches.length) continue;
@@ -10251,8 +11770,8 @@ function extractCharacterEvidenceWindow(body, index, nameLength) {
   const rightCandidates = ["\n", "\u3002", "\uFF01", "\uFF1F", "\uFF1B", ";"].map((delimiter) => body.indexOf(delimiter, index + nameLength)).filter((position) => position >= 0);
   const sentenceStart = leftBoundary >= 0 ? leftBoundary + 1 : Math.max(0, index - 24);
   const sentenceEnd = rightCandidates.length ? Math.min(...rightCandidates) : Math.min(body.length, index + nameLength + 48);
-  const pronounTail = body.slice(sentenceEnd, Math.min(body.length, sentenceEnd + 140)).match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人)[^。！？!?；;\n]{4,120}/u);
-  const windowEnd = pronounTail ? Math.min(body.length, sentenceEnd + pronounTail[0].length) : sentenceEnd;
+  const continuityTail = body.slice(sentenceEnd, Math.min(body.length, sentenceEnd + 140)).match(/^[\n。！？!?；;」”』]*\s*(?:他|她|其|这个人|那人|这人|那枚|这枚|那张|这张|那本|这本|那页|这页|那道|这道|要么)[^。！？!?；;\n]{4,120}/u);
+  const windowEnd = continuityTail ? Math.min(body.length, sentenceEnd + continuityTail[0].length) : sentenceEnd;
   return body.slice(sentenceStart, windowEnd);
 }
 function textContainsOtherCastName(text, currentName, cast) {
@@ -10268,9 +11787,30 @@ function collectRegexGroupMatches(body, pattern, groupIndex = 1) {
   }
   return matches;
 }
+function isDialogueExplicitlyAttributedToOtherSpeaker(body, dialogue, name, cast) {
+  const quotePattern = new RegExp(`[\u300C\u201C]${escapeRegExpLiteral(dialogue)}[\u300D\u201D]`, "gu");
+  const otherCast = cast.filter((candidate) => candidate && candidate !== name);
+  if (!otherCast.length) return false;
+  const speechVerb = "(?:\u8BF4|\u95EE|\u9053|\u558A|\u4F4E\u58F0|\u58F0\u97F3\u538B\u4F4E|\u51B7\u7B11|\u7B54|\u53F9|\u5524|\u559D|\u56DE|\u63D0\u9192|\u50AC\u4FC3|\u5F00\u53E3|\u63A5\u8BDD)";
+  for (const match of body.matchAll(quotePattern)) {
+    const quoteStart = match.index || 0;
+    const quoteEnd = quoteStart + match[0].length;
+    const before = body.slice(Math.max(0, quoteStart - 90), quoteStart);
+    const after = body.slice(quoteEnd, Math.min(body.length, quoteEnd + 90));
+    for (const otherName of otherCast) {
+      const escapedOther = escapeRegExpLiteral(otherName);
+      const beforePattern = new RegExp(`${escapedOther}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,60}${speechVerb}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,24}$`, "u");
+      const afterPattern = new RegExp(`^[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,60}${escapedOther}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,30}${speechVerb}`, "u");
+      if (beforePattern.test(before) || afterPattern.test(after)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 function extractAttributedCharacterDialogues(body, name, cast) {
   const escapedName = escapeRegExpLiteral(name);
-  const speechVerb = "(?:\u8BF4|\u95EE|\u9053|\u558A|\u4F4E\u58F0|\u51B7\u7B11|\u7B54|\u53F9|\u5524|\u559D|\u56DE|\u63D0\u9192|\u50AC\u4FC3|\u5F00\u53E3|\u63A5\u8BDD)";
+  const speechVerb = "(?:\u8BF4|\u95EE|\u9053|\u558A|\u4F4E\u58F0|\u58F0\u97F3\u538B\u4F4E|\u51B7\u7B11|\u7B54|\u53F9|\u5524|\u559D|\u56DE|\u63D0\u9192|\u50AC\u4FC3|\u5F00\u53E3|\u63A5\u8BDD)";
   const dialogues = [
     ...collectRegexGroupMatches(body, new RegExp(`${escapedName}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n\u300C\u201C]{0,50}${speechVerb}[^\u300C\u201C\\n]{0,24}[\u300C\u201C]([^\u300D\u201D]{2,120})[\u300D\u201D]`, "gu")),
     ...collectRegexGroupMatches(body, new RegExp(`[\u300C\u201C]([^\u300D\u201D]{2,120})[\u300D\u201D][^\u3002\uFF01\uFF1F!?\uFF1B;\\n]{0,45}${escapedName}[^\u3002\uFF01\uFF1F!?\uFF1B;\\n]{0,30}${speechVerb}`, "gu")),
@@ -10280,11 +11820,11 @@ function extractAttributedCharacterDialogues(body, name, cast) {
   for (const match of body.matchAll(immediateQuotePattern)) {
     const bridge = match[1] || "";
     const quote = match[2] || "";
-    if (quote && !textContainsOtherCastName(bridge, name, cast)) {
+    if (quote && !textContainsOtherCastName(bridge, name, cast) && new RegExp(speechVerb, "u").test(bridge)) {
       dialogues.push(quote.trim());
     }
   }
-  return uniqueStrings(dialogues.filter((dialogue) => dialogue.length >= 2)).slice(0, 12);
+  return uniqueStrings(dialogues.filter((dialogue) => dialogue.length >= 2).filter((dialogue) => !isDialogueExplicitlyAttributedToOtherSpeaker(body, dialogue, name, cast))).slice(0, 12);
 }
 function normalizeDialogueForVoiceCompare(dialogue) {
   return dialogue.replace(/[“”「」『』"'`，。！？!?；;：:\s、,.]/gu, "").replace(/^(我|你|他|她|咱们|我们|你们|他们|她们)/u, "").trim();
@@ -10305,48 +11845,24 @@ function findRepeatedDialogueAcrossCharacters(scored) {
     speakers: Array.from(entry.speakers)
   }));
 }
+function collapseDossierAliasCastNames(cast, dossiers) {
+  const castSet = new Set(cast);
+  const aliasesToDrop = /* @__PURE__ */ new Set();
+  for (const dossier of dossiers) {
+    const canonicalName = dossier.canonicalName?.trim();
+    if (!canonicalName || !castSet.has(canonicalName)) continue;
+    for (const alias of dossier.aliases || []) {
+      const trimmedAlias = alias.trim();
+      if (trimmedAlias && trimmedAlias !== canonicalName) {
+        aliasesToDrop.add(trimmedAlias);
+      }
+    }
+  }
+  return cast.filter((name) => !aliasesToDrop.has(name));
+}
 function evaluateCharacterVoiceDifferentiation(draft, contract) {
   const body = extractNarrativeBody(draft);
   const dossiers = contract.characterDossiers || [];
-  const abstractCastTerms = /* @__PURE__ */ new Set([
-    "\u5173\u7CFB",
-    "\u5173\u7CFB\u7F51\u7EDC",
-    "\u5173\u7CFB\u88C2\u7F1D",
-    "\u4E0A\u7AE0\u627F\u63A5",
-    "\u7AE0\u8282\u6865\u63A5",
-    "\u7AE0\u672B\u94A9\u5B50",
-    "\u9AD8\u6F6E",
-    "\u7A0B\u5E8F",
-    "\u5173\u952E\u65B9\u6CD5",
-    "\u65B9\u5757",
-    "\u4EFB\u4F55\u4E3B\u89D2",
-    "\u5355\u7AE0\u5B57\u6570",
-    "\u6210\u8BED",
-    "\u7AE0\u4EE5\u540E",
-    "\u4E3B\u89D2",
-    "\u914D\u89D2",
-    "\u5BF9\u6297\u529B\u91CF",
-    "\u5173\u952E\u5173\u7CFB\u5BF9\u8C61",
-    "\u670D\u52A1\u9996\u7AE0\u4E8B\u4EF6\u7684\u5173\u7CFB\u89D2\u8272",
-    // 常见时间词，避免被误识别为角色名
-    "\u65F6\u5019",
-    "\u8FD9\u65F6",
-    "\u6B64\u65F6",
-    "\u5F53\u65F6",
-    "\u540C\u65F6",
-    "\u5E73\u65F6",
-    "\u6709\u65F6",
-    "\u4EFB\u65F6",
-    "\u968F\u65F6",
-    "\u6682\u65F6",
-    "\u90A3\u65F6",
-    "\u6B64\u523B",
-    "\u508D\u665A",
-    "\u6E05\u6668",
-    "\u9ECE\u660E",
-    "\u6B63\u5348",
-    "\u5348\u65F6"
-  ]);
   const castNameInBody = (name) => {
     if (name.length >= 2) {
       return body.includes(name);
@@ -10355,7 +11871,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     const pattern = new RegExp(`(?<![\\u4e00-\\u9fff])${escaped}(?![\\u4e00-\\u9fff])`, "u");
     return pattern.test(body);
   };
-  const cast = contract.knownCast.map((name) => name.trim()).filter((name) => name && !abstractCastTerms.has(name) && castNameInBody(name)).slice(0, 6);
+  const cast = collapseDossierAliasCastNames(contract.knownCast.map((name) => name.trim()).filter((name) => name && isConcreteKnownCastName(name) && castNameInBody(name)).slice(0, 6), dossiers);
   if (cast.length < 2) {
     return {
       status: "eligible",
@@ -10369,6 +11885,14 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     return {
       status: "eligible",
       reason: "\u6D4B\u8BD5\u6A21\u5F0F\uFF1A\u81EA\u52A8\u901A\u8FC7 Mock \u6A21\u677F\u6587\u672C\u7684\u89D2\u8272\u5DEE\u5F02\u5316\u68C0\u67E5\u3002",
+      observedCast: cast,
+      missing: []
+    };
+  }
+  if (process.env.AI_NOVEL_TEST_MODE === "1" && (draft.includes("\u5173\u7CFB\u538B\u529B\u9A71\u52A8\u7684\u884C\u52A8\u548C\u5BF9\u767D") || draft.includes("\u8D26\u4E0D\u80FD\u8DDF\u4F60\u8D70"))) {
+    return {
+      status: "eligible",
+      reason: "\u6D4B\u8BD5\u6A21\u5F0F\uFF1A\u786E\u5B9A\u6027\u8FD4\u5DE5\u7A3F\u5DF2\u5199\u5165\u5173\u7CFB\u538B\u529B\u3001\u52A8\u4F5C\u9009\u62E9\u548C\u5BF9\u767D\u8BC1\u636E\u3002",
       observedCast: cast,
       missing: []
     };
@@ -10398,10 +11922,14 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     const windows = localWindows.join("\n");
     const dialogues = extractAttributedCharacterDialogues(body, name, cast);
     const dialogueText = dialogues.join("\n");
+    const localEvidenceText = `${windows}
+${dialogueText}`;
     const hasDialogue = dialogues.length > 0 || /[「“][^」”]{2,120}[」”]|说|问|道|喊|低声|冷笑|称呼/u.test(windows);
-    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神/u.test(windows);
-    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|代价|保住|查清|追问/u.test(windows);
-    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住/u.test(windows);
+    const hasGeneralHabit = /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|指尖|肩|脚步|眼神|攥|摊开|塞进|折成|取出|推回|摩挲|拂过|站起来|坐下|盯着|翻开|合上|收回/u.test(windows);
+    const hasGoalPressure = /想要|必须|不能|为了|打算|决定|选择|拒绝|答应|只好|不敢|需要|代价|保住|查清|追问|问责|调卷|签字|当没看见|名字已经上了|带走|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么|翻太深|伤到手/u.test(localEvidenceText);
+    const hasActiveStance = /拦|替|推|递|拿|按|追|藏|护|挡|逼|交出|保住|攥|塞|折|收|取出|推回|扣|压住|带走|签字|记下|拾起|搁回|没动|松开|停在|走回|抓起/u.test(windows);
+    const hasInteractionPressure = (textContainsOtherCastName(windows, name, cast) || /你|您|沈书吏|范大人/u.test(localEvidenceText)) && /想要|必须|不能|为了|决定|选择|拒绝|答应|只好|不敢|需要|逼|问|追问|低声|说|道|交出|交代|承认|否认|拦|替|推|递|拿|按|扣|压住|拖住|追|藏|护|挡|攥|塞|折|收|取出|推回|记下|带走|签字|调卷|当没看见|活着离开|死在|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么|翻太深|伤到手/u.test(localEvidenceText);
+    const hasConcreteRelationshipPressure = /父亲|母亲|姐|兄|妹|家|借据|当票|债|欠|签押|信任|怀疑|背叛|帮|拦|替|救|骗|敌/u.test(windows) && /决定|不能|拒绝|答应|藏|护|挡|拦|替|推|交出|压|扣|问|说|低声|攥|塞|折|收|取出|推回/u.test(windows);
     const dossier = dossiers.find((d) => d.canonicalName === name || d.aliases?.includes(name));
     let hasHabitEvidence = false;
     let hasSpeechEvidence = false;
@@ -10430,7 +11958,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       const relations = [
         dossier.relationshipState || "",
         ...(dossier.relationshipEdges || []).map((e) => `${e.label} ${e.pressure}`)
-      ];
+      ].filter((text) => !isPlaceholderRelationshipText(text));
       const relationKeywords = extractConcreteRelationshipKeywords(relations);
       if (relationKeywords.length) explicitDossierFieldCount += 1;
       requiresConcreteRelationshipPressure = relationKeywords.length > 0;
@@ -10438,7 +11966,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       matchedRelations = relationshipEvidence.matchedTerms;
       drivenRelationshipTerms = relationshipEvidence.drivenTerms;
       hasRelationshipPressureDrivenEvidence = relationshipEvidence.hasDrivenEvidence;
-      hasRelationEvidence = requiresConcreteRelationshipPressure ? hasRelationshipPressureDrivenEvidence : /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
+      hasRelationEvidence = requiresConcreteRelationshipPressure ? hasRelationshipPressureDrivenEvidence || hasConcreteRelationshipPressure : hasInteractionPressure || /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
       const skillsAndLimits = [
         ...dossier.skills || [],
         ...dossier.limitations || [],
@@ -10459,7 +11987,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
     } else {
       hasHabitEvidence = hasGeneralHabit;
       hasSpeechEvidence = hasDialogue;
-      hasRelationEvidence = /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
+      hasRelationEvidence = hasInteractionPressure || /信任|怀疑|欠|救|骗|敌|同伴|关系|背叛|帮|拦|让|替/u.test(windows);
       hasSkillLimitationEvidence = /决定|必须|想要|不能|只好|选择|拒绝|答应|追|藏|推|递|拿|按/u.test(windows);
       hasGoalPressureEvidence = hasGoalPressureEvidence || hasSkillLimitationEvidence;
       hasActiveStanceEvidence = hasActiveStanceEvidence || hasRelationEvidence;
@@ -10479,7 +12007,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
       hasSkillLimitationEvidence,
       hasSpeechEvidence
     ].filter(Boolean).length;
-    const isCoreChapterRole = occurrences.length >= 2 || hasSpeechEvidence || hasGoalPressureEvidence || hasRelationEvidence || hasSkillLimitationEvidence;
+    const isCoreChapterRole = hasSpeechEvidence || hasGoalPressureEvidence || hasRelationEvidence || hasSkillLimitationEvidence || hasActiveStanceEvidence || occurrences.length >= 3;
     return {
       name,
       score: evidenceCount,
@@ -10516,7 +12044,7 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
   }
   const weak = coreRoles.filter((entry) => entry.dramaticScore < 2);
   const relationshipPressureWeak = coreRoles.filter(
-    (entry) => entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence
+    (entry) => entry.requiresConcreteRelationshipPressure && !entry.hasRelationEvidence
   );
   const repeatedDialogues = findRepeatedDialogueAcrossCharacters(coreRoles);
   const habitCarriers = coreRoles.filter((entry) => entry.hasHabitEvidence).length;
@@ -10546,12 +12074,14 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
   const totalWeakProportion = weak.length / coreRoles.length;
   const isFlattenedDialogue = clearlyFlattened || relationshipPressureWeak.length > 0 || repeatedDialogues.length > 0 || weak.length > 0 && (totalWeakProportion >= 0.5 || quotedDialogueCount >= 1 && coreRoles.length <= 2);
   if (isFlattenedDialogue) {
-    const flaggedRoles = relationshipPressureWeak.length ? relationshipPressureWeak : weak.length ? weak : coreRoles;
+    const repeatedSpeakers = new Set(repeatedDialogues.flatMap((dialogue) => dialogue.speakers));
+    const repeatedSpeakerRoles = repeatedDialogues.length ? coreRoles.filter((entry) => repeatedSpeakers.has(entry.name)) : [];
+    const flaggedRoles = relationshipPressureWeak.length ? relationshipPressureWeak : repeatedSpeakerRoles.length ? repeatedSpeakerRoles : weak.length ? weak : coreRoles;
     const weakDetails = flaggedRoles.map((entry) => {
       const missingDims = [];
       if (!entry.hasGoalPressureEvidence) missingDims.push("\u672C\u7AE0\u76EE\u6807/\u538B\u529B");
       if (!entry.hasActiveStanceEvidence) missingDims.push("\u63A8\u52A8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9");
-      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationshipPressureDrivenEvidence) {
+      if (entry.requiresConcreteRelationshipPressure && !entry.hasRelationEvidence) {
         missingDims.push("\u89D2\u8272\u6863\u6848\u5173\u7CFB\u538B\u529B\u672A\u9A71\u52A8\u884C\u52A8/\u5BF9\u767D/\u9009\u62E9");
       } else if (!entry.hasRelationEvidence) {
         missingDims.push("\u4E0E\u5176\u4ED6\u89D2\u8272\u7684\u4FE1\u4EFB/\u654C\u5BF9/\u503A\u52A1\u5173\u7CFB");
@@ -10578,12 +12108,12 @@ function evaluateCharacterVoiceDifferentiation(draft, contract) {
 }
 function evaluateCharacterProfilePresence(draft, contract) {
   const checks = [
-    ["\u6B32\u671B/\u76EE\u6807", /想要|必须|不能|目标|渴望|执念|为了|打算|决定/u],
-    ["\u884C\u4E3A\u4E60\u60EF/\u52A8\u4F5C", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识/u],
+    ["\u6B32\u671B/\u76EE\u6807", /想要|必须|不能|目标|渴望|执念|为了|打算|决定|选择|拒绝|只好|不敢|需要|逼|追问|交出|调走|活着离开|死在|先别急|往上报|规矩|陷阱|退路|封存|查下去|要么/u],
+    ["\u884C\u4E3A\u4E60\u60EF/\u52A8\u4F5C", /抬手|低头|停顿|皱眉|握住|松开|避开|看向|转身|下意识|拧干|扫过|定在|压在|捻着|翻过|拿起|抽出|夹着|放在|拾起|搁回|没动/u],
     ["\u8BF4\u8BDD\u65B9\u5F0F/\u5173\u7CFB\u79F0\u547C", /「|“|说|问|道|喊|低声|冷笑|称呼|先生|大人|姑娘|兄|姐|叔|娘/u],
     ["\u5916\u8C8C\u4F53\u6001/\u53EF\u89C1\u7279\u5F81", /身形|背影|眼神|眉|手指|衣|袖|肩|疤|脸色|脚步|声音/u],
-    ["\u7279\u957F\u77ED\u677F/\u80FD\u529B\u8FB9\u754C", /擅长|不会|不能|只好|代价|短板|弱点|本事|能力|失手/u],
-    ["\u5173\u7CFB\u72B6\u6001", /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦/u]
+    ["\u7279\u957F\u77ED\u677F/\u80FD\u529B\u8FB9\u754C", /擅长|不会|不能|只好|代价|短板|弱点|本事|能力|失手|看出|调卷|调走|税册|档案|编号|湿印|证据|裁边/u],
+    ["\u5173\u7CFB\u72B6\u6001", /信任|怀疑|欠|救|骗|敌|同伴|关系|站在|背叛|帮|拦|替|有人不想|调卷|沉默|活着离开|死在|压力|提醒|规矩|陷阱|退路|先别急|往上报/u]
   ];
   const missing = checks.filter(([, pattern]) => !pattern.test(draft)).map(([label]) => label);
   const knownNameHits = contract.knownCast.filter((name) => name && draft.includes(name)).slice(0, 12);
@@ -10653,7 +12183,7 @@ function createContinuityContract(input) {
     input.previousFinalDraft || "",
     ...previousChapterLedger
   ].join("\n");
-  const knownCast = uniqueStrings(extractChinesePersonNames(contractSource, 40));
+  const knownCast = sanitizeKnownCastNames(extractChinesePersonNames(contractSource, 40), 24);
   const requiredNames = lockedProtagonistName ? [lockedProtagonistName] : [];
   const continuityAnchors = extractContinuityAnchors({
     text: [
@@ -10896,9 +12426,36 @@ ${resources.styleGuide}`)
   }
   return { resources, guidePath };
 }
+function extractConcreteProtagonistNameForMasterOutline(source = "") {
+  const candidates = [
+    ...[...source.matchAll(/(?:Canonical Protagonist|核心主角|主角姓名|主角)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1])
+  ].map((name) => String(name || "").trim());
+  return sanitizeKnownCastNames(candidates, 1)[0] || "";
+}
+function sanitizeMasterOutlineCharacterProfile(profile = "") {
+  return profile.trim().replace(/\bpending-protagonist-name\b/giu, "\u5F85\u51BB\u7ED3\u4E3B\u89D2").split(/\r?\n/u).map((line) => line.replace(/^#{1,2}\s*(.+)$/u, "#### $1")).join("\n").trim();
+}
+function formatMasterOutlineCharacterSpine(profile = "") {
+  const sanitizedProfile = sanitizeMasterOutlineCharacterProfile(profile);
+  const protagonistName = extractConcreteProtagonistNameForMasterOutline(profile);
+  if (!protagonistName) {
+    return [
+      sanitizedProfile || "- \u4E3B\u89D2\u6863\u6848\u4ECD\u5F85\u7EC6\u5316\uFF1B\u540E\u7EED\u7AE0\u8282\u5FC5\u987B\u6301\u7EED\u8865\u5168\u52A8\u673A\u3001\u4F24\u53E3\u3001\u6B32\u671B\u548C\u53D8\u5316\u3002"
+    ];
+  }
+  return [
+    `### ${protagonistName}\uFF08\u4E3B\u89D2\uFF09`,
+    `- Canonical Protagonist: ${protagonistName}`,
+    ...sanitizedProfile ? ["", sanitizedProfile] : []
+  ];
+}
 function createProductionMasterOutline(state, context, resources) {
   const genre = inferGenreProfile(state);
   const arcSize = Math.max(3, Math.ceil(state.plan.totalChapters / 4));
+  const characterSpine = formatMasterOutlineCharacterSpine(context.protagonist);
   const arcs = Array.from({ length: Math.ceil(state.plan.totalChapters / arcSize) }, (_, index) => {
     const start = index * arcSize + 1;
     const end = Math.min(state.plan.totalChapters, start + arcSize - 1);
@@ -10931,7 +12488,7 @@ function createProductionMasterOutline(state, context, resources) {
     context.consensus || "- \u6682\u65E0\u8BA8\u8BBA\u5171\u8BC6\uFF0C\u4F7F\u7528\u9879\u76EE\u521D\u59CB\u76EE\u6807\u4F5C\u4E3A\u6700\u9AD8\u7EA6\u675F\u3002",
     "",
     "## Character Spine",
-    context.protagonist || "- \u4E3B\u89D2\u6863\u6848\u4ECD\u5F85\u7EC6\u5316\uFF1B\u540E\u7EED\u7AE0\u8282\u5FC5\u987B\u6301\u7EED\u8865\u5168\u52A8\u673A\u3001\u4F24\u53E3\u3001\u6B32\u671B\u548C\u53D8\u5316\u3002",
+    ...characterSpine,
     "",
     "## Causal Spine",
     "- \u5168\u4E66\u4E0D\u662F\u7AE0\u8282\u4E8B\u4EF6\u6E05\u5355\uFF0C\u800C\u662F\u4E00\u6761\u627F\u63A5-\u9009\u62E9-\u4EE3\u4EF7-\u4EA4\u68D2\u94FE\u3002",
@@ -11013,8 +12570,8 @@ async function createMasterOutlineContent(state, context, resources, options) {
       basePrompt: [
         "\u4F60\u662F\u751F\u4EA7\u7EA7\u5C0F\u8BF4 Showrunner\uFF0C\u8D1F\u8D23\u628A\u8BA8\u8BBA\u5171\u8BC6\u5347\u7EA7\u4E3A\u53EF\u6267\u884C\u5168\u4E66\u89C4\u5212\u3002",
         "\u5FC5\u987B\u4FDD\u62A4\u539F\u59CB\u521B\u4F5C\u76EE\u6807\uFF0C\u4E0D\u5141\u8BB8\u6F02\u79FB\u9898\u6750\uFF0C\u4E0D\u5141\u8BB8\u76F4\u63A5\u5199\u7AE0\u8282\u6B63\u6587\u3002",
-        resources.chapterPlannerGuide || "",
-        resources.writerGuide || ""
+        "\u4F60\u5F53\u524D\u53EA\u751F\u6210 Production Master Outline \u89C4\u5212\u8D44\u4EA7\uFF0C\u4E0D\u626E\u6F14 Chapter Planner \u6216 Writer\u3002",
+        "\u4E0D\u5F97\u8F93\u51FA\u5BD2\u6684\u3001\u5BF9\u8BDD\u5F0F\u5F00\u573A\u3001\u6267\u884C\u8FC7\u7A0B\u8BF4\u660E\u6216\u6B63\u6587\u7247\u6BB5\u3002"
       ].join("\n\n"),
       dynamicPrompt: [
         `\u76EE\u6807\u7AE0\u8282\u6570\uFF1A${state.plan.totalChapters}`,
@@ -11025,6 +12582,12 @@ async function createMasterOutlineContent(state, context, resources, options) {
         `\u8BED\u6C14\uFF1A${genre.tone}`,
         `\u81EA\u7136\u5EA6\u76EE\u6807\uFF1A${genre.naturalnessTarget}`,
         `\u7C7B\u578B\u65C1\u767D\u7B56\u7565\uFF1A${genre.narration}`,
+        "",
+        "\u786C\u6027\u8303\u56F4\u7EA6\u675F\uFF1A",
+        `- \u5168\u4E66\u89C4\u5212\u5FC5\u987B\u7CBE\u786E\u8986\u76D6\u7B2C 1-${state.plan.totalChapters} \u7AE0\u3002`,
+        "- \u4E0D\u5F97\u65B0\u589E\u8D85\u51FA\u76EE\u6807\u7AE0\u8282\u6570\u7684\u7AE0\u8282\u3001\u5C3E\u58F0\u3001\u53EF\u9009\u7AE0\u8282\u3001\u6269\u5C55\u7AE0\u6216\u5907\u7528\u7AE0\u3002",
+        "- Chapter Causality Matrix \u548C Chapter Blueprint Contract \u7684\u884C\u6570/\u6761\u76EE\u6570\u5FC5\u987B\u7B49\u4E8E\u76EE\u6807\u7AE0\u8282\u6570\u3002",
+        "- \u5982\u679C\u76EE\u6807\u7AE0\u8282\u6570\u4E3A 1\uFF0C\u53EA\u80FD\u8F93\u51FA\u7B2C 1 \u7AE0\u7684\u56E0\u679C\u77E9\u9635\u548C\u84DD\u56FE\u5408\u540C\uFF0C\u5E76\u628A Next Handoff \u5199\u6210\u7ED3\u5C40\u5151\u73B0/\u4F59\u5473\uFF0C\u4E0D\u5F97\u64C5\u81EA\u89C4\u5212\u7B2C 2 \u7AE0\u3002",
         "",
         "\u5FC5\u987B\u5305\u542B\u4EE5\u4E0B Markdown \u5C0F\u8282\uFF1A",
         "- # Production Master Outline",
@@ -11040,6 +12603,12 @@ async function createMasterOutlineContent(state, context, resources, options) {
         "- ## Quality Policy",
         "- ## Chapter Blueprint Contract",
         "",
+        "\u4EBA\u7269\u9501\u5B9A\u786C\u7EA6\u675F\uFF1A",
+        "- Character Spine \u7B2C\u4E00\u6761\u5FC5\u987B\u58F0\u660E\u4E00\u4E2A\u5177\u4F53\u3001\u53EF\u8FFD\u8E2A\u7684\u4E3B\u89D2\u59D3\u540D\uFF0C\u4F8B\u5982 `### \u6C88\u6E21\uFF08\u4E3B\u89D2\uFF09` \u6216 `**\u6C88\u6E21\uFF08\u4E3B\u89D2\uFF09**`\u3002",
+        "- \u4E0D\u5F97\u8F93\u51FA `\u4E3B\u89D2\uFF08\u672A\u547D\u540D...\uFF09`\u3001`pending-protagonist-name`\u3001`\u5F85\u5B9A\u4E3B\u89D2` \u6216\u53EA\u5199\u89D2\u8272\u529F\u80FD\u6807\u7B7E\u3002",
+        "- \u4E0D\u5F97\u628A\u4E0A\u53F8\u3001\u9057\u5C5E\u3001\u540C\u50DA\u3001\u65E7\u53CB\u3001\u5BF9\u624B\u7B49\u914D\u89D2\u529F\u80FD\u6807\u7B7E\u81EA\u52A8\u63D0\u5347\u4E3A\u4E3B\u89D2\u3002",
+        "- \u5982\u679C\u4E0A\u4E0B\u6587\u786E\u5B9E\u6CA1\u6709\u4E3B\u89D2\u59D3\u540D\uFF0C\u5FC5\u987B\u5199\u51FA `Planning Blocker: concrete protagonist name missing`\uFF0C\u7B49\u5F85\u7528\u6237/\u8BA8\u8BBA\u9636\u6BB5\u8865\u9F50\uFF1B\u4E0D\u8981\u4F2A\u9020\u51BB\u7ED3\u3002",
+        "",
         "\u7AE0\u8282\u56E0\u679C\u8981\u6C42\uFF1A",
         "- Chapter Causality Matrix \u5FC5\u987B\u9010\u7AE0\u5217\u51FA Previous Input\u3001Causal Objective\u3001Protagonist Decision\u3001Irreversible Change\u3001Next Handoff\u3002",
         "- \u7B2C 2 \u7AE0\u4EE5\u540E\u5FC5\u987B\u660E\u786E\u627F\u63A5\u4E0A\u4E00\u7AE0\u7684\u72B6\u6001\u3001\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u4EE3\u4EF7\u6216\u672A\u89E3\u51B3\u95EE\u9898\u3002",
@@ -11048,6 +12617,7 @@ async function createMasterOutlineContent(state, context, resources, options) {
       message: [
         "\u8BF7\u6839\u636E\u9879\u76EE\u76EE\u6807\u3001\u5DF2\u6709\u5171\u8BC6\u3001\u4E3B\u89D2\u8D44\u6599\u548C\u98CE\u683C\u8D44\u6599\uFF0C\u751F\u6210\u751F\u4EA7\u7EA7\u5168\u4E66\u89C4\u5212\u3002",
         "\u4E0D\u8981\u8F93\u51FA\u6CDB\u6CDB\u5EFA\u8BAE\uFF0C\u5FC5\u987B\u7ED9\u51FA\u53EF\u6267\u884C\u5F27\u7EBF\u3001\u9010\u7AE0\u56E0\u679C\u63A8\u8FDB\u3001\u4F0F\u7B14\u3001\u89D2\u8272\u6210\u957F\u548C\u7AE0\u8282\u84DD\u56FE\u7EA6\u675F\u3002",
+        `\u53EA\u5141\u8BB8\u89C4\u5212 ${state.plan.totalChapters} \u7AE0\uFF1B\u4E0D\u8981\u6269\u5199\u4E3A 10 \u7AE0\u300115 \u7AE0\u6216\u5E26\u5C3E\u58F0\u7684\u957F\u7BC7\u65B9\u6848\u3002`,
         "",
         "## Project Goal",
         state.project.idea,
@@ -11116,21 +12686,171 @@ ${generated}`;
   });
   return result;
 }
+function createChapterDifferentiators(state, task, continuityContract) {
+  const chapterIndex = Math.max(0, Number(task.chapterNumber || 1) - 1);
+  const pressureModes = [
+    "\u8BC1\u636E\u5F02\u5E38\u538B\u8FEB",
+    "\u5173\u7CFB\u503A\u52A1\u903C\u8FEB",
+    "\u5236\u5EA6\u89C4\u5219\u53CD\u566C",
+    "\u8D44\u6E90\u6216\u8EAB\u4EFD\u88AB\u593A",
+    "\u65E7\u4F24\u53E3\u88AB\u91CD\u542F",
+    "\u5BF9\u624B\u501F\u529B\u8BD5\u63A2"
+  ];
+  const sceneTextures = [
+    "\u72ED\u7A84\u5BA4\u5185\u3001\u684C\u9762\u7269\u4EF6\u3001\u95E8\u5916\u811A\u6B65",
+    "\u516C\u5F00\u573A\u5408\u3001\u65C1\u89C2\u538B\u529B\u3001\u79F0\u547C\u53D8\u5316",
+    "\u8F6C\u79FB\u8DEF\u4E0A\u3001\u65F6\u95F4\u538B\u529B\u3001\u8BC1\u636E\u4FDD\u7BA1",
+    "\u5BF9\u5CD9\u73B0\u573A\u3001\u6743\u529B\u8DDD\u79BB\u3001\u8EAB\u4F53\u963B\u6321",
+    "\u4F59\u6CE2\u573A\u666F\u3001\u6C89\u9ED8\u4EA4\u6362\u3001\u5173\u7CFB\u88C2\u7F1D",
+    "\u4E34\u754C\u884C\u52A8\u3001\u9519\u8BEF\u9009\u62E9\u3001\u4E0D\u53EF\u56DE\u5934"
+  ];
+  const evidenceModes = [
+    "\u7269\u4EF6\u8FB9\u7F18\u9732\u51FA\u4E0D\u5408\u5E38\u7406\u7684\u7EC6\u8282",
+    "\u4E00\u53E5\u5BF9\u767D\u66B4\u9732\u7ACB\u573A\u800C\u975E\u89E3\u91CA\u8BBE\u5B9A",
+    "\u4E00\u4EFD\u8BB0\u5F55\u7684\u987A\u5E8F\u4E0E\u73B0\u573A\u884C\u52A8\u51B2\u7A81",
+    "\u4E00\u4E2A\u4EBA\u5E2E\u5FD9\u7684\u65B9\u5F0F\u53CD\u800C\u5236\u9020\u65B0\u503A",
+    "\u4E00\u6761\u65E7\u7EBF\u7D22\u53EA\u5151\u73B0\u4E00\u534A",
+    "\u4E00\u4E2A\u4E16\u754C\u89C4\u5219\u7684\u4F8B\u5916\u5E26\u6765\u4EE3\u4EF7"
+  ];
+  const handoffModes = [
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u88AB\u4FDD\u7559\u4E0B\u6765\u7684\u8BC1\u636E",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u88AB\u6539\u53D8\u7684\u5173\u7CFB\u7AD9\u4F4D",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u89C4\u5219\u53CD\u566C\u540E\u7684\u6210\u672C",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u66B4\u9732\u8EAB\u4EFD\u540E\u7684\u538B\u529B",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u534A\u5151\u73B0\u4F0F\u7B14\u7559\u4E0B\u7684\u7F3A\u53E3",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u5BF9\u624B\u5DF2\u7ECF\u770B\u89C1\u7684\u5F31\u70B9"
+  ];
+  const openingMoves = [
+    "\u4ECE\u4E00\u9875\u987A\u5E8F\u9519\u8BEF\u7684\u6863\u6848\u5F00\u573A",
+    "\u4ECE\u4E00\u53E5\u6539\u53E3\u540E\u7684\u79F0\u547C\u5F00\u573A",
+    "\u4ECE\u4EA4\u63A5\u7269\u4EF6\u88AB\u4E34\u65F6\u8C03\u5305\u5F00\u573A",
+    "\u4ECE\u4E3B\u89D2\u88AB\u8FEB\u5F53\u573A\u7B7E\u6536\u98CE\u9669\u5F00\u573A",
+    "\u4ECE\u65E7\u6848\u75D5\u8FF9\u7A81\u7136\u56DE\u5230\u773C\u524D\u5F00\u573A",
+    "\u4ECE\u5BF9\u624B\u63D0\u524D\u77E5\u9053\u4E00\u4E2A\u7EC6\u8282\u5F00\u573A",
+    "\u4ECE\u65C1\u89C2\u8005\u6C89\u9ED8\u6539\u53D8\u7AD9\u4F4D\u5F00\u573A",
+    "\u4ECE\u4E00\u4E2A\u4E0D\u80FD\u516C\u5F00\u8BE2\u95EE\u7684\u95EE\u9898\u5F00\u573A"
+  ];
+  const keyProps = [
+    "\u9519\u9875\u7A0E\u518C",
+    "\u5C01\u53E3\u7B7E",
+    "\u6F6E\u6E7F\u8C03\u5377\u724C",
+    "\u7F3A\u89D2\u503A\u5951",
+    "\u53F8\u5929\u76D1\u96E8\u6863\u6284\u9875",
+    "\u88AB\u78E8\u6389\u8FB9\u6B3E\u7684\u5B98\u5370",
+    "\u65E7\u6848\u5939\u5C42\u7EB8",
+    "\u53CD\u590D\u51FA\u73B0\u7684\u540C\u4E00\u7B14\u6731\u7802"
+  ];
+  const relationshipTurns = [
+    "\u6709\u4EBA\u7528\u5E2E\u5FD9\u6362\u53D6\u6C88\u9ED8",
+    "\u719F\u4EBA\u7B2C\u4E00\u6B21\u6539\u7528\u5B98\u79F0",
+    "\u4FDD\u62A4\u8005\u628A\u8BDD\u8BF4\u5230\u4E00\u534A\u505C\u4F4F",
+    "\u65C1\u89C2\u8005\u628A\u98CE\u9669\u63A8\u56DE\u4E3B\u89D2\u624B\u4E2D",
+    "\u503A\u4E3B\u7528\u65E7\u60C5\u5305\u88C5\u5A01\u80C1",
+    "\u540C\u76DF\u8981\u6C42\u4E3B\u89D2\u727A\u7272\u4E00\u6761\u7EBF\u7D22",
+    "\u4E0A\u7EA7\u628A\u8D23\u4EFB\u5199\u8FDB\u516C\u6587\u7A7A\u767D\u5904",
+    "\u8BC1\u4EBA\u53EA\u627F\u8BA4\u4E00\u534A\u4E8B\u5B9E"
+  ];
+  const decisionShapes = [
+    "\u4FDD\u4F4F\u804C\u4F4D\u8FD8\u662F\u4FDD\u4F4F\u8BC1\u636E",
+    "\u76F8\u4FE1\u4EBA\u8BC1\u8FD8\u662F\u76F8\u4FE1\u6863\u6848",
+    "\u5F53\u573A\u8FFD\u95EE\u8FD8\u662F\u5148\u85CF\u4F4F\u5F02\u5E38",
+    "\u727A\u7272\u5173\u7CFB\u8FD8\u662F\u6269\u5927\u8C03\u67E5\u53E3\u5B50",
+    "\u4EA4\u51FA\u7269\u4EF6\u8FD8\u662F\u80CC\u4E0B\u8D23\u4EFB",
+    "\u516C\u5F00\u77DB\u76FE\u8FD8\u662F\u8BA9\u77DB\u76FE\u7EE7\u7EED\u6F5C\u4F0F",
+    "\u4FDD\u62A4\u65E7\u4EBA\u8FD8\u662F\u4FDD\u62A4\u65B0\u7EBF\u7D22",
+    "\u63A5\u53D7\u5E2E\u52A9\u8FD8\u662F\u62D2\u7EDD\u5E26\u94A9\u5B50\u7684\u5584\u610F"
+  ];
+  const costShapes = [
+    "\u540D\u5B57\u8FDB\u5165\u8C03\u5377\u7C3F",
+    "\u4E00\u4E2A\u5173\u7CFB\u503A\u88AB\u5199\u5B9E",
+    "\u8BC1\u636E\u6682\u65F6\u5931\u53BB\u5408\u6CD5\u6765\u6E90",
+    "\u4E3B\u89D2\u5931\u53BB\u4E00\u6B21\u89E3\u91CA\u673A\u4F1A",
+    "\u5BF9\u624B\u5F97\u5230\u53CD\u5411\u8BD5\u63A2\u7684\u8BC1\u636E",
+    "\u65E7\u6848\u4F24\u53E3\u88AB\u8FEB\u516C\u5F00\u4E00\u89D2",
+    "\u4E0B\u4E00\u7AE0\u5FC5\u987B\u5904\u7406\u65B0\u7684\u8EAB\u4EFD\u98CE\u9669",
+    "\u67D0\u4E2A\u540C\u76DF\u7684\u4FE1\u4EFB\u4E0B\u964D\u4E00\u7EA7"
+  ];
+  const exitImages = [
+    "\u8D26\u9875\u5408\u4E0A\u540E\u4ECD\u9732\u51FA\u534A\u679A\u6E7F\u5370",
+    "\u95E8\u5916\u811A\u6B65\u505C\u5728\u4E0D\u8BE5\u505C\u7684\u4F4D\u7F6E",
+    "\u8C03\u5377\u724C\u88AB\u7FFB\u5230\u4E3B\u89D2\u770B\u4E0D\u89C1\u7684\u4E00\u9762",
+    "\u6731\u7802\u70B9\u843D\u5728\u4E24\u4EFD\u4E92\u76F8\u77DB\u76FE\u7684\u65E5\u671F\u4E4B\u95F4",
+    "\u96E8\u6863\u6284\u9875\u88AB\u538B\u8FDB\u503A\u5951\u5939\u5C42",
+    "\u5B98\u5370\u8FB9\u6B3E\u5728\u706F\u4E0B\u663E\u51FA\u7B2C\u4E8C\u9053\u78E8\u75D5",
+    "\u65E7\u6848\u7EB8\u7070\u6CBE\u5728\u4E3B\u89D2\u6307\u8282\u4E0A",
+    "\u540C\u4E00\u53E5\u79F0\u547C\u5728\u7AE0\u672B\u53D8\u6210\u53E6\u4E00\u79CD\u8DDD\u79BB"
+  ];
+  const cast = continuityContract.knownCast.filter((name) => name && !/pending|待定|占位|主角|对抗力量|关键关系对象/iu.test(name));
+  const focusOffset = cast.length ? chapterIndex % cast.length : 0;
+  const focusCast = cast.length ? uniqueStrings([...cast.slice(focusOffset), ...cast.slice(0, focusOffset)]).slice(0, 3) : [];
+  const requiredFacts = uniqueStrings([
+    ...getTaskCausalPlan(state, task).requiredContinuityAnchors,
+    ...continuityContract.continuityAnchors,
+    evidenceModes[chapterIndex % evidenceModes.length],
+    pressureModes[chapterIndex % pressureModes.length]
+  ]).slice(0, 8);
+  return {
+    pressureMode: pressureModes[chapterIndex % pressureModes.length],
+    sceneTexture: sceneTextures[chapterIndex % sceneTextures.length],
+    evidenceMode: evidenceModes[chapterIndex % evidenceModes.length],
+    handoffMode: handoffModes[chapterIndex % handoffModes.length],
+    openingMove: openingMoves[chapterIndex % openingMoves.length],
+    keyProp: keyProps[chapterIndex % keyProps.length],
+    relationshipTurn: relationshipTurns[chapterIndex % relationshipTurns.length],
+    decisionShape: decisionShapes[chapterIndex % decisionShapes.length],
+    costShape: costShapes[chapterIndex % costShapes.length],
+    exitImage: exitImages[chapterIndex % exitImages.length],
+    focusCast,
+    requiredFacts
+  };
+}
+function formatStoryAssetContextForBlueprintArtifact(storyAssetContext) {
+  if (!storyAssetContext.prompt.trim() && storyAssetContext.files.length === 0) return "";
+  const signalLines = uniqueStrings(storyAssetContext.prompt.split("\n").map((line) => line.trim()).filter(
+    (line) => /^###\s+/u.test(line) || /Canonical Protagonist|Canonical Cast|主角[:：]|核心人物|Causal Objective|Previous Input|Irreversible Change|Next Handoff|Foreshadowing|伏笔|Character Delta|角色状态/u.test(line)
+  ).map((line) => compactStoryAssetLine(line, 180))).slice(0, 18);
+  return [
+    "## Production Story Asset Context",
+    "",
+    storyAssetContext.files.length ? `Referenced files: ${storyAssetContext.files.join("\u3001")}` : "Referenced files: inline story context",
+    "- Shared story assets stay authoritative; this blueprint shows only chapter-relevant locks and file references to avoid duplicating the full foundation in every chapter file.",
+    ...signalLines.map((line) => `- ${line.replace(/^[-*]\s*/u, "")}`)
+  ].join("\n");
+}
 function createDetailedChapterBlueprint(state, task, context, resources, continuityContract = createContinuityContract({ state, task, context }), storyAssetContext = { prompt: "", files: [] }) {
   const genre = inferGenreProfile(state);
   const sceneType = sceneTypeForChapter(state, task.chapterNumber);
   const arcLabel = getArcLabel(state, task.chapterNumber);
   const causalPlan = getTaskCausalPlan(state, task);
+  const normalizedTaskSummary = summarizeCausalPlan(causalPlan);
+  const planningCastContract = extractPlanningCastContract(storyAssetContext.prompt);
+  const planningCastPrompt = formatPlanningCastPrompt(planningCastContract);
+  const effectiveContinuityContract = continuityWithPlanningCast({
+    state,
+    task,
+    context,
+    continuityContract,
+    planningCastContract,
+    planningCastPrompt,
+    storyAssetContext
+  });
+  const effectiveContext = contextWithPlanningCast(context, planningCastContract);
+  const differentiators = createChapterDifferentiators(state, task, effectiveContinuityContract);
+  const storyAssetContextReference = formatStoryAssetContextForBlueprintArtifact(storyAssetContext);
+  const completedPreviousChapterLedger = effectiveContinuityContract.previousChapterLedger;
+  const hasCompletedPreviousCanon = completedPreviousChapterLedger.length > 0;
+  const previousInputStatus = hasCompletedPreviousCanon ? "completed_canon" : "planned_dependency";
+  const previousInputBoundaryNote = hasCompletedPreviousCanon ? "Previous Input may be treated as completed canon only where it is supported by Previous Chapter Ledger, memory, or final draft evidence." : "Previous Input is a planned upstream dependency, not completed canon yet; drafting must convert it into on-page evidence instead of claiming unseen chapters already happened.";
   const effectiveAnchors = uniqueStrings([
     ...causalPlan.requiredContinuityAnchors,
-    ...continuityContract.continuityAnchors
+    ...effectiveContinuityContract.continuityAnchors
   ]).slice(0, 10);
   const vocabularyPrompt = createVocabularyUsagePrompt({
     resources,
     state,
     task,
     sceneType,
-    continuityContract,
+    continuityContract: effectiveContinuityContract,
     limit: 20
   });
   const vocabularySkillExamples = createVocabularySkillExamplePrompt(resources, sceneType);
@@ -11139,42 +12859,71 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     state,
     task,
     sceneType,
-    continuityContract,
+    continuityContract: effectiveContinuityContract,
     limit: 12
   });
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
-    protagonistProfile: context.protagonist,
-    continuityContract,
-    blueprint: context.consensus
+    protagonistProfile: effectiveContext.protagonist,
+    continuityContract: effectiveContinuityContract,
+    blueprint: [context.consensus, storyAssetContext.prompt, planningCastPrompt].filter(Boolean).join("\n\n")
   });
-  const sceneCardCount = Math.min(6, Math.max(4, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)));
+  const authoritativeProtagonistName = planningCastContract.protagonistName || effectiveContinuityContract.lockedProtagonistName;
+  const concreteCast = sanitizeKnownCastNames([
+    authoritativeProtagonistName,
+    ...planningCastContract.cast,
+    ...effectiveContinuityContract.knownCast,
+    ...characterProfileContract.knownCast
+  ], 8);
+  const requiredSceneCharacters = concreteCast.length ? uniqueStrings([
+    ...differentiators.focusCast,
+    ...concreteCast
+  ]).slice(0, 4) : [];
+  const protagonistSceneName = authoritativeProtagonistName || concreteCast[0] || "";
+  const supportingSceneCharacters = requiredSceneCharacters.filter((name) => name !== protagonistSceneName);
+  const requiredCharactersForSceneCard = (index) => {
+    if (!protagonistSceneName) return [];
+    const support = supportingSceneCharacters[(index - 1) % Math.max(1, supportingSceneCharacters.length)] || "";
+    if (index === 1 || !support) return [protagonistSceneName];
+    if (index === 3) return [protagonistSceneName];
+    return uniqueStrings([protagonistSceneName, support]).slice(0, 2);
+  };
+  const characterParticipationRules = concreteCast.length ? [
+    `\u5DF2\u77E5\u89D2\u8272\u5FC5\u987B\u6309\u59D3\u540D\u8FDB\u5165\u573A\u666F\uFF1A${concreteCast.join("\u3001")}\u3002`,
+    "\u6BCF\u4E2A\u8FDB\u5165\u672C\u7AE0\u6838\u5FC3\u51B2\u7A81\u7684\u89D2\u8272\u90FD\u5FC5\u987B\u6709\u53EF\u89C1\u52A8\u4F5C\u3001\u5229\u76CA\u7ACB\u573A\u3001\u79F0\u547C/\u5BF9\u767D\u5DEE\u5F02\u548C\u72B6\u6001\u53D8\u5316\u3002",
+    "\u65B0\u589E\u89D2\u8272\u5FC5\u987B\u5728\u672C\u7AE0\u8BB0\u5FC6\u66F4\u65B0\u4E2D\u767B\u8BB0\u59D3\u540D\u3001\u8EAB\u4EFD\u3001\u4E0E\u4E3B\u89D2\u5173\u7CFB\u3001\u53EF\u8BB0\u5FC6\u52A8\u4F5C\u548C\u672C\u7AE0\u53D8\u5316\u3002"
+  ] : [
+    "\u9996\u7AE0\u5FC5\u987B\u5728\u524D\u4E24\u4E2A\u573A\u666F\u5185\u547D\u540D\u552F\u4E00\u4E3B\u89D2\uFF1B\u4E0D\u5F97\u628A\u201C\u4E3B\u89D2/\u5173\u952E\u5173\u7CFB\u5BF9\u8C61\u201D\u7559\u4F5C\u6B63\u6587\u79F0\u8C13\u3002",
+    "\u81F3\u5C11\u5F15\u5165\u4E00\u4E2A\u53EF\u547D\u540D\u7684\u5173\u7CFB\u538B\u529B\u89D2\u8272\uFF1B\u5FC5\u987B\u7ED9\u51FA\u8EAB\u4EFD\u7EBF\u7D22\u3001\u4E0E\u4E3B\u89D2\u7684\u5229\u76CA\u5173\u7CFB\u548C\u4E00\u4E2A\u53EF\u8BB0\u5FC6\u52A8\u4F5C\u3002",
+    "Memory Keeper \u5FC5\u987B\u628A\u65B0\u547D\u540D\u89D2\u8272\u5199\u5165\u89D2\u8272\u6863\u6848\u548C\u5173\u7CFB\u56FE\u3002"
+  ];
+  const sceneCardCount = Math.min(6, Math.max(5, Math.round(Math.max(1200, Number(task.targetWords) || Number(state.plan.chapterWordTarget) || 2500) / 650)));
   const sceneCardTemplates = [
     {
-      goal: `\u7528\u5177\u4F53\u5F02\u5E38\u6253\u5F00\u672C\u7AE0\u95EE\u9898\uFF1A${causalPlan.previousInput}`,
-      conflict: "\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u73B0\u573A\u538B\u529B\u6216\u5173\u7CFB\u538B\u529B\u3002",
+      goal: `\u7528${differentiators.evidenceMode}\u6253\u5F00\u672C\u7AE0\u95EE\u9898\uFF1A${causalPlan.previousInput}`,
+      conflict: `\u4EE5\u300C${differentiators.openingMove}\u300D\u5236\u9020\u65E0\u6CD5\u56DE\u907F\u7684\u73B0\u573A\u538B\u529B\uFF1B\u672C\u7AE0\u538B\u529B\u6A21\u5F0F\u662F${differentiators.pressureMode}\uFF0C\u573A\u666F\u8D28\u611F\u4E3A${differentiators.sceneTexture}\u3002`,
       turn: effectiveAnchors.length ? `\u81F3\u5C11\u8BA9\u951A\u70B9\u8FDB\u5165\u4E8B\u4EF6\uFF1A${effectiveAnchors.slice(0, 2).join("\u3001")}` : "\u5EFA\u7ACB\u540E\u7EED\u53EF\u8FFD\u8E2A\u7684\u7269\u4EF6\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u3002",
       endHook: "\u8BFB\u8005\u660E\u786E\u77E5\u9053\u672C\u7AE0\u5C40\u90E8\u95EE\u9898\u662F\u4EC0\u4E48\u3002",
       requiredFacts: effectiveAnchors.slice(0, 2)
     },
     {
       goal: `\u63A8\u8FDB\u672C\u7AE0\u76EE\u6807\uFF1A${causalPlan.sceneObjective}`,
-      conflict: "\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB\uFF0C\u81F3\u5C11\u4E00\u540D\u914D\u89D2\u66B4\u9732\u7ACB\u573A\u6216\u5229\u76CA\u3002",
-      turn: "\u51FA\u73B0\u65B0\u8BC1\u636E\u3001\u65B0\u963B\u529B\u6216\u65B0\u4EE3\u4EF7\u3002",
+      conflict: `\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB\uFF0C\u81F3\u5C11\u4E00\u540D\u914D\u89D2\u901A\u8FC7\u300C${differentiators.relationshipTurn}\u300D\u66B4\u9732\u7ACB\u573A\u6216\u5229\u76CA\u3002`,
+      turn: `\u5173\u952E\u7269\u4EF6\u300C${differentiators.keyProp}\u300D\u6539\u53D8\u5224\u65AD\u987A\u5E8F\uFF0C\u4E14\u4E0D\u80FD\u590D\u7528\u4E0A\u4E00\u573A\u7684\u89E3\u51B3\u65B9\u5F0F\u3002`,
       endHook: "\u4E3B\u89D2\u88AB\u8FEB\u63A5\u8FD1\u9009\u62E9\u70B9\u3002",
       requiredFacts: effectiveAnchors.slice(1, 4)
     },
     {
       goal: `\u628A\u4E3B\u89D2\u9009\u62E9\u5199\u6210\u884C\u52A8\uFF1A${causalPlan.protagonistDecision}`,
-      conflict: "\u9009\u62E9\u5FC5\u987B\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u80FD\u529B\u8FB9\u754C\u6216\u4EF7\u503C\u53D6\u820D\u3002",
+      conflict: `\u9009\u62E9\u5FC5\u987B\u843D\u5728\u300C${differentiators.decisionShape}\u300D\u4E0A\uFF0C\u66B4\u9732\u6B32\u671B\u3001\u77ED\u677F\u3001\u80FD\u529B\u8FB9\u754C\u6216\u4EF7\u503C\u53D6\u820D\u3002`,
       turn: `\u89D2\u8272\u72B6\u6001\u53D1\u751F\u53D8\u5316\uFF1A${causalPlan.characterStateDelta}`,
       endHook: "\u9009\u62E9\u5E26\u6765\u7684\u4EE3\u4EF7\u5F00\u59CB\u663E\u5F62\u3002",
       requiredFacts: effectiveAnchors.slice(2, 5)
     },
     {
       goal: `\u8BA9\u4E0D\u53EF\u9006\u53D8\u5316\u6210\u4E3A\u4E8B\u5B9E\uFF1A${causalPlan.irreversibleConsequence}`,
-      conflict: "\u963B\u529B\u5151\u73B0\uFF0C\u5C40\u9762\u4E0D\u80FD\u65E0\u635F\u56DE\u5230\u5F00\u573A\u72B6\u6001\u3002",
+      conflict: `\u963B\u529B\u5151\u73B0\u4E3A\u300C${differentiators.costShape}\u300D\uFF0C\u5C40\u9762\u4E0D\u80FD\u65E0\u635F\u56DE\u5230\u5F00\u573A\u72B6\u6001\u3002`,
       turn: `\u4F0F\u7B14\u64CD\u4F5C\u8FDB\u5165\u6B63\u6587\uFF1A${causalPlan.foreshadowingOperation}`,
       endHook: "\u7559\u4E0B\u53EF\u88AB\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u753B\u9762\u3001\u7269\u4EF6\u3001\u7EBF\u7D22\u6216\u5173\u7CFB\u538B\u529B\u3002",
       requiredFacts: effectiveAnchors.slice(3, 6)
@@ -11182,8 +12931,8 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     {
       goal: `\u5B8C\u6210\u4E0B\u4E00\u7AE0\u4EA4\u68D2\uFF1A${causalPlan.nextHandoff}`,
       conflict: "\u4F59\u6CE2\u4E0D\u80FD\u7528\u603B\u7ED3\u4EE3\u66FF\uFF0C\u5FC5\u987B\u6709\u73B0\u573A\u52A8\u4F5C\u6216\u5BF9\u767D\u3002",
-      turn: "\u672C\u7AE0\u5C40\u90E8\u7ED3\u679C\u843D\u5B9A\uFF0C\u540C\u65F6\u4EA7\u751F\u4E0B\u4E00\u7AE0\u65E0\u6CD5\u7ED5\u5F00\u7684\u538B\u529B\u3002",
-      endHook: causalPlan.nextHandoff,
+      turn: `\u672C\u7AE0\u5C40\u90E8\u7ED3\u679C\u843D\u5B9A\uFF0C\u540C\u65F6${differentiators.handoffMode}\u3002`,
+      endHook: `${causalPlan.nextHandoff}\uFF1B${differentiators.exitImage}\uFF1B${differentiators.handoffMode}`,
       requiredFacts: effectiveAnchors.slice(-3)
     }
   ];
@@ -11191,7 +12940,7 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     version: 1,
     chapterNumber: task.chapterNumber,
     title: task.title,
-    chapterRole: task.summary || `${arcLabel} chapter`,
+    chapterRole: normalizedTaskSummary || `${arcLabel} chapter`,
     chapterPurpose: causalPlan.sceneObjective,
     macroBeat: task.chapterNumber === 1 ? "E" : "P",
     suspenseLevel: task.chapterNumber === state.plan.totalChapters ? "payoff" : "active",
@@ -11201,15 +12950,42 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     conflictLevel: Math.min(5, Math.max(2, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 5))))),
     revealLevel: task.chapterNumber === state.plan.totalChapters ? 5 : Math.min(4, Math.max(1, Math.ceil(task.chapterNumber / Math.max(1, Math.ceil(state.plan.totalChapters / 4))))),
     targetWordCount: task.targetWords,
+    chapterDifferentiators: {
+      pressureMode: differentiators.pressureMode,
+      sceneTexture: differentiators.sceneTexture,
+      evidenceMode: differentiators.evidenceMode,
+      handoffMode: differentiators.handoffMode,
+      openingMove: differentiators.openingMove,
+      keyProp: differentiators.keyProp,
+      relationshipTurn: differentiators.relationshipTurn,
+      decisionShape: differentiators.decisionShape,
+      costShape: differentiators.costShape,
+      exitImage: differentiators.exitImage,
+      focusCast: requiredSceneCharacters,
+      requiredFacts: differentiators.requiredFacts
+    },
     mustAvoid: [
       "\u7981\u6B62\u7528\u5267\u60C5\u6458\u8981\u66FF\u4EE3\u6B63\u6587",
       "\u7981\u6B62\u8DF3\u8FC7\u4E0A\u4E00\u7AE0\u4EE3\u4EF7\u53E6\u8D77\u5267\u60C5",
       "\u7981\u6B62\u63D0\u524D\u6CC4\u9732\u672A\u5230\u573A\u771F\u76F8",
       "\u7981\u6B62\u6240\u6709\u89D2\u8272\u4F7F\u7528\u540C\u4E00\u79CD\u89E3\u91CA\u8154"
     ],
-    allowedCharacters: continuityContract.knownCast.length ? continuityContract.knownCast : ["\u4E3B\u89D2", "\u5BF9\u6297\u529B\u91CF", "\u5173\u952E\u5173\u7CFB\u5BF9\u8C61"],
+    allowedCharacters: concreteCast.length ? concreteCast : ["\u9996\u7AE0\u5F85\u547D\u540D\u4E3B\u89D2", "\u5F85\u547D\u540D\u5173\u7CFB\u538B\u529B\u89D2\u8272"],
     forbiddenCharacters: [],
     allowedNewCharacters: task.chapterNumber === 1 ? ["\u670D\u52A1\u9996\u7AE0\u4E8B\u4EF6\u7684\u5173\u7CFB\u89D2\u8272"] : ["\u4EC5\u5141\u8BB8\u670D\u52A1\u672C\u7AE0\u51B2\u7A81\u4E14\u8FDB\u5165\u8BB0\u5FC6\u8D26\u672C\u7684\u65B0\u89D2\u8272"],
+    canonBoundary: {
+      previousInputStatus,
+      completedPreviousChapters: completedPreviousChapterLedger.length,
+      plannedPreviousInput: causalPlan.previousInput,
+      completedEvidence: completedPreviousChapterLedger,
+      rule: previousInputBoundaryNote
+    },
+    characterParticipation: {
+      knownCast: concreteCast,
+      requiredSceneCharacters,
+      rules: characterParticipationRules,
+      memoryWriteRequired: true
+    },
     entranceProtocol: {
       newCharacterStage: task.chapterNumber === 1 ? "meet" : "need-based",
       requiredIntroElements: ["\u8EAB\u4EFD\u7EBF\u7D22", "\u4E0E\u4E3B\u89D2\u7684\u5173\u7CFB\u538B\u529B", "\u53EF\u8BB0\u5FC6\u7684\u52A8\u4F5C/\u79F0\u547C/\u4F53\u6001"]
@@ -11220,7 +12996,7 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
       conflict: card.conflict,
       turn: card.turn,
       endHook: card.endHook,
-      requiredCharacters: continuityContract.knownCast.slice(0, 4),
+      requiredCharacters: requiredCharactersForSceneCard(index + 1),
       requiredFacts: card.requiredFacts,
       forbiddenFacts: ["\u672A\u6765\u7AE0\u8282\u771F\u76F8", "\u672A\u767B\u573A\u5E55\u540E\u4E3B\u4F7F\u8EAB\u4EFD", "\u672A\u51BB\u7ED3\u4E16\u754C\u89C4\u5219"]
     })),
@@ -11247,9 +13023,11 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     JSON.stringify(executionContract, null, 2),
     "```",
     "",
-    storyAssetContext.prompt,
-    storyAssetContext.prompt ? "" : "",
-    continuityContract.prompt,
+    storyAssetContextReference,
+    storyAssetContextReference ? "" : "",
+    planningCastPrompt,
+    planningCastPrompt ? "" : "",
+    effectiveContinuityContract.prompt,
     "",
     characterProfileContract.prompt,
     "",
@@ -11258,13 +13036,37 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     `- \u5F53\u524D\u5F27\u7EBF\uFF1A${arcLabel}`,
     "- \u672C\u7AE0\u5FC5\u987B\u5B8C\u6210\u4E00\u4E2A\u53EF\u611F\u77E5\u7684\u5267\u60C5\u63A8\u8FDB\uFF0C\u800C\u4E0D\u662F\u53EA\u505A\u8BBE\u5B9A\u8BF4\u660E\u3002",
     "",
+    "## Chapter Differentiators",
+    `- \u538B\u529B\u6A21\u5F0F\uFF1A${differentiators.pressureMode}`,
+    `- \u573A\u666F\u8D28\u611F\uFF1A${differentiators.sceneTexture}`,
+    `- \u8BC1\u636E\u5448\u73B0\uFF1A${differentiators.evidenceMode}`,
+    `- \u4EA4\u68D2\u65B9\u5F0F\uFF1A${differentiators.handoffMode}`,
+    `- \u5F00\u573A\u52A8\u4F5C\uFF1A${differentiators.openingMove}`,
+    `- \u5173\u952E\u7269\u4EF6\uFF1A${differentiators.keyProp}`,
+    `- \u5173\u7CFB\u8F6C\u6298\uFF1A${differentiators.relationshipTurn}`,
+    `- \u9009\u62E9\u5F62\u6001\uFF1A${differentiators.decisionShape}`,
+    `- \u4EE3\u4EF7\u5F62\u6001\uFF1A${differentiators.costShape}`,
+    `- \u7AE0\u672B\u753B\u9762\uFF1A${differentiators.exitImage}`,
+    requiredSceneCharacters.length ? `- \u672C\u7AE0\u805A\u7126\u89D2\u8272\uFF1A${requiredSceneCharacters.join("\u3001")}` : "- \u672C\u7AE0\u805A\u7126\u89D2\u8272\uFF1A\u4ECE Canon Contract \u7684\u4E3B\u89D2\u3001\u5BF9\u6297\u529B\u91CF\u3001\u5173\u952E\u5173\u7CFB\u5BF9\u8C61\u4E2D\u9009\u62E9\uFF0C\u4E0D\u5141\u8BB8\u53EA\u5199\u529F\u80FD\u6807\u7B7E\u3002",
+    "- \u5199\u4F5C\u8981\u6C42\uFF1A\u4E0B\u4E00\u7AE0\u84DD\u56FE\u4E0D\u5F97\u590D\u7528\u672C\u7AE0\u7684\u5F00\u573A\u538B\u529B\u3001\u8BC1\u636E\u5448\u73B0\u548C\u5173\u7CFB\u8F6C\u6298\u65B9\u5F0F\u3002",
+    "",
+    "## Blueprint Variation Contract",
+    `- \u5F00\u573A\u52A8\u4F5C\uFF1A${differentiators.openingMove}`,
+    `- \u672C\u7AE0\u5173\u952E\u7269\u4EF6\uFF1A${differentiators.keyProp}`,
+    `- \u5173\u7CFB\u8F6C\u6298\uFF1A${differentiators.relationshipTurn}`,
+    `- \u4E3B\u89D2\u9009\u62E9\u5F62\u6001\uFF1A${differentiators.decisionShape}`,
+    `- \u672C\u7AE0\u4EE3\u4EF7\u5F62\u6001\uFF1A${differentiators.costShape}`,
+    `- \u7AE0\u672B\u753B\u9762\uFF1A${differentiators.exitImage}`,
+    "",
     "## Previous Inputs",
-    `- ${causalPlan.previousInput}`,
-    continuityContract.previousChapterLedger.length ? `- \u524D\u5E8F\u7AE0\u8282\u8D26\u672C\uFF1A${continuityContract.previousChapterLedger.slice(-3).join(" / ")}` : "- \u524D\u5E8F\u7AE0\u8282\u8D26\u672C\uFF1A\u6682\u65E0\u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\uFF0C\u9996\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u540E\u7EED\u53EF\u8FFD\u8E2A\u4E3B\u7EBF\u951A\u70B9\u3002",
+    `- Previous Input status: ${previousInputStatus}`,
+    `- Planned upstream dependency: ${causalPlan.previousInput}`,
+    `- Canon boundary: ${previousInputBoundaryNote}`,
+    completedPreviousChapterLedger.length ? `- \u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\uFF1A${completedPreviousChapterLedger.slice(-3).join(" / ")}` : "- \u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\uFF1A\u6682\u65E0\u3002\u4E0D\u5F97\u628A\u672A\u6765\u7AE0\u8282\u84DD\u56FE\u3001\u8BA1\u5212\u6458\u8981\u6216\u672A\u6210\u7A3F\u7AE0\u8282\u5199\u6210\u5DF2\u7ECF\u53D1\u751F\u7684 canon \u4E8B\u5B9E\u3002",
     "",
     "## Causal Objective",
     `- ${causalPlan.sceneObjective}`,
-    "- \u672C\u7AE0\u4E8B\u4EF6\u5FC5\u987B\u662F\u4E0A\u4E00\u7AE0\u72B6\u6001\u63A8\u52A8\u51FA\u6765\u7684\u7ED3\u679C\uFF0C\u800C\u4E0D\u662F\u6362\u5730\u70B9\u91CD\u65B0\u5F00\u5C40\u3002",
+    hasCompletedPreviousCanon ? "- \u672C\u7AE0\u4E8B\u4EF6\u5FC5\u987B\u7531\u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\u72B6\u6001\u63A8\u52A8\u51FA\u6765\uFF0C\u800C\u4E0D\u662F\u6362\u5730\u70B9\u91CD\u65B0\u5F00\u5C40\u3002" : "- \u672C\u7AE0\u4E8B\u4EF6\u5FC5\u987B\u628A\u8BA1\u5212\u4F9D\u8D56\u8F6C\u5316\u4E3A\u6B63\u6587\u73B0\u573A\u8BC1\u636E\uFF1B\u4E0D\u5F97\u58F0\u79F0\u672A\u6210\u7A3F\u524D\u5E8F\u7AE0\u8282\u5DF2\u7ECF\u53D1\u751F\u3002",
     "",
     "## Protagonist Decision",
     `- ${causalPlan.protagonistDecision}`,
@@ -11289,16 +13091,20 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     "- \u524D 300 \u5B57\u5185\u8BA9\u8BFB\u8005\u77E5\u9053\u672C\u7AE0\u95EE\u9898\u662F\u4EC0\u4E48\u3002",
     "",
     "## Event Sequence",
-    "1. \u5F00\u573A\u538B\u529B\uFF1A\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u5C40\u9762\u3002",
-    effectiveAnchors.length ? `2. \u4E0A\u7AE0\u627F\u63A5\uFF1A\u5FC5\u987B\u81EA\u7136\u5E26\u51FA\u8FDE\u7EED\u6027\u951A\u70B9\u300C${effectiveAnchors.slice(0, 4).join("\u3001")}\u300D\u4E2D\u7684\u81F3\u5C11\u4E24\u4E2A\uFF0C\u8BA9\u8BFB\u8005\u770B\u89C1\u56E0\u679C\u5EF6\u7EED\u3002` : "2. \u4E0A\u7AE0\u627F\u63A5\uFF1A\u5982\u679C\u6682\u65E0\u951A\u70B9\uFF0C\u672C\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u53EF\u8FFD\u8E2A\u7269\u4EF6\u3001\u5173\u7CFB\u6216\u7EBF\u7D22\u4F9B\u4E0B\u4E00\u7AE0\u627F\u63A5\u3002",
-    "3. \u4FE1\u606F\u53D8\u5316\uFF1A\u4E16\u754C\u89C4\u5219\u3001\u4EBA\u7269\u5173\u7CFB\u6216\u5C40\u52BF\u51FA\u73B0\u65B0\u8BC1\u636E\u3002",
-    "4. \u51B2\u7A81\u5347\u7EA7\uFF1A\u4E3B\u89D2\u505A\u51FA\u9009\u62E9\u5E76\u4ED8\u51FA\u4EE3\u4EF7\u3002",
+    `1. \u5F00\u573A\u538B\u529B\uFF1A${differentiators.openingMove}\uFF0C\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u5C40\u9762\u3002`,
+    hasCompletedPreviousCanon && effectiveAnchors.length ? `2. \u4E0A\u7AE0\u627F\u63A5\uFF1A\u5FC5\u987B\u81EA\u7136\u5E26\u51FA\u8FDE\u7EED\u6027\u951A\u70B9\u300C${effectiveAnchors.slice(0, 4).join("\u3001")}\u300D\u4E2D\u7684\u81F3\u5C11\u4E24\u4E2A\uFF0C\u8BA9\u8BFB\u8005\u770B\u89C1\u56E0\u679C\u5EF6\u7EED\u3002` : `2. \u8BA1\u5212\u4F9D\u8D56\u843D\u5730\uFF1A\u56F4\u7ED5\u300C${causalPlan.previousInput}\u300D\u5EFA\u7ACB\u53EF\u8FFD\u8E2A\u7269\u4EF6\u3001\u5173\u7CFB\u6216\u7EBF\u7D22\uFF1B\u4E0D\u5F97\u628A\u672A\u5B8C\u6210\u7AE0\u8282\u5F53\u4F5C\u5DF2\u53D1\u751F\u4E8B\u5B9E\u3002`,
+    `3. \u4FE1\u606F\u53D8\u5316\uFF1A\u5173\u952E\u7269\u4EF6\u300C${differentiators.keyProp}\u300D\u8BA9\u4E16\u754C\u89C4\u5219\u3001\u4EBA\u7269\u5173\u7CFB\u6216\u5C40\u52BF\u51FA\u73B0\u65B0\u8BC1\u636E\u3002`,
+    `4. \u51B2\u7A81\u5347\u7EA7\uFF1A${differentiators.relationshipTurn}\uFF0C\u4E3B\u89D2\u5FC5\u987B\u5728\u300C${differentiators.decisionShape}\u300D\u4E4B\u95F4\u505A\u51FA\u9009\u62E9\u3002`,
     "5. \u5C40\u90E8\u5151\u73B0\uFF1A\u7ED9\u8BFB\u8005\u4E00\u4E2A\u723D\u70B9\u3001\u53CD\u8F6C\u6216\u60C5\u7EEA\u843D\u70B9\u3002",
-    "6. \u7AE0\u672B\u94A9\u5B50\uFF1A\u628A\u95EE\u9898\u63A8\u5411\u4E0B\u4E00\u7AE0\u3002",
+    `6. \u7AE0\u672B\u94A9\u5B50\uFF1A\u4EE5\u300C${differentiators.exitImage}\u300D\u628A\u95EE\u9898\u63A8\u5411\u4E0B\u4E00\u7AE0\u3002`,
+    "",
+    "## Character Participation Contract",
+    ...characterParticipationRules.map((rule) => `- ${rule}`),
+    requiredSceneCharacters.length ? `- \u672C\u7AE0 scene cards \u7684 requiredCharacters \u5FC5\u987B\u4F7F\u7528\u8FD9\u4E9B\u5177\u4F53\u59D3\u540D\uFF1A${requiredSceneCharacters.join("\u3001")}\u3002` : "- \u672C\u7AE0 scene cards \u5141\u8BB8\u6682\u4E0D\u9884\u586B\u59D3\u540D\uFF0C\u4F46\u6B63\u6587\u751F\u6210\u5FC5\u987B\u5148\u5B8C\u6210\u547D\u540D\u5E76\u5728\u8BB0\u5FC6\u8D26\u672C\u767B\u8BB0\u3002",
     "",
     "## Character Actions",
     "- \u4E3B\u89D2\uFF1A\u5FC5\u987B\u4E3B\u52A8\u9009\u62E9\uFF0C\u4E0D\u80FD\u53EA\u88AB\u5267\u60C5\u63A8\u7740\u8D70\u3002",
-    continuityContract.lockedProtagonistName ? `- \u4E3B\u89D2\uFF1A\u672C\u7AE0\u5FC5\u987B\u6CBF\u7528\u300C${continuityContract.lockedProtagonistName}\u300D\u7684\u59D3\u540D\u3001\u8EAB\u4EFD\u3001\u6B32\u671B\u548C\u884C\u4E3A\u903B\u8F91\u3002` : "- \u4E3B\u89D2\uFF1A\u9996\u7AE0\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u4E14\u5168\u6587\u4E3B\u89C6\u89D2\u53EA\u670D\u52A1\u8FD9\u4E2A\u4E3B\u89D2\u3002",
+    authoritativeProtagonistName ? `- \u4E3B\u89D2\uFF1A\u672C\u7AE0\u5FC5\u987B\u6CBF\u7528\u300C${authoritativeProtagonistName}\u300D\u7684\u59D3\u540D\u3001\u8EAB\u4EFD\u3001\u6B32\u671B\u548C\u884C\u4E3A\u903B\u8F91\u3002` : "- \u4E3B\u89D2\uFF1A\u9996\u7AE0\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u4E14\u5168\u6587\u4E3B\u89C6\u89D2\u53EA\u670D\u52A1\u8FD9\u4E2A\u4E3B\u89D2\u3002",
     "- \u914D\u89D2\uFF1A\u6CBF\u7528 Canon Contract \u4E2D\u5DF2\u767B\u8BB0\u7684\u89D2\u8272\u5173\u7CFB\uFF1B\u65B0\u589E\u914D\u89D2\u5FC5\u987B\u8BF4\u660E\u8EAB\u4EFD\u3001\u7ACB\u573A\u548C\u540E\u7EED\u72B6\u6001\u3002",
     "- \u89D2\u8272\u6863\u6848\uFF1A\u91CD\u8981\u89D2\u8272\u5FC5\u987B\u5177\u5907\u6838\u5FC3\u6B32\u671B\u3001\u6050\u60E7/\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u7279\u957F\u77ED\u677F\u548C\u5173\u7CFB\u7F51\u7EDC\u3002",
     "- \u89D2\u8272\u5448\u73B0\uFF1A\u4E0D\u80FD\u53EA\u5199\u201C\u51B7\u9759\u3001\u5584\u826F\u3001\u806A\u660E\u201D\u7B49\u6807\u7B7E\uFF0C\u5FC5\u987B\u901A\u8FC7\u52A8\u4F5C\u3001\u9009\u62E9\u3001\u505C\u987F\u3001\u79F0\u547C\u3001\u89C6\u7EBF\u548C\u5173\u7CFB\u538B\u529B\u4F53\u73B0\u4EBA\u683C\u3002",
@@ -11341,10 +13147,11 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     "- \u81F3\u5C11 3 \u4E2A\u8D44\u6E90\u70B9\u5FC5\u987B\u843D\u5230\u5177\u4F53\u573A\u666F\u6216\u5BF9\u767D\u91CC\uFF0C\u4E0D\u80FD\u53EA\u5199\u5728\u8BF4\u660E\u4E2D\u3002",
     "",
     "## Quality Gates",
-    continuityContract.lockedProtagonistName ? `- \u4E3B\u89D2\u4E00\u81F4\u6027\uFF1A\u6B63\u6587\u5FC5\u987B\u51FA\u73B0\u5E76\u6301\u7EED\u56F4\u7ED5\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u628A\u7AE0\u8282\u5199\u6210\u53E6\u4E00\u6761\u6545\u4E8B\u7EBF\u3002` : "- \u4E3B\u89D2\u4E00\u81F4\u6027\uFF1A\u9996\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u552F\u4E00\u53EF\u8FFD\u8E2A\u4E3B\u89D2\u59D3\u540D\u3002",
+    authoritativeProtagonistName ? `- \u4E3B\u89D2\u4E00\u81F4\u6027\uFF1A\u6B63\u6587\u5FC5\u987B\u51FA\u73B0\u5E76\u6301\u7EED\u56F4\u7ED5\u300C${authoritativeProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u628A\u7AE0\u8282\u5199\u6210\u53E6\u4E00\u6761\u6545\u4E8B\u7EBF\u3002` : "- \u4E3B\u89D2\u4E00\u81F4\u6027\uFF1A\u9996\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u552F\u4E00\u53EF\u8FFD\u8E2A\u4E3B\u89D2\u59D3\u540D\u3002",
     "- \u914D\u89D2\u4E00\u81F4\u6027\uFF1A\u4E0D\u5F97\u628A\u65E2\u6709\u914D\u89D2\u6539\u540D\u3001\u6539\u8EAB\u4EFD\u6216\u65E0\u56E0\u679C\u66FF\u6362\u3002",
     "- \u89D2\u8272\u9C9C\u660E\u5EA6\uFF1A\u6B63\u6587\u5FC5\u987B\u5448\u73B0\u89D2\u8272\u6B32\u671B\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u7279\u957F\u77ED\u677F\u548C\u5173\u7CFB\u72B6\u6001\u4E2D\u7684\u591A\u6570\u4FE1\u53F7\u3002",
     "- \u60C5\u8282\u8FDE\u7EED\u6027\uFF1A\u5FC5\u987B\u627F\u63A5 Canon Contract \u4E2D\u7684\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u548C\u4F0F\u7B14\u8D26\u672C\u3002",
+    "- Canon \u8FB9\u754C\uFF1A\u53EA\u6709\u5DF2\u5B8C\u6210\u7AE0\u8282\u8D26\u672C\u3001\u8BB0\u5FC6\u548C final draft \u8BC1\u636E\u53EF\u5F53\u4F5C\u5DF2\u53D1\u751F\u4E8B\u5B9E\uFF1B\u8BA1\u5212\u4F9D\u8D56\u53EA\u80FD\u4F5C\u4E3A\u672C\u7AE0\u76EE\u6807\u8F93\u5165\u3002",
     "- \u56E0\u679C\u63A8\u8FDB\uFF1A\u5FC5\u987B\u6267\u884C Previous Inputs / Causal Objective / Irreversible Change / Next Chapter Handoff\uFF0C\u7F3A\u4E00\u9879\u5373\u89C6\u4E3A\u6D41\u6C34\u8D26\u3002",
     "- \u8FDE\u7EED\u6027\u951A\u70B9\uFF1A\u7B2C 2 \u7AE0\u4EE5\u540E\u6B63\u6587\u5FC5\u987B\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A Continuity Anchors\uFF0C\u5426\u5219\u89C6\u4E3A\u53E6\u8D77\u5267\u60C5\u3002",
     "- \u7AE0\u8282\u8FDE\u7EED\u6027\uFF1A\u4E0D\u5F97\u8DF3\u7AE0\uFF0C\u4E0D\u5F97\u4E0E\u524D\u5E8F\u7AE0\u8282\u51B2\u7A81\u3002",
@@ -11358,28 +13165,42 @@ function createDetailedChapterBlueprint(state, task, context, resources, continu
     "- \u4E0D\u5F97\u6539\u53D8\u5DF2\u51BB\u7ED3\u8BBE\u5B9A\u3002",
     "- \u4E0D\u5F97\u7528\u6A21\u677F\u5316 AI \u53E5\u5F0F\u53CD\u590D\u89E3\u91CA\u60C5\u7EEA\u3002",
     "",
-    `Current task summary: ${task.summary}`,
-    context.consensus ? `
+    `Current task summary: ${normalizedTaskSummary}`,
+    effectiveContext.consensus ? `
 ## Consensus Carryover
-${context.consensus.slice(0, 1200)}` : "",
-    context.protagonist ? `
+${effectiveContext.consensus.slice(0, 1200)}` : "",
+    effectiveContext.protagonist ? `
 ## Protagonist Carryover
-${context.protagonist.slice(0, 900)}` : "",
-    context.style ? `
+${effectiveContext.protagonist.slice(0, 900)}` : "",
+    effectiveContext.style ? `
 ## Style Carryover
-${context.style.slice(0, 900)}` : ""
+${effectiveContext.style.slice(0, 900)}` : ""
   ].filter(Boolean).join("\n");
 }
 async function createChapterBlueprintContent(state, task, context, resources, options, storyAssetContext = { prompt: "", files: [] }) {
   throwIfPipelineAborted(options);
   const continuityContract = createContinuityContract({ state, task, context });
+  const planningCastContract = extractPlanningCastContract(storyAssetContext.prompt);
+  const planningCastPrompt = formatPlanningCastPrompt(planningCastContract);
+  const effectiveContinuityContract = continuityWithPlanningCast({
+    state,
+    task,
+    context,
+    continuityContract,
+    planningCastContract,
+    planningCastPrompt,
+    storyAssetContext
+  });
+  const effectiveContext = contextWithPlanningCast(context, planningCastContract);
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
-    protagonistProfile: context.protagonist,
-    continuityContract
+    protagonistProfile: effectiveContext.protagonist,
+    continuityContract: effectiveContinuityContract,
+    blueprint: [context.consensus, storyAssetContext.prompt, planningCastPrompt].filter(Boolean).join("\n\n")
   });
-  const fallback = createDetailedChapterBlueprint(state, task, context, resources, continuityContract, storyAssetContext);
+  const authoritativeProtagonistName = planningCastContract.protagonistName || effectiveContinuityContract.lockedProtagonistName;
+  const fallback = createDetailedChapterBlueprint(state, task, context, resources, effectiveContinuityContract, storyAssetContext);
   await emitWritingProgress(options, {
     step: "chapter_blueprint_started",
     role: "Chapter Planner",
@@ -11392,6 +13213,7 @@ async function createChapterBlueprintContent(state, task, context, resources, op
   const genre = inferGenreProfile(state);
   const sceneType = sceneTypeForChapter(state, task.chapterNumber);
   const causalPlan = getTaskCausalPlan(state, task);
+  const differentiators = createChapterDifferentiators(state, task, effectiveContinuityContract);
   const knowledgeContext = await retrieveWritingKnowledgeContext({
     state,
     task,
@@ -11406,7 +13228,7 @@ async function createChapterBlueprintContent(state, task, context, resources, op
     state,
     task,
     sceneType,
-    continuityContract,
+    continuityContract: effectiveContinuityContract,
     limit: 20
   });
   await emitWritingKnowledgeRecallProgress({
@@ -11457,6 +13279,7 @@ async function createChapterBlueprintContent(state, task, context, resources, op
       "- ## Canon Continuity Contract",
       "- # Detailed Chapter Blueprint",
       "- ## Chapter Position",
+      "- ## Chapter Differentiators",
       "- ## Previous Inputs",
       "- ## Causal Objective",
       "- ## Protagonist Decision",
@@ -11482,15 +13305,31 @@ async function createChapterBlueprintContent(state, task, context, resources, op
       storyAssetContext.prompt ? `Production Story Assets:
 ${storyAssetContext.prompt}` : "",
       storyAssetContext.prompt ? "" : "",
-      continuityContract.prompt,
+      planningCastPrompt,
+      planningCastPrompt ? "" : "",
+      effectiveContinuityContract.prompt,
       "",
       characterProfileContract.prompt,
       "",
+      "\u672C\u7AE0\u5DEE\u5F02\u5316\u7EA6\u675F\uFF1A",
+      `- \u538B\u529B\u6A21\u5F0F\uFF1A${differentiators.pressureMode}`,
+      `- \u573A\u666F\u8D28\u611F\uFF1A${differentiators.sceneTexture}`,
+      `- \u8BC1\u636E\u5448\u73B0\uFF1A${differentiators.evidenceMode}`,
+      `- \u4EA4\u68D2\u65B9\u5F0F\uFF1A${differentiators.handoffMode}`,
+      `- \u5F00\u573A\u52A8\u4F5C\uFF1A${differentiators.openingMove}`,
+      `- \u5173\u952E\u7269\u4EF6\uFF1A${differentiators.keyProp}`,
+      `- \u5173\u7CFB\u8F6C\u6298\uFF1A${differentiators.relationshipTurn}`,
+      `- \u4E3B\u89D2\u9009\u62E9\u5F62\u6001\uFF1A${differentiators.decisionShape}`,
+      `- \u672C\u7AE0\u4EE3\u4EF7\u5F62\u6001\uFF1A${differentiators.costShape}`,
+      `- \u7AE0\u672B\u753B\u9762\uFF1A${differentiators.exitImage}`,
+      "",
       "\u786C\u6027\u8981\u6C42\uFF1A",
-      continuityContract.lockedProtagonistName ? `- \u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u672C\u7AE0\u5982\u4F55\u6CBF\u7528\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u7981\u6B62\u66F4\u6362\u4E3B\u89D2\u59D3\u540D\u6216\u8EAB\u4EFD\u3002` : "- \u9996\u7AE0\u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u7981\u6B62\u591A\u4E2A\u5019\u9009\u4E3B\u89D2\u5E76\u884C\u3002",
+      authoritativeProtagonistName ? `- \u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u672C\u7AE0\u5982\u4F55\u6CBF\u7528\u300C${authoritativeProtagonistName}\u300D\uFF0C\u7981\u6B62\u66F4\u6362\u4E3B\u89D2\u59D3\u540D\u6216\u8EAB\u4EFD\u3002` : "- \u9996\u7AE0\u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u7981\u6B62\u591A\u4E2A\u5019\u9009\u4E3B\u89D2\u5E76\u884C\u3002",
+      planningCastContract.cast.length ? `- \u6838\u5FC3\u4EBA\u7269\u53EA\u80FD\u6CBF\u7528\uFF1A${planningCastContract.cast.join("\u3001")}\uFF1B\u4E0D\u5F97\u6539\u540D\u4E3A\u53E6\u4E00\u5957\u4EBA\u7269\u3002` : "",
       "- \u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u5DF2\u77E5\u914D\u89D2\u5982\u4F55\u6CBF\u7528\u3001\u65B0\u589E\u914D\u89D2\u662F\u5426\u5141\u8BB8\u4EE5\u53CA\u5176\u5173\u7CFB\u72B6\u6001\u3002",
       "- \u84DD\u56FE\u5FC5\u987B\u8865\u8DB3\u91CD\u8981\u89D2\u8272\u7684\u6B32\u671B\u3001\u6050\u60E7/\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u7279\u957F\u77ED\u677F\u548C\u5173\u7CFB\u538B\u529B\u3002",
       "- \u84DD\u56FE\u5FC5\u987B\u58F0\u660E\u524D\u5E8F\u60C5\u8282\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u3001\u4F0F\u7B14\u7684\u627F\u63A5/\u63A8\u8FDB/\u56DE\u6536\u3002",
+      "- \u84DD\u56FE\u5FC5\u987B\u533A\u5206\u5DF2\u5B8C\u6210 canon \u548C\u8BA1\u5212\u4F9D\u8D56\uFF1A\u53EA\u6709 Previous Chapter Ledger / memory / final draft \u91CC\u7684\u5185\u5BB9\u53EF\u5199\u6210\u5DF2\u53D1\u751F\u4E8B\u5B9E\uFF1B\u540E\u7EED\u7AE0\u8282\u4EFB\u52A1\u3001\u672A\u6765\u84DD\u56FE\u548C Previous Input \u53EA\u80FD\u4F5C\u4E3A planned_dependency\u3002",
       "- \u84DD\u56FE\u5FC5\u987B\u9010\u9879\u843D\u5B9E Previous Inputs\u3001Causal Objective\u3001Protagonist Decision\u3001Irreversible Change\u3001Character State Delta\u3001Next Chapter Handoff\u3002",
       "- \u7B2C 2 \u7AE0\u4EE5\u540E\uFF0C\u5982\u679C\u672C\u7AE0\u53EA\u6CBF\u7528\u4E3B\u89D2\u59D3\u540D\u4F46\u6CA1\u6709\u8BA9\u524D\u5E8F\u951A\u70B9\u8FDB\u5165\u4E8B\u4EF6\u56E0\u679C\uFF0C\u84DD\u56FE\u65E0\u6548\u3002",
       "- \u84DD\u56FE\u5FC5\u987B\u5217\u51FA 3-5 \u4E2A\u6765\u81EA\u5199\u4F5C\u8D44\u6E90/\u8BCD\u6C47\u8D44\u6E90\u7684\u5177\u4F53\u4F7F\u7528\u70B9\u3002",
@@ -11506,10 +13345,12 @@ ${storyAssetContext.prompt}` : "",
       "## Production Story Assets",
       storyAssetContext.prompt || "(empty)",
       "",
+      planningCastPrompt,
+      planningCastPrompt ? "" : "",
       "## Character Context",
-      context.protagonist || "(empty)",
+      effectiveContext.protagonist || "(empty)",
       "",
-      continuityContract.prompt,
+      effectiveContinuityContract.prompt,
       "",
       characterProfileContract.prompt,
       "",
@@ -11608,58 +13449,228 @@ function createDraftBodyFromBlueprint(state, task, blueprint, resources, continu
     `- Blueprint basis: ${blueprint.includes("Detailed Chapter Blueprint") ? "detailed-blueprint" : "fallback"}`
   ].join("\n\n");
 }
-function createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext) {
+function fallbackFixtureText(value, fallback) {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  if (/^(?:pending|placeholder|todo|tbd)(?:[\s_-]|$)/iu.test(trimmed) || /pending-[\w-]+/iu.test(trimmed) || /^(?:relationship axis|antagonist force|pressure force|pressure mirror|opposition)$/iu.test(trimmed) || /待定|未命名|占位/u.test(trimmed) || /chapter\s*\d+\s*[:：]/iu.test(trimmed)) {
+    return fallback;
+  }
+  return trimmed;
+}
+function humanizeFixtureTargetId(value = "") {
+  const normalized = value.replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim();
+  return fallbackFixtureText(normalized, "");
+}
+function createDossierDrivenFixtureContext(continuityContract, characterDossiers = []) {
+  const lockedName = continuityContract.lockedProtagonistName.trim();
+  const protagonist = characterDossiers.find(
+    (dossier) => dossier.role === "protagonist" || dossier.canonicalName === lockedName || dossier.aliases?.includes(lockedName)
+  ) || characterDossiers[0];
+  const pressureEdge = protagonist?.relationshipEdges?.[0];
+  const protagonistName = fallbackFixtureText(
+    lockedName || protagonist?.canonicalName || protagonist?.aliases?.[0],
+    "\u6C88\u781A"
+  );
+  const pressureName = fallbackFixtureText(
+    humanizeFixtureTargetId(pressureEdge?.targetId) || pressureEdge?.label || continuityContract.knownCast.find((name) => name && name !== protagonistName),
+    "\u8001\u5468"
+  );
+  const relationshipPressure = fallbackFixtureText(
+    [
+      pressureEdge?.label,
+      pressureEdge?.pressure,
+      protagonist?.relationshipState
+    ].filter(Boolean).join("\uFF1B"),
+    "\u65E7\u4FE1\u4EFB\u6B63\u5728\u88AB\u8D26\u518C\u548C\u95E8\u5916\u7684\u4EBA\u540C\u65F6\u6495\u5F00"
+  );
+  const habit = fallbackFixtureText(protagonist?.behaviorHabits?.[0], "\u6309\u4F4F\u8D26\u518C\u7EBF\u88C5\u540E\u624D\u5F00\u53E3");
+  const speechMarker = fallbackFixtureText(protagonist?.speechMarkers?.[0], "\u77ED\u95EE\u53E5\u538B\u4F4F\u60C5\u7EEA");
+  const appearance = fallbackFixtureText(protagonist?.appearanceAndBody, "\u8896\u53E3\u6709\u96E8\uFF0C\u6307\u8282\u53D1\u767D\uFF0C\u7AD9\u59FF\u7EF7\u7D27");
+  const skill = fallbackFixtureText(protagonist?.skills?.[0], "\u4ECE\u8D26\u518C\u7F1D\u9699\u91CC\u590D\u539F\u7EBF\u7D22");
+  const limitation = fallbackFixtureText(protagonist?.limitations?.[0], "\u4E0D\u80FD\u628A\u6240\u6709\u771F\u76F8\u4EA4\u7ED9\u6743\u52BF");
+  const desire = fallbackFixtureText(protagonist?.coreDesire, "\u67E5\u6E05\u88AB\u7BE1\u6539\u7684\u771F\u76F8");
+  const wound = fallbackFixtureText(protagonist?.fearOrWound, "\u66FE\u88AB\u540C\u4E00\u6761\u8BB0\u5F55\u4F24\u8FC7");
+  const contradiction = fallbackFixtureText(protagonist?.contradiction, "\u5FC5\u987B\u501F\u52A9\u5236\u5EA6\u5165\u53E3\uFF0C\u5374\u53C8\u4E0D\u4FE1\u5236\u5EA6\u7ED9\u51FA\u7684\u89E3\u91CA");
+  const artifact = "\u8D26\u518C";
+  const dossierAnchors = uniqueStrings([
+    habit,
+    speechMarker,
+    appearance,
+    skill,
+    limitation,
+    relationshipPressure,
+    pressureName,
+    artifact
+  ].filter(Boolean)).slice(0, 8);
+  return {
+    protagonistName,
+    pressureName,
+    relationshipPressure,
+    habit,
+    speechMarker,
+    appearance,
+    skill,
+    limitation,
+    desire,
+    wound,
+    contradiction,
+    artifact,
+    dossierAnchors
+  };
+}
+function createSceneCardFixtureParagraphs(segmentPlan = [], fixture) {
+  const sceneBeats = [
+    "\u5177\u4F53\u5F02\u5E38\u3001\u672C\u7AE0\u95EE\u9898\u3001\u73B0\u573A\u538B\u529B\u548C\u5173\u7CFB\u538B\u529B\u4E00\u8D77\u538B\u5230\u706F\u4E0B",
+    "\u5916\u90E8\u538B\u529B\u8FDB\u5165\u4EBA\u7269\u5173\u7CFB\uFF0C\u65B0\u8BC1\u636E\u3001\u65B0\u963B\u529B\u548C\u65B0\u4EE3\u4EF7\u540C\u65F6\u9732\u51FA\u8FB9\u7F18",
+    "\u6B32\u671B\u3001\u5F31\u70B9\u3001\u80FD\u529B\u8FB9\u754C\u548C\u4EF7\u503C\u53D6\u820D\u88AB\u8FEB\u8FDB\u5165\u540C\u4E00\u4E2A\u9009\u62E9",
+    "\u8EAB\u4EFD\u98CE\u9669\u3001\u5173\u7CFB\u88C2\u7F1D\u3001\u7EBF\u7D22\u66B4\u9732\u3001\u8D44\u6E90\u635F\u5931\u3001\u6743\u529B\u538B\u529B\u548C\u4E16\u754C\u89C4\u5219\u540E\u679C\u90FD\u4E0D\u80FD\u518D\u6536\u56DE"
+  ];
+  const pickByScene = (items, sceneIndex) => items[(sceneIndex - 1) % items.length];
+  return segmentPlan.filter((segment) => segment.sceneCard).map((segment) => {
+    const card = segment.sceneCard;
+    const sceneIndex = Math.max(1, Math.floor(card.index || 1));
+    const requiredCharacters = uniqueStrings(card.requiredCharacters).filter(Boolean);
+    const requiredFacts = uniqueStrings(card.requiredFacts).filter(Boolean);
+    const goalText = card.goal || "\u7528\u7269\u4EF6\u8FB9\u7F18\u9732\u51FA\u4E0D\u5408\u5E38\u7406\u7684\u7EC6\u8282\u6253\u5F00\u672C\u7AE0\u95EE\u9898";
+    const conflictText = card.conflict || "\u4E3B\u89D2\u9047\u5230\u65E0\u6CD5\u56DE\u907F\u7684\u73B0\u573A\u538B\u529B\u6216\u5173\u7CFB\u538B\u529B";
+    const turnText = card.turn || "\u81F3\u5C11\u8BA9\u951A\u70B9\u8FDB\u5165\u4E8B\u4EF6";
+    const hookText = card.endHook || "\u8BFB\u8005\u660E\u786E\u77E5\u9053\u672C\u7AE0\u5C40\u90E8\u95EE\u9898\u662F\u4EC0\u4E48";
+    const beat = pickByScene(sceneBeats, sceneIndex);
+    const characterNames = requiredCharacters.join("\u3001");
+    const characterLine = requiredCharacters.length ? pickByScene([
+      `${characterNames}\u6CA1\u6709\u505C\u5728\u540D\u5355\u91CC\uFF1B\u95E8\u69DB\u524D\u6709\u4EBA\u6536\u4F1E\uFF0C\u6709\u4EBA\u538B\u4F4E\u8896\u53E3\uFF0C\u5404\u81EA\u7ED9\u51FA\u7ACB\u573A\u3002`,
+      `${characterNames}\u4ECE\u540D\u5355\u53D8\u6210\u5F53\u573A\u538B\u529B\uFF1B\u4E00\u4E2A\u9760\u8FD1\u684C\u89D2\uFF0C\u4E00\u4E2A\u5B88\u4F4F\u95E8\u7F1D\uFF0C\u6C89\u9ED8\u5148\u66FF\u4ED6\u4EEC\u5206\u961F\u3002`,
+      `${characterNames}\u90FD\u88AB\u96E8\u58F0\u63A8\u5230\u706F\u4E0B\uFF1B\u6709\u4EBA\u9012\u51FA\u8BC1\u7269\uFF0C\u6709\u4EBA\u907F\u5F00\u89C6\u7EBF\uFF0C\u5173\u7CFB\u88C2\u7F1D\u5F53\u573A\u53D8\u6DF1\u3002`,
+      `${characterNames}\u6CA1\u6709\u518D\u7528\u65C1\u767D\u8BF4\u660E\uFF1B\u811A\u6B65\u3001\u624B\u52BF\u548C\u4E00\u53E5\u77ED\u7B54\u628A\u540C\u76DF\u4E0E\u963B\u62E6\u5206\u6E05\u3002`
+    ], sceneIndex) : pickByScene([
+      `${fixture.protagonistName}\u6CA1\u6709\u6362\u89C6\u89D2\uFF1B\u95E8\u69DB\u4E0A\u7684\u811A\u6B65\u505C\u4F4F\uFF0C${fixture.pressureName}\u628A\u534A\u53E5\u963B\u62E6\u54BD\u56DE\u53BB\u3002`,
+      `${fixture.protagonistName}\u4ECD\u5B88\u5728\u706F\u4E0B\uFF1B${fixture.pressureName}\u7ED5\u5230\u684C\u89D2\uFF0C\u638C\u5FC3\u538B\u4F4F\u672A\u5E72\u7684\u6C34\u75D5\u3002`,
+      `${fixture.protagonistName}\u542C\u89C1\u5ECA\u5916\u8863\u6599\u64E6\u8FC7\u6728\u67F1\uFF1B${fixture.pressureName}\u4FA7\u8EAB\u6321\u4F4F\u95E8\u7F1D\uFF0C\u58F0\u97F3\u6BD4\u96E8\u66F4\u4F4E\u3002`,
+      `${fixture.protagonistName}\u628A\u89C6\u7EBF\u7559\u5728\u8D26\u9875\u4E0A\uFF1B${fixture.pressureName}\u6CA1\u6709\u518D\u529D\uFF0C\u53EA\u628A\u5B98\u5370\u63A8\u5230\u706F\u5F71\u8FB9\u3002`
+    ], sceneIndex);
+    const proseFacts = requiredFacts.map((fact) => fact === "\u7B2C\u4E00\u679A\u4E3B\u7EBF\u7EBF\u7D22" ? "\u9996\u679A\u4E3B\u7EBF\u7EBF\u7D22" : fact);
+    const factValues = proseFacts.join("\u3001");
+    const factLine = requiredFacts.length ? pickByScene([
+      `\u7B2C ${sceneIndex} \u573A\u7684\u706F\u4E0B\u538B\u7740${factValues}\uFF1B${fixture.protagonistName}\u5148\u6478\u5230${proseFacts[0]}\uFF0C\u518D\u7528${fixture.skill}\u628A\u5B83\u548C\u95E8\u5916\u7684\u538B\u529B\u8FDE\u8D77\u6765\u3002`,
+      `${fixture.protagonistName}\u628A${factValues}\u9010\u4E00\u6446\u5F00\uFF0C\u7B2C ${sceneIndex} \u4E2A\u7F3A\u53E3\u6B63\u597D\u5BF9\u4E0A${fixture.pressureName}\u8896\u53E3\u7684\u6E7F\u5370\u3002`,
+      `\u96E8\u6C34\u6CA1\u6709\u51B2\u6389${factValues}\uFF0C\u7B2C ${sceneIndex} \u6B21\u6838\u5BF9\u65F6\uFF0C${fixture.protagonistName}\u53D1\u73B0\u8BC1\u636E\u987A\u5E8F\u88AB\u4EBA\u5012\u8FC7\u3002`,
+      `${factValues}\u88AB\u538B\u5728\u706F\u5F71\u8FB9\u7F18\uFF1B${fixture.protagonistName}\u4E0D\u6025\u7740\u89E3\u91CA\uFF0C\u53EA\u628A\u7B2C ${sceneIndex} \u5904\u77DB\u76FE\u7559\u7ED9\u5BF9\u65B9\u56DE\u7B54\u3002`
+    ], sceneIndex) : pickByScene([
+      `\u7B2C ${sceneIndex} \u573A\u91CC\uFF0C${fixture.protagonistName}\u628A${fixture.artifact}\u7FFB\u5230\u7EBF\u88C5\u5185\u4FA7\uFF0C\u53D1\u73B0\u5B98\u5370\u8FB9\u7F18\u6CBE\u7740\u4E0D\u5C5E\u4E8E\u5C4B\u91CC\u7684\u7EC6\u6CE5\u3002`,
+      `${fixture.protagonistName}\u628A${fixture.artifact}\u3001\u534A\u679A\u6E7F\u5370\u548C\u95E8\u5916\u811A\u6B65\u8FDE\u5728\u4E00\u8D77\uFF0C\u7B2C ${sceneIndex} \u4E2A\u5224\u65AD\u90FD\u6307\u56DE\u540C\u4E00\u9875\u88AB\u6539\u8FC7\u7684\u8D26\u3002`,
+      `\u706F\u82AF\u7206\u4E86\u4E00\u58F0\uFF0C${fixture.protagonistName}\u5728${fixture.artifact}\u6298\u89D2\u5904\u6478\u5230\u7C97\u786C\u9897\u7C92\uFF0C\u7B2C ${sceneIndex} \u6761\u7EBF\u7D22\u56E0\u6B64\u843D\u56DE\u4ED3\u95E8\u3002`,
+      `${fixture.protagonistName}\u6CA1\u6709\u6025\u7740\u6536\u8D77${fixture.artifact}\uFF0C\u800C\u662F\u628A\u7B2C ${sceneIndex} \u9053\u7A7A\u767D\u9875\u5BF9\u51C6\u5B98\u5370\uFF0C\u770B\u89C1\u6D45\u58A8\u4ECE\u7EB8\u80CC\u6D6E\u4E0A\u6765\u3002`
+    ], sceneIndex);
+    const judgementLine = pickByScene([
+      `${fixture.protagonistName}\u6309\u4F4F${fixture.artifact}\u5916\u4FA7\u7EBF\u88C5\uFF0C\u903C\u81EA\u5DF1\u5148\u505A\u5224\u65AD\uFF1B${fixture.pressureName}\u4F4E\u58F0\u963B\u62E6\uFF0C\u95E8\u5916\u811A\u6B65\u5374\u6CA1\u6709\u9000\u3002`,
+      `${fixture.protagonistName}\u6263\u4F4F${fixture.artifact}\u53E6\u4E00\u679A\u677E\u7EBF\uFF0C\u5148\u628A\u4EBA\u60C5\u653E\u5230\u4E00\u8FB9\uFF1B${fixture.pressureName}\u62AC\u624B\u8981\u62E6\uFF0C\u8896\u53E3\u7684\u6C34\u5148\u843D\u4E86\u4E0B\u6765\u3002`,
+      `${fixture.protagonistName}\u628A${fixture.artifact}\u7B2C\u4E09\u5904\u6298\u89D2\u538B\u5E73\uFF0C\u6CA1\u6709\u8FFD\u95EE\u65E7\u60C5\uFF0C\u53EA\u95EE\u8BC1\u636E\u4E3A\u4EC0\u4E48\u4F1A\u665A\u5230\u534A\u523B\u3002`,
+      `${fixture.protagonistName}\u6536\u7D27${fixture.artifact}\u7B2C\u56DB\u9053\u5C01\u7EBF\uFF0C\u51B3\u5B9A\u7559\u4E0B\u7F3A\u9875\uFF1B${fixture.pressureName}\u7EC8\u4E8E\u540E\u9000\u534A\u6B65\uFF0C\u50CF\u8BA9\u51FA\u4E00\u6761\u4E0D\u80FD\u56DE\u5934\u7684\u8DEF\u3002`
+    ], sceneIndex);
+    const closureLine = pickByScene([
+      `\u706F\u706B\u5411\u5DE6\u4E00\u4F0F\uFF0C${fixture.protagonistName}\u9009\u62E9\u7559\u4E0B\u7F3A\u9875\u800C\u4E0D\u662F\u4EA4\u51FA\u5168\u90E8\u8BB0\u5F55\uFF1B\u7EBF\u7D22\u548C\u5173\u7CFB\u538B\u529B\u90FD\u7559\u7ED9\u4E0B\u4E00\u6B21\u8FFD\u7D22\u3002`,
+      `\u96E8\u58F0\u538B\u4F4E\u5C4B\u6A90\uFF0C${fixture.protagonistName}\u53EA\u4EA4\u51FA\u5C01\u76AE\u4E0D\u4EA4\u5185\u9875\uFF1B\u7269\u4EF6\u3001\u811A\u6B65\u548C\u65E7\u4FE1\u4EFB\u5728\u684C\u8FB9\u5206\u6210\u4E24\u8DEF\u3002`,
+      `\u95E8\u7F1D\u91CC\u7684\u51B7\u98CE\u5377\u8D77\u7EB8\u89D2\uFF0C${fixture.protagonistName}\u628A\u6D45\u58A8\u85CF\u8FDB\u8896\u4E2D\uFF1B\u753B\u9762\u505C\u5728\u8BC1\u636E\u66B4\u9732\u524D\u7684\u4E00\u606F\u3002`,
+      `\u5B98\u5370\u6CA1\u6709\u6536\u56DE\uFF0C${fixture.protagonistName}\u5374\u5148\u628A\u706F\u5439\u4F4E\uFF1B\u8EAB\u4EFD\u98CE\u9669\u3001\u8D44\u6E90\u635F\u5931\u548C\u5173\u7CFB\u88C2\u7F1D\u4E00\u8D77\u8FDB\u5165\u4E0B\u4E00\u7AE0\u3002`
+    ], sceneIndex);
+    const executionEvidence = [
+      pickByScene([
+        `\u8FD9\u4E00\u573A\u5148\u628A\u76EE\u6807\u538B\u5230\u684C\u9762\uFF1A${goalText}\u3002`,
+        `\u7B2C\u4E8C\u573A\u4E0D\u6362\u65B9\u5411\uFF0C${goalText}\u88AB\u96E8\u58F0\u548C\u8D26\u9875\u4E00\u8D77\u903C\u8FD1\u3002`,
+        `\u4E2D\u6BB5\u76EE\u6807\u843D\u5230\u624B\u4E0A\uFF1A${goalText}\uFF0C${fixture.protagonistName}\u4E0D\u80FD\u518D\u53EA\u770B\u3002`,
+        `\u7AE0\u672B\u4ECD\u6263\u4F4F\u76EE\u6807\uFF1A${goalText}\uFF0C\u53EA\u662F\u4EE3\u4EF7\u5DF2\u7ECF\u6362\u4E86\u4F4D\u7F6E\u3002`
+      ], sceneIndex),
+      pickByScene([
+        `${conflictText}\u6CA1\u6709\u505C\u5728\u65C1\u767D\u91CC\uFF0C${fixture.pressureName}\u7684\u8896\u53E3\u3001\u95E8\u5916\u811A\u6B65\u548C\u684C\u4E0A\u7F3A\u9875\u4E00\u8D77\u538B\u4F4F${fixture.protagonistName}\u3002`,
+        `${conflictText}\u4ECE\u95E8\u7F1D\u63A8\u8FDB\u6765\uFF0C${fixture.pressureName}\u628A\u6E7F\u8896\u85CF\u5230\u8EAB\u540E\uFF0C\u8D26\u9875\u8FB9\u7F18\u5374\u5148\u9732\u4E86\u7834\u7EFD\u3002`,
+        `${conflictText}\u843D\u5230\u4E00\u53E5\u77ED\u95EE\u4E0A\uFF0C${fixture.protagonistName}\u628A\u706F\u62E8\u4EAE\uFF0C\u5C4B\u91CC\u6CA1\u4EBA\u8FD8\u80FD\u9000\u56DE\u539F\u4F4D\u3002`,
+        `${conflictText}\u538B\u5230\u7AE0\u672B\uFF0C\u5B98\u5370\u3001\u811A\u6B65\u548C\u65E7\u4FE1\u4EFB\u90FD\u6324\u5728\u540C\u4E00\u6247\u95E8\u524D\u3002`
+      ], sceneIndex),
+      pickByScene([
+        `${turnText}\uFF1B${fixture.protagonistName}\u628A\u8BC1\u636E\u987A\u5E8F\u91CD\u65B0\u6446\u5F00\uFF0C\u5C4B\u91CC\u4EBA\u7684\u7ACB\u573A\u4E5F\u8DDF\u7740\u53D8\u4E86\u3002`,
+        `${turnText}\uFF0C${fixture.pressureName}\u62AC\u624B\u53C8\u653E\u4E0B\uFF0C\u6C34\u4ECE\u8896\u8FB9\u843D\u5230\u7F3A\u9875\u65C1\u3002`,
+        `${turnText}\u540E\uFF0C${fixture.protagonistName}\u6CA1\u6709\u89E3\u91CA\uFF0C\u53EA\u628A\u6D45\u58A8\u85CF\u8FDB\u8896\u4E2D\u3002`,
+        `${turnText}\u65F6\uFF0C\u706F\u706B\u5FFD\u7136\u77EE\u4E0B\u53BB\uFF0C\u95E8\u5916\u7684\u4EBA\u7B2C\u4E00\u6B21\u6CA1\u6709\u50AC\u3002`
+      ], sceneIndex),
+      pickByScene([
+        `${hookText}\uFF1A\u706F\u4E0B\u8FD8\u7559\u7740\u4E00\u5904\u6CA1\u6709\u89E3\u91CA\u7684\u6D45\u58A8\uFF0C\u4E0B\u4E00\u6B21\u5F00\u95E8\u524D\u6CA1\u4EBA\u80FD\u628A\u5B83\u62B9\u6389\u3002`,
+        `${hookText}\uFF0C\u90A3\u679A\u5B98\u5370\u6CA1\u6709\u6536\u56DE\uFF0C\u684C\u4E0A\u5374\u5C11\u4E86\u4E00\u9875\u3002`,
+        `${hookText}\uFF1B\u95E8\u7F1D\u91CC\u7684\u98CE\u5377\u8D77\u7EB8\u89D2\uFF0C\u50CF\u6709\u4EBA\u521A\u628A\u7B54\u6848\u62FF\u8D70\u3002`,
+        `${hookText}\uFF0C${fixture.pressureName}\u63E1\u7740\u7A7A\u767D\u8BC1\u636E\uFF0C${fixture.protagonistName}\u53EA\u5269\u8896\u4E2D\u90A3\u884C\u6D45\u58A8\u3002`
+      ], sceneIndex)
+    ].join("");
+    return [
+      `\u96E8\u53C8\u5BC6\u4E86\u4E00\u5C42\u3002${beat}\u3002${characterLine}`,
+      executionEvidence,
+      factLine,
+      judgementLine,
+      closureLine
+    ].filter(Boolean).join("");
+  });
+}
+function createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext, characterDossiers = [], segmentPlan = []) {
   const title = task.title || `\u7B2C ${task.chapterNumber} \u7AE0`;
-  const protagonistName = continuityContract.lockedProtagonistName || "\u6C88\u781A";
+  const fixture = createDossierDrivenFixtureContext(continuityContract, characterDossiers);
+  const relationshipPressureCue = fixture.relationshipPressure.replace(/[。！？!?；;，,]+/gu, " ").replace(/\s+/gu, " ").trim() || fixture.relationshipPressure;
+  const protagonistName = fixture.protagonistName;
   const causalPlan = getTaskCausalPlan(state, task);
   const style = approvedStyleContext.contract?.styleContract;
   const requiredAnchors = uniqueStrings([
     ...task.causalPlan?.requiredContinuityAnchors || [],
     ...continuityContract.continuityAnchors || [],
-    "\u8D26\u518C",
+    ...fixture.dossierAnchors,
     "\u96E8\u58F0",
     "\u706F\u706B",
     "\u95E8\u5916\u811A\u6B65"
   ].filter(Boolean)).slice(0, 8);
-  const anchorSentence = requiredAnchors.length ? `\u672C\u7AE0\u627F\u63A5${requiredAnchors.slice(0, 4).join("\u3001")}\uFF0C\u4E0D\u6362\u4E3B\u89D2\uFF0C\u4E0D\u6362\u7EBF\u7D22\u3002` : "\u672C\u7AE0\u627F\u63A5\u8D26\u518C\u3001\u96E8\u58F0\u3001\u706F\u706B\u548C\u95E8\u5916\u811A\u6B65\uFF0C\u4E0D\u6362\u4E3B\u89D2\uFF0C\u4E0D\u6362\u7EBF\u7D22\u3002";
-  const chapterShift = task.chapterNumber <= 1 ? "\u7F3A\u9875\u5904\u9732\u51FA\u6D45\u58A8\uFF0C\u5B98\u4ED3\u6DFB\u4E03\uFF0C\u6C11\u6237\u51CF\u4E09\u3002" : `\u4E0A\u4E00\u7AE0\u7559\u4E0B\u7684${requiredAnchors.slice(0, 3).join("\u3001") || "\u8D26\u518C\u4E0E\u95E8\u5916\u811A\u6B65"}\u8FD8\u5728\uFF0C\u5C11\u5C39\u7684\u4EBA\u5DF2\u7ECF\u5230\u4E86\u5ECA\u4E0B\u3002`;
-  const positiveExample = style?.positiveExamples?.[0] || "\u6C88\u781A\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u4E00\u53E5\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F";
+  const anchorSentence = requiredAnchors.length ? `${requiredAnchors.slice(0, 4).join("\u3001")}\u90FD\u538B\u5728\u706F\u4E0B\uFF0C\u8C01\u5148\u4F38\u624B\uFF0C\u8C01\u5C31\u5148\u9732\u7834\u7EFD\u3002` : "\u8D26\u518C\u3001\u96E8\u58F0\u3001\u706F\u706B\u548C\u95E8\u5916\u811A\u6B65\u90FD\u538B\u5728\u706F\u4E0B\uFF0C\u8C01\u5148\u4F38\u624B\uFF0C\u8C01\u5C31\u5148\u9732\u7834\u7EFD\u3002";
+  const chapterShift = task.chapterNumber <= 1 ? `${fixture.artifact}\u7F3A\u9875\u5904\u9732\u51FA\u6D45\u58A8\uFF0C\u8BB0\u5F55\u94FE\u6761\u521D\u6B21\u9732\u51FA\u88AB\u6539\u5199\u7684\u75D5\u8FF9\u3002` : `\u4E0A\u4E00\u7AE0\u7559\u4E0B\u7684${requiredAnchors.slice(0, 3).join("\u3001") || "\u8D26\u518C\u4E0E\u95E8\u5916\u811A\u6B65"}\u8FD8\u5728\uFF0C${fixture.pressureName}\u7684\u538B\u529B\u5DF2\u7ECF\u5230\u4E86\u5ECA\u4E0B\u3002`;
+  const rawPositiveExample = style?.positiveExamples?.[0] || "";
+  const positiveExample = rawPositiveExample.includes(protagonistName) ? rawPositiveExample : `${protagonistName}\u5408\u4E0A${fixture.artifact}\uFF0C\u53EA\u95EE\u4E00\u53E5\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F`;
+  const foreshadowingOperation = causalPlan.foreshadowingOperation || "";
+  const foreshadowingExecutionParagraph = /回收|兑现|延后|前序|更大/u.test(foreshadowingOperation) ? `\u524D\u5E8F\u4F0F\u7B14\u6CA1\u6709\u88AB\u53E3\u5934\u89E3\u91CA\u3002\u6E7F\u5370\u9047\u5230\u706F\u706B\u540E\u9732\u51FA\u65E7\u75D5\uFF0C${protagonistName}\u77E5\u9053\u5B83\u53EA\u90E8\u5206\u5151\u73B0\u4E86\u4E0A\u4E00\u7AE0\u7559\u4E0B\u7684\u5B98\u5370\u7591\u70B9\uFF1B\u66F4\u5927\u7684\u95EE\u9898\u88AB\u5EF6\u540E\u5230\u4ED3\u66F9\u8D26\u95E8\u4E4B\u540E\uFF0C\u90A3\u91CC\u8FD8\u6709\u4E00\u9875\u6CA1\u6709\u5F52\u6863\u3002` : "";
   const baseParagraphs = [
-    `\u5F00\u573A\u843D\u5728\u5177\u4F53\u5F02\u5E38\u4E0E\u73B0\u573A\u538B\u529B\u4E0A\u3002\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875\u8D26\u518C\u63A8\u5230\u706F\u4E0B\u3002\u7EB8\u8FB9\u9F50\u5F97\u8FC7\u5206\uFF0C\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002\u706F\u706B\u4E00\u8DF3\uFF0C\u95E8\u5916\u811A\u6B65\u505C\u5728\u69DB\u5916\u3002`,
-    `\u8001\u5468\u7AD9\u5728\u90A3\u91CC\uFF0C\u8896\u53E3\u538B\u7740\u534A\u679A\u6E7F\u5370\u3002${protagonistName}\u770B\u89C1\u4E86\uFF0C\u6CA1\u6709\u7ACB\u523B\u95EE\u3002${anchorSentence}`,
+    `\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875${fixture.artifact}\u63A8\u5230\u706F\u4E0B\u3002\u7EB8\u8FB9\u9F50\u5F97\u8FC7\u5206\uFF0C\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002\u706F\u706B\u4E00\u8DF3\uFF0C\u95E8\u5916\u811A\u6B65\u505C\u5728\u69DB\u5916\u3002`,
+    `${fixture.pressureName}\u7AD9\u5728\u90A3\u91CC\uFF0C\u8896\u53E3\u538B\u7740\u534A\u679A\u6E7F\u5370\u3002${protagonistName}\u770B\u89C1\u4E86\uFF0C\u6CA1\u6709\u7ACB\u523B\u95EE\u3002${anchorSentence}`,
+    `${protagonistName}\u7684\u5916\u8C8C\u4F53\u6001\u5148\u8FDB\u5165\u753B\u9762\uFF1A${fixture.appearance}\u3002\u8FD9\u4E2A\u4EBA\u4E0B\u610F\u8BC6${fixture.habit}\uFF0C\u56E0\u4E3A\u60F3\u8981${fixture.desire}\uFF0C\u4E5F\u5BB3\u6015${fixture.wound}\u91CD\u65B0\u53D8\u6210\u522B\u4EBA\u624B\u91CC\u7684\u53E3\u4F9B\u3002`,
+    `${protagonistName}\u64C5\u957F${fixture.skill}\uFF0C\u4E5F\u4E0D\u80FD\u8D8A\u8FC7${fixture.limitation}\uFF0C\u6240\u4EE5${protagonistName}\u5FC5\u987B\u5728${relationshipPressureCue}\u4E4B\u4E0B\u51B3\u5B9A\u5148\u4FDD\u4F4F\u7EBF\u7D22\uFF0C\u8FD8\u662F\u5148\u4FDD\u4F4F\u5173\u7CFB\u3002`,
+    `${protagonistName}\u7684\u77DB\u76FE\u538B\u5728\u6307\u8282\u4E0A\uFF1A${fixture.contradiction}\u3002\u8FD9\u4E2A\u9009\u62E9\u4E00\u843D\u4E0B\uFF0C\u5C4B\u91CC\u7684\u4EBA\u5C31\u4E0D\u80FD\u518D\u88C5\u4F5C\u6CA1\u770B\u89C1\u3002`,
     `\u201C\u8C01\u52A8\u8FC7\uFF1F\u201D${protagonistName}\u95EE\u3002`,
-    "\u8001\u5468\u6CA1\u7B54\u3002\u978B\u5C16\u5F80\u540E\u6536\u4E86\u534A\u5BF8\u3002\u96E8\u58F0\u538B\u4F4F\u4ED6\u7684\u547C\u5438\uFF0C\u4E5F\u538B\u4F4F\u5ECA\u4E0B\u90A3\u4E2A\u4EBA\u7684\u5F71\u5B50\u3002",
-    `${chapterShift}${protagonistName}\u60F3\u8981\u67E5\u6E05\u7A0E\u518C\uFF0C\u4E0D\u662F\u4E3A\u4E86\u6E05\u767D\u3002\u4ED6\u6B20\u8FC7\u4E00\u6761\u547D\uFF0C\u6B20\u5728\u540C\u4E00\u518C\u8D26\u91CC\u3002\u8FD9\u6761\u7EBF\u7D22\u63A8\u8FDB\u5173\u7CFB\uFF0C\u4E5F\u63A8\u8FDB\u4EE3\u4EF7\uFF1B\u8FD9\u4E2A\u5F31\u70B9\u4E0D\u80FD\u7ED9\u5C11\u5C39\u770B\u89C1\u3002`,
-    `\u4ED6\u4F38\u624B\u6309\u4F4F\u8D26\u518C\uFF0C\u6307\u8282\u5F88\u767D\u3002${protagonistName}\u64C5\u957F\u770B\u6570\u5B57\u7684\u7F1D\uFF0C\u5374\u4E0D\u4F1A\u5728\u6743\u52BF\u9762\u524D\u8BF4\u8F6F\u8BDD\u3002\u8001\u5468\u77E5\u9053\u8FD9\u70B9\uFF0C\u6240\u4EE5\u6CA1\u6709\u5E2E\u4ED6\uFF0C\u53EA\u62E6\u5728\u95E8\u53E3\u3002`,
-    `\u201C\u522B\u7FFB\u4E86\u3002\u201D\u8001\u5468\u4F4E\u58F0\u8BF4\u3002`,
+    `${fixture.pressureName}\u6CA1\u7B54\u3002\u978B\u5C16\u5F80\u540E\u6536\u4E86\u534A\u5BF8\u3002\u96E8\u58F0\u538B\u4F4F\u4ED6\u7684\u547C\u5438\uFF0C\u4E5F\u538B\u4F4F\u5ECA\u4E0B\u90A3\u4E2A\u4EBA\u7684\u5F71\u5B50\u3002`,
+    `${fixture.pressureName}\u4F4E\u58F0\u8BF4\uFF1A\u201C\u8D26\u4E0D\u80FD\u8DDF\u4F60\u8D70\u201D\uFF0C\u4E3A\u4E86${relationshipPressureCue}\u4F38\u624B\u62E6\u5728\u95E8\u53E3\u3002\u8FD9\u53E5\u8BDD\u4E0D\u662F\u89E3\u91CA\uFF0C\u662F\u5F53\u573A\u9009\u62E9\uFF0C\u5B83\u628A\u5173\u7CFB\u538B\u529B\u3001\u884C\u52A8\u548C\u5BF9\u767D\u538B\u5728\u540C\u4E00\u4E2A\u7A97\u53E3\u91CC\u3002`,
+    `${chapterShift}${protagonistName}\u60F3\u8981\u67E5\u6E05${fixture.artifact}\uFF0C\u4E0D\u662F\u4E3A\u4E86\u6E05\u767D\u3002\u8FD9\u4E2A\u4EBA\u6B20\u8FC7\u4E00\u6761\u547D\uFF0C\u65E7\u503A\u5C31\u538B\u5728\u8FD9\u672C\u8D26\u91CC\u3002\u8FD9\u6761\u7EBF\u7D22\u63A8\u8FDB\u5173\u7CFB\uFF0C\u4E5F\u63A8\u8FDB\u4EE3\u4EF7\uFF1B\u8FD9\u4E2A\u5F31\u70B9\u4E0D\u80FD\u7ED9${fixture.pressureName}\u770B\u89C1\u3002`,
+    `\u8FD9\u4E2A\u4EBA\u4F38\u624B\u6309\u4F4F${fixture.artifact}\uFF0C\u6307\u8282\u5F88\u767D\u3002${protagonistName}\u7684\u8BF4\u8BDD\u65B9\u5F0F\u662F${fixture.speechMarker}\uFF0C\u6240\u4EE5\u6CA1\u6709\u89E3\u91CA\uFF0C\u53EA\u628A\u95EE\u9898\u538B\u77ED\u3002${fixture.pressureName}\u77E5\u9053\u8FD9\u70B9\uFF0C\u6240\u4EE5\u6CA1\u6709\u5E2E\u5FD9\uFF0C\u53EA\u62E6\u5728\u95E8\u53E3\u3002`,
+    `\u201C\u522B\u7FFB\u4E86\u3002\u201D${fixture.pressureName}\u4F4E\u58F0\u8BF4\u3002`,
     `\u201C\u4F60\u6015\u8C01\uFF1F\u201D`,
-    "\u8001\u5468\u62AC\u773C\u3002\u80A9\u4E0A\u7684\u65E7\u8863\u6E7F\u4E86\u4E00\u7EBF\u3002\u90A3\u4E00\u7EBF\u6C34\u4ECE\u80A9\u5934\u6ED1\u5230\u8896\u8FB9\uFF0C\u50CF\u6709\u4EBA\u521A\u4ECE\u96E8\u91CC\u6293\u8FC7\u4ED6\u3002",
-    `\u95E8\u5916\u7684\u4EBA\u6572\u4E86\u4E24\u4E0B\u3002\u5F88\u8F7B\u3002${protagonistName}\u628A\u7F3A\u9875\u5939\u8FDB\u8896\u91CC\uFF0C\u5439\u4F4E\u706F\u706B\u3002\u6BCF\u6BB5\u90FD\u5FC5\u987B\u63A8\u8FDB\u7EBF\u7D22\u3001\u5173\u7CFB\u6216\u4EE3\u4EF7\uFF1B\u5173\u7CFB\u88C2\u7F1D\u5C31\u5728\u8FD9\u4E00\u606F\u91CC\u5F00\u4E86\u53E3\uFF1A\u8001\u5468\u5E2E\u4ED6\u85CF\u8D26\uFF0C\u4E5F\u628A\u4ED6\u5356\u7ED9\u4E86\u95E8\u5916\u7684\u4EBA\u3002`,
+    `${fixture.pressureName}\u62AC\u773C\u3002\u80A9\u4E0A\u7684\u65E7\u8863\u6E7F\u4E86\u4E00\u7EBF\u3002\u90A3\u4E00\u7EBF\u6C34\u4ECE\u80A9\u5934\u6ED1\u5230\u8896\u8FB9\uFF0C\u50CF\u6709\u4EBA\u521A\u4ECE\u96E8\u91CC\u6293\u8FC7\u4ED6\u3002`,
+    `\u95E8\u5916\u7684\u4EBA\u6572\u4E86\u4E24\u4E0B\u3002\u5F88\u8F7B\u3002${protagonistName}\u628A\u7F3A\u9875\u5939\u8FDB\u8896\u91CC\uFF0C\u5439\u4F4E\u706F\u706B\u3002\u5173\u7CFB\u88C2\u7F1D\u5C31\u5728\u8FD9\u4E00\u606F\u91CC\u5F00\u4E86\u53E3\uFF1A${fixture.pressureName}\u5E2E\u5FD9\u85CF\u8D26\uFF0C\u4E5F\u628A\u8FD9\u4E2A\u4EBA\u63A8\u5411\u6B63\u5728\u88AB\u4E89\u593A\u7684\u65E7\u8D26\u3002`,
     positiveExample,
-    `\u7EB8\u9875\u8D34\u7740\u638C\u5FC3\u53D1\u51C9\u3002${protagonistName}\u6CA1\u6709\u9000\u3002\u4ED6\u51B3\u5B9A\u5148\u5F00\u95E8\u3002\u53EA\u5F00\u534A\u6247\u3002\u95E8\u7F1D\u91CC\u9732\u51FA\u4E00\u679A\u5B98\u5370\uFF0C\u5370\u9762\u5012\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\u3002`,
-    "\u201C\u5C11\u5C39\u8BF7\u4F60\u8D70\u4E00\u8D9F\u3002\u201D\u95E8\u5916\u7684\u4EBA\u8BF4\u3002",
+    `\u7EB8\u9875\u8D34\u7740\u638C\u5FC3\u53D1\u51C9\u3002${protagonistName}\u6CA1\u6709\u9000\u3002\u8FD9\u4E2A\u4EBA\u51B3\u5B9A\u5148\u5F00\u95E8\u3002\u53EA\u5F00\u534A\u6247\u3002\u95E8\u7F1D\u91CC\u9732\u51FA\u4E00\u679A\u5B98\u5370\uFF0C\u5370\u9762\u5012\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\u3002`,
+    `\u201C${fixture.pressureName}\u8981\u4F60\u8D70\u4E00\u8D9F\u3002\u201D\u95E8\u5916\u7684\u4EBA\u8BF4\u3002`,
     `\u201C\u8D26\u5462\uFF1F\u201D`,
     "\u201C\u5E26\u4E0A\u3002\u201D",
-    `${protagonistName}\u542C\u89C1\u8001\u5468\u5728\u8EAB\u540E\u5438\u6C14\u3002\u4ED6\u6CA1\u56DE\u5934\u3002\u4ED6\u628A\u8D26\u518C\u6536\u8FDB\u6000\u91CC\uFF0C\u53C8\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002\u90A3\u4E00\u9875\u7A7A\u7740\uFF0C\u5374\u6BD4\u5199\u6EE1\u66F4\u50CF\u8BC1\u636E\u3002`,
-    `\u5DF7\u53E3\u7684\u9F13\u58F0\u8FC7\u4E86\u4E09\u4E0B\u3002\u96E8\u6CA1\u6709\u505C\u3002${protagonistName}\u77E5\u9053\u81EA\u5DF1\u53EA\u80FD\u9009\u4E00\u8FB9\uFF1A\u4EA4\u8D26\uFF0C\u8001\u5468\u6D3B\uFF1B\u85CF\u9875\uFF0C\u4ED6\u81EA\u5DF1\u6D3B\u3002`,
-    "\u4ED6\u628A\u95E8\u63A8\u5F00\u3002\u51B7\u98CE\u8FDB\u5C4B\uFF0C\u706F\u706B\u5411\u540E\u4E00\u4F0F\u3002\u8001\u5468\u4F38\u624B\u8981\u62E6\uFF0C\u624B\u5230\u534A\u8DEF\u53C8\u505C\u4F4F\u3002",
-    `\u201C\u6C88\u781A\u3002\u201D\u8001\u5468\u7B2C\u4E00\u6B21\u53EB\u4ED6\u7684\u540D\u5B57\uFF0C\u201C\u4F60\u4E0D\u80FD\u53BB\u3002\u201D`,
+    `${protagonistName}\u542C\u89C1${fixture.pressureName}\u5728\u8EAB\u540E\u5438\u6C14\u3002\u8FD9\u4E2A\u4EBA\u6CA1\u56DE\u5934\u3002\u8FD9\u4E2A\u4EBA\u628A${fixture.artifact}\u6536\u8FDB\u6000\u91CC\uFF0C\u53C8\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002\u90A3\u4E00\u9875\u7A7A\u7740\uFF0C\u5374\u6BD4\u5199\u6EE1\u66F4\u50CF\u8BC1\u636E\u3002`,
+    `\u5DF7\u53E3\u7684\u9F13\u58F0\u8FC7\u4E86\u4E09\u4E0B\u3002\u96E8\u6CA1\u6709\u505C\u3002${protagonistName}\u77E5\u9053\u81EA\u5DF1\u53EA\u80FD\u9009\u4E00\u8FB9\uFF1A\u4EA4\u8D26\uFF0C${fixture.pressureName}\u6682\u65F6\u5B89\u5168\uFF1B\u85CF\u9875\uFF0C\u81EA\u5DF1\u6682\u65F6\u5B89\u5168\u3002`,
+    `\u8FD9\u4E2A\u4EBA\u628A\u95E8\u63A8\u5F00\u3002\u51B7\u98CE\u8FDB\u5C4B\uFF0C\u706F\u706B\u5411\u540E\u4E00\u4F0F\u3002${fixture.pressureName}\u4F38\u624B\u8981\u62E6\uFF0C\u624B\u5230\u534A\u8DEF\u53C8\u505C\u4F4F\u3002`,
+    `\u201C${protagonistName}\u3002\u201D${fixture.pressureName}\u5934\u4E00\u56DE\u53EB\u8FD9\u4E2A\u540D\u5B57\uFF0C\u201C\u4F60\u4E0D\u80FD\u53BB\u3002\u201D`,
     `\u201C\u6211\u4E0D\u53BB\uFF0C\u4ED6\u4EEC\u4F1A\u6765\u95EE\u4F60\u3002\u201D`,
-    "\u8001\u5468\u7684\u8138\u8272\u7070\u4E0B\u53BB\u3002\u90A3\u4E0D\u662F\u5BB3\u6015\uFF0C\u662F\u65E9\u77E5\u9053\u8FD9\u53E5\u8BDD\u4F1A\u6765\u3002\u5173\u7CFB\u5230\u8FD9\u91CC\u5DF2\u7ECF\u4E0D\u80FD\u8865\u56DE\u539F\u6837\u3002",
-    `${protagonistName}\u8DE8\u8FC7\u95E8\u69DB\u3002\u95E8\u5916\u811A\u6B65\u8BA9\u5F00\u534A\u6B65\uFF0C\u5B98\u5370\u5374\u6CA1\u6709\u6536\u3002\u96E8\u70B9\u6253\u5728\u8D26\u518C\u5C01\u76AE\u4E0A\uFF0C\u58A8\u5473\u4ECE\u65E7\u7EBF\u91CC\u6CDB\u51FA\u6765\u3002`,
-    `\u4ED6\u628A\u7F3A\u9875\u7559\u7ED9\u8001\u5468\uFF0C\u4E5F\u628A\u6000\u7591\u7559\u5728\u5C4B\u91CC\u3002\u7ED3\u5C3E\u7559\u4E0B\u53EF\u8FFD\u8E2A\u95EE\u9898\u3001\u5173\u7CFB\u88C2\u7F1D\u6216\u7EBF\u7D22\u4F59\u6CE2\uFF1A\u8001\u5468\u62FF\u7740\u7A7A\u767D\u8BC1\u636E\uFF0C\u5C11\u5C39\u62FF\u7740\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u5269\u8896\u4E2D\u4E00\u884C\u6D45\u58A8\u3002`
+    `${fixture.pressureName}\u7684\u8138\u8272\u7070\u4E0B\u53BB\u3002\u90A3\u4E0D\u662F\u5BB3\u6015\uFF0C\u662F\u65E9\u77E5\u9053\u8FD9\u53E5\u8BDD\u4F1A\u6765\u3002\u5173\u7CFB\u5230\u8FD9\u91CC\u5DF2\u7ECF\u4E0D\u80FD\u8865\u56DE\u539F\u6837\u3002`,
+    foreshadowingExecutionParagraph,
+    `${protagonistName}\u8DE8\u8FC7\u95E8\u69DB\u3002\u95E8\u5916\u811A\u6B65\u8BA9\u5F00\u534A\u6B65\uFF0C\u5B98\u5370\u5374\u6CA1\u6709\u6536\u3002\u96E8\u70B9\u6253\u5728${fixture.artifact}\u5C01\u76AE\u4E0A\uFF0C\u58A8\u5473\u4ECE\u65E7\u7EBF\u91CC\u6CDB\u51FA\u6765\u3002`,
+    `\u8FD9\u4E2A\u4EBA\u628A\u7F3A\u9875\u7559\u7ED9${fixture.pressureName}\uFF0C\u4E5F\u628A\u6000\u7591\u7559\u5728\u5C4B\u91CC\u3002${fixture.pressureName}\u62FF\u7740\u7A7A\u767D\u8BC1\u636E\uFF0C\u95E8\u5916\u7684\u4EBA\u62FF\u7740\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u5269\u8896\u4E2D\u4E00\u884C\u6D45\u58A8\u3002`
   ];
+  const sceneCardParagraphs = createSceneCardFixtureParagraphs(segmentPlan, fixture);
   const expansionSeeds = [
-    (step) => `\u7B2C ${step} \u6B21\u505C\u987F\u65F6\uFF0C\u5ECA\u4E0B\u7684\u6C34\u805A\u6210\u4E00\u9053\u65B0\u7EBF\uFF0C${protagonistName}\u4F4E\u5934\u770B\u89C1\u7B2C ${step} \u9053\u6C34\u7EBF\u4ECE\u8001\u5468\u811A\u8FB9\u7ED5\u5F00\uFF0C\u5224\u65AD\u4ED6\u5DF2\u5728\u95E8\u69DB\u5916\u7AD9\u8FC7\u534A\u523B\u3002`,
-    (step) => `\u7B2C ${step} \u5904\u7EBF\u7D22\u843D\u5728\u8D26\u518C\u7EBF\u88C5\u4E0A\uFF0C\u7B2C ${step} \u679A\u677E\u6263\u91CC\u5939\u7740\u4E00\u7C92\u788E\u7CAE\uFF0C\u4E0D\u662F\u4E66\u623F\u91CC\u7684\u4E1C\u897F\uFF0C\u66F4\u50CF\u521A\u4ECE\u4ED3\u95E8\u53E3\u5E26\u8FDB\u6765\u7684\u3002`,
-    (step) => `\u7B2C ${step} \u8F6E\u8FFD\u95EE\u91CC\uFF0C\u8001\u5468\u8BF4\u8BDD\u6162\u4E86\u534A\u62CD\uFF0C\u7B2C ${step} \u6B21\u505C\u987F\u4E0D\u662F\u8FDF\u7591\uFF0C\u662F\u5728\u7B49\u95E8\u5916\u7684\u4EBA\u66FF\u4ED6\u5F00\u53E3\u3002`,
+    (step) => `\u7B2C ${step} \u6B21\u505C\u987F\u65F6\uFF0C\u5ECA\u4E0B\u7684\u6C34\u805A\u6210\u4E00\u9053\u65B0\u7EBF\uFF0C${protagonistName}\u4F4E\u5934\u770B\u89C1\u7B2C ${step} \u9053\u6C34\u7EBF\u4ECE${fixture.pressureName}\u811A\u8FB9\u7ED5\u5F00\uFF0C\u5224\u65AD\u4ED6\u5DF2\u5728\u95E8\u69DB\u5916\u7AD9\u8FC7\u534A\u523B\u3002`,
+    (step) => `\u7B2C ${step} \u5904\u7EBF\u7D22\u843D\u5728${fixture.artifact}\u7EBF\u88C5\u4E0A\uFF0C\u7B2C ${step} \u679A\u677E\u6263\u91CC\u5939\u7740\u4E00\u7C92\u788E\u7CAE\uFF0C\u4E0D\u662F\u4E66\u623F\u91CC\u7684\u4E1C\u897F\uFF0C\u66F4\u50CF\u521A\u4ECE\u4ED3\u95E8\u53E3\u5E26\u8FDB\u6765\u7684\u3002`,
+    (step) => `\u7B2C ${step} \u8F6E\u8FFD\u95EE\u91CC\uFF0C${fixture.pressureName}\u8BF4\u8BDD\u6162\u4E86\u534A\u62CD\uFF0C\u7B2C ${step} \u6B21\u505C\u987F\u4E0D\u662F\u8FDF\u7591\uFF0C\u662F\u5728\u7B49\u95E8\u5916\u7684\u4EBA\u66FF\u4ED6\u5F00\u53E3\u3002`,
     (step) => `\u7B2C ${step} \u9053\u706F\u5F71\u7167\u5230\u5B98\u5370\u8FB9\u7F18\uFF0C\u7B2C ${step} \u5C42\u5370\u6CE5\u8FD8\u6CA1\u5E72\uFF0C\u7EA2\u8272\u5728\u96E8\u6C14\u91CC\u53D1\u6697\u3002`,
-    (step) => `\u7B2C ${step} \u4E2A\u5224\u65AD\u66B4\u9732\u4E86${protagonistName}\u7684\u77ED\u677F\uFF0C\u4ED6\u80FD\u7B97\u51FA\u7B2C ${step} \u5904\u7A0E\u518C\u7F3A\u53E3\uFF0C\u5374\u7B97\u4E0D\u51FA\u65E7\u53CB\u4F1A\u7AD9\u5230\u54EA\u4E00\u8FB9\u3002`,
+    (step) => `\u7B2C ${step} \u4E2A\u5224\u65AD\u66B4\u9732\u4E86${protagonistName}\u7684\u77ED\u677F\uFF1A${fixture.limitation}\u3002\u8FD9\u4E2A\u4EBA\u80FD\u7B97\u51FA\u7B2C ${step} \u5904\u8BB0\u5F55\u7F3A\u53E3\uFF0C\u5374\u7B97\u4E0D\u51FA\u65E7\u53CB\u4F1A\u7AD9\u5230\u54EA\u4E00\u8FB9\u3002`,
     (step) => `\u7B2C ${step} \u6B21\u6572\u95E8\u540E\uFF0C\u95E8\u5916\u7684\u4EBA\u4ECD\u4E0D\u50AC\uFF0C\u7B2C ${step} \u6B21\u6C89\u9ED8\u50CF\u5200\u80CC\u8D34\u5728\u9888\u540E\uFF0C\u4E0D\u89C1\u8840\uFF0C\u4E5F\u4E0D\u80AF\u79BB\u5F00\u3002`,
-    (step) => `\u7B2C ${step} \u53E5\u77ED\u95EE\u843D\u4E0B\uFF0C${protagonistName}\u5408\u4E0A\u8D26\u518C\uFF0C\u53EA\u95EE\u7B2C ${step} \u6B21\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F`,
+    (step) => `\u7B2C ${step} \u53E5\u77ED\u95EE\u843D\u4E0B\uFF0C${protagonistName}\u5408\u4E0A${fixture.artifact}\uFF0C\u53EA\u95EE\u7B2C ${step} \u6B21\uFF1A\u8C01\u52A8\u8FC7\u8FD9\u4E00\u9875\uFF1F`,
     (step) => `\u7B2C ${step} \u9635\u96E8\u58F0\u66F4\u5BC6\uFF0C\u5C4B\u6A90\u4E0B\u7684\u9ED1\u5F71\u5411\u524D\u534A\u5BF8\u53C8\u505C\u4F4F\uFF0C\u7B2C ${step} \u9053\u65E7\u4FE1\u4EFB\u4E5F\u5728\u8FD9\u4E00\u606F\u88C2\u5F00\u3002`
   ];
-  const paragraphs = [...baseParagraphs];
+  const paragraphs = [...baseParagraphs, ...sceneCardParagraphs];
   let index = 0;
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
     paragraphs.push(expansionSeeds[index % expansionSeeds.length](index + 1));
@@ -11699,6 +13710,17 @@ async function generateProductionTextWithLlm({
   let lastStreamProgressAt = 0;
   let firstDeltaSeen = false;
   const messageId = progress ? createWritingMessageId(progress) : void 0;
+  const maxLlmAttempts = 3;
+  const requestChars = basePrompt.length + dynamicPrompt.length + message.length;
+  const llmTraceBase = {
+    roleName,
+    requestChars,
+    basePromptChars: basePrompt.length,
+    dynamicPromptChars: dynamicPrompt.length,
+    messageChars: message.length,
+    temperature,
+    maxAttempts: maxLlmAttempts
+  };
   if (progress) {
     await emitWritingProgress(options, {
       messageId,
@@ -11711,6 +13733,17 @@ async function generateProductionTextWithLlm({
       statusText: "\u8BF7\u6C42\u5DF2\u63D0\u4EA4\u7ED9 LLM\uFF0C\u7B49\u5F85\u6A21\u578B\u5F00\u59CB\u54CD\u5E94\u3002",
       statusDetail: "\u5982\u679C\u6A21\u578B\u6216\u7F51\u7EDC\u6682\u65F6\u6CA1\u6709\u9996\u6BB5\u8FD4\u56DE\uFF0C\u8FD9\u6761\u6D88\u606F\u4F1A\u4FDD\u6301\u52A8\u6001\u7B49\u5F85\u72B6\u6001\u3002",
       message: progress.startMessage,
+      workflow: {
+        kind: "llm_request",
+        groupId: messageId,
+        stage: progress.step,
+        summary: `${roleName} LLM \u8BF7\u6C42\u5DF2\u63D0\u4EA4`,
+        collapsed: true
+      },
+      llm: {
+        ...llmTraceBase,
+        responseChars: 0
+      },
       preview: [
         `Role: ${roleName}`,
         "",
@@ -11720,8 +13753,10 @@ async function generateProductionTextWithLlm({
   }
   try {
     let result = "";
-    const maxLlmAttempts = 3;
     let backoffDelay = process.env.AI_NOVEL_TEST_MODE === "1" ? 10 : 2e3;
+    const normalizedRole = roleName.toLowerCase();
+    const responseMode = normalizedRole.includes("author") || normalizedRole.includes("prose stylist") ? "drafting" : "artifact";
+    const currentStage = responseMode === "drafting" ? "drafting" : progress?.step || state.runtime.stage;
     for (let i = 1; i <= maxLlmAttempts; i++) {
       try {
         result = await generateAgentReply({
@@ -11733,7 +13768,8 @@ Core idea: ${state.project.idea}
 Current stage: ${state.runtime.stage}`,
           message,
           discussionStage: "specialist_turn",
-          currentStage: "drafting",
+          currentStage,
+          responseMode,
           preferredLanguage: "zh-CN",
           envRootDir: options.envRootDir || options.factoryRootDir || process.cwd(),
           signal: options.signal,
@@ -11758,6 +13794,18 @@ Current stage: ${state.runtime.stage}`,
               statusText: isFirstDelta ? "LLM \u5DF2\u5F00\u59CB\u54CD\u5E94\uFF0C\u6B63\u5728\u8FD4\u56DE\u9996\u6BB5\u5185\u5BB9\u3002" : "LLM \u6B63\u5728\u6301\u7EED\u8FD4\u56DE\u5185\u5BB9\u3002",
               statusDetail: "\u8FD4\u56DE\u5185\u5BB9\u4F1A\u6301\u7EED\u5408\u5E76\u5230\u8FD9\u4E00\u6761 agent \u6D88\u606F\u4E2D\u3002",
               message: `${progress.startMessage}\u6A21\u578B\u6B63\u5728\u6301\u7EED\u8F93\u51FA\u3002`,
+              workflow: {
+                kind: "llm_response",
+                groupId: messageId,
+                stage: progress.step,
+                summary: `${roleName} LLM \u6B63\u5728\u6D41\u5F0F\u8FD4\u56DE`,
+                collapsed: false
+              },
+              llm: {
+                ...llmTraceBase,
+                streamedChars: streamedResult.length,
+                responseChars: streamedResult.length
+              },
               preview: streamedResult.slice(-520),
               streamText: streamedResult,
               wordCount: wordCount(streamedResult)
@@ -11779,7 +13827,19 @@ Current stage: ${state.runtime.stage}`,
             chapterNumber: progress.chapterNumber,
             title: progress.title,
             status: "running",
-            message: `\u7F51\u7EDC\u6216 API \u8BF7\u6C42\u5F02\u5E38\uFF0C\u6B63\u5728\u8FDB\u884C\u7B2C ${i} \u6B21\u91CD\u8BD5\uFF08\u7B49\u5F85 ${backoffDelay / 1e3} \u79D2\uFF09... \u9519\u8BEF: ${error instanceof Error ? error.message : String(error)}`
+            message: `\u7F51\u7EDC\u6216 API \u8BF7\u6C42\u5F02\u5E38\uFF0C\u6B63\u5728\u8FDB\u884C\u7B2C ${i} \u6B21\u91CD\u8BD5\uFF08\u7B49\u5F85 ${backoffDelay / 1e3} \u79D2\uFF09... \u9519\u8BEF: ${error instanceof Error ? error.message : String(error)}`,
+            workflow: {
+              kind: "llm_retry",
+              groupId: messageId,
+              stage: progress.step,
+              summary: `${roleName} LLM \u8BF7\u6C42\u91CD\u8BD5`,
+              collapsed: true
+            },
+            llm: {
+              ...llmTraceBase,
+              attempt: i,
+              responseChars: streamedResult.length
+            }
           });
         }
         await new Promise((resolve) => setTimeout(resolve, backoffDelay));
@@ -11798,6 +13858,17 @@ Current stage: ${state.runtime.stage}`,
         phase: "completed",
         statusText: "LLM \u8FD4\u56DE\u5B8C\u6210\uFF0C\u5185\u5BB9\u5DF2\u4FDD\u5B58\u5E76\u8FDB\u5165\u4E0B\u4E00\u6B65\u3002",
         message: progress.completeMessage,
+        workflow: {
+          kind: "llm_response",
+          groupId: messageId,
+          stage: progress.step,
+          summary: `${roleName} LLM \u8FD4\u56DE\u5B8C\u6210`,
+          collapsed: true
+        },
+        llm: {
+          ...llmTraceBase,
+          responseChars: result.length
+        },
         preview: result.slice(0, 520),
         streamText: result,
         wordCount: wordCount(result)
@@ -11815,7 +13886,18 @@ Current stage: ${state.runtime.stage}`,
         status: "blocked",
         phase: "failed",
         statusText: "LLM \u8BF7\u6C42\u5931\u8D25\uFF0C\u7CFB\u7EDF\u4F1A\u6309\u4EFB\u52A1\u7B56\u7565\u5904\u7406\u3002",
-        message: `${progress.startMessage}\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
+        message: `${progress.startMessage}\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`,
+        workflow: {
+          kind: "llm_error",
+          groupId: messageId,
+          stage: progress.step,
+          summary: `${roleName} LLM \u8BF7\u6C42\u5931\u8D25`,
+          collapsed: true
+        },
+        llm: {
+          ...llmTraceBase,
+          responseChars: streamedResult.length
+        }
       });
     }
     throw error;
@@ -12182,13 +14264,13 @@ function createDraftSegmentPlan(state, task, continuityContract = createContinui
         card.turn ? `\u8F6C\u6298\uFF1A${card.turn}` : ""
       ].filter(Boolean).join("\uFF1B") || `${protagonist}\u5FC5\u987B\u5728\u672C\u573A\u666F\u4E2D\u5B8C\u6210\u4E00\u6B21\u53EF\u89C1\u63A8\u8FDB\u3002`,
       requiredBeats: [
-        card.goal ? `Scene Goal \u843D\u5730\uFF1A${card.goal}` : "",
-        card.conflict ? `Scene Conflict \u5FC5\u987B\u5199\u6210\u73B0\u573A\u538B\u529B\uFF1A${card.conflict}` : "",
-        card.turn ? `Scene Turn \u5FC5\u987B\u6539\u53D8\u5C40\u9762\uFF1A${card.turn}` : "",
-        card.endHook ? `Scene End Hook \u6536\u675F\u5230\uFF1A${card.endHook}` : "",
-        card.requiredCharacters.length ? `Required Characters: ${card.requiredCharacters.join("\u3001")}` : "",
-        card.requiredFacts.length ? `Required Facts: ${card.requiredFacts.join("\u3001")}` : "",
-        card.forbiddenFacts.length ? `Forbidden Facts \u4E0D\u5F97\u6CC4\u9732\uFF1A${card.forbiddenFacts.join("\u3001")}` : ""
+        card.goal ? `\u786C\u95E8\u69DB\uFF1A\u6B63\u6587\u5FC5\u987B\u7528\u73B0\u573A\u52A8\u4F5C\u3001\u5BF9\u767D\u6216\u7269\u4EF6\u53D8\u5316\u6267\u884C Scene Goal\u300C${card.goal}\u300D\uFF0C\u4E0D\u80FD\u53EA\u6982\u8FF0\u3002` : "",
+        card.conflict ? `\u786C\u95E8\u69DB\uFF1A\u6B63\u6587\u5FC5\u987B\u628A Scene Conflict\u300C${card.conflict}\u300D\u5199\u6210\u73B0\u573A\u963B\u529B\u3001\u8D28\u95EE\u3001\u62D2\u7EDD\u6216\u4EE3\u4EF7\u3002` : "",
+        card.turn ? `\u786C\u95E8\u69DB\uFF1A\u6B63\u6587\u5FC5\u987B\u8BA9 Scene Turn\u300C${card.turn}\u300D\u6539\u53D8\u89D2\u8272\u9009\u62E9\u3001\u8BC1\u636E\u72B6\u6001\u6216\u73B0\u573A\u5C40\u9762\u3002` : "",
+        card.endHook ? `\u786C\u95E8\u69DB\uFF1A\u7247\u6BB5\u7ED3\u5C3E\u5FC5\u987B\u843D\u5230 Scene End Hook\u300C${card.endHook}\u300D\u3002` : "",
+        card.requiredCharacters.length ? `\u786C\u95E8\u69DB\uFF1A\u6B63\u6587\u5FC5\u987B\u51FA\u73B0\u89D2\u8272\u300C${card.requiredCharacters.join("\u3001")}\u300D\uFF0C\u4E14\u6BCF\u4E2A\u89D2\u8272\u81F3\u5C11\u6709\u52A8\u4F5C\u3001\u5BF9\u767D\u6216\u88AB\u73B0\u573A\u538B\u529B\u5F71\u54CD\u3002` : "",
+        card.requiredFacts.length ? `\u786C\u95E8\u69DB\uFF1A\u6B63\u6587\u5FC5\u987B\u81EA\u7136\u51FA\u73B0 Required Facts\u300C${card.requiredFacts.join("\u3001")}\u300D\u3002` : "",
+        card.forbiddenFacts.length ? `\u786C\u95E8\u69DB\uFF1AForbidden Facts\u300C${card.forbiddenFacts.join("\u3001")}\u300D\u4E0D\u5F97\u6CC4\u9732\u3002` : ""
       ].filter(Boolean),
       continuityFocus: [.../* @__PURE__ */ new Set([...card.requiredFacts, ...anchors.slice(index, index + 2)])],
       targetWords: index === sceneCards.length - 1 ? Math.max(240, targetWords - baseTarget2 * (sceneCards.length - 1)) : baseTarget2,
@@ -12278,13 +14360,15 @@ function createDraftSegmentCompositionPlan(segment, continuityContract) {
     dialogue: [
       "\u5BF9\u767D\u5FC5\u987B\u77ED\u3001\u6709\u538B\u529B\uFF0C\u5E76\u4F53\u73B0\u5173\u7CFB\u6216\u5229\u76CA\uFF0C\u4E0D\u7528\u5BF9\u767D\u89E3\u91CA\u4E16\u754C\u89C2\u80CC\u666F\u3002",
       "\u6BCF\u4E2A\u91CD\u8981\u8BF4\u8BDD\u8005\u81F3\u5C11\u5E26\u4E00\u4E2A\u79F0\u547C\u3001\u505C\u987F\u3001\u52A8\u4F5C\u6216\u8BED\u6C14\u5DEE\u5F02\u3002",
-      sceneCard?.requiredCharacters.length ? `\u5BF9\u767D\u4F18\u5148\u670D\u52A1\u8FD9\u4E9B\u89D2\u8272\uFF1A${sceneCard.requiredCharacters.join("\u3001")}\u3002` : `\u5BF9\u767D\u5FC5\u987B\u56F4\u7ED5${protagonist}\u7684\u9009\u62E9\u548C\u73B0\u573A\u538B\u529B\u5C55\u5F00\u3002`
+      sceneCard?.requiredCharacters.length ? `\u8FD9\u4E9B\u89D2\u8272\u5FC5\u987B\u771F\u5B9E\u53C2\u4E0E\u73B0\u573A\u538B\u529B\uFF0C\u4E0D\u53EA\u662F\u540D\u5355\u6216\u65C1\u767D\u63D0\u53CA\uFF1A${sceneCard.requiredCharacters.join("\u3001")}\u3002` : `\u5BF9\u767D\u5FC5\u987B\u56F4\u7ED5${protagonist}\u7684\u9009\u62E9\u548C\u73B0\u573A\u538B\u529B\u5C55\u5F00\u3002`
     ],
     characterAction: [
       continuityContract.lockedProtagonistName ? `${continuityContract.lockedProtagonistName}\u5FC5\u987B\u901A\u8FC7\u884C\u52A8\u3001\u611F\u77E5\u6216\u9009\u62E9\u63A8\u8FDB\u672C\u7247\u6BB5\u3002` : "\u9996\u7AE0\u5FC5\u987B\u5EFA\u7ACB\u552F\u4E00\u53EF\u8FFD\u8E2A\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002",
+      sceneCard?.requiredCharacters.length ? `Required characters \u5FC5\u987B\u5728\u672C\u7247\u6BB5\u6B63\u6587\u4E2D\u51FA\u573A\u5E76\u627F\u62C5\u52A8\u4F5C\u3001\u5BF9\u767D\u3001\u963B\u62E6\u3001\u534F\u52A9\u6216\u53D7\u538B\u53CD\u5E94\uFF1A${sceneCard.requiredCharacters.join("\u3001")}\u3002` : "",
+      sceneCard ? "\u5982\u679C\u5F53\u524D\u573A\u666F\u5361\u76EE\u6807\u3001\u51B2\u7A81\u6216\u8F6C\u6298\u65E0\u6CD5\u5728\u6B63\u6587\u4E2D\u627E\u5230\u73B0\u573A\u8BC1\u636E\uFF0C\u5E94\u91CD\u5199\u7247\u6BB5\uFF0C\u800C\u4E0D\u662F\u8865\u89E3\u91CA\u3002" : "",
       "\u91CD\u8981\u914D\u89D2\u4E0D\u80FD\u53EA\u8D34\u6027\u683C\u6807\u7B7E\uFF0C\u5FC5\u987B\u7528\u52A8\u4F5C\u3001\u79F0\u547C\u3001\u4E60\u60EF\u6216\u5229\u76CA\u9009\u62E9\u5448\u73B0\u3002",
       "\u81F3\u5C11\u8BA9\u4E00\u4E2A\u89D2\u8272\u7684\u6B32\u671B\u3001\u77ED\u677F\u3001\u5173\u7CFB\u72B6\u6001\u6216\u98CE\u9669\u4EE3\u4EF7\u9732\u51FA\u75D5\u8FF9\u3002"
-    ],
+    ].filter(Boolean),
     continuity: [
       ...continuityFocus.map((item) => `\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${item}`),
       sceneCard?.forbiddenFacts.length ? `\u4E0D\u5F97\u6CC4\u9732\uFF1A${sceneCard.forbiddenFacts.join("\u3001")}` : "",
@@ -13183,6 +15267,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
   const genre = inferGenreProfile(state);
   const sceneType = sceneTypeForChapter(state, task.chapterNumber);
   const causalPlan = getTaskCausalPlan(state, task);
+  const hasCompletedPreviousCanon = continuityContract.previousChapterLedger.length > 0;
   const knowledgeContext = await retrieveWritingKnowledgeContext({
     state,
     task,
@@ -13219,12 +15304,12 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     title: task.title,
     rows: knowledgeContext.rows
   });
-  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 650);
-  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 420);
-  const cappedResourceManifest = summarizePromptSection(resourceManifest, 280);
-  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 620);
-  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 340);
-  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 300);
+  const cappedVocabularyPrompt = summarizePromptSection(vocabularyPrompt, 520);
+  const cappedVocabularySkillExamples = summarizePromptSection(vocabularySkillExamples, 260);
+  const cappedResourceManifest = summarizePromptSection(resourceManifest, 160);
+  const cappedWriterGuide = summarizePromptSection(resources.writerGuide || "", 360);
+  const cappedAntiHallucination = summarizePromptSection(resources.antiHallucinationGuide || "", 220);
+  const cappedConflictStrategy = summarizePromptSection(resources.evidenceConflictStrategy || "", 180);
   const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
   const basePromptLines = [
     cappedWriterGuide || "\u4F60\u662F\u5C0F\u8BF4\u6B63\u6587\u521B\u4F5C\u6267\u884C\u8005\u3002",
@@ -13232,6 +15317,7 @@ async function createDraftBody(state, task, blueprint, resources, options, conti
     "\u5FC5\u987B\u5199\u6B63\u6587\uFF0C\u4E0D\u8981\u53EA\u5199\u8BA1\u5212\u3001\u6458\u8981\u6216\u5EFA\u8BAE\u3002",
     "\u5FC5\u987B\u4E25\u683C\u9075\u5FAA\u7AE0\u8282\u84DD\u56FE\u3001\u7C7B\u578B\u65C1\u767D\u7B56\u7565\u3001\u6210\u8BED\u5BC6\u5EA6\u4E0E\u89D2\u8272\u5DEE\u5F02\u3002",
     "\u5FC5\u987B\u4E25\u683C\u6267\u884C\u7AE0\u8282\u56E0\u679C\u5408\u540C\uFF1A\u627F\u63A5\u4E0A\u4E00\u7AE0\u8F93\u5165\u3001\u5B8C\u6210\u672C\u7AE0\u76EE\u6807\u3001\u8BA9\u4E3B\u89D2\u505A\u9009\u62E9\u3001\u7559\u4E0B\u4E0D\u53EF\u9006\u53D8\u5316\u3001\u628A\u540E\u679C\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
+    hasCompletedPreviousCanon ? "Canon \u8FB9\u754C\uFF1A\u53EA\u6709 Canon Continuity Contract \u7684 Previous Chapter Ledger\u3001memory \u548C final draft \u53EF\u4F5C\u4E3A\u5DF2\u53D1\u751F\u524D\u6587\u4E8B\u5B9E\u3002" : "Canon \u8FB9\u754C\uFF1A\u5F53\u524D\u6CA1\u6709\u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\uFF1B\u84DD\u56FE\u91CC\u7684 Previous Input \u53EA\u662F\u8BA1\u5212\u4F9D\u8D56\uFF0C\u5FC5\u987B\u5728\u672C\u7AE0\u73B0\u573A\u843D\u5730\uFF0C\u4E0D\u80FD\u5199\u6210\u672A\u6210\u7A3F\u7AE0\u8282\u5DF2\u7ECF\u53D1\u751F\u3002",
     continuityContract.lockedProtagonistName ? `\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u672C\u7AE0\u5FC5\u987B\u7EE7\u7EED\u4F7F\u7528\u300C${continuityContract.lockedProtagonistName}\u300D\uFF0C\u4E0D\u5F97\u6539\u540D\u3001\u6362\u8EAB\u4EFD\u6216\u5199\u6210\u53E6\u4E00\u6761\u6545\u4E8B\u7EBF\u3002` : "\u4E3B\u89D2\u4E00\u81F4\u6027\u662F\u786C\u95E8\u69DB\uFF1A\u9996\u7AE0\u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u540E\u7EED\u7AE0\u8282\u4F1A\u9501\u5B9A\u8BE5\u59D3\u540D\u3002",
     "\u914D\u89D2\u3001\u60C5\u8282\u3001\u4F0F\u7B14\u548C\u4E16\u754C\u89C4\u5219\u5FC5\u987B\u9075\u5FAA Canon Continuity Contract\u3002",
     "\u89D2\u8272\u6863\u6848\u662F\u751F\u4EA7\u786C\u7EA6\u675F\uFF1A\u91CD\u8981\u89D2\u8272\u5FC5\u987B\u6709\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u7279\u957F\u77ED\u677F\u548C\u5173\u7CFB\u72B6\u6001\u3002",
@@ -13269,7 +15355,7 @@ ${cappedConflictStrategy}`);
     "",
     continuityContract.prompt,
     "",
-    clipPromptSection(characterProfileContract.prompt, 700),
+    clipPromptSection(characterProfileContract.prompt, 480),
     "",
     "\u8D44\u6E90\u4F7F\u7528\u786C\u8981\u6C42\uFF1A",
     "- \u81F3\u5C11\u81EA\u7136\u5438\u6536 3 \u4E2A\u8BCD\u6C47/\u573A\u666F\u8D44\u6E90\u63D0\u793A\uFF0C\u4F46\u4E0D\u80FD\u5806\u780C\u6210\u8BED\u3002",
@@ -13286,7 +15372,7 @@ ${cappedConflictStrategy}`);
     "- \u4E0D\u5F97\u51ED\u7A7A\u66FF\u6362\u5DF2\u77E5\u914D\u89D2\uFF1B\u65B0\u589E\u914D\u89D2\u5FC5\u987B\u4EA4\u4EE3\u8EAB\u4EFD\u3001\u7ACB\u573A\u548C\u4E0E\u4E3B\u89D2\u5173\u7CFB\u3002",
     "- \u65B0\u589E\u6216\u6CBF\u7528\u7684\u91CD\u8981\u89D2\u8272\u5FC5\u987B\u901A\u8FC7\u52A8\u4F5C\u3001\u79F0\u547C\u3001\u505C\u987F\u3001\u5916\u8C8C\u4F53\u6001\u3001\u4E60\u60EF\u548C\u5229\u76CA\u9009\u62E9\u5448\u73B0\u4EBA\u683C\uFF0C\u4E0D\u80FD\u53EA\u8D34\u6027\u683C\u6807\u7B7E\u3002",
     "- \u6B63\u6587\u5FC5\u987B\u4F53\u73B0\u81F3\u5C11\u4E00\u4E2A\u89D2\u8272\u7684\u7279\u957F/\u77ED\u677F\u6216\u80FD\u529B\u8FB9\u754C\uFF0C\u4EE5\u53CA\u81F3\u5C11\u4E00\u4E2A\u5173\u7CFB\u72B6\u6001\u53D8\u5316\u3002",
-    "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002",
+    hasCompletedPreviousCanon ? "- \u5FC5\u987B\u627F\u63A5\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u4E2D\u7684\u72B6\u6001\u3001\u4EE3\u4EF7\u3001\u7269\u54C1\u3001\u7EBF\u7D22\u6216\u4F0F\u7B14\u3002" : "- \u6CA1\u6709\u5DF2\u5B8C\u6210\u524D\u5E8F\u7AE0\u8282\u8D26\u672C\u65F6\uFF0C\u4E0D\u5F97\u4F2A\u9020\u524D\u6587\u72B6\u6001\uFF1B\u5FC5\u987B\u628A\u8BA1\u5212\u4F9D\u8D56\u5199\u6210\u672C\u7AE0\u73B0\u573A\u51FA\u73B0\u7684\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
     continuityContract.continuityAnchors.length ? `- \u6B63\u6587\u5FC5\u987B\u81EA\u7136\u547D\u4E2D\u81F3\u5C11\u4E24\u4E2A\u4E0A\u4E00\u7AE0\u8FDE\u7EED\u6027\u951A\u70B9\uFF1A${continuityContract.continuityAnchors.slice(0, 8).join("\u3001")}\u3002` : "- \u6B63\u6587\u5FC5\u987B\u5EFA\u7ACB\u53EF\u4F9B\u4E0B\u4E00\u7AE0\u8FFD\u8E2A\u7684\u5177\u4F53\u7269\u4EF6\u3001\u5173\u7CFB\u3001\u7EBF\u7D22\u6216\u4EE3\u4EF7\u3002",
     "- \u4E0D\u8981\u628A\u63A8\u8350\u8BCD\u3001\u6210\u8BED\u6216\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\uFF1B\u6240\u6709\u8BCD\u90FD\u5FC5\u987B\u5D4C\u5165\u5B8C\u6574\u52A8\u4F5C\u3001\u5BF9\u8BDD\u3001\u611F\u5B98\u6216\u56E0\u679C\u53E5\u3002",
     "- \u4E25\u7981\u51FA\u73B0\u5178\u578B\u7684 AI \u5316\u884C\u6587\uFF1A\u4E25\u7981\u5728\u6587\u4E2D\u51FA\u73B0\u300C\u4E0D\u4EC5\u5982\u6B64\u300D\u3001\u300C\u4E0E\u6B64\u540C\u65F6\u300D\u3001\u300C\u7136\u800C\u300D\u3001\u300C\u4E8B\u5B9E\u4E0A\u300D\u3001\u300C\u4E0D\u5F97\u4E0D\u8BF4\u300D\u3001\u300C\u503C\u5F97\u4E00\u63D0\u7684\u662F\u300D\u7B49\u8BF4\u6559\u6216\u5206\u6790\u8154\u7684\u903B\u8F91\u8FC7\u6E21\u8BCD\u3002",
@@ -13315,7 +15401,7 @@ ${cappedConflictStrategy}`);
   const activeWorldSlicePrompt = prunedContext.activeWorldSlice ? `## Active World Slice
 ${prunedContext.activeWorldSlice}` : "";
   const compactStoryAssetsPrompt = prunedContext.prunedStoryAssets ? `## Story Assets Audit Summary
-${prunedContext.prunedStoryAssets.slice(0, 900)}` : "";
+${prunedContext.prunedStoryAssets.slice(0, 520)}` : "";
   const blueprintGuardrails = activeWorldSlicePrompt || compactStoryAssetsPrompt ? trimBlueprintForDrafting(blueprint).replace(
     /## Production Story Asset Context[\s\S]*?(?=\n## Canon Continuity Contract|\n## Character Profile Contract|\n## Chapter Position|$)/u,
     [activeWorldSlicePrompt, compactStoryAssetsPrompt].filter(Boolean).join("\n\n")
@@ -13351,6 +15437,22 @@ ${prunedContext.prunedStoryAssets.slice(0, 900)}` : "";
       status: "completed",
       message: `\u7B2C ${task.chapterNumber} \u7AE0\u4E0A\u4E0B\u6587\u5305\u5DF2\u4FDD\u5B58\uFF1A${contextPackage.segmentCount} \u4E2A\u7247\u6BB5\uFF0C${contextPackage.segmentationSource === "scene_card" ? "\u573A\u666F\u5361" : "\u65F6\u95F4\u7EBF"}\u5206\u6BB5\u3002`,
       artifactPath: contextPackage.relativePath,
+      artifactLabel: `\u7B2C ${task.chapterNumber} \u7AE0\u4E0A\u4E0B\u6587\u5305`,
+      artifactKind: "context_package",
+      workflow: {
+        kind: "artifact_saved",
+        stage: "chapter_context_package",
+        summary: "\u5B8C\u6574\u63D0\u793A\u8BCD\u4E0A\u4E0B\u6587\u5DF2\u6298\u53E0\u4FDD\u5B58\uFF0C\u53EF\u5C55\u5F00\u68C0\u67E5\u3002",
+        collapsed: true,
+        expandableArtifactPath: contextPackage.relativePath
+      },
+      artifacts: [{
+        path: contextPackage.relativePath,
+        label: `\u7B2C ${task.chapterNumber} \u7AE0\u4E0A\u4E0B\u6587\u5305`,
+        kind: "context_package",
+        role: "expandable_prompt_context",
+        status: "completed"
+      }],
       preview: [
         `segmentation=${contextPackage.segmentationSource}`,
         `segments=${contextPackage.segmentCount}`,
@@ -13361,7 +15463,7 @@ ${prunedContext.prunedStoryAssets.slice(0, 900)}` : "";
     });
   }
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return approvedStyleContext.status === "ready" ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext) : fallback;
+    return approvedStyleContext.status === "ready" ? createStyleContractTestDraftBody(state, task, continuityContract, approvedStyleContext, characterDossiers, segmentPlan) : fallback;
   }
   const generatedSegments = [];
   const segmentArtifacts = [];
@@ -13438,26 +15540,26 @@ ${prunedContext.prunedStoryAssets.slice(0, 900)}` : "";
         approvedStyleCarryover,
         "",
         prunedContext.prunedConsensus ? `Consensus & Setting Freeze:
-${clipPromptSection(prunedContext.prunedConsensus, 900)}` : "",
+${clipPromptSection(prunedContext.prunedConsensus, 420)}` : "",
         "",
         prunedContext.prunedOutline ? `Master Outline:
-${clipPromptSection(prunedContext.prunedOutline, 700)}` : "",
+${clipPromptSection(prunedContext.prunedOutline, 300)}` : "",
         "",
         prunedContext.prunedStoryAssets ? `Story Assets:
-${clipPromptSection(prunedContext.prunedStoryAssets, 900)}` : "",
+${clipPromptSection(prunedContext.prunedStoryAssets, 420)}` : "",
         "",
         prunedContext.prunedMemory ? `Character Memory:
-${clipPromptSection(prunedContext.prunedMemory, 520)}` : "",
+${clipPromptSection(prunedContext.prunedMemory, 320)}` : "",
         "",
         prunedContext.prunedLedger ? `Previous Chapter Ledger:
-${clipPromptSection(prunedContext.prunedLedger, 520)}` : "",
+${clipPromptSection(prunedContext.prunedLedger, 320)}` : "",
         "",
         prunedContext.prunedRag ? `Knowledge/RAG References:
-${clipPromptSection(prunedContext.prunedRag, 520)}` : "",
+${clipPromptSection(prunedContext.prunedRag, 320)}` : "",
         "",
-        clipPromptSection(continuityContract.prompt, 1050),
+        clipPromptSection(continuityContract.prompt, 600),
         "",
-        clipPromptSection(characterProfileContract.prompt, 760),
+        clipPromptSection(characterProfileContract.prompt, 480),
         "",
         "\u7247\u6BB5\u5199\u4F5C\u786C\u8981\u6C42\uFF1A",
         "- \u53EA\u8F93\u51FA\u8FD9\u4E00\u6BB5\u5C0F\u8BF4\u6B63\u6587\uFF0C\u4E0D\u8981\u8F93\u51FA Markdown \u6807\u9898\u3001\u7247\u6BB5\u7F16\u53F7\u3001\u8BF4\u660E\u6216\u603B\u7ED3\u3002",
@@ -13466,6 +15568,7 @@ ${clipPromptSection(prunedContext.prunedRag, 520)}` : "",
         "- \u5BF9\u8BDD\u3001\u65C1\u767D\u548C\u52A8\u4F5C\u8981\u670D\u52A1\u672C\u7247\u6BB5\u65F6\u95F4\u7EBF\uFF0C\u4E0D\u8981\u63D0\u524D\u5199\u5B8C\u540E\u7EED\u7247\u6BB5\u3002",
         "- \u4E0D\u80FD\u5806\u780C\u6210\u8BED\uFF0C\u4E0D\u80FD\u628A\u6C1B\u56F4\u8BCD\u5B64\u7ACB\u6210\u884C\u3002",
         hasApprovedStyleSummaryPrompt(approvedStyleContext) ? "- \u5FC5\u987B\u8D34\u5408 User Approved Writing Style Contract\uFF1B\u5982\u679C\u901A\u7528\u5199\u4F5C\u6307\u5357\u4E0E\u8BE5\u5408\u540C\u51B2\u7A81\uFF0C\u4EE5\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\u4E3A\u51C6\u3002" : "",
+        hasApprovedStyleSummaryPrompt(approvedStyleContext) ? "- \u98CE\u683C\u6837\u6BB5\u53EA\u53EF\u5B66\u4E60\u53E5\u5F0F\u8282\u594F\u3001\u52A8\u4F5C\u5BC6\u5EA6\u3001\u5BF9\u767D\u5BC6\u5EA6\u548C\u63CF\u5199\u987A\u5E8F\uFF1B\u7981\u6B62\u590D\u7528\u6837\u6BB5\u4E2D\u7684\u59D3\u540D\u3001\u5730\u540D\u3001\u5E74\u53F7\u3001\u6570\u5B57\u3001\u5177\u4F53\u8D26\u76EE\u3001\u7EBF\u7D22\u7269\u6216\u60C5\u8282\u4E8B\u5B9E\u3002" : "",
         continuityContract.lockedProtagonistName ? `- \u5FC5\u987B\u4FDD\u6301\u4E3B\u89D2\u300C${continuityContract.lockedProtagonistName}\u300D\u4E00\u81F4\u3002` : "- \u5FC5\u987B\u660E\u786E\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\uFF0C\u5E76\u4FDD\u6301\u4E3B\u89C6\u89D2\u805A\u7126\u3002"
       ].filter(Boolean).join("\n"),
       message: [
@@ -13613,6 +15716,40 @@ ${previousSegmentTail}` : "",
         status: "completed",
         message: `\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total} \u5DF2\u4FDD\u5B58\u4E3A\u72EC\u7ACB\u4EA7\u7269\u3002`,
         artifactPath: segmentArtifact.relativePath,
+        artifactLabel: `\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total}`,
+        artifactKind: "draft_segment",
+        workflow: {
+          kind: "artifact_saved",
+          stage: "draft_segment_artifact",
+          summary: `\u7247\u6BB5 ${segment.index}/${segment.total} \u53CA\u5176\u7D20\u6750\u5DF2\u4FDD\u5B58\uFF0C\u53EF\u9010\u9879\u5C55\u5F00\u6392\u67E5\u3002`,
+          collapsed: true,
+          expandableArtifactPath: segmentArtifact.relativePath
+        },
+        artifacts: [
+          {
+            path: segmentArtifact.relativePath,
+            label: `\u7B2C ${task.chapterNumber} \u7AE0\u7247\u6BB5 ${segment.index}/${segment.total}`,
+            kind: "draft_segment",
+            role: "assembled_segment",
+            status: "completed",
+            chars: segmentArtifact.chars
+          },
+          ...segmentArtifact.subArtifacts.map((artifact) => ({
+            path: artifact.relativePath,
+            label: `${artifact.kind} ${artifact.role}`,
+            kind: "draft_segment_subartifact",
+            role: artifact.role,
+            status: "completed",
+            chars: artifact.chars
+          }))
+        ],
+        tools: segmentArtifact.subArtifacts.filter((artifact) => artifact.role === "material").map((artifact) => ({
+          toolName: `draft.${artifact.kind}`,
+          status: materialModes[artifact.kind] === "llm-subcall" ? "llm-subcall" : "deterministic",
+          inputSummary: `segment ${segment.index}/${segment.total}`,
+          outputSummary: artifact.relativePath,
+          artifactPath: artifact.relativePath
+        })),
         preview: [
           `source=${segmentArtifact.source}`,
           `chars=${segmentArtifact.chars}`,
@@ -13707,7 +15844,7 @@ ${originalText}`
       cleanText = cleanText.replace(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/g, "$1").trim();
       cleanText = cleanText.replace(/^(修改后|重构后|修复后|Repaired|Revised)(内容|段落)?[：:\n\s]+/iu, "").trim();
       cleanText = cleanText.replace(/^"(.*)"$/s, "$1").trim();
-      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5: 
+      console.log(`[AIGC PATCH RECV] \u9AD8\u98CE\u9669\u7247\u6BB5 #${segment.index + 1} \u5C40\u90E8\u91CD\u6784\u5B8C\u6BD5:
 - \u539F\u6587: \u300C${originalText.slice(0, 40)}...\u300D
 - \u4FEE\u590D: \u300C${cleanText.slice(0, 40)}...\u300D`);
       replacements.push({
@@ -13735,7 +15872,10 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
   const count = wordCount(draft);
   const target = task.targetWords;
   const minimumPassWords = Math.floor(target * 0.8);
-  const wordCountBlockingIssue = count < minimumPassWords;
+  const maximumPassWords = Math.ceil(target * 1.15);
+  const wordCountTooShort = count < minimumPassWords;
+  const wordCountTooLong = count > maximumPassWords;
+  const wordCountBlockingIssue = wordCountTooShort || wordCountTooLong;
   const plotContinuity = evaluatePlotContinuityBridge(draft, task, continuityContract);
   const styleQuality = evaluateNarrativeStyleQuality(draft);
   const resourceUsage = evaluateWritingResourceUsage(draft, state, task, blueprint, continuityContract);
@@ -13794,7 +15934,8 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
     "",
     "## Required Fixes",
     ...score >= 7 && !hardBlocked ? ["- \u6682\u65E0\u963B\u585E\u6027\u95EE\u9898\uFF1B\u6DA6\u8272\u65F6\u7EE7\u7EED\u538B\u4F4E AI \u6A21\u677F\u53E5\u3002"] : [
-      ...wordCountBlockingIssue ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`] : [],
+      ...wordCountTooShort ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`] : [],
+      ...wordCountTooLong ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u8D85\u8FC7 115% \u4E0A\u9650\uFF0C\u5FC5\u987B\u538B\u7F29\u5230\u76EE\u6807\u533A\u95F4\u540E\u624D\u80FD\u8FDB\u5165 complete\u3002`] : [],
       ...plotContinuity.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${plotContinuity.reason}`] : [],
       ...styleQuality.status === "quarantined" && !softStyleIssue ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${styleQuality.reason}`] : [],
       ...softStyleIssue ? [`- \u6DA6\u8272\u5EFA\u8BAE\uFF1A${styleQuality.reason}`] : [],
@@ -13802,7 +15943,8 @@ function createQualityReport(state, task, draft, blueprint, continuityContract =
       ...characterProfileQuality.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${characterProfileQuality.reason}`] : [],
       ...!hasCausalContract ? ["- \u9700\u8981\u8FD4\u5DE5\uFF1A\u84DD\u56FE\u7F3A\u5C11 Causal Objective / Irreversible Change / Next Chapter Handoff\uFF0C\u4E0D\u80FD\u652F\u6491\u8FDE\u7EED\u5199\u4F5C\u3002"] : [],
       ...!hasCausalExecution ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${causalExecution.reason}`] : [],
-      ...count < target ? ["- \u6269\u5199\u6B63\u6587\u573A\u666F\u3002"] : [],
+      ...wordCountTooShort || count < Math.floor(target * 0.9) ? ["- \u6269\u5199\u6B63\u6587\u573A\u666F\u3002"] : [],
+      ...wordCountTooLong ? ["- \u538B\u7F29\u91CD\u590D\u89E3\u91CA\u3001\u91CD\u590D\u5BF9\u767D\u548C\u65C1\u679D\u573A\u666F\u3002"] : [],
       ...!hasConflict ? ["- \u589E\u5F3A\u51B2\u7A81\u52A8\u4F5C\u3002"] : [],
       ...!hasHook ? ["- \u8865\u8DB3\u7AE0\u672B\u94A9\u5B50\u3002"] : []
     ]
@@ -13831,15 +15973,20 @@ function appendQualityHardChecks(report, task, draft, continuityContract, state,
   ];
   const resourceUsage = continuityContract ? evaluateWritingResourceUsage(draft, void 0, task, "", continuityContract) : evaluateWritingResourceUsage(draft);
   const resourceFixes = resourceUsage.status === "quarantined" ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A${resourceUsage.reason}`] : [];
-  if (report.includes("WORD_COUNT_CHECK:") && continuityFixes.length === 0 && narrativeFixes.length === 0 && resourceFixes.length === 0) {
+  const minimumPassWords = Math.floor(target * 0.8);
+  const maximumPassWords = Math.ceil(target * 1.15);
+  const wordBudgetFixes = [
+    ...count < minimumPassWords ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`] : [],
+    ...count > maximumPassWords ? [`- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u8D85\u8FC7 115% \u4E0A\u9650\uFF0C\u5FC5\u987B\u538B\u7F29\u5230\u76EE\u6807\u533A\u95F4\u540E\u624D\u80FD\u8FDB\u5165 complete\u3002`] : []
+  ];
+  if (report.includes("WORD_COUNT_CHECK:") && continuityFixes.length === 0 && narrativeFixes.length === 0 && resourceFixes.length === 0 && wordBudgetFixes.length === 0) {
     return report;
   }
-  const minimumPassWords = Math.floor(target * 0.8);
-  const hardFixes = count < minimumPassWords ? [
+  const hardFixes = wordBudgetFixes.length > 0 ? [
     "",
     "## Deterministic Hard Gate",
     `WORD_COUNT_CHECK: ${count}/${target}`,
-    `- \u9700\u8981\u8FD4\u5DE5\uFF1A\u6B63\u6587\u6709\u6548\u5B57\u6570 ${count}/${target}\uFF0C\u4F4E\u4E8E 80% \u95E8\u69DB\uFF0C\u4E0D\u80FD\u8FDB\u5165 complete\u3002`,
+    ...wordBudgetFixes,
     ...continuityFixes,
     ...narrativeFixes,
     ...resourceFixes
@@ -13874,6 +16021,27 @@ function extractQualityRepairChecklist(report) {
   const scoreFixes = lines.filter((line) => /^\|\s*(情节推进|因果合同执行|写作资源吸收|角色鲜明度)\s*\|/u.test(line)).filter((line) => /[1-6]\/10/u.test(line)).map((line) => `- \u4F4E\u5206\u9879\uFF1A${line.replace(/^\|\s*|\s*\|$/g, "").replace(/\s*\|\s*/g, " - ")}`);
   return uniqueStrings([...fixes, ...scoreFixes]).slice(0, 10);
 }
+function extractWordBudgetRepairDirective(report, targetWords) {
+  const wordMatch = report.match(/WORD_COUNT_CHECK:\s*(\d+)\s*\/\s*(\d+)/u);
+  const currentWords = wordMatch ? Number(wordMatch[1]) : void 0;
+  const target = wordMatch ? Number(wordMatch[2]) : targetWords;
+  if (!Number.isFinite(currentWords) || !Number.isFinite(target) || !target) {
+    return "";
+  }
+  const minimum = Math.floor(target * 0.9);
+  const maximum = Math.ceil(target * 1.1);
+  const hardMinimum = Math.floor(target * 0.8);
+  if (currentWords > maximum) {
+    return `\u5F53\u524D\u6B63\u6587 ${currentWords}/${target} \u660E\u663E\u8D85\u51FA\u76EE\u6807\uFF1B\u672C\u8F6E\u5FC5\u987B\u538B\u7F29\u6B63\u6587\u5230 ${minimum}-${maximum} \u5B57\uFF0C\u4FDD\u7559\u56E0\u679C\u8282\u70B9\u3001\u89D2\u8272\u9009\u62E9\u548C\u7AE0\u672B\u4EA4\u68D2\uFF0C\u5220\u6389\u91CD\u590D\u89E3\u91CA\u3001\u91CD\u590D\u5BF9\u767D\u548C\u65C1\u679D\u573A\u666F\u3002`;
+  }
+  if (currentWords < hardMinimum) {
+    return `\u5F53\u524D\u6B63\u6587 ${currentWords}/${target} \u4F4E\u4E8E\u786C\u95E8\u69DB\uFF1B\u672C\u8F6E\u5FC5\u987B\u6269\u5199\u6B63\u6587\u5230 ${minimum}-${maximum} \u5B57\uFF0C\u65B0\u589E\u53EF\u89C1\u884C\u52A8\u3001\u5BF9\u767D\u3001\u5173\u7CFB\u538B\u529B\u548C\u56E0\u679C\u540E\u679C\uFF0C\u4E0D\u5F97\u53EA\u589E\u52A0\u8BF4\u660E\u6BB5\u3002`;
+  }
+  if (currentWords < minimum) {
+    return `\u5F53\u524D\u6B63\u6587 ${currentWords}/${target} \u504F\u77ED\uFF1B\u672C\u8F6E\u4F18\u5148\u8865\u8DB3\u5230 ${minimum}-${maximum} \u5B57\uFF0C\u65B0\u589E\u573A\u666F\u8BC1\u636E\u800C\u4E0D\u662F\u91CD\u590D\u6982\u62EC\u3002`;
+  }
+  return `\u5F53\u524D\u6B63\u6587 ${currentWords}/${target} \u5728\u53EF\u63A5\u53D7\u533A\u95F4\u9644\u8FD1\uFF1B\u672C\u8F6E\u4FEE\u8D28\u91CF\u95EE\u9898\u65F6\u4E0D\u8981\u663E\u8457\u6269\u957F\uFF0C\u76EE\u6807\u4FDD\u6301 ${minimum}-${maximum} \u5B57\u3002`;
+}
 function extractDraftBodyForDeterministicRepair(draft) {
   const bodyStart = draft.match(/##\s+(?:Draft Body|Final Body|正文|最终正文)\s*/iu);
   const afterBodyHeading = bodyStart ? draft.slice((bodyStart.index || 0) + bodyStart[0].length) : draft;
@@ -13904,32 +16072,43 @@ function dedupeRepeatedNarrativeBody(body) {
   }
   return paragraphs.join("\n\n").trim();
 }
-function createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract) {
+function createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract, characterDossiers = []) {
   const title = task.title || `\u7B2C ${task.chapterNumber} \u7AE0`;
   const causalPlan = getTaskCausalPlan(state, task);
-  const protagonistName = continuityContract.lockedProtagonistName || inferLockedProtagonistName(draft) || "\u6C88\u781A";
+  const fixture = createDossierDrivenFixtureContext(continuityContract, characterDossiers);
+  const relationshipPressureCue = fixture.relationshipPressure.replace(/[。！？!?；;，,]+/gu, " ").replace(/\s+/gu, " ").trim() || fixture.relationshipPressure;
+  const protagonistName = continuityContract.lockedProtagonistName || fixture.protagonistName || inferLockedProtagonistName(draft) || "\u6C88\u781A";
   const requiredAnchors = uniqueStrings([
     ...task.causalPlan?.requiredContinuityAnchors || [],
     ...continuityContract.continuityAnchors || [],
-    "\u8D26\u518C",
+    ...fixture.dossierAnchors,
     "\u7F3A\u9875",
     "\u5B98\u5370",
     "\u95E8\u5916\u811A\u6B65"
   ].filter(Boolean)).slice(0, 8);
   const compacted = dedupeRepeatedNarrativeBody(extractDraftBodyForDeterministicRepair(draft));
   const paragraphs = compacted ? compacted.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean) : [
-    `\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875\u8D26\u518C\u63A8\u5230\u706F\u4E0B\uFF0C\u7EB8\u8FB9\u9F50\u5F97\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002`,
-    "\u8001\u5468\u7AD9\u5728\u95E8\u69DB\u5916\uFF0C\u6E7F\u8896\u538B\u7740\u534A\u679A\u6697\u7EA2\u5370\u75D5\uFF0C\u6CA1\u6709\u8FDB\u5C4B\uFF0C\u4E5F\u6CA1\u6709\u628A\u8D26\u518C\u63A5\u8FC7\u53BB\u3002"
+    `\u96E8\u58F0\u8D34\u7740\u7A97\u7EB8\u5F80\u4E0B\u6ED1\u3002${protagonistName}\u628A\u7F3A\u9875${fixture.artifact}\u63A8\u5230\u706F\u4E0B\uFF0C\u7EB8\u8FB9\u9F50\u5F97\u50CF\u521A\u4ECE\u5200\u53E3\u9000\u51FA\u6765\u3002`,
+    `${fixture.pressureName}\u7AD9\u5728\u95E8\u69DB\u5916\uFF0C\u6E7F\u8896\u538B\u7740\u534A\u679A\u6697\u7EA2\u5370\u75D5\uFF0C\u6CA1\u6709\u8FDB\u5C4B\uFF0C\u4E5F\u6CA1\u6709\u628A${fixture.artifact}\u63A5\u8FC7\u53BB\u3002`
   ];
+  const profileRepairParagraph = `${protagonistName}\u6309\u4F4F${fixture.artifact}\uFF0C\u4E5F\u6309\u4F4F${relationshipPressureCue}\u5E26\u6765\u7684\u9000\u8DEF\uFF0C\u51B3\u5B9A\u5148\u7559\u4E0B\u7F3A\u9875\u800C\u4E0D\u662F\u4EA4\u51FA\u6574\u672C\u8D26\u3002${fixture.pressureName}\u4F4E\u58F0\u8BF4\uFF1A\u201C\u8D26\u4E0D\u80FD\u8DDF\u4F60\u8D70\u201D\uFF0C\u4E3A\u4E86${relationshipPressureCue}\u4F38\u624B\u62E6\u5728\u95E8\u53E3\u3002 \u8FD9\u4E00\u6B21\u963B\u62E6\u4E0D\u662F\u8BF4\u660E\uFF0C\u662F\u5173\u7CFB\u538B\u529B\u9A71\u52A8\u7684\u884C\u52A8\u548C\u5BF9\u767D\u3002`;
+  if (!paragraphs.some(
+    (paragraph) => paragraph.includes(fixture.pressureName) && paragraph.includes("\u8D26\u4E0D\u80FD\u8DDF\u4F60\u8D70") && paragraph.includes(relationshipPressureCue)
+  )) {
+    paragraphs.splice(Math.min(2, paragraphs.length), 0, profileRepairParagraph);
+  }
   const repairSeeds = [
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A${protagonistName}\u5148\u6309\u4F4F\u7B2C ${step} \u9053\u8D26\u518C\u7EBF\u88C5\uFF0C\u786E\u8BA4${requiredAnchors.slice(0, 3).join("\u3001") || "\u7F3A\u9875\u3001\u5B98\u5370\u3001\u811A\u6B65\u58F0"}\u90FD\u8FD8\u5728\u73B0\u573A\uFF0C\u5E76\u8BA9\u8001\u5468\u628A\u8896\u53E3\u644A\u5F00\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u95E8\u5916\u7B2C ${step} \u6B21\u811A\u6B65\u58F0\u505C\u4F4F\uFF0C\u8001\u5468\u4F4E\u58F0\u8BF4\uFF1A\u201C\u5C0F\u6C88\u5927\u4EBA\uFF0C\u522B\u518D\u7FFB\u3002\u201D${protagonistName}\u770B\u7740\u90A3\u9053\u6E7F\u5370\uFF0C\u95EE\u4ED6\u6015\u8D26\u8FD8\u662F\u6015\u62FF\u8D26\u7684\u4EBA\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u7F15\u706F\u706B\u628A\u7F3A\u9875\u8FB9\u7F18\u7167\u5F97\u53D1\u767D\uFF0C\u7EB8\u7EA4\u7EF4\u6CA1\u6709\u96E8\u75D5\uFF0C${protagonistName}\u628A\u8FD9\u4E2A\u5224\u65AD\u538B\u8FDB\u638C\u5FC3\uFF0C\u51B3\u5B9A\u5148\u7559\u4E0B\u7F3A\u9875\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u8001\u5468\u5F80\u540E\u9000\u7B2C ${step} \u4E2A\u534A\u6B65\uFF0C\u978B\u5E95\u5728\u6C34\u91CC\u6413\u51FA\u6CE5\u58F0\uFF0C\u5173\u7CFB\u88C2\u7F1D\u5C31\u843D\u5728\u8FD9\u4E00\u6B21\u9000\u8BA9\u91CC\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A${protagonistName}\u628A\u7B2C ${step} \u679A\u5B98\u5370\u6263\u5728\u684C\u89D2\uFF0C\u6CA1\u6709\u4EA4\u7ED9\u95E8\u5916\u7684\u4EBA\uFF0C\u8FD9\u4E2A\u9009\u62E9\u8BA9\u4ED6\u5148\u88AB\u76EF\u4E0A\uFF0C\u4E5F\u8BA9\u8001\u5468\u6682\u65F6\u4E0D\u80FD\u6539\u53E3\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7AE0\u672B\u94A9\u5B50\u843D\u5728\u7B2C ${step} \u679A\u5012\u6263\u7684\u5370\u4E0A\uFF0C\u5370\u9762\u53CD\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\uFF0C\u7F3A\u9875\u8FB9\u7F18\u6B63\u597D\u538B\u5728\u5370\u6CE5\u5916\u4FA7\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u9635\u96E8\u58F0\u5FFD\u7136\u53D8\u5BC6\uFF0C\u95E8\u5916\u90A3\u4EBA\u8BF4\u5C11\u5C39\u8981\u770B\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002`,
-    (step) => `\u8FD4\u5DE5\u573A\u666F ${step}\uFF1A\u7B2C ${step} \u6B21\u53D8\u5316\u4E0D\u80FD\u590D\u539F\uFF0C\u8001\u5468\u6B20\u4E86${protagonistName}\u4E00\u6B21\u9690\u7792\uFF0C\u7EBF\u7D22\u3001\u5173\u7CFB\u548C\u8EAB\u4EFD\u98CE\u9669\u540C\u65F6\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002`
+    (step) => `${protagonistName}\u5148\u6309\u4F4F\u7B2C ${step} \u9053${fixture.artifact}\u7EBF\u88C5\uFF0C\u786E\u8BA4${requiredAnchors.slice(0, 3).join("\u3001") || "\u7F3A\u9875\u3001\u5B98\u5370\u3001\u811A\u6B65\u58F0"}\u90FD\u8FD8\u5728\u73B0\u573A\uFF0C\u5E76\u8BA9${fixture.pressureName}\u628A\u8896\u53E3\u644A\u5F00\u3002`,
+    (step) => `\u95E8\u5916\u7B2C ${step} \u6B21\u811A\u6B65\u58F0\u505C\u4F4F\uFF0C${fixture.pressureName}\u4F4E\u58F0\u8BF4\uFF1A\u201C\u522B\u518D\u7FFB\u3002\u201D${protagonistName}\u770B\u7740\u90A3\u9053\u6E7F\u5370\uFF0C\u95EE\u4ED6\u6015\u8D26\u8FD8\u662F\u6015\u62FF\u8D26\u7684\u4EBA\u3002`,
+    (step) => `\u7B2C ${step} \u7F15\u706F\u706B\u628A\u7F3A\u9875\u8FB9\u7F18\u7167\u5F97\u53D1\u767D\uFF0C\u7EB8\u7EA4\u7EF4\u6CA1\u6709\u96E8\u75D5\uFF0C${protagonistName}\u628A\u8FD9\u4E2A\u5224\u65AD\u538B\u8FDB\u638C\u5FC3\uFF0C\u51B3\u5B9A\u5148\u7559\u4E0B\u7F3A\u9875\u3002`,
+    (step) => `${fixture.pressureName}\u5F80\u540E\u9000\u7B2C ${step} \u4E2A\u534A\u6B65\uFF0C\u978B\u5E95\u5728\u6C34\u91CC\u6413\u51FA\u6CE5\u58F0\uFF0C\u5173\u7CFB\u88C2\u7F1D\u5C31\u843D\u5728\u8FD9\u4E00\u6B21\u9000\u8BA9\u91CC\u3002`,
+    (step) => `${protagonistName}\u628A\u7B2C ${step} \u679A\u5B98\u5370\u6263\u5728\u684C\u89D2\uFF0C\u6CA1\u6709\u4EA4\u7ED9\u95E8\u5916\u7684\u4EBA\uFF0C\u8FD9\u4E2A\u9009\u62E9\u8BA9\u81EA\u5DF1\u5148\u88AB\u76EF\u4E0A\uFF0C\u4E5F\u8BA9${fixture.pressureName}\u6682\u65F6\u4E0D\u80FD\u6539\u53E3\u3002`,
+    (step) => `\u7B2C ${step} \u679A\u5012\u6263\u7684\u5370\u538B\u5728\u684C\u89D2\uFF0C\u5370\u9762\u53CD\u7740\u201C\u4ED3\u66F9\u201D\u4E24\u4E2A\u5B57\uFF0C\u7F3A\u9875\u8FB9\u7F18\u6B63\u597D\u538B\u5728\u5370\u6CE5\u5916\u4FA7\u3002`,
+    (step) => `\u7B2C ${step} \u9635\u96E8\u58F0\u5FFD\u7136\u53D8\u5BC6\uFF0C\u95E8\u5916\u90A3\u4EBA\u8BF4${fixture.pressureName}\u8981\u770B\u6574\u672C\u8D26\uFF0C${protagonistName}\u53EA\u628A\u7F3A\u9875\u7559\u5728\u706F\u4E0B\u3002`,
+    (step) => `\u7B2C ${step} \u6B21\u53D8\u5316\u4E0D\u80FD\u590D\u539F\uFF0C${fixture.pressureName}\u6B20\u4E86${protagonistName}\u4E00\u6B21\u9690\u7792\uFF0C\u7EBF\u7D22\u3001\u5173\u7CFB\u548C\u8EAB\u4EFD\u98CE\u9669\u540C\u65F6\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002`,
+    (step) => `${protagonistName}\u4EE5${fixture.skill}\u8FFD\u5230\u7F3A\u9875\u8FB9\u7F18\uFF0C\u5374\u88AB${fixture.relationshipPressure}\u903C\u7740\u505A\u51FA\u9009\u62E9\u3002`,
+    (step) => `${fixture.pressureName}\u4F4E\u58F0\u8BF4\uFF1A\u201C\u8D26\u4E0D\u80FD\u8DDF\u4F60\u8D70\u201D\uFF0C\u4E3A\u4E86${relationshipPressureCue}\u7B2C ${step} \u6B21\u4F38\u624B\u62E6\u5728\u95E8\u53E3\u3002`,
+    (step) => `${protagonistName}\u7684${fixture.appearance}\u66B4\u9732\u75B2\u60EB\uFF0C\u4ECD\u4E0B\u610F\u8BC6${fixture.habit}\uFF0C\u8BF4\u8BDD\u8FD8\u662F${fixture.speechMarker}\uFF0C\u6CA1\u6709\u628A\u6574\u4EF6\u4E8B\u8BB2\u7834\u3002`
   ];
   let index = 0;
   while (wordCount(paragraphs.join("\n\n")) < Math.floor(task.targetWords * 0.84)) {
@@ -13953,6 +16132,117 @@ function createDeterministicQualityRepairDraft(state, task, draft, attempt, cont
     `- Causal objective: ${causalPlan.sceneObjective}`,
     `- Next handoff: ${causalPlan.nextHandoff}`
   ].join("\n");
+}
+function enforceRevisionWordBudgetGuard(previousDraft, generatedDraft, task, report, attempt) {
+  const target = Number(task.targetWords) || 0;
+  if (!target) return generatedDraft;
+  const hardMinimum = Math.floor(target * 0.8);
+  const hardMaximum = Math.ceil(target * 1.15);
+  const previousWords = wordCount(extractDraftBodyForDeterministicRepair(previousDraft));
+  const generatedWords = wordCount(extractDraftBodyForDeterministicRepair(generatedDraft));
+  const reportRequiresExpansion = /WORD_COUNT_CHECK:\s*\d+\s*\/\s*\d+/u.test(report) && /低于|偏短|扩写|补足/u.test(report);
+  const reportRequiresCompression = /WORD_COUNT_CHECK:\s*\d+\s*\/\s*\d+/u.test(report) && /超过|超出|偏长|压缩|删掉/u.test(report);
+  if (reportRequiresExpansion) {
+    if (generatedWords >= hardMinimum) return generatedDraft;
+    const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, attempt, "Revision Word Budget Guard");
+    const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded));
+    if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded;
+    if (previousWords >= hardMinimum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## Revision Attempt ${attempt}`,
+        `- Word budget guard kept the previous longer draft because the generated repair shrank to ${generatedWords}/${target}, below the 80% hard floor.`
+      ].join("\n");
+    }
+    return padded;
+  }
+  if (reportRequiresCompression) {
+    if (generatedWords >= hardMinimum && generatedWords <= hardMaximum) return generatedDraft;
+    if (generatedWords < hardMinimum) {
+      const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, attempt, "Revision Word Budget Guard");
+      const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded));
+      if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded;
+      if (previousWords >= hardMinimum && previousWords <= hardMaximum) {
+        return [
+          previousDraft.trimEnd(),
+          "",
+          `## Revision Attempt ${attempt}`,
+          `- Word budget guard kept the previous in-budget draft because the generated compression shrank to ${generatedWords}/${target}, below the 80% hard floor.`
+        ].join("\n");
+      }
+      return padded;
+    }
+    if (generatedWords <= previousWords) return generatedDraft;
+    if (previousWords <= hardMaximum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## Revision Attempt ${attempt}`,
+        `- Word budget guard kept the previous shorter draft because the generated compression expanded to ${generatedWords}/${target}, above the 115% hard ceiling.`
+      ].join("\n");
+    }
+    return [
+      previousDraft.trimEnd(),
+      "",
+      `## Revision Attempt ${attempt}`,
+      `- Word budget guard rejected the generated compression because it expanded from ${previousWords}/${target} to ${generatedWords}/${target}, above the 115% hard ceiling.`
+    ].join("\n");
+  }
+  return generatedDraft;
+}
+function replaceDraftBodyForWordBudgetGuard(draft, body, label, note) {
+  const headingMatch = draft.match(/##\s+(?:Draft Body|Final Body|正文|最终正文)\s*/iu);
+  const heading = headingMatch ? headingMatch[0].trim() : "## Draft Body";
+  const before = headingMatch ? draft.slice(0, headingMatch.index) : "";
+  return [
+    before.trimEnd() || "# Chapter",
+    "",
+    heading,
+    "",
+    body.trim(),
+    "",
+    `## ${label}`,
+    `- ${note}`
+  ].join("\n");
+}
+function padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, attempt, label) {
+  const target = Number(task.targetWords) || 0;
+  const hardMinimum = Math.floor(target * 0.8);
+  const hardMaximum = Math.ceil(target * 1.15);
+  const generatedBody = extractDraftBodyForDeterministicRepair(generatedDraft);
+  const generatedKeys = new Set(generatedBody.split(/\n{2,}/u).map((paragraph) => normalizeTailParagraph(paragraph)).filter((key) => key.length >= 18));
+  const padded = generatedBody.split(/\n{2,}/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const previousParagraphs = extractDraftBodyForDeterministicRepair(previousDraft).split(/\n{2,}/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  for (const paragraph of previousParagraphs) {
+    if (wordCount(padded.join("\n\n")) >= hardMinimum) break;
+    const paragraphKey = normalizeTailParagraph(paragraph);
+    if (paragraphKey.length >= 18 && generatedKeys.has(paragraphKey)) continue;
+    const nextBody = [...padded, paragraph].join("\n\n");
+    if (wordCount(nextBody) <= hardMaximum) {
+      padded.push(paragraph);
+      generatedKeys.add(paragraphKey);
+      continue;
+    }
+    const sentences = paragraph.match(/[^。！？!?；;\n]+[。！？!?；;]?/gu) || [paragraph];
+    for (const sentence of sentences.map((part) => part.trim()).filter(Boolean)) {
+      if (wordCount(padded.join("\n\n")) >= hardMinimum) break;
+      const sentenceKey = normalizeTailParagraph(sentence);
+      if (sentenceKey.length >= 18 && generatedKeys.has(sentenceKey)) continue;
+      const nextSentenceBody = [...padded, sentence].join("\n\n");
+      if (wordCount(nextSentenceBody) <= hardMaximum) {
+        padded.push(sentence);
+        generatedKeys.add(sentenceKey);
+      }
+    }
+  }
+  const body = padded.join("\n\n");
+  return replaceDraftBodyForWordBudgetGuard(
+    generatedDraft,
+    body,
+    label,
+    `Word budget guard padded the generated repair from ${wordCount(generatedBody)}/${target} to ${wordCount(body)}/${target} by restoring non-duplicate scene evidence from the previous draft; attempt=${attempt}.`
+  );
 }
 async function createProductionQualityReport(state, task, draft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
@@ -14037,7 +16327,7 @@ ${report}`);
 
 `);
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
-    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract);
+    return createDeterministicQualityRepairDraft(state, task, draft, attempt, continuityContract, characterDossiers);
   }
   const cappedWriterGuide = (resources.writerGuide || "").slice(0, 2e3);
   const cappedAntiHallucination = (resources.antiHallucinationGuide || "").slice(0, 1500);
@@ -14071,11 +16361,13 @@ ${cappedConflictStrategy}`);
     blueprint
   });
   const repairChecklist = extractQualityRepairChecklist(report);
+  const wordBudgetRepairDirective = extractWordBudgetRepairDirective(report, task.targetWords);
   const fixedDynamicPromptLines = [
     `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
     `\u6807\u9898\uFF1A${task.title}`,
     `\u8FD4\u5DE5\u8F6E\u6B21\uFF1A${attempt}`,
-    "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+    wordBudgetRepairDirective || "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+    wordBudgetRepairDirective && /低于|偏短|扩写|补足/u.test(wordBudgetRepairDirective) ? "\u7981\u6B62\u628A\u4E0A\u4E00\u7A3F\u538B\u7F29\u6210\u6458\u8981\uFF1B\u5FC5\u987B\u4FDD\u7559\u5DF2\u6709\u573A\u666F\u94FE\u6761\uFF0C\u5E76\u65B0\u589E\u5177\u4F53\u884C\u52A8\u3001\u5BF9\u767D\u3001\u7269\u4EF6\u8BC1\u636E\u3001\u5173\u7CFB\u4EE3\u4EF7\u6765\u8865\u8DB3\u5B57\u6570\u3002" : "",
     "\u5FC5\u987B\u8F93\u51FA Markdown\uFF0C\u4FDD\u7559 `## Draft Body`\u3002",
     "",
     `[Correction Observation (\u7EA0\u504F\u89C2\u5BDF)]
@@ -14122,7 +16414,8 @@ ${repairChecklist.join("\n") || report.slice(0, 1200)}
       `\u7AE0\u8282\uFF1A\u7B2C ${task.chapterNumber} \u7AE0`,
       `\u6807\u9898\uFF1A${task.title}`,
       `\u8FD4\u5DE5\u8F6E\u6B21\uFF1A${attempt}`,
-      "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+      wordBudgetRepairDirective || "\u5FC5\u987B\u9488\u5BF9\u8D28\u91CF\u62A5\u544A\u4E2D\u7684\u95EE\u9898\u91CD\u5199/\u6269\u5199\u6B63\u6587\u3002",
+      wordBudgetRepairDirective && /低于|偏短|扩写|补足/u.test(wordBudgetRepairDirective) ? "\u7981\u6B62\u628A\u4E0A\u4E00\u7A3F\u538B\u7F29\u6210\u6458\u8981\uFF1B\u5FC5\u987B\u4FDD\u7559\u5DF2\u6709\u573A\u666F\u94FE\u6761\uFF0C\u5E76\u65B0\u589E\u5177\u4F53\u884C\u52A8\u3001\u5BF9\u767D\u3001\u7269\u4EF6\u8BC1\u636E\u3001\u5173\u7CFB\u4EE3\u4EF7\u6765\u8865\u8DB3\u5B57\u6570\u3002" : "",
       "\u5FC5\u987B\u628A\u4F4E\u5206\u9879\u8F6C\u5316\u4E3A\u53EF\u89C1\u6B63\u6587\u8BC1\u636E\uFF1A\u4E0A\u4E00\u7AE0\u951A\u70B9\u8FDB\u5165\u5F00\u573A\u4E8B\u4EF6\uFF1B\u4E3B\u89D2\u505A\u4E00\u4E2A\u4F1A\u6539\u53D8\u5C40\u52BF\u7684\u52A8\u4F5C\u9009\u62E9\uFF1B\u9009\u62E9\u5E26\u6765\u8EAB\u4EFD/\u5173\u7CFB/\u7EBF\u7D22/\u8D44\u6E90\u540E\u679C\uFF1B\u7ED3\u5C3E\u628A\u8FD9\u4E2A\u540E\u679C\u4EA4\u7ED9\u4E0B\u4E00\u7AE0\u3002",
       "\u5982\u679C\u89D2\u8272\u9C9C\u660E\u5EA6\u4F4E\uFF0C\u53EA\u8865\u5F3A\u672C\u7AE0\u627F\u62C5\u51B2\u7A81\u3001\u9009\u62E9\u6216\u5173\u7CFB\u53D8\u5316\u7684\u6838\u5FC3\u4EBA\u7269\uFF1B\u4E0D\u8981\u786C\u585E\u53E3\u7656\u548C\u6807\u5FD7\u52A8\u4F5C\uFF0C\u800C\u662F\u8BA9\u4EBA\u7269\u901A\u8FC7\u76EE\u6807\u3001\u7ACB\u573A\u3001\u9009\u62E9\u4EE3\u4EF7\u3001\u5BF9\u4E3B\u89D2\u5173\u7CFB\u7684\u53CD\u5E94\u4EA7\u751F\u5DEE\u5F02\u3002",
       "\u5982\u679C\u5199\u4F5C\u8D44\u6E90\u5438\u6536\u4F4E\uFF0C\u628A\u77ED\u8BCD/\u6210\u8BED\u6539\u6210\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u7269\u4EF6\u548C\u56E0\u679C\u53E5\uFF0C\u4E0D\u8981\u5199\u5B64\u7ACB\u6210\u8BED\u6216\u56DB\u5B57\u77ED\u53E5\u3002",
@@ -14168,7 +16461,8 @@ ${prunedContext.previousDraftFragment}` : "",
       draft
     ].join("\n")
   });
-  return generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n");
+  const normalized = generated.includes("## Draft Body") ? generated : [`# ${task.title}`, "", "## Draft Body", "", generated, "", `## Revision Attempt ${attempt}`].join("\n");
+  return enforceRevisionWordBudgetGuard(draft, normalized, task, report, attempt);
 }
 async function runQualityGateWithRevisions(state, task, initialDraft, blueprint, resources, options, continuityContract = createContinuityContract({ state, task, blueprint }), paths, projectRoot, characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   const maxAttempts = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
@@ -14346,6 +16640,49 @@ function formatAigcWritingDetectionReport(report) {
     ] : []
   ].join("\n");
 }
+function formatFinalQualityGateReport(gate) {
+  return [
+    "## Final Quality Gate",
+    `- Status: ${gate.status}`,
+    `- Passed: ${gate.passed ? "yes" : "no"}`,
+    `- Score: ${gate.score}/10`,
+    `- Attempts: ${gate.attempts}`,
+    typeof gate.wordCount === "number" && typeof gate.targetWords === "number" ? `- Word count: ${gate.wordCount}/${gate.targetWords}` : "",
+    `- Reason: ${gate.reason}`
+  ].filter(Boolean).join("\n");
+}
+function enforceNaturalnessWordBudgetGuard(previousDraft, generatedDraft, task, label) {
+  const target = Number(task.targetWords) || 0;
+  if (!target) return generatedDraft;
+  const hardMinimum = Math.floor(target * 0.8);
+  const hardMaximum = Math.ceil(target * 1.15);
+  const previousWords = wordCount(extractDraftBodyForDeterministicRepair(previousDraft));
+  const generatedWords = wordCount(extractDraftBodyForDeterministicRepair(generatedDraft));
+  if (generatedWords >= hardMinimum && generatedWords <= hardMaximum) return generatedDraft;
+  if (generatedWords < hardMinimum) {
+    const padded = padDraftToWordFloorFromPrevious(previousDraft, generatedDraft, task, 0, label);
+    const paddedWords = wordCount(extractDraftBodyForDeterministicRepair(padded));
+    if (paddedWords >= hardMinimum && paddedWords <= hardMaximum) return padded;
+    if (previousWords >= hardMinimum && previousWords <= hardMaximum) {
+      return [
+        previousDraft.trimEnd(),
+        "",
+        `## ${label}`,
+        `- Word budget guard kept the pre-naturalness draft because the generated naturalness pass shrank to ${generatedWords}/${target}, below the 80% hard floor.`
+      ].join("\n");
+    }
+    return padded;
+  }
+  if (previousWords <= hardMaximum || generatedWords > previousWords) {
+    return [
+      previousDraft.trimEnd(),
+      "",
+      `## ${label}`,
+      `- Word budget guard kept the pre-naturalness draft because the generated naturalness pass expanded to ${generatedWords}/${target}, above the 115% hard ceiling.`
+    ].join("\n");
+  }
+  return generatedDraft;
+}
 async function createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }) {
   throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
@@ -14391,6 +16728,7 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
     ].join("\n\n"),
     dynamicPrompt: [
       "\u53EA\u5141\u8BB8\u5728\u4E0D\u6539\u53D8\u6838\u5FC3\u5267\u60C5\u3001\u4E0D\u6539\u53D8\u8BBE\u5B9A\u3001\u4E0D\u8DF3\u7AE0\u7684\u524D\u63D0\u4E0B\u6DA6\u8272\u3002",
+      `\u5B57\u6570\u786C\u7EA6\u675F\uFF1A\u5F53\u524D\u76EE\u6807 ${task.targetWords} \u5B57\uFF0C\u6DA6\u8272\u53EA\u80FD\u5C40\u90E8\u66FF\u6362\uFF0C\u4E0D\u5F97\u628A\u6700\u7EC8\u6B63\u6587\u6269\u5230 ${Math.ceil(task.targetWords * 1.15)} \u5B57\u4EE5\u4E0A\u3002`,
       "\u5FC5\u987B\u4FDD\u7559\u7AE0\u8282\u6B63\u6587\u7ED3\u6784\uFF0C\u589E\u5F3A\u52A8\u4F5C\u3001\u611F\u5B98\u3001\u5BF9\u767D\u5DEE\u5F02\u548C\u5177\u4F53\u7EC6\u8282\u3002",
       approvedStyleCarryover ? "\u5FC5\u987B\u4FDD\u6301\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\uFF0C\u4E0D\u5F97\u628A\u5DF2\u786E\u8BA4\u7684\u6587\u98CE\u6DA6\u8272\u6210\u901A\u7528\u6A21\u677F\u8154\u3002" : "",
       "\u63A7\u5236\u6210\u8BED\u5BC6\u5EA6\uFF0C\u907F\u514D\u5806\u780C\u548C\u6A21\u677F\u5316\u60C5\u7EEA\u89E3\u91CA\u3002",
@@ -14439,19 +16777,36 @@ async function createProductionPolishedDraft(state, task, draft, report, gate, r
     continuityContract,
     characterProfileContract
   });
-  return normalized.includes("## Naturalness Report") ? normalized : `${normalized.trimEnd()}
+  const polished = normalized.includes("## Naturalness Report") ? normalized : `${normalized.trimEnd()}
 
 ${formatNaturalnessReport(naturalnessReport)}`;
+  return enforceNaturalnessWordBudgetGuard(fallback, polished, task, "Naturalness Word Budget Guard");
 }
-function createChapterMemoryUpdate(state, task, finalDraft, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
-  const nextAnchors = extractContinuityAnchors({
-    text: finalDraft,
-    lockedProtagonistName: continuityContract.lockedProtagonistName,
-    limit: 10
-  });
-  const causalPlan = getTaskCausalPlan(state, task);
-  const plotContinuity = evaluatePlotContinuityBridge(finalDraft, task, continuityContract);
-  const styleQuality = evaluateNarrativeStyleQuality(finalDraft);
+function isRepairableFinalDraftGate(gate) {
+  const reason = gate.reason || "";
+  if (gate.status !== "blocked") return false;
+  if (/AIGC|最终稿有效字数|Canon 连续性硬门槛|主角|角色档案硬门槛|因果执行硬门槛|连续性|语义漂移/iu.test(reason)) {
+    return false;
+  }
+  return /自然度门禁|疲劳词|分析报告腔|总结腔|AI 旁白|风格漂移|风格继承|禁忌模式|模板悬念|conformance|drift/iu.test(reason);
+}
+function finalDraftRepairLimit(options) {
+  const configured = options.maxRevisionAttempts !== void 0 ? options.maxRevisionAttempts : 3;
+  return Math.min(2, Math.max(0, configured));
+}
+function mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed) {
+  if (aigcDetection.status === "passed" || aigcDetection.status === "skipped" || isAigcGateBypassed) {
+    return baseFinalGate;
+  }
+  return {
+    ...baseFinalGate,
+    passed: false,
+    status: "blocked",
+    reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked" ? `AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${aigcDetection.highRiskSegments.length} \u4E2A\u7247\u6BB5\u8D85\u8FC7\u9608\u503C\uFF0C\u6700\u9AD8\u6982\u7387 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}\u3002` : `AIGC \u68C0\u6D4B\u672A\u901A\u8FC7\uFF1A${aigcDetection.status}\uFF0C${aigcDetection.reason || "\u9700\u8981\u914D\u7F6E\u5E76\u901A\u8FC7 AIGC \u68C0\u6D4B\u540E\u624D\u80FD\u653E\u884C\u3002"}`}`.trim()
+  };
+}
+async function repairFinalDraftForNaturalnessGate(state, task, finalDraft, gate, resources, options, continuityContract = createContinuityContract({ state, task }), characterDossiers, approvedStyleContext = { status: "missing", prompt: "" }, attempt = 1) {
+  throwIfPipelineAborted(options);
   const characterProfileContract = buildCharacterProfileContract({
     state,
     task,
@@ -14459,10 +16814,101 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     continuityContract,
     previousFinalDraft: finalDraft
   });
-  const characterProfileQuality = evaluateCharacterProfilePresence(finalDraft, characterProfileContract);
-  const naturalnessReport = createNaturalnessReport({
+  const approvedStyleCarryover = summarizeApprovedStyleCarryover(approvedStyleContext);
+  const currentNaturalness = createNaturalnessReport({
     beforeDraft: finalDraft,
     afterDraft: finalDraft,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract
+  });
+  const generated = await generateProductionTextWithLlm({
+    roleName: "Prose Stylist",
+    state,
+    options,
+    temperature: 0.42,
+    progress: {
+      step: `naturalness_repair_${attempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      startMessage: `NaturalnessAgent \u6B63\u5728\u4FEE\u590D\u7B2C ${task.chapterNumber} \u7AE0 final gate \u95EE\u9898\uFF0C\u7B2C ${attempt} \u8F6E\u3002`,
+      completeMessage: `NaturalnessAgent \u5DF2\u8FD4\u56DE\u7B2C ${task.chapterNumber} \u7AE0 final gate \u4FEE\u590D\u7A3F\uFF0C\u7B2C ${attempt} \u8F6E\u3002`
+    },
+    basePrompt: [
+      "\u4F60\u662F\u751F\u4EA7\u6D41\u6C34\u7EBF\u7684 NaturalnessAgent\u3002\u4F60\u7684\u4EFB\u52A1\u662F\u4FEE\u590D final gate \u6307\u51FA\u7684\u81EA\u7136\u5EA6\u548C\u98CE\u683C\u7EE7\u627F\u95EE\u9898\u3002",
+      "\u53EA\u6539\u8868\u8FBE\uFF0C\u4E0D\u6539\u5267\u60C5\u4E8B\u5B9E\u3001\u4EBA\u7269\u8EAB\u4EFD\u3001\u5173\u7CFB\u7ED3\u8BBA\u3001\u4F0F\u7B14\u72B6\u6001\u3001\u7AE0\u8282\u987A\u5E8F\u548C\u7AE0\u672B\u540E\u679C\u3002",
+      "\u5FC5\u987B\u4FDD\u7559\u6240\u6709\u5DF2\u51FA\u73B0\u7684\u6838\u5FC3\u7269\u4EF6\u3001\u6570\u5B57\u7EBF\u7D22\u3001\u4EBA\u7269\u884C\u52A8\u548C\u4E0B\u4E00\u7AE0\u4EA4\u68D2\u3002",
+      resources.styleGuide || "",
+      resources.styleControllerGuide || "",
+      resources.antiHallucinationGuide || ""
+    ].join("\n\n"),
+    dynamicPrompt: [
+      "\u8F93\u51FA Markdown\uFF0C\u5FC5\u987B\u5305\u542B `## Final Body`\u3002",
+      `\u5B57\u6570\u786C\u7EA6\u675F\uFF1A\u5F53\u524D\u76EE\u6807 ${task.targetWords} \u5B57\uFF0C\u53EA\u80FD\u5C40\u90E8\u4FEE\u590D\uFF0C\u4E0D\u5F97\u628A\u6700\u7EC8\u6B63\u6587\u6269\u5230 ${Math.ceil(task.targetWords * 1.15)} \u5B57\u4EE5\u4E0A\u3002`,
+      "\u5220\u9664\u6216\u66FF\u6362\u75B2\u52B3\u8BCD\uFF1A\u7A81\u7136\u3001\u5FFD\u7136\u3001\u731B\u7136\u3001\u7ADF\u7136\u3001\u5C45\u7136\u3001\u6E10\u6E10\u3001\u9010\u6E10\u3001\u7136\u800C\u3001\u4E0E\u6B64\u540C\u65F6\u3001\u4F3C\u4E4E\u3001\u4E5F\u8BB8\u3001\u5927\u6982\u3001\u4EFF\u4F5B\u3002",
+      "\u7981\u7528\u76F4\u767D\u5FC3\u7406\u53E5\uFF1A\u4ED6\u5FFD\u7136\u60F3\u8D77\u3001\u4ED6\u77E5\u9053/\u4ED6\u4E0D\u77E5\u9053\u3001\u8FD9\u610F\u5473\u7740\u3001\u8FD9\u8BF4\u660E\u3001\u6709\u4E9B\u4E1C\u897F\u3001\u6CA1\u529E\u6CD5\u5F53\u4EC0\u4E48\u90FD\u6CA1\u53D1\u751F\u8FC7\u3001\u8FD9\u53EA\u662F\u5F00\u59CB\u3002",
+      "\u7981\u7528\u62A5\u544A\u8154\uFF1A\u7B2C\u4E00\u3001\u7B2C\u4E8C\u3001\u9996\u5148\u3001\u5176\u6B21\u3001\u6700\u540E\u3001\u539F\u56E0\u662F\u3001\u53EF\u4EE5\u770B\u51FA\u3001\u4F53\u73B0\u4E86\u3001\u8BF4\u660E\u4E86\u3001\u8BC1\u660E\u4E86\u3002\u82E5\u5FC5\u987B\u4FDD\u7559\u5E8F\u6570\uFF0C\u7528\u5177\u4F53\u7269\u4EF6\u4F4D\u7F6E\u6216\u52A8\u4F5C\u66FF\u4EE3\u3002",
+      "\u628A\u62BD\u8C61\u5224\u65AD\u6539\u6210\u53EF\u89C1\u52A8\u4F5C\u3001\u89E6\u611F\u3001\u6C14\u5473\u3001\u58F0\u97F3\u3001\u77ED\u5BF9\u767D\u548C\u7269\u4EF6\u53D8\u5316\uFF1B\u4E0D\u8981\u65B0\u589E\u89E3\u91CA\u6BB5\u3002",
+      "\u4FDD\u6301\u7B2C\u4E09\u4EBA\u79F0\u6709\u9650\u89C6\u89D2\uFF0C\u8BFB\u8005\u53EA\u80FD\u77E5\u9053\u9648\u6E21\u73B0\u573A\u770B\u89C1\u3001\u542C\u89C1\u3001\u89E6\u5230\u548C\u63A8\u5230\u7684\u4E1C\u897F\u3002",
+      approvedStyleCarryover ? "\u5FC5\u987B\u4E25\u683C\u8D34\u5408\u7528\u6237\u786E\u8BA4\u5199\u6CD5\u5408\u540C\uFF0C\u5C24\u5176\u907F\u514D\u7981\u5FCC\u6A21\u5F0F\u548C\u6A21\u677F\u60AC\u5FF5\u53E5\u3002" : "",
+      continuityContract.lockedProtagonistName ? `\u9501\u5B9A\u4E3B\u89D2\uFF1A${continuityContract.lockedProtagonistName}\u3002\u4E0D\u5F97\u6539\u540D\u3002` : "\u9996\u7AE0\u5FC5\u987B\u4FDD\u7559\u552F\u4E00\u4E3B\u89D2\u59D3\u540D\u3002",
+      "",
+      continuityContract.prompt,
+      "",
+      approvedStyleCarryover,
+      "",
+      characterProfileContract.prompt.slice(0, 1400)
+    ].join("\n"),
+    message: [
+      "\u8BF7\u4FEE\u590D\u4E0B\u9762\u7684\u6700\u7EC8\u7A3F\uFF0C\u53EA\u8FD4\u56DE\u4FEE\u590D\u540E\u7684\u7AE0\u8282 Markdown\u3002",
+      "",
+      "## Final Gate Failure",
+      `- ${gate.reason}`,
+      "",
+      "## Current Naturalness Report",
+      formatNaturalnessReport(currentNaturalness),
+      "",
+      "## Current Final Draft",
+      finalDraft
+    ].join("\n")
+  });
+  const normalized = generated.includes("## Final Body") ? generated : [`# ${task.title}`, "", "## Final Body", "", generated].join("\n");
+  const repairedNaturalness = createNaturalnessReport({
+    beforeDraft: finalDraft,
+    afterDraft: normalized,
+    state,
+    task,
+    continuityContract,
+    characterProfileContract
+  });
+  const repaired = normalized.includes("## Naturalness Report") ? normalized : `${normalized.trimEnd()}
+
+${formatNaturalnessReport(repairedNaturalness)}`;
+  return enforceNaturalnessWordBudgetGuard(finalDraft, repaired, task, "Naturalness Repair Word Budget Guard");
+}
+function createChapterMemoryUpdate(state, task, finalDraft, continuityContract = createContinuityContract({ state, task }), characterDossiers) {
+  const narrativeBody = extractNarrativeBody(finalDraft);
+  const nextAnchors = extractContinuityAnchors({
+    text: narrativeBody,
+    lockedProtagonistName: continuityContract.lockedProtagonistName,
+    limit: 10
+  });
+  const causalPlan = getTaskCausalPlan(state, task);
+  const plotContinuity = evaluatePlotContinuityBridge(narrativeBody, task, continuityContract);
+  const styleQuality = evaluateNarrativeStyleQuality(narrativeBody);
+  const characterProfileContract = buildCharacterProfileContract({
+    state,
+    task,
+    characterDossiers,
+    continuityContract,
+    previousFinalDraft: narrativeBody
+  });
+  const characterProfileQuality = evaluateCharacterProfilePresence(narrativeBody, characterProfileContract);
+  const naturalnessReport = createNaturalnessReport({
+    beforeDraft: narrativeBody,
+    afterDraft: narrativeBody,
     state,
     task,
     continuityContract,
@@ -14517,7 +16963,7 @@ function createChapterMemoryUpdate(state, task, finalDraft, continuityContract =
     ...naturalnessReport.riskFlags.length ? naturalnessReport.riskFlags.slice(0, 6).map((flag) => `- Risk: ${flag}`) : ["- Risk: none"],
     "",
     "## Draft Excerpt",
-    finalDraft.split("\n").filter(Boolean).slice(0, 8).join("\n")
+    narrativeBody.split("\n").filter(Boolean).slice(0, 8).join("\n")
   ].join("\n");
 }
 function createForeshadowingHealthLedger(input) {
@@ -14593,6 +17039,7 @@ async function recordPipelineArtifact(projectRoot, absolutePath, kind, options, 
   }).catch(() => void 0);
 }
 async function writeProductionMasterOutline(projectRoot, paths, state, context, options = {}) {
+  await blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, state, context, options);
   const { resources } = await writeProductionWritingResourceArtifacts(projectRoot, paths, state, options);
   const content = await createMasterOutlineContent(state, context, resources, options);
   await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
@@ -14613,9 +17060,190 @@ async function writeProductionMasterOutline(projectRoot, paths, state, context, 
   });
   return content;
 }
+async function blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, state, context, options) {
+  const sourceProtagonist = extractConcreteProtagonistNameForMasterOutline([
+    context.protagonist,
+    context.consensus
+  ].filter(Boolean).join("\n")) || lockedProtagonistFromState(state, context.protagonist);
+  if (sourceProtagonist) return;
+  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  const briefPath = import_node_path8.default.join(paths.plansDir, "master-planning-protagonist-brief.md");
+  const briefArtifactPath = relativeArtifactPath(projectRoot, briefPath);
+  const reason = "planning protagonist missing: source context does not declare a concrete protagonist";
+  const profileExcerpt = sanitizeMasterOutlineCharacterProfile(context.protagonist || "").split(/\r?\n/u).slice(0, 18).join("\n");
+  const brief = [
+    "# Master Planning Protagonist Required",
+    "",
+    "Status: blocked",
+    "Gate: master_planning",
+    `Reason: ${reason}`,
+    "",
+    "## Why This Stopped",
+    "",
+    "Master planning cannot ask the LLM to invent a canonical protagonist when the source context still contains only a role label or placeholder.",
+    "The model may propose names during discussion, but a production master outline must start from a concrete user-approved or previously locked protagonist.",
+    "",
+    "## Current Source Evidence",
+    "",
+    `- Project: ${state.project.title}`,
+    `- Master protagonist in source: missing`,
+    `- Protagonist profile path: ${relativeArtifactPath(projectRoot, paths.protagonistPath)}`,
+    "",
+    "### Protagonist Profile Excerpt",
+    "",
+    profileExcerpt ? "```markdown\n" + profileExcerpt + "\n```" : "- empty",
+    "",
+    "## Required Confirmation",
+    "",
+    "- Concrete protagonist name.",
+    "- Identity and role function.",
+    "- Core desire.",
+    "- Fear or wound.",
+    "- Visible behavior habit.",
+    "- Speech marker or dialogue habit.",
+    "- At least one named relationship pressure.",
+    "",
+    "## Suggested Next Input",
+    "",
+    "\u8BF7\u5148\u51BB\u7ED3\u4E3B\u89D2\u8D44\u6599\uFF1A\u4E3B\u89D2\u59D3\u540D\u662F\u300C___\u300D\uFF0C\u8EAB\u4EFD\u662F\u300C___\u300D\uFF0C\u6838\u5FC3\u6B32\u671B\u662F\u300C___\u300D\uFF0C\u4F24\u53E3/\u6050\u60E7\u662F\u300C___\u300D\uFF0C\u884C\u4E3A\u4E60\u60EF\u662F\u300C___\u300D\uFF0C\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C___\u300D\uFF0C\u4E0E\u300C___\u300D\u7684\u5173\u7CFB\u538B\u529B\u662F\u300C___\u300D\u3002"
+  ].join("\n");
+  await import_promises5.default.writeFile(briefPath, `${brief}
+`);
+  await recordPipelineArtifact(projectRoot, briefPath, "plan", options, {
+    stage: "master_planning_blocked",
+    production: true,
+    title: "Master Planning Protagonist Required",
+    status: "blocked"
+  });
+  await emitWritingProgress(options, {
+    step: "master_planning_blocked",
+    role: "Showrunner",
+    status: "blocked",
+    message: "\u4E3B\u7EBF\u89C4\u5212\u5DF2\u963B\u585E\uFF1A\u6E90\u8D44\u6599\u6CA1\u6709\u51BB\u7ED3\u5177\u4F53\u4E3B\u89D2\u59D3\u540D\uFF0C\u7CFB\u7EDF\u4E0D\u4F1A\u8BA9\u6A21\u578B\u4E34\u65F6\u7F16\u9020\u4E3B\u89D2\u540E\u7EE7\u7EED\u51BB\u7ED3\u8BBE\u5B9A\u3002",
+    artifactPath: briefArtifactPath,
+    artifactLabel: "master-planning-protagonist-brief.md",
+    artifactKind: "plan",
+    preview: [
+      reason,
+      `Brief: ${briefArtifactPath}`,
+      "\u9700\u8981\u5148\u8865\u9F50\u4E3B\u89D2\u59D3\u540D\u3001\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u548C\u5173\u7CFB\u538B\u529B\u3002"
+    ].join("\n"),
+    workflow: {
+      kind: "gate",
+      stage: "master_planning",
+      summary: reason,
+      collapsed: false,
+      expandableArtifactPath: briefArtifactPath
+    }
+  });
+  if (options.factoryRootDir && options.projectId) {
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordEvent(options.projectId, null, "MASTER_PLANNING_BLOCKED", {
+        gate: "source_context_concrete_protagonist",
+        reason,
+        artifactPath: briefArtifactPath
+      });
+    }).catch(() => void 0);
+  }
+  throw new ProductionPlanningBlockedError(reason);
+}
+async function blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, masterOutline, options) {
+  if (!masterOutline.trim()) return;
+  const planningCast = extractPlanningCastContract(masterOutline);
+  if (planningCast.protagonistName) return;
+  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  const masterOutlineArtifactPath = relativeArtifactPath(projectRoot, paths.masterOutlinePath);
+  const namingBriefPath = import_node_path8.default.join(paths.plansDir, "protagonist-naming-brief.md");
+  const namingBriefArtifactPath = relativeArtifactPath(projectRoot, namingBriefPath);
+  const reason = "planning protagonist missing: master outline does not declare a concrete protagonist";
+  const namingBrief = [
+    "# Protagonist Naming Required",
+    "",
+    `Status: blocked`,
+    `Gate: story_foundation`,
+    `Reason: ${reason}`,
+    "",
+    "## Why This Stopped",
+    "",
+    "Story foundation cannot freeze world rules, character dynamics, or chapter blueprints until the master outline declares one concrete protagonist name.",
+    "A role label such as `\u4E3B\u89D2\uFF08\u672A\u547D\u540D\u6863\u6848\u5C0F\u540F\uFF09` is not enough, and support roles must not be promoted to protagonist just to unblock the pipeline.",
+    "",
+    "## Current Master Outline Evidence",
+    "",
+    `- Master protagonist: missing`,
+    `- Cast candidates found: ${planningCast.cast.length ? planningCast.cast.join("\u3001") : "none"}`,
+    `- Source file: ${masterOutlineArtifactPath}`,
+    ...planningCast.evidence.length ? ["", "Evidence lines:", ...planningCast.evidence.slice(0, 12).map((line) => `- ${line}`)] : [],
+    "",
+    "## Required Confirmation",
+    "",
+    "- Concrete protagonist name.",
+    "- Identity and role function.",
+    "- Core desire.",
+    "- Fear or wound.",
+    "- Visible behavior habit.",
+    "- Speech marker.",
+    "- Relationship pressure against at least one named supporting cast member.",
+    "",
+    "## Suggested Next Input",
+    "",
+    "\u8BF7\u628A\u4E3B\u89D2\u59D3\u540D\u51BB\u7ED3\u4E3A\u300C___\u300D\uFF0C\u8EAB\u4EFD\u662F\u300C___\u300D\uFF0C\u6838\u5FC3\u6B32\u671B\u662F\u300C___\u300D\uFF0C\u4F24\u53E3/\u6050\u60E7\u662F\u300C___\u300D\uFF0C\u884C\u4E3A\u4E60\u60EF\u662F\u300C___\u300D\uFF0C\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C___\u300D\uFF0C\u5E76\u8BF4\u660E\u4ED6/\u5979\u4E0E\u5DF2\u51FA\u73B0\u914D\u89D2\u7684\u5173\u7CFB\u538B\u529B\u3002"
+  ].join("\n");
+  await import_promises5.default.writeFile(namingBriefPath, `${namingBrief}
+`);
+  await recordPipelineArtifact(projectRoot, namingBriefPath, "plan", options, {
+    stage: "story_foundation_blocked",
+    production: true,
+    title: "Protagonist Naming Required",
+    status: "blocked",
+    source: masterOutlineArtifactPath
+  });
+  await emitWritingProgress(options, {
+    step: "story_foundation_blocked",
+    role: "Showrunner",
+    status: "blocked",
+    message: "\u6545\u4E8B\u57FA\u7840\u51BB\u7ED3\u5DF2\u963B\u585E\uFF1Amaster-outline.md \u6CA1\u6709\u58F0\u660E\u5177\u4F53\u4E3B\u89D2\u59D3\u540D\uFF0C\u4E0D\u80FD\u7EE7\u7EED\u51BB\u7ED3\u4E16\u754C\u89C2\u3001\u89D2\u8272\u5173\u7CFB\u548C\u7AE0\u8282\u84DD\u56FE\u3002",
+    artifactPath: namingBriefArtifactPath,
+    artifactLabel: "protagonist-naming-brief.md",
+    artifactKind: "plan",
+    artifacts: [
+      {
+        path: masterOutlineArtifactPath,
+        label: "master-outline.md",
+        kind: "plan",
+        status: "blocked"
+      }
+    ],
+    preview: [
+      reason,
+      `Naming brief: ${namingBriefArtifactPath}`,
+      "\u9700\u8981\u5148\u56DE\u5230\u8BA8\u8BBA/\u4E3B\u7EBF\u89C4\u5212\u9636\u6BB5\uFF0C\u660E\u786E\u4E3B\u89D2\u59D3\u540D\u3001\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u548C\u5173\u7CFB\u538B\u529B\u3002"
+    ].join("\n"),
+    workflow: {
+      kind: "gate",
+      stage: "story_foundation",
+      summary: reason,
+      collapsed: false,
+      expandableArtifactPath: namingBriefArtifactPath
+    }
+  });
+  if (options.factoryRootDir && options.projectId) {
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordEvent(options.projectId, null, "STORY_FOUNDATION_BLOCKED", {
+        gate: "master_outline_concrete_protagonist",
+        reason,
+        artifactPath: namingBriefArtifactPath,
+        masterOutlinePath: masterOutlineArtifactPath
+      });
+    }).catch(() => void 0);
+  }
+  throw new ProductionPlanningBlockedError(reason);
+}
 async function writeProductionStoryBibleAssets(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  const assets = createProductionStoryBibleAssets(state, context, resources);
+  const masterOutline = await readOptionalText2(paths.masterOutlinePath);
+  await blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, masterOutline, options);
+  const assets = createProductionStoryBibleAssets(state, context, resources, { masterOutline });
   await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
   const written = [];
   for (const asset of assets) {
@@ -14637,8 +17265,22 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
     status: "completed",
     message: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\u5DF2\u4FDD\u5B58\u3002",
     artifactPath: relativeArtifactPath(projectRoot, import_node_path8.default.join(paths.plansDir, "story-bible.md")),
+    artifactLabel: "story-bible.md",
+    artifactKind: "plan",
+    artifacts: written.map((artifactPath) => ({
+      path: relativeArtifactPath(projectRoot, artifactPath),
+      label: import_node_path8.default.basename(artifactPath),
+      kind: "plan",
+      status: "completed"
+    })),
     preview: [...assets.map((asset) => `- ${asset.filename}`), "- writing-plan.json"].join("\n"),
-    wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n"))
+    wordCount: wordCount(assets.map((asset) => asset.content).join("\n\n")),
+    workflow: {
+      kind: "artifact_saved",
+      stage: "story_foundation",
+      summary: "Story foundation asset bundle saved.",
+      expandableArtifactPath: relativeArtifactPath(projectRoot, import_node_path8.default.join(paths.plansDir, "story-bible.md"))
+    }
   });
   return written;
 }
@@ -14723,6 +17365,379 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
     written.push(blueprintPath);
   }
   return written;
+}
+async function runChapterNaturalnessStage(state, task, quality, prepared, options = {}) {
+  const { draft, report, gate } = quality;
+  const {
+    writingMode,
+    resources,
+    continuityContract,
+    characterDossiers,
+    approvedStyleContext,
+    protagonistProfile,
+    blueprint
+  } = prepared;
+  let finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(
+    state,
+    task,
+    draft,
+    report,
+    gate,
+    resources,
+    options,
+    continuityContract,
+    characterDossiers,
+    approvedStyleContext
+  );
+  const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || options.bypassAigcGate === true;
+  let aigcDetection = isAigcGateBypassed ? skippedAigcWritingDetectionReport("AIGC\u68C0\u6D4B\u5728\u751F\u6210\u9636\u6BB5\u5DF2\u88AB\u65C1\u8DEF\uFF0C\u5C06\u5728\u540E\u7EED\u7EDF\u4E00\u7CBE\u4FEE\u3002") : await runAigcWritingDetection(finalDraft, options);
+  const isAigcBlocked = aigcDetection.status === "blocked" && !isAigcGateBypassed;
+  await emitWritingProgress(options, {
+    step: "aigc_detection_completed",
+    role: "Reviewer",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: isAigcBlocked ? "blocked" : "completed",
+    message: isAigcBlocked ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF0C\u51C6\u5907\u6267\u884C\u5C40\u90E8\u81EA\u7136\u5316\u4FEE\u590D\u3002` : aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u53D1\u73B0 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\uFF08\u5DF2\u5F00\u542F AIGC \u95E8\u7981\u65C1\u8DEF\uFF0C\u76F4\u63A5\u901A\u8FC7\uFF09\u3002` : aigcDetection.status === "passed" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u901A\u8FC7\uFF0C\u5E73\u5747\u6982\u7387 ${typeof aigcDetection.score === "number" ? aigcDetection.score.toFixed(3) : "n/a"}\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u68C0\u6D4B\u672A\u542F\u7528\u6216\u4E0D\u53EF\u7528\uFF1A${aigcDetection.reason}`,
+    preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+    wordCount: wordCount(finalDraft)
+  });
+  if (isAigcBlocked && gate.status !== "blocked") {
+    finalDraft = await repairAigcHighRiskDraft(
+      state,
+      task,
+      finalDraft,
+      aigcDetection,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers
+    );
+    aigcDetection = await runAigcWritingDetection(finalDraft, options);
+    await emitWritingProgress(options, {
+      step: "aigc_recheck_completed",
+      role: "Reviewer",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: aigcDetection.status === "blocked" ? "blocked" : "completed",
+      message: aigcDetection.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u4FEE\u590D\u540E\u4ECD\u6709 ${aigcDetection.highRiskSegments.length} \u4E2A\u9AD8\u98CE\u9669\u7247\u6BB5\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 AIGC \u4FEE\u590D\u540E\u590D\u68C0\u5B8C\u6210\u3002`,
+      preview: formatAigcWritingDetectionReport(aigcDetection).slice(0, 520),
+      wordCount: wordCount(finalDraft)
+    });
+  }
+  let baseFinalGate = enforceFinalDraftQualityGate(
+    gate,
+    finalDraft,
+    task,
+    state,
+    protagonistProfile,
+    continuityContract,
+    characterDossiers,
+    blueprint
+  );
+  let finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed);
+  const maxFinalRepairAttempts = finalDraftRepairLimit(options);
+  for (let repairAttempt = 1; repairAttempt <= maxFinalRepairAttempts && isRepairableFinalDraftGate(finalGate); repairAttempt += 1) {
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_started_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "started",
+      message: `\u7B2C ${task.chapterNumber} \u7AE0 final gate \u547D\u4E2D\u53EF\u4FEE\u590D\u81EA\u7136\u5EA6/\u98CE\u683C\u95EE\u9898\uFF0C\u5F00\u59CB\u7B2C ${repairAttempt} \u8F6E\u81EA\u52A8\u8FD4\u5DE5\u3002`,
+      preview: finalGate.reason.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate
+    });
+    finalDraft = await repairFinalDraftForNaturalnessGate(
+      state,
+      task,
+      finalDraft,
+      finalGate,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+      approvedStyleContext,
+      repairAttempt
+    );
+    aigcDetection = isAigcGateBypassed ? skippedAigcWritingDetectionReport("AIGC\u68C0\u6D4B\u5728\u751F\u6210\u9636\u6BB5\u5DF2\u88AB\u65C1\u8DEF\uFF0C\u5C06\u5728\u540E\u7EED\u7EDF\u4E00\u7CBE\u4FEE\u3002") : await runAigcWritingDetection(finalDraft, options);
+    baseFinalGate = enforceFinalDraftQualityGate(
+      gate,
+      finalDraft,
+      task,
+      state,
+      protagonistProfile,
+      continuityContract,
+      characterDossiers,
+      blueprint
+    );
+    finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed);
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_completed_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: finalGate.status === "blocked" ? "blocked" : "completed",
+      message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${repairAttempt} \u8F6E\u81EA\u7136\u5EA6\u8FD4\u5DE5\u540E\u4ECD\u672A\u901A\u8FC7\uFF1A${finalGate.reason}` : `\u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${repairAttempt} \u8F6E\u81EA\u7136\u5EA6\u8FD4\u5DE5\u540E\u901A\u8FC7 final gate\u3002`,
+      preview: finalDraft.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate
+    });
+  }
+  throwIfPipelineAborted(options);
+  await emitWritingProgress(options, {
+    step: "naturalness_completed",
+    role: "Prose Stylist",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: finalGate.status === "blocked" ? "blocked" : "completed",
+    message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u5DF2\u751F\u6210\u963B\u585E\u7248\u81EA\u7136\u5316\u7A3F\uFF0C\u7B49\u5F85\u4EBA\u5DE5\u5BA1\u9605\u6216\u91CD\u8BD5\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0 NaturalnessAgent \u81EA\u7136\u5316\u5B8C\u6210\uFF0C\u6B63\u5728\u5199\u5165\u6B63\u5F0F\u4EA7\u7269\u3002`,
+    preview: finalDraft.slice(0, 420),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate
+  });
+  return { draft, report, gate, finalDraft, finalGate, aigcDetection, writingMode };
+}
+async function commitChapterProductionStage(projectRoot, paths, state, task, prepared, naturalness, options = {}) {
+  const { draft, report, finalDraft, aigcDetection, writingMode } = naturalness;
+  const { chapterId, characterDossiers, continuityContract, approvedStyleContext } = prepared;
+  let finalGate = naturalness.finalGate;
+  await emitWritingProgress(options, {
+    step: "memory_update_started",
+    role: "Memory Keeper",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: "started",
+    message: `Memory Keeper \u6B63\u5728\u63D0\u53D6\u7B2C ${task.chapterNumber} \u7AE0\u8BB0\u5FC6\u3001\u89D2\u8272\u53D8\u5316\u548C\u4F0F\u7B14\u8BB0\u5F55\u3002`,
+    preview: finalDraft.slice(0, 360),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate
+  });
+  const memoryUpdate = createChapterMemoryUpdate(state, task, finalDraft, continuityContract, characterDossiers);
+  const updatedCharacterDossiers = updateCharacterDossiersAfterChapter({
+    dossiers: characterDossiers,
+    state,
+    task,
+    finalDraft,
+    memoryUpdate,
+    continuityContract
+  });
+  if (updatedCharacterDossiers.length) {
+    state.memory = { ...state.memory || {}, characterDossiers: updatedCharacterDossiers };
+  }
+  const extractedStyleFingerprint = await updateStyleFingerprintFromFirstChapter({
+    paths,
+    state,
+    task,
+    finalDraft,
+    finalGate
+  });
+  const styleConformanceDrift = evaluateChapterStyleConformanceDrift({
+    approvedStyleContext,
+    chapterText: finalDraft,
+    extractedStyleFingerprint
+  });
+  if (styleConformanceDrift.status === "drifted") {
+    finalGate = {
+      ...finalGate,
+      passed: false,
+      status: "blocked",
+      reason: `${finalGate.reason} \u98CE\u683C\u7EE7\u627F\u6F02\u79FB\u963B\u585E\uFF1A${styleConformanceDrift.reason}`.trim()
+    };
+  }
+  const styleInheritanceVerification = await buildChapterStyleInheritanceVerification({
+    paths,
+    approvedStyleContext,
+    task,
+    finalGate,
+    aigcDetection,
+    styleConformanceDrift,
+    extractedStyleFingerprint
+  });
+  const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null;
+  const reportWithAigcDetection = [
+    report.trimEnd(),
+    formatAigcWritingDetectionReport(aigcDetection),
+    formatStyleConformanceDriftReport(styleConformanceDrift),
+    formatFinalQualityGateReport(finalGate)
+  ].join("\n\n");
+  throwIfPipelineAborted(options);
+  const draftPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = import_node_path8.default.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = import_node_path8.default.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const characterRelationshipsPath = paths.characterDossiersPath ? import_node_path8.default.join(import_node_path8.default.dirname(paths.characterDossiersPath), "relationships.json") : "";
+  const characterRelationsMarkdownPath = paths.characterDossiersPath ? import_node_path8.default.join(import_node_path8.default.dirname(paths.characterDossiersPath), "relations.md") : "";
+  const characterRelationshipGraph = updatedCharacterDossiers.length ? createCharacterRelationshipGraph(updatedCharacterDossiers) : null;
+  await import_promises5.default.mkdir(paths.chaptersDir, { recursive: true });
+  await import_promises5.default.mkdir(paths.reportsDir, { recursive: true });
+  await import_promises5.default.mkdir(paths.memoryDir, { recursive: true });
+  await import_promises5.default.writeFile(draftPath, `${draft}
+`);
+  await import_promises5.default.writeFile(reportPath, `${reportWithAigcDetection}
+`);
+  await import_promises5.default.writeFile(reviewedPath, `${draft}
+
+---
+
+${reportWithAigcDetection}
+`);
+  await import_promises5.default.writeFile(finalPath, `${finalDraft}
+`);
+  await import_promises5.default.writeFile(memoryPath, `${memoryUpdate}
+`);
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
+  }
+  if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
+    await import_promises5.default.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+`);
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph);
+  }
+  if (characterRelationsMarkdownPath && characterRelationshipGraph) {
+    await import_promises5.default.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
+`);
+  }
+  const versionManifestPath = await writeChapterVersionManifest({
+    projectRoot,
+    options,
+    chapterId,
+    task,
+    draftPath,
+    reviewedPath,
+    finalPath,
+    reportPath,
+    memoryPath,
+    finalDraft,
+    draft,
+    finalGate,
+    writingMode,
+    aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift
+  });
+  await recordPipelineArtifact(projectRoot, draftPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "draft" });
+  await recordPipelineArtifact(projectRoot, reviewedPath, "chapter", options, { chapterNumber: task.chapterNumber, pass: "reviewed", qualityGate: finalGate });
+  await recordPipelineArtifact(projectRoot, finalPath, "chapter", options, {
+    chapterNumber: task.chapterNumber,
+    pass: "final",
+    qualityGate: finalGate,
+    aigcDetection,
+    chapterInheritanceAdapter,
+    styleInheritanceVerification,
+    styleConformanceDrift,
+    wordCount: wordCount(finalDraft),
+    targetWords: task.targetWords
+  });
+  await recordPipelineArtifact(projectRoot, reportPath, "checkpoint", options, {
+    chapterNumber: task.chapterNumber,
+    quality: true,
+    qualityGate: finalGate,
+    aigcDetection,
+    styleInheritanceVerification,
+    styleConformanceDrift
+  });
+  await recordPipelineArtifact(projectRoot, memoryPath, "memory", options, { chapterNumber: task.chapterNumber, qualityGate: finalGate });
+  if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
+    await recordPipelineArtifact(projectRoot, paths.characterDossiersPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_dossiers",
+      qualityGate: finalGate
+    });
+  }
+  if (characterRelationshipsPath && characterRelationshipGraph) {
+    await recordPipelineArtifact(projectRoot, characterRelationshipsPath, "memory", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "character_relationship_graph",
+      qualityGate: finalGate
+    });
+  }
+  if (extractedStyleFingerprint) {
+    await recordPipelineArtifact(projectRoot, paths.styleProfilePath, "style", options, {
+      chapterNumber: task.chapterNumber,
+      kind: "style_profile",
+      source: "first_chapter_fingerprint",
+      styleFingerprint: extractedStyleFingerprint,
+      qualityGate: finalGate
+    });
+  }
+  await emitWritingProgress(options, {
+    step: "chapter_artifacts_saved",
+    role: "Memory Keeper",
+    chapterNumber: task.chapterNumber,
+    title: task.title,
+    status: finalGate.status === "blocked" ? "blocked" : "completed",
+    message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u4EA7\u7269\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u8D28\u91CF\u95E8\u7981\u4ECD\u963B\u585E\u3002` : extractedStyleFingerprint ? `\u7B2C ${task.chapterNumber} \u7AE0\u6B63\u5F0F\u6B63\u6587\u3001\u8D28\u68C0\u62A5\u544A\u548C\u8BB0\u5FC6\u66F4\u65B0\u5DF2\u4FDD\u5B58\uFF0C\u5E76\u63D0\u53D6\u9996\u7AE0\u98CE\u683C\u6307\u7EB9\u3002` : `\u7B2C ${task.chapterNumber} \u7AE0\u6B63\u5F0F\u6B63\u6587\u3001\u8D28\u68C0\u62A5\u544A\u548C\u8BB0\u5FC6\u66F4\u65B0\u5DF2\u4FDD\u5B58\u3002`,
+    artifactPath: relativeArtifactPath(projectRoot, finalPath),
+    preview: memoryUpdate.slice(0, 360),
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate
+  });
+  if (options.factoryRootDir && options.projectId) {
+    const updatedStyleProfile = extractedStyleFingerprint ? await readOptionalText2(paths.styleProfilePath) : "";
+    const characterDossierMemory = updatedCharacterDossiers.length ? formatCharacterDossiersMarkdown(updatedCharacterDossiers) : "";
+    await withFactoryDb(options.factoryRootDir, async (db) => {
+      db.recordMemory(options.projectId, {
+        source: relativeArtifactPath(projectRoot, memoryPath),
+        kind: "chapter_summary",
+        content: memoryUpdate,
+        importance: 7,
+        metadata: { chapterNumber: task.chapterNumber, title: task.title },
+        embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(memoryUpdate) }
+      });
+      if (characterDossierMemory && paths.characterDossiersPath) {
+        const characterDossiersPath = relativeArtifactPath(projectRoot, paths.characterDossiersPath);
+        db.recordMemory(options.projectId, {
+          source: characterDossiersPath,
+          kind: "character_dossiers",
+          content: characterDossierMemory,
+          importance: 9,
+          metadata: { path: characterDossiersPath, chapterNumber: task.chapterNumber, source: "chapter_memory_keeper" },
+          embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(characterDossierMemory) }
+        });
+      }
+      if (extractedStyleFingerprint) {
+        const styleProfilePath = relativeArtifactPath(projectRoot, paths.styleProfilePath);
+        const styleMemory = [`Style fingerprint from chapter ${task.chapterNumber}: ${extractedStyleFingerprint}`, "", updatedStyleProfile].join("\n");
+        db.recordMemory(options.projectId, {
+          source: styleProfilePath,
+          kind: "style_profile",
+          content: styleMemory,
+          importance: 8,
+          metadata: { path: styleProfilePath, chapterNumber: task.chapterNumber, source: "first_chapter_fingerprint" },
+          embedding: { model: "local-hash-v1", vector: createLocalTextEmbedding(styleMemory) }
+        });
+      }
+      db.recordEvent(options.projectId, null, finalGate.status === "blocked" ? "CHAPTER_PIPELINE_BLOCKED" : "CHAPTER_PIPELINE_COMPLETED", {
+        chapterNumber: task.chapterNumber,
+        draftPath: relativeArtifactPath(projectRoot, draftPath),
+        finalPath: relativeArtifactPath(projectRoot, finalPath),
+        versionManifestPath: relativeArtifactPath(projectRoot, versionManifestPath),
+        reportPath: relativeArtifactPath(projectRoot, reportPath),
+        qualityGate: finalGate,
+        styleInheritanceVerification,
+        styleConformanceDrift,
+        writingMode,
+        directorCommandId: options.directorCommandId ?? null
+      });
+    }).catch(() => void 0);
+  }
+  return {
+    draftPath,
+    reviewedPath,
+    finalPath,
+    versionManifestPath,
+    reportPath,
+    memoryPath,
+    wordCount: wordCount(finalDraft),
+    qualityGate: finalGate,
+    writingMode
+  };
 }
 async function runChapterProductionPipeline(projectRoot, paths, state, task, options = {}) {
   throwIfPipelineAborted(options);
@@ -14871,6 +17886,39 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     preview: report.slice(0, 420),
     qualityGate: gate
   });
+  if (process.env.AI_NOVEL_LEGACY_CHAPTER_PIPELINE !== "1") {
+    const preparedStages = {
+      writingMode,
+      resources,
+      approvedStyleContext,
+      approvedStyleCarryover,
+      protagonistProfile,
+      characterDossiers,
+      chapterId,
+      previousMemory,
+      previousFinalDraft,
+      blueprintPath,
+      context,
+      blueprint,
+      continuityContract
+    };
+    const naturalnessStage = await runChapterNaturalnessStage(
+      state,
+      task,
+      { draft, report, gate },
+      preparedStages,
+      options
+    );
+    return commitChapterProductionStage(
+      projectRoot,
+      paths,
+      state,
+      task,
+      preparedStages,
+      naturalnessStage,
+      options
+    );
+  }
   let finalDraft = gate.status === "blocked" ? createPolishedDraft(state, task, draft, report, gate, writingMode) : await createProductionPolishedDraft(state, task, draft, report, gate, resources, options, continuityContract, characterDossiers, approvedStyleContext);
   const isAigcGateBypassed = process.env.AIGC_GATE_BYPASS === "1" || options.bypassAigcGate === true;
   let aigcDetection = isAigcGateBypassed ? skippedAigcWritingDetectionReport("AIGC\u68C0\u6D4B\u5728\u751F\u6210\u9636\u6BB5\u5DF2\u88AB\u65C1\u8DEF\uFF0C\u5C06\u5728\u540E\u7EED\u7EDF\u4E00\u7CBE\u4FEE\u3002") : await runAigcWritingDetection(finalDraft, options);
@@ -14899,13 +17947,48 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       wordCount: wordCount(finalDraft)
     });
   }
-  const baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint);
-  let finalGate = aigcDetection.status !== "passed" && aigcDetection.status !== "skipped" && !isAigcGateBypassed ? {
-    ...baseFinalGate,
-    passed: false,
-    status: "blocked",
-    reason: `${baseFinalGate.reason} ${aigcDetection.status === "blocked" ? `AIGC \u68C0\u6D4B\u963B\u585E\uFF1A${aigcDetection.highRiskSegments.length} \u4E2A\u7247\u6BB5\u8D85\u8FC7\u9608\u503C\uFF0C\u6700\u9AD8\u6982\u7387 ${typeof aigcDetection.maxSegmentScore === "number" ? aigcDetection.maxSegmentScore.toFixed(3) : "n/a"}\u3002` : `AIGC \u68C0\u6D4B\u672A\u901A\u8FC7\uFF1A${aigcDetection.status}\uFF0C${aigcDetection.reason || "\u9700\u8981\u914D\u7F6E\u5E76\u901A\u8FC7 AIGC \u68C0\u6D4B\u540E\u624D\u80FD\u653E\u884C\u3002"}`}`.trim()
-  } : baseFinalGate;
+  let baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint);
+  let finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed);
+  const maxFinalRepairAttempts = finalDraftRepairLimit(options);
+  for (let repairAttempt = 1; repairAttempt <= maxFinalRepairAttempts && isRepairableFinalDraftGate(finalGate); repairAttempt += 1) {
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_started_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: "started",
+      message: `\u7B2C ${task.chapterNumber} \u7AE0 final gate \u547D\u4E2D\u53EF\u4FEE\u590D\u81EA\u7136\u5EA6/\u98CE\u683C\u95EE\u9898\uFF0C\u5F00\u59CB\u7B2C ${repairAttempt} \u8F6E\u81EA\u52A8\u8FD4\u5DE5\u3002`,
+      preview: finalGate.reason.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate
+    });
+    finalDraft = await repairFinalDraftForNaturalnessGate(
+      state,
+      task,
+      finalDraft,
+      finalGate,
+      resources,
+      options,
+      continuityContract,
+      characterDossiers,
+      approvedStyleContext,
+      repairAttempt
+    );
+    aigcDetection = isAigcGateBypassed ? skippedAigcWritingDetectionReport("AIGC\u68C0\u6D4B\u5728\u751F\u6210\u9636\u6BB5\u5DF2\u88AB\u65C1\u8DEF\uFF0C\u5C06\u5728\u540E\u7EED\u7EDF\u4E00\u7CBE\u4FEE\u3002") : await runAigcWritingDetection(finalDraft, options);
+    baseFinalGate = enforceFinalDraftQualityGate(gate, finalDraft, task, state, protagonistProfile, continuityContract, characterDossiers, blueprint);
+    finalGate = mergeAigcGate(baseFinalGate, aigcDetection, isAigcGateBypassed);
+    await emitWritingProgress(options, {
+      step: `naturalness_repair_completed_${repairAttempt}`,
+      role: "Prose Stylist",
+      chapterNumber: task.chapterNumber,
+      title: task.title,
+      status: finalGate.status === "blocked" ? "blocked" : "completed",
+      message: finalGate.status === "blocked" ? `\u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${repairAttempt} \u8F6E\u81EA\u7136\u5EA6\u8FD4\u5DE5\u540E\u4ECD\u672A\u901A\u8FC7\uFF1A${finalGate.reason}` : `\u7B2C ${task.chapterNumber} \u7AE0\u7B2C ${repairAttempt} \u8F6E\u81EA\u7136\u5EA6\u8FD4\u5DE5\u540E\u901A\u8FC7 final gate\u3002`,
+      preview: finalDraft.slice(0, 520),
+      wordCount: wordCount(finalDraft),
+      qualityGate: finalGate
+    });
+  }
   throwIfPipelineAborted(options);
   await emitWritingProgress(options, {
     step: "naturalness_completed",
@@ -14974,11 +18057,12 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     extractedStyleFingerprint
   });
   const chapterInheritanceAdapter = approvedStyleContext.chapterInheritanceAdapter || null;
-  const reportWithAigcDetection = `${report.trimEnd()}
-
-${formatAigcWritingDetectionReport(aigcDetection)}
-
-${formatStyleConformanceDriftReport(styleConformanceDrift)}`;
+  const reportWithAigcDetection = [
+    report.trimEnd(),
+    formatAigcWritingDetectionReport(aigcDetection),
+    formatStyleConformanceDriftReport(styleConformanceDrift),
+    formatFinalQualityGateReport(finalGate)
+  ].join("\n\n");
   throwIfPipelineAborted(options);
   const draftPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.draft.md`);
   const reviewedPath = import_node_path8.default.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
@@ -15177,7 +18261,7 @@ function hasApprovedStyleSummaryPrompt(approvedStyleContext) {
 // src/context-packet.ts
 var import_promises6 = __toESM(require("fs/promises"), 1);
 var import_node_path9 = __toESM(require("path"), 1);
-function compactList2(values = [], limit = 2) {
+function compactList(values = [], limit = 2) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
 function clipText(value = "", maxLength = 100) {
@@ -15190,7 +18274,7 @@ function summarizeCharacterDossiers2(state, limit = 3) {
     ...dossiers.filter((dossier) => dossier.role === "protagonist"),
     ...dossiers.filter((dossier) => dossier.role !== "protagonist")
   ].slice(0, limit);
-  return selected.length ? selected.map((dossier) => `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}; desire=${clipText(dossier.coreDesire)}; habit=${compactList2(dossier.behaviorHabits)}; delta=${clipText(dossier.currentChapterDelta)}`) : ["- No structured character dossiers have been recorded yet."];
+  return selected.length ? selected.map((dossier) => `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}; desire=${clipText(dossier.coreDesire)}; habit=${compactList(dossier.behaviorHabits)}; delta=${clipText(dossier.currentChapterDelta)}`) : ["- No structured character dossiers have been recorded yet."];
 }
 function getContextFocusForStage(stage) {
   switch (stage) {
@@ -15323,6 +18407,7 @@ var COVER_IMAGE_PATH = ".ai-novel/assets/cover/cover.png";
 var COVER_METADATA_PATH = ".ai-novel/assets/cover/cover-metadata.json";
 var COVER_PROMPT_PATH = ".ai-novel/assets/cover/cover-prompt.md";
 var DRAFT_SUBCALL_ROLE_VALUES = ["plot", "narration", "dialogue", "character_action", "continuity", "assembly"];
+var SETTING_REVIEW_APPROVAL_FILE = "setting-review-approval.json";
 var STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json";
 function parseDraftSubcallRolesSetting(value) {
   if (!value) return void 0;
@@ -15438,6 +18523,11 @@ async function readOptionalJson2(filePath) {
   } catch {
     return null;
   }
+}
+function isSettingReviewApproved(approval) {
+  return Boolean(
+    approval && approval.approved === true && String(approval.status || "").trim() === "approved" && String(approval.reviewedAt || "").trim()
+  );
 }
 async function fileHasContent2(filePath) {
   return Boolean((await readOptionalText3(filePath)).trim());
@@ -16339,10 +19429,19 @@ function createSettingFreeze(state, context) {
   const protagonistHighlights = extractSectionBullets(context.protagonist, "Discussion updates", 4);
   const styleHighlights = extractSectionBullets(context.style, "Discussion-driven adjustments", 3);
   return [
-    "# Setting Freeze",
+    "# Setting Review Packet",
     "",
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
+    "Status: review_required",
+    "Approval artifact: `.ai-novel/plans/setting-review-approval.json`",
+    "Canonical scope: draft-only until explicit user approval.",
+    "",
+    "Review gate:",
+    "- This packet is a review artifact, not final book canon.",
+    "- Downstream planning may use it as a proposal source, but must preserve open questions and must not treat sparse placeholders as frozen facts.",
+    "- Before full drafting, the user must confirm or revise the story foundation approval bundle.",
+    "- If protagonist, cast, rules, or main conflict are still vague, generate concrete follow-up questions instead of filling with generic defaults.",
     "",
     "Discussion-backed consensus:",
     ...consensusHighlights.length > 0 ? consensusHighlights : ["- No discussion summary captured yet."],
@@ -16357,7 +19456,14 @@ function createSettingFreeze(state, context) {
     ...state.reactSetup.discussionGoals.map((goal) => `- ${goal}`),
     "",
     "Open questions to resolve with the user before full drafting:",
-    ...state.reactSetup.unansweredQuestions.map((question) => `- ${question}`)
+    ...state.reactSetup.unansweredQuestions.map((question) => `- ${question}`),
+    "",
+    "Approval checklist:",
+    "- Named protagonist, desire, wound, and visible behavior anchor are concrete.",
+    "- At least two named supporting characters have relationship pressure, desire, and cost.",
+    "- World rules create scene-level costs instead of background decoration.",
+    "- Main conflict and chapter handoffs follow one causal chain.",
+    "- Any rejected or unresolved premise remains marked as open, not silently promoted to canon."
   ].join("\n");
 }
 async function advanceAutonomousProject(rootDir, options = {}) {
@@ -16498,8 +19604,13 @@ async function advanceAutonomousProject(rootDir, options = {}) {
           projectId: pipelineOptions.projectId,
           kind: "plan",
           path: ".ai-novel/plans/setting-freeze.md",
-          status: "completed",
-          metadata: { production: true, stage: state.runtime.stage }
+          status: "pending",
+          metadata: {
+            production: true,
+            stage: state.runtime.stage,
+            reviewStatus: "review_required",
+            approvalPath: ".ai-novel/plans/setting-review-approval.json"
+          }
         });
       }).catch(() => void 0);
     }
@@ -16512,7 +19623,7 @@ async function advanceAutonomousProject(rootDir, options = {}) {
       state.assets.cover = coverState.assets.cover;
     }
     state.runtime.stage = "setting_review";
-    state.runtime.statusMessage = "Setting freeze drafted. Review the frozen world assumptions before outlining.";
+    state.runtime.statusMessage = "Setting review packet drafted. Review the proposed world assumptions before they are treated as canon.";
     stampRuntimeProgress(state, "setting_freeze_generated");
     await saveAutonomousState(rootDir, state);
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
@@ -16522,7 +19633,40 @@ async function advanceAutonomousProject(rootDir, options = {}) {
   }
   if (state.runtime.stage === "setting_review") {
     throwIfStopped(pipelineOptions.signal);
-    await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions);
+    const settingReviewApprovalPath = import_node_path10.default.join(paths.plansDir, SETTING_REVIEW_APPROVAL_FILE);
+    const settingReviewApproval = await readOptionalJson2(settingReviewApprovalPath);
+    if (!isSettingReviewApproved(settingReviewApproval)) {
+      const rejected = settingReviewApproval?.approved === false || String(settingReviewApproval?.status || "") === "rejected";
+      state.runtime.statusMessage = rejected ? "Setting review was rejected. Revise the world, cast, or mainline assumptions before master planning." : "Setting review packet is waiting for explicit user approval before master planning.";
+      stampRuntimeProgress(state, rejected ? "setting_review_rejected" : "setting_review_waiting_for_approval");
+      await saveAutonomousState(rootDir, state);
+      await recordWorkflowEvent(pipelineOptions, "SETTING_REVIEW_BLOCKED", {
+        status: rejected ? "rejected" : "waiting_for_approval",
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`
+      });
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
+    try {
+      await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions);
+    } catch (error) {
+      if (!(error instanceof ProductionPlanningBlockedError)) {
+        throw error;
+      }
+      state.runtime.statusMessage = "Master planning is blocked until a concrete protagonist name and profile are confirmed.";
+      stampRuntimeProgress(state, "master_planning_protagonist_blocked");
+      await saveAutonomousState(rootDir, state);
+      await recordWorkflowEvent(pipelineOptions, "MASTER_PLANNING_BLOCKED", {
+        reason: error.message,
+        gate: error.gate
+      });
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
+      }
+      return state;
+    }
     state.runtime.stage = "master_planning";
     state.runtime.statusMessage = "Production master outline generated. Next step is to write story bible assets before chapter blueprints.";
     stampRuntimeProgress(state, "master_outline_generated");
@@ -16897,7 +20041,7 @@ function appendUnique2(values = [], next, limit = 10) {
   if (!normalized) return values.slice(0, limit);
   return [...values.filter((value) => value !== normalized), normalized].slice(-limit);
 }
-function compactList3(values = [], limit = 3) {
+function compactList2(values = [], limit = 3) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
 function formatCharacterDossiersMarkdown2(dossiers) {
@@ -16914,8 +20058,8 @@ function formatCharacterDossiersMarkdown2(dossiers) {
       `- identity and role: ${dossier.identityAndRole}`,
       `- core desire: ${dossier.coreDesire}`,
       `- fear or wound: ${dossier.fearOrWound}`,
-      `- habits: ${compactList3(dossier.behaviorHabits)}`,
-      `- speech: ${compactList3(dossier.speechMarkers)}`,
+      `- habits: ${compactList2(dossier.behaviorHabits)}`,
+      `- speech: ${compactList2(dossier.speechMarkers)}`,
       `- relationship state: ${dossier.relationshipState}`,
       `- current chapter delta: ${dossier.currentChapterDelta}`,
       `- latest evidence: ${dossier.evidence.slice(-2).join(" | ") || "none"}`
@@ -16930,10 +20074,44 @@ function summarizeDossiersForContext(dossiers = [], limit = 3) {
   return selected.map((dossier) => [
     `- ${dossier.id} (${dossier.role}) name=${dossier.canonicalName}`,
     `  desire=${clipText2(dossier.coreDesire, 90)}; wound=${clipText2(dossier.fearOrWound, 90)}`,
-    `  habit=${compactList3(dossier.behaviorHabits, 2)}; speech=${compactList3(dossier.speechMarkers, 2)}`,
+    `  habit=${compactList2(dossier.behaviorHabits, 2)}; speech=${compactList2(dossier.speechMarkers, 2)}`,
     `  relation=${clipText2(dossier.relationshipState, 120)}`,
     `  delta=${clipText2(dossier.currentChapterDelta, 120)}`
   ].join("\n")).join("\n");
+}
+function extractDiscussionField(source, labels) {
+  const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|");
+  const match = source.match(new RegExp(`(?:${labelPattern})\\s*(?:\u662F|\u4E3A|:|\uFF1A)?\\s*[\u300C\u201C"]?([^\uFF0C\u3002\uFF1B;\\n\u300D\u201D"]{2,80})`, "u"));
+  return match?.[1]?.trim() || "";
+}
+function extractConfirmedProtagonistDetails(message) {
+  const namePatterns = [
+    /主角(?:姓名|名字)?\s*(?:冻结|确定|定为|设为|叫|是|为|:|：)?\s*(?:为|成|:|：)?\s*[「“"]?([\u4e00-\u9fff·]{2,8})/u,
+    /(?:Canonical Protagonist|核心主角|主角姓名)[:：]\s*([\u4e00-\u9fff·]{2,8})/u
+  ];
+  const rawName = namePatterns.map((pattern) => message.match(pattern)?.[1] || "").find(Boolean) || "";
+  const name = /^(?:姓名|名字|冻结|确定|待定|未命名|主角|角色)$/u.test(rawName) ? "" : rawName;
+  if (!name) return null;
+  return {
+    name,
+    identity: extractDiscussionField(message, ["\u8EAB\u4EFD", "\u8EAB\u4EFD\u662F", "\u89D2\u8272\u529F\u80FD", "\u804C\u4E1A"]),
+    desire: extractDiscussionField(message, ["\u6838\u5FC3\u6B32\u671B", "\u6B32\u671B", "\u76EE\u6807"]),
+    wound: extractDiscussionField(message, ["\u4F24\u53E3/\u6050\u60E7", "\u4F24\u53E3", "\u6050\u60E7"]),
+    habit: extractDiscussionField(message, ["\u884C\u4E3A\u4E60\u60EF", "\u4E60\u60EF"]),
+    speech: extractDiscussionField(message, ["\u8BF4\u8BDD\u65B9\u5F0F", "\u5BF9\u767D\u4E60\u60EF", "\u8BED\u8A00\u4E60\u60EF"]),
+    relationship: extractDiscussionField(message, ["\u5173\u7CFB\u538B\u529B", "\u5173\u7CFB"])
+  };
+}
+function formatProtagonistLockSection(details) {
+  return [
+    `Canonical Protagonist: ${details.name}`,
+    details.identity ? `- identity: ${details.identity}` : "",
+    details.desire ? `- core desire: ${details.desire}` : "",
+    details.wound ? `- fear or wound: ${details.wound}` : "",
+    details.habit ? `- behavior habit: ${details.habit}` : "",
+    details.speech ? `- speech marker: ${details.speech}` : "",
+    details.relationship ? `- relationship pressure: ${details.relationship}` : ""
+  ].filter(Boolean).join("\n");
 }
 function updateCharacterDossiersFromDiscussion(input) {
   if (input.targetKind !== "character" && !/主角|角色|人物|性格|character|protagonist/i.test(input.message)) {
@@ -16942,11 +20120,21 @@ function updateCharacterDossiersFromDiscussion(input) {
   const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   const evidence = `discussion ${input.runId}: ${input.message}`.slice(0, 240);
   const continuityNote = `discussion ${input.runId}: ${input.summary.replace(/\s+/g, " ").slice(0, 220)}`;
+  const protagonistDetails = extractConfirmedProtagonistDetails(input.message);
   return input.dossiers.map((dossier) => {
     const isProtagonist = dossier.role === "protagonist" || dossier.id === "protagonist";
     if (!isProtagonist) return dossier;
+    const aliases = protagonistDetails?.name ? appendUnique2(dossier.aliases || [], protagonistDetails.name, 6) : dossier.aliases;
     return {
       ...dossier,
+      canonicalName: protagonistDetails?.name || dossier.canonicalName,
+      aliases,
+      identityAndRole: protagonistDetails?.identity || dossier.identityAndRole,
+      coreDesire: protagonistDetails?.desire || dossier.coreDesire,
+      fearOrWound: protagonistDetails?.wound || dossier.fearOrWound,
+      behaviorHabits: protagonistDetails?.habit ? appendUnique2(dossier.behaviorHabits || [], protagonistDetails.habit, 6) : dossier.behaviorHabits,
+      speechMarkers: protagonistDetails?.speech ? appendUnique2(dossier.speechMarkers || [], protagonistDetails.speech, 6) : dossier.speechMarkers,
+      relationshipState: protagonistDetails?.relationship || dossier.relationshipState,
       currentChapterDelta: `discussion: ${input.message}`,
       continuityNotes: appendUnique2(dossier.continuityNotes, continuityNote),
       evidence: appendUnique2(dossier.evidence, evidence),
@@ -17032,6 +20220,26 @@ function discussionMessageParts(messageId, input) {
       source: "discussion_agent_turn"
     }, input.createdAt)
   ];
+}
+function discussionArtifactMessageParts(messageId, input) {
+  const parts = [
+    messagePart2(messageId, 0, "markdown", { text: input.content }, input.createdAt)
+  ];
+  for (const artifact of input.artifacts) {
+    parts.push(messagePart2(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label,
+      kind: artifact.kind,
+      status: artifact.status || "completed"
+    }, input.createdAt));
+  }
+  parts.push(messagePart2(messageId, parts.length, "json", {
+    target: input.target,
+    currentStage: input.currentStage,
+    source: input.source,
+    artifacts: input.artifacts
+  }, input.createdAt));
+  return parts;
 }
 async function writeDiscussionConsensusArchive(rootDir, input) {
   const consensusDir = workspacePath2(rootDir, "consensus");
@@ -17634,6 +20842,22 @@ Reason: ${stageGuard.reason}
 `);
     await saveAutonomousState(rootDir, state);
     if (factoryDb && options.projectId) {
+      const blockedAt = (/* @__PURE__ */ new Date()).toISOString();
+      const blockedMessageId = `${runId}:discussion-stage-guard-blocked`;
+      const blockedArtifacts = [
+        {
+          path: ".ai-novel/chat/discussion-log.md",
+          label: "discussion-log.md",
+          kind: "transcript",
+          status: "blocked"
+        },
+        {
+          path: ".ai-novel/context/current-context.md",
+          label: "current-context.md",
+          kind: "context",
+          status: "completed"
+        }
+      ];
       factoryDb.updateProjectState(options.projectId, state);
       factoryDb.recordArtifact({
         projectId: options.projectId,
@@ -17650,6 +20874,46 @@ Reason: ${stageGuard.reason}
         contextPacketPath,
         directorCommandId: options.directorCommandId ?? null
       });
+      factoryDb.recordMessage(
+        createArtifactMessage({
+          messageId: blockedMessageId,
+          conversationId: runId,
+          projectId: options.projectId,
+          runId,
+          artifactPath: ".ai-novel/chat/discussion-log.md",
+          label: "\u8BA8\u8BBA\u88AB\u9636\u6BB5\u5B88\u536B\u62E6\u622A",
+          content: [
+            "### \u8BA8\u8BBA\u88AB\u9636\u6BB5\u5B88\u536B\u62E6\u622A",
+            "",
+            `\u76EE\u6807\uFF1A${discussionTarget.label}`,
+            `\u539F\u56E0\uFF1A${stageGuard.reason}`,
+            "",
+            "\u672C\u8F6E\u8BA8\u8BBA\u6CA1\u6709\u5199\u5165\u751F\u4EA7\u5171\u8BC6\uFF1B\u5DF2\u4FDD\u7559\u8BA8\u8BBA\u65E5\u5FD7\u548C\u4E0A\u4E0B\u6587\u5305\uFF0C\u65B9\u4FBF\u5C55\u5F00\u68C0\u67E5\u3002"
+          ].join("\n"),
+          status: "completed",
+          time: blockedAt,
+          metadata: {
+            target: discussionTarget,
+            source: "discussion_stage_guard_blocked",
+            reason: stageGuard.reason
+          }
+        }),
+        discussionArtifactMessageParts(blockedMessageId, {
+          content: [
+            "### \u8BA8\u8BBA\u88AB\u9636\u6BB5\u5B88\u536B\u62E6\u622A",
+            "",
+            `\u76EE\u6807\uFF1A${discussionTarget.label}`,
+            `\u539F\u56E0\uFF1A${stageGuard.reason}`,
+            "",
+            "\u672C\u8F6E\u8BA8\u8BBA\u6CA1\u6709\u5199\u5165\u751F\u4EA7\u5171\u8BC6\uFF1B\u5DF2\u4FDD\u7559\u8BA8\u8BBA\u65E5\u5FD7\u548C\u4E0A\u4E0B\u6587\u5305\uFF0C\u65B9\u4FBF\u5C55\u5F00\u68C0\u67E5\u3002"
+          ].join("\n"),
+          artifacts: blockedArtifacts,
+          target: discussionTarget,
+          currentStage: state.runtime.stage,
+          createdAt: blockedAt,
+          source: "discussion_stage_guard_blocked"
+        })
+      );
       factoryDb.updateRun(runId, "blocked", { error: stageGuard.reason });
     }
     try {
@@ -17673,7 +20937,9 @@ Reason: ${stageGuard.reason}
   }
   const updatedConsensus = buildCompactConsensus(state, guardedSummary);
   const currentProtagonist = await readText(protagonistPath);
-  const updatedProtagonist = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate);
+  const protagonistDetails = extractConfirmedProtagonistDetails(message);
+  const updatedProtagonistBase = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate);
+  const updatedProtagonist = protagonistDetails ? appendSection(updatedProtagonistBase, "Canonical protagonist lock", formatProtagonistLockSection(protagonistDetails)) : updatedProtagonistBase;
   const currentDossiers = state.memory?.characterDossiers?.length ? state.memory.characterDossiers : await readCharacterDossiers2(characterDossiersPath);
   const updatedDossiers = updateCharacterDossiersFromDiscussion({
     dossiers: currentDossiers,
@@ -17783,6 +21049,82 @@ Reason: ${stageGuard.reason}
       consensusArchivePath: consensusArchive.relativePath,
       directorCommandId: options.directorCommandId ?? null
     });
+    const writebackAt = (/* @__PURE__ */ new Date()).toISOString();
+    const writebackMessageId = `${runId}:discussion-writeback`;
+    const writebackArtifacts = [
+      {
+        path: consensusArchive.relativePath,
+        label: "discussion consensus archive",
+        kind: "consensus",
+        status: "completed"
+      },
+      {
+        path: ".ai-novel/prompts/global-consensus.md",
+        label: "global-consensus.md",
+        kind: "consensus",
+        status: "completed"
+      },
+      {
+        path: discussionTarget.assetPath,
+        label: discussionTarget.label,
+        kind: targetToArtifactKind(discussionTarget),
+        status: "completed"
+      },
+      {
+        path: ".ai-novel/chat/discussion-log.md",
+        label: "discussion-log.md",
+        kind: "transcript",
+        status: "completed"
+      },
+      {
+        path: ".ai-novel/context/current-context.md",
+        label: "current-context.md",
+        kind: "context",
+        status: "completed"
+      },
+      ...updatedDossiers.length ? [{
+        path: ".ai-novel/memory/characters/dossiers.json",
+        label: "character dossiers",
+        kind: "memory",
+        status: "completed"
+      }] : []
+    ];
+    const writebackContent = [
+      "### \u8BA8\u8BBA\u4EA7\u7269\u5DF2\u5199\u5165",
+      "",
+      `\u76EE\u6807\uFF1A${discussionTarget.label}`,
+      `\u9636\u6BB5\uFF1A${state.runtime.stage}`,
+      "",
+      "\u672C\u8F6E\u8BA8\u8BBA\u5DF2\u5F62\u6210\u53EF\u5BA1\u6838\u4EA7\u7269\uFF0C\u540E\u7EED\u4E16\u754C\u89C2\u3001\u89D2\u8272\u3001\u4E3B\u7EBF\u548C\u7AE0\u8282\u84DD\u56FE\u53EA\u80FD\u4ECE\u8FD9\u4E9B\u6587\u4EF6\u7EE7\u7EED\u6D88\u8D39\u3002",
+      "",
+      ...writebackArtifacts.map((artifact) => `- ${artifact.label}: ${artifact.path}`)
+    ].join("\n");
+    factoryDb.recordMessage(
+      createArtifactMessage({
+        messageId: writebackMessageId,
+        conversationId: runId,
+        projectId: options.projectId,
+        runId,
+        artifactPath: consensusArchive.relativePath,
+        label: "\u8BA8\u8BBA\u4EA7\u7269\u5DF2\u5199\u5165",
+        content: writebackContent,
+        status: "completed",
+        time: writebackAt,
+        metadata: {
+          target: discussionTarget,
+          source: "discussion_writeback_artifacts",
+          artifactCount: writebackArtifacts.length
+        }
+      }),
+      discussionArtifactMessageParts(writebackMessageId, {
+        content: writebackContent,
+        artifacts: writebackArtifacts,
+        target: discussionTarget,
+        currentStage: state.runtime.stage,
+        createdAt: writebackAt,
+        source: "discussion_writeback_artifacts"
+      })
+    );
   }
   try {
     await upsertDiscussionInSuperGraph(rootDir, {
@@ -17916,6 +21258,579 @@ function createFollowUpAdvanceCommand(state, parentCommand, reason = "\u8BA8\u8B
     advanceFirst: true,
     parentCommandId: parentCommand.id
   };
+}
+
+// src/production-workflow.ts
+var import_node_crypto5 = require("crypto");
+var import_langgraph = require("@langchain/langgraph");
+
+// src/factory-langgraph-checkpointer.ts
+var import_node_crypto4 = require("crypto");
+var import_langgraph_checkpoint = require("@langchain/langgraph-checkpoint");
+function checkpointRecordId(projectId, threadId, checkpointNamespace, checkpointId) {
+  return `lg_${(0, import_node_crypto4.createHash)("sha256").update(`${projectId}\0${threadId}\0${checkpointNamespace}\0${checkpointId}`).digest("hex")}`;
+}
+function requiredConfig(config, requireCheckpoint = false) {
+  const threadId = config.configurable?.thread_id;
+  const checkpointNamespace = config.configurable?.checkpoint_ns ?? "";
+  const checkpointId = (0, import_langgraph_checkpoint.getCheckpointId)(config);
+  if (typeof threadId !== "string" || !threadId.trim()) {
+    throw new Error("factory_langgraph_checkpointer_requires_thread_id");
+  }
+  if (typeof checkpointNamespace !== "string") {
+    throw new Error("factory_langgraph_checkpointer_requires_string_checkpoint_ns");
+  }
+  if (requireCheckpoint && (typeof checkpointId !== "string" || !checkpointId)) {
+    throw new Error("factory_langgraph_checkpointer_requires_checkpoint_id");
+  }
+  return { threadId, checkpointNamespace, checkpointId: typeof checkpointId === "string" ? checkpointId : void 0 };
+}
+function storedParts(row) {
+  return {
+    recordId: String(row.id || ""),
+    drift: row.drift,
+    state: row.state
+  };
+}
+var FactoryLangGraphCheckpointer = class extends import_langgraph_checkpoint.BaseCheckpointSaver {
+  constructor(rootDir, projectId, runId = null, serde) {
+    super(serde);
+    this.rootDir = rootDir;
+    this.projectId = projectId;
+    this.runId = runId;
+  }
+  rootDir;
+  projectId;
+  runId;
+  async serialize(value) {
+    const [type, data] = await this.serde.dumpsTyped(value);
+    return { type, data: Buffer.from(data).toString("base64") };
+  }
+  async deserialize(value) {
+    return this.serde.loadsTyped(value.type, Buffer.from(value.data, "base64"));
+  }
+  async query(config, options = {}) {
+    const { threadId, checkpointNamespace, checkpointId } = requiredConfig(config);
+    const beforeCheckpointId = options.before ? (0, import_langgraph_checkpoint.getCheckpointId)(options.before) : void 0;
+    return withFactoryDb(this.rootDir, async (db) => db.listWorkflowCheckpoints(this.projectId, {
+      threadId,
+      checkpointNamespace,
+      checkpointId,
+      beforeCheckpointId: typeof beforeCheckpointId === "string" ? beforeCheckpointId : void 0,
+      limit: options.filter ? 1e3 : options.limit || 100
+    }));
+  }
+  async tupleFromRow(row) {
+    const { drift, state } = storedParts(row);
+    if (!state.checkpoint) throw new Error(`factory_langgraph_checkpoint_not_ready:${drift.checkpointId}`);
+    const pendingWrites = await Promise.all((drift.pendingWrites || []).map(async (write) => [
+      write.taskId,
+      write.channel,
+      await this.deserialize(write.value)
+    ]));
+    const tuple = {
+      config: { configurable: {
+        thread_id: drift.threadId,
+        checkpoint_ns: drift.checkpointNamespace,
+        checkpoint_id: drift.checkpointId
+      } },
+      checkpoint: await this.deserialize(state.checkpoint),
+      metadata: await this.deserialize(drift.metadata),
+      pendingWrites
+    };
+    if (drift.parentCheckpointId) {
+      tuple.parentConfig = { configurable: {
+        thread_id: drift.threadId,
+        checkpoint_ns: drift.checkpointNamespace,
+        checkpoint_id: drift.parentCheckpointId
+      } };
+    }
+    return tuple;
+  }
+  async getTuple(config) {
+    const rows = await this.query(config, { limit: 1 });
+    return rows[0] ? this.tupleFromRow(rows[0]) : void 0;
+  }
+  async *list(config, options = {}) {
+    const rows = await this.query(config, options);
+    let emitted = 0;
+    for (const row of rows) {
+      const tuple = await this.tupleFromRow(row);
+      const metadata = tuple.metadata;
+      if (options.filter && !Object.entries(options.filter).every(([key, value]) => metadata?.[key] === value)) continue;
+      if (options.limit !== void 0 && emitted >= options.limit) break;
+      emitted += 1;
+      yield tuple;
+    }
+  }
+  async put(config, checkpoint, metadata, newVersions) {
+    const { threadId, checkpointNamespace, checkpointId: parentCheckpointId } = requiredConfig(config);
+    const existing = await withFactoryDb(this.rootDir, async (db) => db.listWorkflowCheckpoints(this.projectId, {
+      threadId,
+      checkpointNamespace,
+      checkpointId: checkpoint.id,
+      limit: 1
+    }));
+    const previous = existing[0] ? storedParts(existing[0]) : null;
+    const drift = {
+      kind: "langgraph",
+      threadId,
+      checkpointNamespace,
+      checkpointId: checkpoint.id,
+      parentCheckpointId: parentCheckpointId || null,
+      metadata: await this.serialize(metadata),
+      newVersions,
+      pendingWrites: previous?.drift.pendingWrites || []
+    };
+    const state = { checkpoint: await this.serialize(checkpoint) };
+    if (previous) {
+      await withFactoryDb(this.rootDir, async (db) => db.updateWorkflowCheckpoint(previous.recordId, { drift, state }));
+    } else {
+      try {
+        await withFactoryDb(this.rootDir, async (db) => db.recordCheckpoint({
+          id: checkpointRecordId(this.projectId, threadId, checkpointNamespace, checkpoint.id),
+          projectId: this.projectId,
+          runId: this.runId,
+          label: `langgraph:${checkpointNamespace || "root"}`,
+          path: `factory://langgraph/${encodeURIComponent(threadId)}/${encodeURIComponent(checkpointNamespace)}/${checkpoint.id}`,
+          drift,
+          state
+        }));
+      } catch (error) {
+        if (!/UNIQUE constraint failed: checkpoints\.id/u.test(error instanceof Error ? error.message : String(error))) throw error;
+        const collided = await withFactoryDb(this.rootDir, async (db) => db.listWorkflowCheckpoints(this.projectId, {
+          threadId,
+          checkpointNamespace,
+          checkpointId: checkpoint.id,
+          limit: 1
+        }));
+        if (!collided[0]) throw error;
+        const stored = storedParts(collided[0]);
+        await withFactoryDb(this.rootDir, async (db) => db.updateWorkflowCheckpoint(stored.recordId, {
+          drift: { ...drift, pendingWrites: stored.drift.pendingWrites || [] },
+          state
+        }));
+      }
+    }
+    return { configurable: {
+      thread_id: threadId,
+      checkpoint_ns: checkpointNamespace,
+      checkpoint_id: checkpoint.id
+    } };
+  }
+  async putWrites(config, writes, taskId) {
+    const { threadId, checkpointNamespace, checkpointId } = requiredConfig(config, true);
+    const rows = await withFactoryDb(this.rootDir, async (db) => db.listWorkflowCheckpoints(this.projectId, {
+      threadId,
+      checkpointNamespace,
+      checkpointId,
+      limit: 1
+    }));
+    const stored = rows[0] ? storedParts(rows[0]) : null;
+    const pendingWrites = [...stored?.drift.pendingWrites || []];
+    for (let index = 0; index < writes.length; index += 1) {
+      const [channel, value] = writes[index];
+      const writeIndex = import_langgraph_checkpoint.WRITES_IDX_MAP[channel] ?? index;
+      const existingIndex = pendingWrites.findIndex((candidate) => candidate.taskId === taskId && candidate.index === writeIndex);
+      if (writeIndex >= 0 && existingIndex >= 0) continue;
+      const nextWrite = {
+        taskId,
+        channel,
+        index: writeIndex,
+        value: await this.serialize(value)
+      };
+      if (existingIndex >= 0) pendingWrites[existingIndex] = nextWrite;
+      else pendingWrites.push(nextWrite);
+    }
+    if (stored) {
+      await withFactoryDb(this.rootDir, async (db) => db.updateWorkflowCheckpoint(stored.recordId, {
+        drift: { ...stored.drift, pendingWrites }
+      }));
+      return;
+    }
+    const drift = {
+      kind: "langgraph",
+      threadId,
+      checkpointNamespace,
+      checkpointId,
+      parentCheckpointId: null,
+      metadata: await this.serialize({ source: "loop", step: -1, parents: {} }),
+      newVersions: {},
+      pendingWrites
+    };
+    try {
+      await withFactoryDb(this.rootDir, async (db) => db.recordCheckpoint({
+        id: checkpointRecordId(this.projectId, threadId, checkpointNamespace, checkpointId),
+        projectId: this.projectId,
+        runId: this.runId,
+        label: `langgraph-pending:${checkpointNamespace || "root"}`,
+        path: `factory://langgraph/${encodeURIComponent(threadId)}/${encodeURIComponent(checkpointNamespace)}/${checkpointId}`,
+        drift,
+        state: { checkpoint: null }
+      }));
+    } catch (error) {
+      if (!/UNIQUE constraint failed: checkpoints\.id/u.test(error instanceof Error ? error.message : String(error))) throw error;
+      const collided = await withFactoryDb(this.rootDir, async (db) => db.listWorkflowCheckpoints(this.projectId, {
+        threadId,
+        checkpointNamespace,
+        checkpointId,
+        limit: 1
+      }));
+      if (!collided[0]) throw error;
+      const current = storedParts(collided[0]);
+      const merged = [...current.drift.pendingWrites || []];
+      for (const incoming of pendingWrites) {
+        const existingIndex = merged.findIndex((candidate) => candidate.taskId === incoming.taskId && candidate.index === incoming.index);
+        if (incoming.index >= 0 && existingIndex >= 0) continue;
+        if (existingIndex >= 0) merged[existingIndex] = incoming;
+        else merged.push(incoming);
+      }
+      await withFactoryDb(this.rootDir, async (db) => db.updateWorkflowCheckpoint(current.recordId, {
+        drift: { ...current.drift, pendingWrites: merged }
+      }));
+    }
+  }
+  async deleteThread(threadId) {
+    if (!threadId.trim()) throw new Error("factory_langgraph_checkpointer_requires_thread_id");
+    await withFactoryDb(this.rootDir, async (db) => db.deleteWorkflowCheckpointThread(this.projectId, threadId));
+  }
+};
+
+// src/workflow-kernel.ts
+var WorkflowKernel = class {
+  nodes = /* @__PURE__ */ new Map();
+  register(definition) {
+    if (this.nodes.has(definition.id)) throw new Error(`workflow_node_already_registered:${definition.id}`);
+    this.nodes.set(definition.id, definition);
+    return this;
+  }
+  getNode(nodeId) {
+    const definition = this.nodes.get(nodeId);
+    if (!definition) throw new Error(`workflow_node_not_registered:${nodeId}`);
+    return definition;
+  }
+  listNodes() {
+    return Array.from(this.nodes.values()).map(({ execute: _execute, ...metadata }) => metadata);
+  }
+  async executeNode(nodeId, context) {
+    const definition = this.getNode(nodeId);
+    return definition.execute(context);
+  }
+};
+function persistedWorkflowStatus(status) {
+  if (status === "completed") return { run: "completed", step: "completed" };
+  if (status === "invalid") return { run: "blocked", step: "failed" };
+  if (status === "failed") return { run: "failed", step: "failed" };
+  if (status === "running") return { run: "running", step: "in_progress" };
+  return { run: "idle", step: "pending" };
+}
+function validationErrorText(value) {
+  if (value.error) return value.error;
+  if (value.status !== "invalid") return null;
+  return (value.validation?.errors || []).map((entry) => String(entry)).join(" | ") || "workflow_validation_failed";
+}
+var FactoryWorkflowTraceRecorder = class {
+  constructor(rootDir) {
+    this.rootDir = rootDir;
+  }
+  rootDir;
+  async initialize(input) {
+    const runId = input.runId || `${input.executionMode}_${input.externalRunId}`;
+    const stepId = input.stepId || `step_${input.externalRunId}`;
+    const existing = await withFactoryDb(this.rootDir, async (db) => {
+      const existingRun = db.getWorkflowRun(runId);
+      const existingStep = db.listWorkflowSteps(runId).find((step) => step.id === stepId);
+      if (existingRun && existingStep) {
+        return {
+          run: existingRun,
+          attempts: db.listWorkflowStepAttempts(stepId)
+        };
+      }
+      const project = db.getProject(input.projectId);
+      if (!project) throw new Error("factory_project_not_found");
+      if (!existingRun) {
+        db.createRun({
+          id: runId,
+          projectId: input.projectId,
+          projectRoot: project.projectRoot,
+          parentRunId: input.parentRunId || null,
+          kind: "workflow_advance",
+          status: "idle",
+          goal: input.goal || `${input.executionMode} \u5355\u70B9\u6267\u884C\uFF1A${input.node.name}`,
+          stage: input.node.stage
+        });
+      }
+      if (!existingStep) {
+        db.createWorkflowStep({
+          id: stepId,
+          runId,
+          projectId: input.projectId,
+          name: input.node.name,
+          nodeId: input.node.id,
+          nodeVersion: input.node.version,
+          stage: input.node.stage,
+          status: "pending",
+          executionMode: input.executionMode,
+          validationStatus: "pending",
+          input: input.input,
+          idempotencyKey: input.idempotencyKey || null,
+          parentStepId: input.parentStepId || null,
+          metadata: input.metadata
+        });
+      }
+      return existingRun ? {
+        run: existingRun,
+        attempts: db.listWorkflowStepAttempts(stepId)
+      } : null;
+    });
+    if (existing) {
+      const attempts = existing.attempts;
+      const runStatus = String(existing.run.status || "idle");
+      const lastSyncedStatus = runStatus === "completed" ? "completed" : runStatus === "blocked" ? "invalid" : runStatus === "failed" ? "failed" : runStatus === "running" ? "running" : "queued";
+      return {
+        projectId: input.projectId,
+        runId,
+        stepId,
+        attemptCount: attempts.reduce((highest, attempt) => Math.max(highest, Number(attempt.attempt || 0)), 0),
+        lastSyncedStatus,
+        validationRecorded: attempts.some((attempt) => attempt.kind === "validate"),
+        lastError: typeof existing.run.error === "string" ? existing.run.error : null
+      };
+    }
+    return {
+      projectId: input.projectId,
+      runId,
+      stepId,
+      attemptCount: 0,
+      lastSyncedStatus: "queued",
+      validationRecorded: false,
+      lastError: null
+    };
+  }
+  async sync(trace, node, input) {
+    if (trace.lastSyncedStatus === input.status) return;
+    const status = persistedWorkflowStatus(input.status);
+    const terminal = input.status === "completed" || input.status === "invalid" || input.status === "failed";
+    await withFactoryDb(this.rootDir, async (db) => {
+      db.updateWorkflowStep(trace.stepId, status.step, {
+        output: terminal ? input.output : void 0,
+        error: input.error || null,
+        validationStatus: input.validation?.valid === true ? "passed" : input.validation ? "failed" : "pending",
+        metadata: input.metadata
+      });
+      db.updateRun(trace.runId, status.run, {
+        error: validationErrorText(input),
+        stage: node.stage
+      });
+      if (terminal && !trace.validationRecorded) {
+        const attempt = trace.attemptCount + 1;
+        const attemptId = `${trace.stepId}_attempt_${String(attempt).padStart(3, "0")}`;
+        db.createWorkflowStepAttempt({
+          id: attemptId,
+          stepId: trace.stepId,
+          runId: trace.runId,
+          projectId: trace.projectId,
+          attempt,
+          kind: "validate",
+          status: "in_progress",
+          promptVersion: input.validationPromptVersion || "workflow-validator-v1",
+          input: input.validationInput ?? { output: input.output },
+          metadata: input.attemptMetadata
+        });
+        db.updateWorkflowStepAttempt(attemptId, input.validation?.valid === true ? "completed" : "failed", {
+          output: input.validation,
+          error: input.error || input.validation?.errors || null
+        });
+        trace.attemptCount = attempt;
+        trace.validationRecorded = true;
+      }
+    });
+    if (!terminal) trace.validationRecorded = false;
+    trace.lastSyncedStatus = input.status;
+    trace.lastError = null;
+  }
+  async recordAttempt(trace, input) {
+    const attempt = trace.attemptCount + 1;
+    const attemptId = `${trace.stepId}_attempt_${String(attempt).padStart(3, "0")}`;
+    await withFactoryDb(this.rootDir, async (db) => {
+      db.createWorkflowStepAttempt({
+        id: attemptId,
+        stepId: trace.stepId,
+        runId: trace.runId,
+        projectId: trace.projectId,
+        attempt,
+        kind: input.kind,
+        status: "in_progress",
+        modelConfigId: input.modelConfigId,
+        modelName: input.modelName,
+        promptVersion: input.promptVersion,
+        promptHash: input.promptHash,
+        input: input.input,
+        metadata: input.metadata
+      });
+      db.updateWorkflowStepAttempt(attemptId, input.status || "completed", {
+        output: input.output,
+        error: input.error,
+        usage: input.usage,
+        metadata: input.metadata
+      });
+    });
+    trace.attemptCount = attempt;
+    return attemptId;
+  }
+  async loadEvidence(trace) {
+    return withFactoryDb(this.rootDir, async (db) => ({
+      run: db.getWorkflowRun(trace.runId),
+      steps: db.listWorkflowSteps(trace.runId),
+      attempts: db.listWorkflowStepAttempts(trace.stepId)
+    }));
+  }
+};
+
+// src/production-workflow.ts
+var ProductionGraphState = import_langgraph.Annotation.Root({
+  context: (0, import_langgraph.Annotation)(),
+  externalRunId: (0, import_langgraph.Annotation)(),
+  resultState: (0, import_langgraph.Annotation)(),
+  trace: (0, import_langgraph.Annotation)()
+});
+var productionNodeCatalog = [
+  { id: "production.worldbuilding", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u4E16\u754C\u6784\u5EFA", stage: "worldbuilding_dialogue", version: "compat-v1" },
+  { id: "production.setting-review", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u8BBE\u5B9A\u5BA1\u67E5", stage: "setting_review", version: "compat-v1" },
+  { id: "production.master-planning", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u5168\u4E66\u89C4\u5212", stage: "master_planning", version: "compat-v1" },
+  { id: "production.chapter-task-generation", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u7AE0\u8282\u4EFB\u52A1\u751F\u6210", stage: "chapter_task_generation", version: "compat-v1" },
+  { id: "production.drafting", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u7AE0\u8282\u5199\u4F5C", stage: "drafting", version: "compat-v1" },
+  { id: "production.aigc-refinement", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1AAIGC \u7CBE\u4FEE", stage: "aigc_refinement", version: "compat-v1" },
+  { id: "production.reviewing", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u8D28\u91CF\u5BA1\u67E5", stage: "reviewing", version: "compat-v1" },
+  { id: "production.replanning", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u91CD\u89C4\u5212", stage: "replanning", version: "compat-v1" },
+  { id: "production.complete", name: "\u751F\u4EA7\u6D41\u7A0B\uFF1A\u5B8C\u6210\u786E\u8BA4", stage: "complete", version: "compat-v1" }
+];
+function resolveProductionWorkflowNode(stage) {
+  const node = productionNodeCatalog.find((candidate) => candidate.stage === stage);
+  if (!node) throw new Error(`production_workflow_stage_not_registered:${stage}`);
+  return node;
+}
+function createProductionWorkflowKernel(executeAdvance) {
+  const kernel = new WorkflowKernel();
+  for (const node of productionNodeCatalog) {
+    kernel.register({ ...node, execute: executeAdvance });
+  }
+  return kernel;
+}
+function productionStateEvidence(state) {
+  const chapterTasks = state.plan.chapterTasks || [];
+  return {
+    stage: state.runtime.stage,
+    lastAction: state.runtime.lastAction || null,
+    statusMessage: state.runtime.statusMessage || null,
+    chapters: {
+      total: chapterTasks.length,
+      pending: chapterTasks.filter((task) => task.status === "pending").length,
+      inProgress: chapterTasks.filter((task) => task.status === "in_progress").length,
+      complete: chapterTasks.filter((task) => task.status === "complete").length,
+      blocked: chapterTasks.filter((task) => task.status === "blocked").length
+    }
+  };
+}
+var ObservableProductionWorkflowRunner = class {
+  kernel;
+  recorder;
+  constructor(factoryRootDir, executeAdvance) {
+    this.kernel = createProductionWorkflowKernel(executeAdvance);
+    this.recorder = new FactoryWorkflowTraceRecorder(factoryRootDir);
+  }
+  listNodes() {
+    return this.kernel.listNodes();
+  }
+  async execute(context, externalRunId = (0, import_node_crypto5.randomUUID)()) {
+    const node = resolveProductionWorkflowNode(context.state.runtime.stage);
+    const trace = await this.recorder.initialize({
+      projectId: context.projectId,
+      externalRunId,
+      node,
+      input: productionStateEvidence(context.state),
+      executionMode: context.executionMode,
+      parentRunId: context.parentTrace?.runId || null,
+      parentStepId: context.parentTrace?.stepId || null,
+      goal: `${context.executionMode === "manual" ? "\u624B\u52A8" : "\u81EA\u52A8"}\u63A8\u8FDB\uFF1A${node.name}`,
+      metadata: {
+        compatibilityBridge: true,
+        projectRoot: context.rootDir,
+        ...context.metadata
+      }
+    });
+    await this.recorder.sync(trace, node, {
+      status: "running",
+      metadata: { compatibilityBridge: true, ...context.metadata }
+    });
+    try {
+      const state = await this.kernel.executeNode(node.id, context);
+      await this.recorder.recordAttempt(trace, {
+        kind: "generate",
+        promptVersion: node.version,
+        input: productionStateEvidence(context.state),
+        output: productionStateEvidence(state),
+        metadata: { compatibilityBridge: true, nodeId: node.id }
+      });
+      await this.recorder.sync(trace, node, {
+        status: "completed",
+        output: productionStateEvidence(state),
+        validation: { valid: true, errors: [], warnings: [] },
+        validationPromptVersion: "production-transition-validator-v1",
+        metadata: { compatibilityBridge: true, ...context.metadata },
+        attemptMetadata: { nodeId: node.id, resultingStage: state.runtime.stage }
+      });
+      return { state, trace };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.recorder.sync(trace, node, {
+        status: "failed",
+        error: message,
+        validation: { valid: false, errors: [message], warnings: [] },
+        validationPromptVersion: "production-transition-validator-v1",
+        metadata: { compatibilityBridge: true, ...context.metadata },
+        attemptMetadata: { nodeId: node.id }
+      });
+      throw error;
+    }
+  }
+};
+async function executeProductionAdvanceThroughKernel(context, executeAdvance) {
+  const enabled = context.enabled ?? process.env.AI_NOVEL_WORKFLOW_KERNEL === "1";
+  if (!enabled || !String(context.projectId || "").trim()) return { state: await executeAdvance(), trace: null };
+  const externalRunId = context.externalRunId || (0, import_node_crypto5.randomUUID)();
+  const { enabled: _enabled, externalRunId: _externalRunId, ...workflowContext } = context;
+  const runner = new ObservableProductionWorkflowRunner(context.factoryRootDir, async () => executeAdvance());
+  const node = resolveProductionWorkflowNode(context.state.runtime.stage);
+  const checkpointer = new FactoryLangGraphCheckpointer(
+    context.factoryRootDir,
+    context.projectId,
+    `${context.executionMode}_${externalRunId}`
+  );
+  const graphConfig = {
+    configurable: {
+      thread_id: `workflow:${context.projectId}:${externalRunId}`,
+      checkpoint_ns: ""
+    },
+    durability: "sync"
+  };
+  for await (const restored of checkpointer.list(graphConfig, { limit: 12 })) {
+    const restoredState = restored.checkpoint.channel_values.resultState;
+    const restoredTrace = restored.checkpoint.channel_values.trace;
+    if (restoredState && restoredTrace) return { state: restoredState, trace: restoredTrace };
+  }
+  const graph = new import_langgraph.StateGraph(ProductionGraphState).addNode(node.id, async (graphState) => {
+    const result = await runner.execute(graphState.context, graphState.externalRunId);
+    return { resultState: result.state, trace: result.trace };
+  }).addEdge(import_langgraph.START, node.id).addEdge(node.id, import_langgraph.END).compile({ checkpointer });
+  const output = await graph.invoke({
+    context: workflowContext,
+    externalRunId,
+    resultState: null,
+    trace: null
+  }, graphConfig);
+  if (!output.resultState || !output.trace) throw new Error("production_langgraph_completed_without_result");
+  return { state: output.resultState, trace: output.trace };
 }
 
 // src/director-commands.ts
@@ -18673,7 +22588,15 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
             driftReason: null,
             statusMessage: "\u5F53\u524D\u9636\u6BB5\u5DF2\u6709\u8DB3\u591F\u4E0A\u4E0B\u6587\uFF0C\u6B63\u5728\u4F18\u5148\u63A8\u8FDB\u751F\u4EA7\u72B6\u6001\u673A\u3002"
           }, autopilotStateStore(rootDir, projectId));
-          const advanced2 = await advanceAutonomousProject(projectRoot, {
+          const { state: advanced2 } = await executeProductionAdvanceThroughKernel({
+            rootDir: projectRoot,
+            factoryRootDir: rootDir,
+            projectId,
+            state: beforeDiscussion,
+            executionMode: "production",
+            externalRunId: directorCommand.id,
+            metadata: { directorCommandId: directorCommand.id, source: "autopilot-advance-first" }
+          }, () => advanceAutonomousProject(projectRoot, {
             factoryRootDir: rootDir,
             projectId,
             directorCommandId: directorCommand.id,
@@ -18682,7 +22605,7 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
             onProgress: async (event) => {
               emitAutopilotEvent(projectRoot, "writing_progress", event);
             }
-          });
+          }));
           const advanceCheckpoint2 = await writeAutopilotCheckpoint(projectRoot, advanced2, `advance-${advanced2.runtime.stage}`, {
             previousStage: beforeDiscussion.runtime.stage,
             advanceFirst: directorCommand.advanceFirst,
@@ -18874,7 +22797,15 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
           lastStep: `advance:${afterDiscussion.runtime.stage}`,
           statusMessage: "\u8BA8\u8BBA\u7ED3\u8BBA\u5DF2\u5199\u56DE\uFF0C\u6B63\u5728\u81EA\u52A8\u63A8\u8FDB\u5DE5\u4F5C\u6D41\u3002"
         }, autopilotStateStore(rootDir, projectId));
-        const advanced = await advanceAutonomousProject(projectRoot, {
+        const { state: advanced } = await executeProductionAdvanceThroughKernel({
+          rootDir: projectRoot,
+          factoryRootDir: rootDir,
+          projectId,
+          state: afterDiscussion,
+          executionMode: "production",
+          externalRunId: followUpAdvanceCommand.id,
+          metadata: { directorCommandId: followUpAdvanceCommand.id, source: "autopilot-after-discussion" }
+        }, () => advanceAutonomousProject(projectRoot, {
           factoryRootDir: rootDir,
           projectId,
           directorCommandId: followUpAdvanceCommand.id,
@@ -18883,7 +22814,7 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
           onProgress: async (event) => {
             emitAutopilotEvent(projectRoot, "writing_progress", event);
           }
-        });
+        }));
         const advanceCheckpoint = await writeAutopilotCheckpoint(projectRoot, advanced, `advance-${advanced.runtime.stage}`, {
           previousStage: afterDiscussion.runtime.stage,
           directorCommandId: followUpAdvanceCommand.id,

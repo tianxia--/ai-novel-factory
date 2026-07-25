@@ -28,6 +28,7 @@ import {
   loadProductionWritingResources,
   repairAigcHighRiskDraft,
   normalizeAigcWritingDetectionReport,
+  ProductionPlanningBlockedError,
   type ProductionPipelineOptions,
 } from "./writing-pipeline"
 import type { ChapterProductionFact } from "./factory-db"
@@ -72,6 +73,7 @@ const COVER_IMAGE_PATH = ".ai-novel/assets/cover/cover.png"
 const COVER_METADATA_PATH = ".ai-novel/assets/cover/cover-metadata.json"
 const COVER_PROMPT_PATH = ".ai-novel/assets/cover/cover-prompt.md"
 const DRAFT_SUBCALL_ROLE_VALUES = ["plot", "narration", "dialogue", "character_action", "continuity", "assembly"] as const
+const SETTING_REVIEW_APPROVAL_FILE = "setting-review-approval.json"
 const STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json"
 
 function parseDraftSubcallRolesSetting(value: string | null | undefined): ProductionPipelineOptions["draftSubcallRoles"] {
@@ -188,6 +190,123 @@ function resolveStoredProjectRoot(rootDir: string, projectRoot: string, projectI
   return rootRelative
 }
 
+const GENERIC_IDEA_TERMS = new Set([
+  "故事",
+  "小说",
+  "主角",
+  "主人公",
+  "世界",
+  "命运",
+  "未来",
+  "核心",
+  "线索",
+  "权力",
+  "关系",
+  "压力",
+])
+
+const ENGLISH_IDEA_STOPWORDS = new Set([
+  "about",
+  "after",
+  "against",
+  "and",
+  "because",
+  "before",
+  "between",
+  "chinese",
+  "chapter",
+  "character",
+  "characters",
+  "deep",
+  "discovers",
+  "factory",
+  "fiction",
+  "foreshadowing",
+  "form",
+  "hide",
+  "hooks",
+  "long",
+  "long-form",
+  "mystery",
+  "novel",
+  "pressure",
+  "prose",
+  "reader",
+  "relationship",
+  "records",
+  "story",
+  "support",
+  "that",
+  "the",
+  "their",
+  "with",
+  "worldbuilding",
+])
+
+function extractEnglishStorySignals(projectIdea: string) {
+  const source = projectIdea.toLowerCase()
+  const signals: string[] = []
+  const add = (term: string, pattern: RegExp) => {
+    if (pattern.test(source)) signals.push(term)
+  }
+  add("档案小吏", /archive\s+clerk|minor\s+archive/u)
+  add("档案库", /archive|archives|archival/u)
+  add("税册", /tax\s+ledger|tax\s+ledgers|ledger|ledgers|tax/u)
+  add("家族债务", /family\s+debt|family\s+debts|debt|debts/u)
+  add("司天监气象记录", /imperial\s+weather|weather\s+record|weather\s+records|meteorological/u)
+  add("不可能矛盾", /impossible\s+contradiction|contradiction|contradict/u)
+  add("证据链", /evidence|proof/u)
+  add("旧案", /old\s+case|past\s+case|cold\s+case/u)
+  add("账目异常", /account|accounts|accounting|bookkeeping/u)
+  add("关系变化", /relationship\s+change|relationship\s+changes/u)
+  add("长线伏笔", /foreshadowing|long-range\s+continuity|continuity/u)
+  return signals
+}
+
+function fallbackProjectIdeaTerms(projectIdea: string) {
+  if (/档案|archive|ledger|tax|weather|debt|账|税|债|气象|天气/u.test(projectIdea)) {
+    return ["档案库", "税册", "家族债务", "气象记录", "不可能矛盾", "被改写的证据"]
+  }
+  if (/悬疑|mystery|case|crime|detective|谋杀|案件|侦探|罪案/u.test(projectIdea)) {
+    return ["案件缺口", "关键物证", "证词矛盾", "关系压力", "隐藏动机", "真相代价"]
+  }
+  return ["核心线索", "关键物件", "关系债", "规则代价", "隐藏伤口", "下一层真相"]
+}
+
+function extractProjectIdeaTerms(projectIdea: string) {
+  const quotedTerms = Array.from(projectIdea.matchAll(/[「《“"]([^」》”"]{2,24})[」》”"]/gu))
+    .map((match) => match[1]?.trim())
+    .filter(Boolean)
+  const englishStorySignals = extractEnglishStorySignals(projectIdea)
+  const normalized = projectIdea
+    .replace(/[「」《》“”"']/gu, " ")
+    .replace(/一名|一个|一种|发现|追查|调查|寻找|守住|穿越到|穿越|进入|见证|改变|成为|并|用|从|被|把|将|在|到|的|了|和|与|及|以及/gu, " ")
+    .replace(/[，。；：、,.!?/\\()[\]{}<>|_-]+/gu, " ")
+  const chineseTerms = Array.from(normalized.matchAll(/[\u4e00-\u9fff]{2,10}/gu))
+    .map((match) => match[0])
+  const englishTerms = Array.from(normalized.matchAll(/[A-Za-z][A-Za-z0-9'-]{3,}/gu))
+    .map((match) => match[0])
+    .filter((term) => {
+      const lower = term.toLowerCase()
+      return lower.length >= 5 && !ENGLISH_IDEA_STOPWORDS.has(lower)
+    })
+  const terms = [
+    ...quotedTerms,
+    ...chineseTerms,
+    ...englishStorySignals,
+    ...(englishStorySignals.length ? [] : englishTerms),
+  ]
+    .map((term) => term.trim())
+    .filter((term) => term && !GENERIC_IDEA_TERMS.has(term))
+  const concreteTerms = Array.from(new Set(terms)).slice(0, 12)
+  return concreteTerms.length ? concreteTerms : fallbackProjectIdeaTerms(projectIdea)
+}
+
+function summarizeProjectIdeaForCausalPlan(projectIdea: string) {
+  const terms = extractProjectIdeaTerms(projectIdea).slice(0, 6)
+  return terms.length ? terms.join("、") : "核心创意"
+}
+
 function buildChapterCausalPlan(chapterNumber: number, totalChapters: number, projectIdea: string): NonNullable<ChapterTask["causalPlan"]> {
   const arcSize = Math.max(3, Math.ceil(totalChapters / 4))
   const arcNumber = Math.ceil(chapterNumber / arcSize)
@@ -196,6 +315,51 @@ function buildChapterCausalPlan(chapterNumber: number, totalChapters: number, pr
   const positionInArc = chapterNumber - arcStart + 1
   const isFirstChapter = chapterNumber === 1
   const isLastChapter = chapterNumber === totalChapters
+  const chapterIndex = Math.max(0, chapterNumber - 1)
+  const pressureVectors = [
+    "证据异常",
+    "关系逼迫",
+    "制度/规则反噬",
+    "资源被夺",
+    "身份暴露风险",
+    "旧债或旧伤重返现场",
+  ]
+  const evidenceObjects = [
+    "一件会改变判断顺序的物件",
+    "一段被删改的记录",
+    "一次不合时宜的沉默",
+    "一个带有代价的帮助",
+    "一条只能部分解释的线索",
+    "一份会让盟友分裂的证据",
+  ]
+  const relationshipPivots = [
+    "信任被迫提前表态",
+    "债务变成当场交换",
+    "隐瞒压过亲近",
+    "同盟因利益出现裂缝",
+    "对手借关系施压",
+    "旁观者必须选边",
+  ]
+  const worldRuleTouches = [
+    "规则第一次显形",
+    "规则制造实际成本",
+    "规则被人利用",
+    "规则的例外出现",
+    "规则造成误判",
+    "规则逼出不可逆选择",
+  ]
+  const pressureVector = pressureVectors[chapterIndex % pressureVectors.length]
+  const evidenceObject = evidenceObjects[chapterIndex % evidenceObjects.length]
+  const relationshipPivot = relationshipPivots[chapterIndex % relationshipPivots.length]
+  const worldRuleTouch = worldRuleTouches[chapterIndex % worldRuleTouches.length]
+  const ideaTerms = extractProjectIdeaTerms(projectIdea)
+  const primaryTerm = ideaTerms[chapterIndex % Math.max(1, ideaTerms.length)] || "核心线索"
+  const secondaryTerm = ideaTerms[(chapterIndex + 1) % Math.max(1, ideaTerms.length)] || primaryTerm
+  const specificPressureVector = `${primaryTerm}牵出的${pressureVector}`
+  const specificEvidenceObject = `${evidenceObject}（必须指向「${primaryTerm}」）`
+  const specificRelationshipPivot = `${relationshipPivot}，并围绕「${secondaryTerm}」发生`
+  const specificWorldRuleTouch = `${worldRuleTouch}：${primaryTerm}不能只停留在设定说明里`
+  const storySignalSummary = summarizeProjectIdeaForCausalPlan(projectIdea)
   const previousLabel = isFirstChapter ? "原始创作目标和设定冻结结论" : `第 ${chapterNumber - 1} 章留下的状态、物件、关系、代价和未解决问题`
   const nextLabel = isLastChapter ? "全书结局兑现与余味" : `第 ${chapterNumber + 1} 章必须继续处理的压力、线索和人物关系`
   const phaseObjective = positionInArc === 1
@@ -205,15 +369,15 @@ function buildChapterCausalPlan(chapterNumber: number, totalChapters: number, pr
       : "让当前冲突升级一次，并把主角推向更困难的选择"
 
   return {
-    previousInput: `承接：${previousLabel}；不能只复用主角姓名另起无关剧情。`,
-    sceneObjective: `推进：围绕「${projectIdea}」在第 ${arcNumber} 弧（第 ${arcStart}-${arcEnd} 章）完成一次具体情节推进：${phaseObjective}。`,
-    protagonistDecision: "主角必须在可见压力下主动做出选择，选择要暴露欲望、弱点、能力边界或价值取舍。",
-    irreversibleConsequence: "本章结尾必须留下不可逆变化：身份风险、关系裂缝、线索暴露、资源损失、权力压力或世界规则后果至少一项。",
+    previousInput: `承接：${previousLabel}；本章切入点是「${specificPressureVector}」，不能只复用主角姓名另起无关剧情。`,
+    sceneObjective: `推进：围绕「${storySignalSummary}」在第 ${arcNumber} 弧（第 ${arcStart}-${arcEnd} 章）完成一次具体情节推进：${phaseObjective}；用「${specificEvidenceObject}」让「${specificWorldRuleTouch}」。`,
+    protagonistDecision: `主角必须在「${specificRelationshipPivot}」的可见压力下主动做出选择，选择要暴露欲望、弱点、能力边界或价值取舍。`,
+    irreversibleConsequence: `本章结尾必须留下不可逆变化：围绕「${specificPressureVector}」造成身份风险、关系裂缝、线索暴露、资源损失、权力压力或世界规则后果至少一项。`,
     nextHandoff: `交棒：把本章的不可逆变化转化为${nextLabel}。`,
     requiredContinuityAnchors: isFirstChapter
       ? ["主角唯一身份", "核心缺口", "第一枚主线线索"]
       : ["上一章关键物件", "上一章关系变化", "上一章未解决问题", "上一章代价"],
-    characterStateDelta: "角色状态必须发生可追踪变化：信任、债务、恐惧、野心、伤口或阵营关系至少一项进入记忆账本。",
+    characterStateDelta: `角色状态必须发生可追踪变化：${specificRelationshipPivot}，并让信任、债务、恐惧、野心、伤口或阵营关系至少一项进入记忆账本。`,
     foreshadowingOperation: chapterNumber % 3 === 0
       ? "回收或部分兑现一个前序伏笔，同时延后一个更大的问题。"
       : "新增一个可追踪伏笔，并明确它与主线或角色伤口的关系。",
@@ -861,6 +1025,15 @@ async function readOptionalJson(filePath: string) {
   } catch {
     return null
   }
+}
+
+function isSettingReviewApproved(approval: Record<string, unknown> | null) {
+  return Boolean(
+    approval
+    && approval.approved === true
+    && String(approval.status || "").trim() === "approved"
+    && String(approval.reviewedAt || "").trim()
+  )
 }
 
 async function fileHasContent(filePath: string) {
@@ -2092,10 +2265,19 @@ function createSettingFreeze(
   const styleHighlights = extractSectionBullets(context.style, "Discussion-driven adjustments", 3)
 
   return [
-    "# Setting Freeze",
+    "# Setting Review Packet",
     "",
     `Project: ${state.project.title}`,
     `Core idea: ${state.project.idea}`,
+    "Status: review_required",
+    "Approval artifact: `.ai-novel/plans/setting-review-approval.json`",
+    "Canonical scope: draft-only until explicit user approval.",
+    "",
+    "Review gate:",
+    "- This packet is a review artifact, not final book canon.",
+    "- Downstream planning may use it as a proposal source, but must preserve open questions and must not treat sparse placeholders as frozen facts.",
+    "- Before full drafting, the user must confirm or revise the story foundation approval bundle.",
+    "- If protagonist, cast, rules, or main conflict are still vague, generate concrete follow-up questions instead of filling with generic defaults.",
     "",
     "Discussion-backed consensus:",
     ...(consensusHighlights.length > 0 ? consensusHighlights : ["- No discussion summary captured yet."]),
@@ -2111,6 +2293,13 @@ function createSettingFreeze(
     "",
     "Open questions to resolve with the user before full drafting:",
     ...state.reactSetup.unansweredQuestions.map((question) => `- ${question}`),
+    "",
+    "Approval checklist:",
+    "- Named protagonist, desire, wound, and visible behavior anchor are concrete.",
+    "- At least two named supporting characters have relationship pressure, desire, and cost.",
+    "- World rules create scene-level costs instead of background decoration.",
+    "- Main conflict and chapter handoffs follow one causal chain.",
+    "- Any rejected or unresolved premise remains marked as open, not silently promoted to canon.",
   ].join("\n")
 }
 
@@ -2369,8 +2558,13 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
           projectId: pipelineOptions.projectId as string,
           kind: "plan",
           path: ".ai-novel/plans/setting-freeze.md",
-          status: "completed",
-          metadata: { production: true, stage: state.runtime.stage },
+          status: "pending",
+          metadata: {
+            production: true,
+            stage: state.runtime.stage,
+            reviewStatus: "review_required",
+            approvalPath: ".ai-novel/plans/setting-review-approval.json",
+          },
         })
       }).catch(() => undefined)
     }
@@ -2383,7 +2577,7 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
       state.assets.cover = coverState.assets.cover
     }
     state.runtime.stage = "setting_review"
-    state.runtime.statusMessage = "Setting freeze drafted. Review the frozen world assumptions before outlining."
+    state.runtime.statusMessage = "Setting review packet drafted. Review the proposed world assumptions before they are treated as canon."
     stampRuntimeProgress(state, "setting_freeze_generated")
     await saveAutonomousState(rootDir, state)
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
@@ -2394,7 +2588,42 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
 
   if (state.runtime.stage === "setting_review") {
     throwIfStopped(pipelineOptions.signal)
-    await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions)
+    const settingReviewApprovalPath = path.join(paths.plansDir, SETTING_REVIEW_APPROVAL_FILE)
+    const settingReviewApproval = await readOptionalJson(settingReviewApprovalPath)
+    if (!isSettingReviewApproved(settingReviewApproval)) {
+      const rejected = settingReviewApproval?.approved === false || String(settingReviewApproval?.status || "") === "rejected"
+      state.runtime.statusMessage = rejected
+        ? "Setting review was rejected. Revise the world, cast, or mainline assumptions before master planning."
+        : "Setting review packet is waiting for explicit user approval before master planning."
+      stampRuntimeProgress(state, rejected ? "setting_review_rejected" : "setting_review_waiting_for_approval")
+      await saveAutonomousState(rootDir, state)
+      await recordWorkflowEvent(pipelineOptions, "SETTING_REVIEW_BLOCKED", {
+        status: rejected ? "rejected" : "waiting_for_approval",
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+      })
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+      }
+      return state
+    }
+    try {
+      await writeProductionMasterOutline(rootDir, paths, state, context, pipelineOptions)
+    } catch (error) {
+      if (!(error instanceof ProductionPlanningBlockedError)) {
+        throw error
+      }
+      state.runtime.statusMessage = "Master planning is blocked until a concrete protagonist name and profile are confirmed."
+      stampRuntimeProgress(state, "master_planning_protagonist_blocked")
+      await saveAutonomousState(rootDir, state)
+      await recordWorkflowEvent(pipelineOptions, "MASTER_PLANNING_BLOCKED", {
+        reason: error.message,
+        gate: error.gate,
+      })
+      if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+        await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
+      }
+      return state
+    }
     state.runtime.stage = "master_planning"
     state.runtime.statusMessage = "Production master outline generated. Next step is to write story bible assets before chapter blueprints."
     stampRuntimeProgress(state, "master_outline_generated")
@@ -2525,6 +2754,16 @@ export async function retryChapterProduction(
 
   if (!task) {
     throw new Error(`chapter_not_found:${chapterNumber}`)
+  }
+
+  if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
+    await withFactoryDb(pipelineOptions.factoryRootDir, async (db) => {
+      db.markStreamingMessagesFailed(pipelineOptions.projectId as string, {
+        conversationId: `writing:${pipelineOptions.projectId}`,
+        chapterNumber,
+        reason: "manual chapter retry superseded an unfinished writing stream",
+      })
+    }).catch(() => undefined)
   }
 
   const maxRecoveryAttempts = getMaxRecoveryAttempts(pipelineOptions)

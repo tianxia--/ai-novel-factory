@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>小说流程节点 · 真实执行调试</title>
+  <link rel="stylesheet" href="flow-debug.css?v=29">
+</head>
+<body>
+  <div class="debug-app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-index" id="brand-index">01</span><div><strong id="brand-title">世界观生成节点</strong><small>REAL EXECUTION LAB</small></div></div>
+      <div class="truth-badge"><i></i><span>只接受真实模型 · 拒绝 TEST_MODE 假回复</span></div>
+      <div class="service-badge checking" id="service-badge"><i></i><span id="service-label">检查执行器</span></div>
+    </header>
+
+    <main class="workspace">
+      <aside class="input-panel">
+        <nav class="node-nav" id="node-nav" aria-label="调试节点">
+          <button type="button" class="active" data-node="world-foundation"><span>01</span><strong>世界观</strong><small>已接通</small></button>
+          <button type="button" data-node="character-planning"><span>02</span><strong>人物规划</strong><small id="character-node-state">等待上游</small></button>
+          <button type="button" data-node="initial-character-state"><span>03</span><strong>初始状态</strong><small id="initial-state-node-state">等待上游</small></button>
+          <button type="button" data-node="world-matrix"><span>04</span><strong>世界矩阵</strong><small id="world-matrix-node-state">等待上游</small></button>
+          <button type="button" data-node="plot-architecture"><span>05</span><strong>主线架构</strong><small id="plot-architecture-node-state">等待上游</small></button>
+          <button type="button" data-node="story-bible"><span>06</span><strong>故事圣经</strong><small id="story-bible-node-state">等待上游</small></button>
+          <button type="button" data-node="volume-strategy"><span>07</span><strong>分卷策略</strong><small id="volume-strategy-node-state">等待上游</small></button>
+          <button type="button" data-node="chapter-blueprints"><span>08</span><strong>章节蓝图</strong><small id="chapter-blueprints-node-state">等待上游</small></button>
+          <button type="button" data-node="style-profile"><span>09</span><strong>文风自进化</strong><small id="style-profile-node-state">等待上游</small></button>
+          <button type="button" data-node="single-chapter-context"><span>10</span><strong>单章上下文</strong><small id="single-chapter-context-node-state">等待上游</small></button>
+          <button type="button" data-node="chapter-draft"><span>11</span><strong>单章生产</strong><small id="chapter-draft-node-state">等待上游</small></button>
+          <button type="button" data-node="chapter-commit"><span>12</span><strong>正文冻结</strong><small id="chapter-commit-node-state">等待正文</small></button>
+          <button type="button" data-node="continuous-chapter-production"><span>13</span><strong>连续生产</strong><small id="continuous-chapter-node-state">等待文风</small></button>
+          <button type="button" data-node="chapter-review"><span>14</span><strong>阅读复盘</strong><small id="chapter-review-node-state">读已冻结</small></button>
+        </nav>
+
+        <section class="model-switcher" aria-labelledby="debug-model-title">
+          <header>
+            <div><span class="eyebrow">RUN MODEL</span><h2 id="debug-model-title">本次调试模型</h2></div>
+            <span class="model-scope">仅 Debug Run</span>
+          </header>
+          <label for="debug-model-select">选择下一次运行使用的模型</label>
+          <select id="debug-model-select" disabled aria-describedby="debug-model-status">
+            <option value="">正在读取模型配置…</option>
+          </select>
+          <div class="model-meta"><strong id="debug-model-name">—</strong><span id="debug-model-mode">—</span></div>
+          <p id="debug-model-status">不会修改正式项目的全局模型路由。</p>
+          <label for="debug-project-select">调试日志归属项目</label>
+          <select id="debug-project-select" disabled aria-describedby="debug-project-status">
+            <option value="">正在读取小说工厂项目…</option>
+          </select>
+          <p id="debug-project-status">只写入 Run / Step / Attempt 调试证据，不修改小说正式状态。</p>
+        </section>
+
+        <details class="production-sandbox-console" id="production-sandbox-console">
+          <summary><span>正式流程沙盒</span><small>真实业务节点 · 不改正式项目</small></summary>
+          <div class="production-sandbox-body">
+            <p>从上方选中的项目复制当前状态。每次只允许执行沙盒当前节点，并保留完整 Run / Step / Attempt / Checkpoint。</p>
+            <dl>
+              <div><dt>Sandbox</dt><dd id="production-sandbox-id">尚未创建</dd></div>
+              <div><dt>当前阶段</dt><dd id="production-sandbox-stage">—</dd></div>
+              <div><dt>可执行节点</dt><dd id="production-sandbox-node">—</dd></div>
+              <div><dt>已执行</dt><dd id="production-sandbox-run-count">0</dd></div>
+            </dl>
+            <p class="production-sandbox-status" id="production-sandbox-status">先创建沙盒；正式项目不会被推进。</p>
+            <div class="production-sandbox-actions">
+              <button type="button" id="production-sandbox-create">创建当前状态沙盒</button>
+              <button type="button" id="production-sandbox-approve" hidden>批准设定评审</button>
+              <button type="button" id="production-sandbox-import-protagonist" hidden>导入人物节点主角</button>
+              <button type="button" id="production-sandbox-run" disabled>运行当前生产节点</button>
+            </div>
+            <div class="production-sandbox-live">
+              <strong>实时执行证据</strong>
+              <ol id="production-sandbox-live-log"><li><time>IDLE</time><span>尚未执行生产节点。</span></li></ol>
+            </div>
+            <div class="production-sandbox-history" id="production-sandbox-history"><span>尚无生产节点执行记录。</span></div>
+          </div>
+        </details>
+
+        <div id="world-input-panel">
+        <div class="panel-title">
+          <div><span class="eyebrow">MANUAL INPUT</span><h1>本次输入</h1></div>
+          <span class="isolated">隔离运行</span>
+        </div>
+
+        <p class="input-note">每次点击只执行这一个节点。结果写入独立 debug run，不修改正式项目。</p>
+
+        <form id="run-form">
+          <label><span>作品名 <b>*</b></span><input id="title" name="title" autocomplete="off" placeholder="例如：雨账" required></label>
+          <label class="wide-field"><span>核心创意 <b>*</b></span><textarea id="core-idea" name="coreIdea" rows="5" placeholder="至少 20 个字。写清楚故事独特矛盾，不要只写题材。" required></textarea><small id="idea-count">0 / 20</small></label>
+
+          <div class="field-grid">
+            <label><span>类型</span><input id="genre" name="genre" value="悬疑"></label>
+            <label><span>章节数</span><input id="total-chapters" name="totalChapters" type="number" min="1" max="500" value="40"></label>
+          </div>
+
+          <label><span>目标读者</span><input id="audience" name="audience" value="成年类型小说读者"></label>
+          <label><span>整体语气</span><input id="tone" name="tone" value="冷峻、克制、具有持续压迫感"></label>
+          <label><span>主角种子</span><textarea id="protagonist-seed" name="protagonistSeed" rows="3" placeholder="姓名、身份、欲望、伤口；留空则让模型创造"></textarea></label>
+          <label><span>必须包含</span><textarea id="must-include" name="mustInclude" rows="3" placeholder="你希望强制进入世界观的制度、物件、冲突或角色关系"></textarea></label>
+          <label><span>必须避免</span><textarea id="must-avoid" name="mustAvoid" rows="3">空泛设定、万能能力、无代价规则、工具人角色、机械降神</textarea></label>
+
+          <div class="temperature-row"><label for="temperature">创造性</label><input id="temperature" name="temperature" type="range" min="0" max="1.2" step="0.05" value="0.65"><output id="temperature-value">0.65</output></div>
+
+          <button class="run-button" id="run-button" type="submit" disabled><span>▶</span><span>运行世界观节点</span></button>
+        </form>
+        </div>
+
+        <div id="character-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">UPSTREAM LOCK</span><h1>人物规划输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过验证的世界观 Run。不会改写正式项目，也不会让浏览器重新拼接上游内容。</p>
+          <section class="upstream-card" id="upstream-card">
+            <span class="eyebrow">WORLD FOUNDATION</span>
+            <h2 id="upstream-title">等待世界观节点</h2>
+            <p id="upstream-detail">请先完成并通过节点 01。</p>
+            <dl><div><dt>上游 Run</dt><dd id="upstream-run-id">—</dd></div><div><dt>已有人物</dt><dd id="upstream-character-count">0</dd></div><div><dt>规划下限</dt><dd id="character-target-count">—</dd></div></dl>
+            <div class="character-chips" id="upstream-character-list"></div>
+          </section>
+          <form id="character-run-form">
+            <label><span>本轮额外关注</span><textarea id="planning-focus" rows="4" placeholder="例如：重点检查 500 章中期人物是否薄弱、反派层级是否单一。">重点检查长篇体量下的人物数量、关系网、各阶段登场与退出计划，避免核心人物撑不起全书。</textarea></label>
+            <div class="temperature-row"><label for="character-temperature">创造性</label><input id="character-temperature" type="range" min="0" max="1.2" step="0.05" value="0.55"><output id="character-temperature-value">0.55</output></div>
+            <button class="run-button" id="character-run-button" type="submit" disabled><span>▶</span><span>运行人物规划节点</span></button>
+          </form>
+        </div>
+
+        <div id="initial-state-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">STATE FREEZE</span><h1>人物初始状态输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的人物规划，不新增人物。输出是第 1 章开场时刻的状态账本，供后续世界矩阵和主线节点消费。</p>
+          <section class="upstream-card" id="initial-state-upstream-card">
+            <span class="eyebrow">CHARACTER PLANNING</span>
+            <h2 id="initial-state-upstream-title">等待人物规划节点</h2>
+            <p id="initial-state-upstream-detail">请先完成并通过节点 02。</p>
+            <dl><div><dt>上游 Run</dt><dd id="initial-state-upstream-run-id">—</dd></div><div><dt>冻结人物</dt><dd id="initial-state-character-count">0</dd></div><div><dt>关系边</dt><dd id="initial-state-relationship-count">0</dd></div></dl>
+            <div class="character-chips" id="initial-state-character-list"></div>
+          </section>
+          <form id="initial-state-run-form">
+            <label><span>状态冻结关注点</span><textarea id="initial-state-focus" rows="4" placeholder="例如：第一章必须从主角的具体行动开始，不能让其他人物原地等待。">确保第 1 章能够直接执行：主角有具体动作、阻力和倒计时；未登场人物也有明确位置、行动与知识边界。</textarea></label>
+            <div class="field-grid">
+              <label><span>开场章节</span><input id="opening-chapter" type="number" min="1" value="1" readonly></label>
+              <label><span>人物数</span><input id="initial-state-count-display" type="text" value="—" readonly></label>
+            </div>
+            <div class="temperature-row"><label for="initial-state-temperature">创造性</label><input id="initial-state-temperature" type="range" min="0" max="1.2" step="0.05" value="0.35"><output id="initial-state-temperature-value">0.35</output></div>
+            <button class="run-button" id="initial-state-run-button" type="submit" disabled><span>▶</span><span>运行人物初始状态节点</span></button>
+          </form>
+        </div>
+
+        <div id="world-matrix-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">WORLD EXECUTION MAP</span><h1>世界矩阵输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的人物初始状态，将规则、地点、势力、资源、制度、压力与人物连接起来。本节点不生成主线、章节或分卷。</p>
+          <section class="upstream-card" id="world-matrix-upstream-card">
+            <span class="eyebrow">INITIAL CHARACTER STATE</span>
+            <h2 id="world-matrix-upstream-title">等待人物初始状态节点</h2>
+            <p id="world-matrix-upstream-detail">请先完成并通过节点 03。</p>
+            <dl><div><dt>上游 Run</dt><dd id="world-matrix-upstream-run-id">—</dd></div><div><dt>人物</dt><dd id="world-matrix-character-count">0</dd></div><div><dt>开场地点</dt><dd id="world-matrix-location-count">0</dd></div></dl>
+            <div class="character-chips" id="world-matrix-location-list"></div>
+          </section>
+          <form id="world-matrix-run-form">
+            <label><span>矩阵构建关注点</span><textarea id="world-matrix-focus" rows="4" placeholder="例如：每个地点必须绑定规则成本、资源入口和人物压力。">确保每个开场地点都能直接执行：明确控制势力、适用规则、可用资源、进入与离开成本；所有倒计时和知识锁都要落到可观察的世界压力。</textarea></label>
+            <div class="field-grid">
+              <label><span>冻结规则</span><input id="world-matrix-rule-count" type="text" value="—" readonly></label>
+              <label><span>活动倒计时</span><input id="world-matrix-clock-count" type="text" value="—" readonly></label>
+            </div>
+            <div class="temperature-row"><label for="world-matrix-temperature">创造性</label><input id="world-matrix-temperature" type="range" min="0" max="1.2" step="0.05" value="0.25"><output id="world-matrix-temperature-value">0.25</output></div>
+            <button class="run-button" id="world-matrix-run-button" type="submit" disabled><span>▶</span><span>运行世界矩阵节点</span></button>
+          </form>
+        </div>
+
+        <div id="plot-architecture-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">CAUSAL SPINE</span><h1>主线架构输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的世界矩阵，把可用选择、锁定后果、升级轴和连续性锚点组织成全书宏观因果弧。本节点不生成故事圣经、分卷策略、逐章蓝图或正文。</p>
+          <section class="upstream-card" id="plot-architecture-upstream-card">
+            <span class="eyebrow">WORLD MATRIX</span>
+            <h2 id="plot-architecture-upstream-title">等待世界矩阵节点</h2>
+            <p id="plot-architecture-upstream-detail">请先完成并通过节点 04。</p>
+            <dl><div><dt>上游 Run</dt><dd id="plot-architecture-upstream-run-id">—</dd></div><div><dt>冻结人物</dt><dd id="plot-architecture-character-count">0</dd></div><div><dt>连续性锚点</dt><dd id="plot-architecture-anchor-count">0</dd></div></dl>
+            <div class="character-chips" id="plot-architecture-causal-list"></div>
+          </section>
+          <form id="plot-architecture-run-form">
+            <label><span>主线架构关注点</span><textarea id="plot-architecture-focus" rows="4" placeholder="例如：重点压测中段重复、人物掉线和结局机械降神。">重点检查长篇中段是否重复：每一弧都必须改变人物关系、世界压力、真相结构或主角方法；所有冻结人物、连续性锚点、支线和伏笔都必须进入可验证计划。</textarea></label>
+            <div class="field-grid">
+              <label><span>全书章节</span><input id="plot-architecture-total-chapters" type="text" value="—" readonly></label>
+              <label><span>目标弧数</span><input id="plot-architecture-arc-count" type="text" value="—" readonly></label>
+            </div>
+            <div class="temperature-row"><label for="plot-architecture-temperature">创造性</label><input id="plot-architecture-temperature" type="range" min="0" max="1.2" step="0.05" value="0.40"><output id="plot-architecture-temperature-value">0.40</output></div>
+            <button class="run-button" id="plot-architecture-run-button" type="submit" disabled><span>▶</span><span>运行主线架构节点</span></button>
+          </form>
+        </div>
+
+        <div id="story-bible-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">CANON FREEZE</span><h1>故事圣经输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的主线架构，把世界、人物、关系、弧线、术语、连续性和承诺冻结为全项目唯一正典。本节点不重新规划主线，也不生成分卷、逐章蓝图或正文。</p>
+          <section class="upstream-card" id="story-bible-upstream-card">
+            <span class="eyebrow">PLOT ARCHITECTURE</span>
+            <h2 id="story-bible-upstream-title">等待主线架构节点</h2>
+            <p id="story-bible-upstream-detail">请先完成并通过节点 05。</p>
+            <dl><div><dt>上游 Run</dt><dd id="story-bible-upstream-run-id">—</dd></div><div><dt>主线弧</dt><dd id="story-bible-arc-count">0</dd></div><div><dt>连续性锚点</dt><dd id="story-bible-anchor-count">0</dd></div></dl>
+            <div class="character-chips" id="story-bible-lock-list"></div>
+          </section>
+          <form id="story-bible-run-form">
+            <label><span>正典冻结关注点</span><textarea id="story-bible-focus" rows="4" placeholder="例如：重点冻结人物声音、知识边界和能力代价。">把所有不可漂移事实变成可检查的正典条目：重点冻结人物身份与声音、关系方向、能力代价、知识边界、专有名词、弧线状态和结局不可回滚项。</textarea></label>
+            <div class="field-grid">
+              <label><span>冻结人物</span><input id="story-bible-character-count" type="text" value="—" readonly></label>
+              <label><span>冻结关系</span><input id="story-bible-relationship-count" type="text" value="—" readonly></label>
+            </div>
+            <div class="temperature-row"><label for="story-bible-temperature">创造性</label><input id="story-bible-temperature" type="range" min="0" max="1.2" step="0.05" value="0.20"><output id="story-bible-temperature-value">0.20</output></div>
+            <button class="run-button" id="story-bible-run-button" type="submit" disabled><span>▶</span><span>运行故事圣经节点</span></button>
+          </form>
+        </div>
+
+        <div id="volume-strategy-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">VOLUME CONTRACT</span><h1>分卷策略输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的故事圣经，把冻结主线弧分组为连续卷，并安排卷级人物变化、压力升级、伏笔推进和读者兑现。本节点不生成逐章蓝图、章节列表或正文。</p>
+          <section class="upstream-card" id="volume-strategy-upstream-card">
+            <span class="eyebrow">STORY BIBLE</span>
+            <h2 id="volume-strategy-upstream-title">等待故事圣经节点</h2>
+            <p id="volume-strategy-upstream-detail">请先完成并通过节点 06。</p>
+            <dl><div><dt>上游 Run</dt><dd id="volume-strategy-upstream-run-id">—</dd></div><div><dt>主线弧</dt><dd id="volume-strategy-arc-count">0</dd></div><div><dt>伏笔承诺</dt><dd id="volume-strategy-promise-count">0</dd></div></dl>
+            <div class="character-chips" id="volume-strategy-break-list"></div>
+          </section>
+          <form id="volume-strategy-run-form">
+            <label><span>分卷设计关注点</span><textarea id="volume-strategy-focus" rows="4" placeholder="例如：重点检查中段各卷是否重复、卷尾是否有真正不可逆变化。">避免长篇中段换地图式重复：每卷使用不同压力模型，至少改变一次人物关系或世界认知；每个卷尾都必须兑现局部答案，并留下具体、不可回滚的下一卷压力。</textarea></label>
+            <div class="field-grid">
+              <label><span>全书章节</span><input id="volume-strategy-total-chapters" type="text" value="—" readonly></label>
+              <label><span>冻结人物</span><input id="volume-strategy-character-count" type="text" value="—" readonly></label>
+              <label><span>目标卷数</span><input id="volume-strategy-target-count" type="number" min="2" max="12" value="5"></label>
+            </div>
+            <p class="input-note compact">目标卷数不能超过主线弧数量；每条弧必须完整归属一卷，不能跨卷拆分。</p>
+            <div class="temperature-row"><label for="volume-strategy-temperature">创造性</label><input id="volume-strategy-temperature" type="range" min="0" max="1.2" step="0.05" value="0.30"><output id="volume-strategy-temperature-value">0.30</output></div>
+            <button class="run-button" id="volume-strategy-run-button" type="submit" disabled><span>▶</span><span>运行分卷策略节点</span></button>
+          </form>
+        </div>
+
+        <div id="chapter-blueprints-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">BLUEPRINT BATCH</span><h1>章节蓝图输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">只读取已通过的分卷策略，按所选卷生成一段连续章节蓝图。节点使用持续收敛 Learning Loop：生成、校验、错误原文回写、定向修复、复检，不再固定 3 轮；成功时放行，正典冲突或连续 5 轮无进展时明确停止。本节点不生成写作计划或正文。</p>
+          <section class="upstream-card" id="chapter-blueprints-upstream-card">
+            <span class="eyebrow">VOLUME STRATEGY</span>
+            <h2 id="chapter-blueprints-upstream-title">等待分卷策略节点</h2>
+            <p id="chapter-blueprints-upstream-detail">请先完成并通过节点 07。</p>
+            <dl><div><dt>上游 Run</dt><dd id="chapter-blueprints-upstream-run-id">—</dd></div><div><dt>可选卷</dt><dd id="chapter-blueprints-volume-count">0</dd></div><div><dt>正典人物</dt><dd id="chapter-blueprints-character-count">0</dd></div></dl>
+            <div class="character-chips" id="chapter-blueprints-volume-list"></div>
+          </section>
+          <section class="batch-ledger" id="chapter-blueprints-ledger">
+            <header><div><span class="eyebrow">BATCH LEDGER</span><h2>章节覆盖与历史版本</h2></div><div class="batch-ledger-actions"><button type="button" id="chapter-blueprints-auto-button" disabled>自动生成全卷</button><button type="button" id="chapter-blueprints-repair-button" disabled>修复当前结果</button><button type="button" id="chapter-blueprints-audit-button" disabled>仅跑正典审计</button><button type="button" id="chapter-blueprints-continue-button" disabled>继续下一批</button></div></header>
+            <dl class="coverage-stats"><div><dt>已调用</dt><dd id="chapter-blueprints-generated-count">0</dd></div><div><dt>完整通过</dt><dd id="chapter-blueprints-valid-count">0</dd></div><div><dt>卷内总章</dt><dd id="chapter-blueprints-volume-total">0</dd></div></dl>
+            <p id="chapter-blueprints-loop-status">Learning Loop：等待加载分层记忆。</p>
+            <p id="chapter-blueprints-auto-status">自动全卷：等待可运行的章节蓝图批次。</p>
+            <p id="chapter-blueprints-cache-status">上下文缓存：新 Run 将显示命中 Token、未命中 Token 和命中率。</p>
+            <div class="loop-trace" id="chapter-blueprints-loop-trace"><div class="loop-trace-empty">等待触发自动闭环。</div></div>
+            <section class="learning-workbench" id="chapter-blueprints-learning">
+              <header><div><span class="eyebrow">LEARNING MEMORY</span><h3>持续学习与经验晋升</h3></div><span id="chapter-learning-prompt-version">尚未加载</span></header>
+              <dl class="learning-stats"><div><dt>生效经验</dt><dd id="chapter-learning-active-count">0</dd></div><div><dt>候选经验</dt><dd id="chapter-learning-candidate-count">0</dd></div><div><dt>小说状态</dt><dd id="chapter-learning-state-count">0</dd></div><div><dt>未解冲突</dt><dd id="chapter-learning-conflict-count">0</dd></div></dl>
+              <div class="learning-scope-key"><span class="system">系统</span><span class="model">模型</span><span class="project">小说</span></div>
+              <div class="learning-experiences" id="chapter-learning-experiences"><div class="loop-trace-empty">运行后显示本次真正加载的经验。</div></div>
+              <div class="learning-conflicts" id="chapter-learning-conflicts" hidden></div>
+            </section>
+            <div class="coverage-track" aria-label="章节蓝图通过进度"><i id="chapter-blueprints-coverage-bar"></i></div>
+            <p id="chapter-blueprints-coverage-detail">等待分卷策略。</p>
+            <div class="chapter-coverage-grid" id="chapter-blueprints-coverage-grid"></div>
+            <div class="batch-history" id="chapter-blueprints-history"><div class="empty compact">尚无章节蓝图 Run。</div></div>
+          </section>
+          <form id="chapter-blueprints-run-form">
+            <label><span>本批蓝图关注点</span><textarea id="chapter-blueprints-focus" rows="4" placeholder="例如：检查每章的决定、不可逆变化和下一章交接是否真实推进。">逐章检查因果推进：每章必须让主角作出具体决定，产生不可逆变化，并把明确的新压力交给下一章；场景卡不得只是换地点重复同一冲突。</textarea></label>
+            <label><span>选择卷</span><select id="chapter-blueprints-volume-id" aria-label="选择要生成蓝图的卷"><option value="">等待分卷策略</option></select></label>
+            <div class="field-grid">
+              <label><span>起始章</span><input id="chapter-blueprints-start-chapter" type="number" min="1" value="1"></label>
+              <label><span>结束章</span><input id="chapter-blueprints-end-chapter" type="number" min="1" value="5"></label>
+              <label><span>单章目标字数</span><input id="chapter-blueprints-target-words" type="number" min="1000" max="10000" step="100" value="2500"></label>
+              <label><span>本批章数</span><input id="chapter-blueprints-batch-count" type="text" value="—" readonly></label>
+            </div>
+            <p class="input-note compact">起止章节必须完全位于同一卷内且连续；稳定生成模式单次 1–5 章。系统会自动定位下一处未通过章节；服务端拒绝重复生成已经完整通过的章节。</p>
+            <div class="temperature-row"><label for="chapter-blueprints-temperature">创造性</label><input id="chapter-blueprints-temperature" type="range" min="0" max="1.2" step="0.05" value="0.25"><output id="chapter-blueprints-temperature-value">0.25</output></div>
+            <button class="run-button" id="chapter-blueprints-run-button" type="submit" disabled><span>▶</span><span>运行章节蓝图节点</span></button>
+          </form>
+        </div>
+
+        <div id="style-profile-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">STYLE EVOLUTION</span><h1>文风自进化输入</h1></div>
+            <span class="isolated">隔离运行</span>
+          </div>
+          <p class="input-note">读取已通过的章节蓝图与故事正典，循环生成可评估文风样段；失败会把评估信息喂回下一轮修正。本节点不把样段写入正式章节、不新增剧情、不修改技能/物品/数字。</p>
+          <section class="upstream-card" id="style-profile-upstream-card">
+            <span class="eyebrow">CHAPTER BLUEPRINTS</span>
+            <h2 id="style-profile-upstream-title">等待章节蓝图节点</h2>
+            <p id="style-profile-upstream-detail">请先完成并通过节点 08。</p>
+            <dl><div><dt>上游 Run</dt><dd id="style-profile-upstream-run-id">—</dd></div><div><dt>蓝图章节</dt><dd id="style-profile-blueprint-count">0</dd></div><div><dt>样例章节</dt><dd id="style-profile-sample-display">—</dd></div></dl>
+            <div class="character-chips" id="style-profile-blueprint-list"></div>
+          </section>
+          <form id="style-profile-run-form">
+            <label><span>文风进化关注点</span><textarea id="style-profile-focus" rows="4">这个阶段先生成可评估的文风样段，不追求华丽辞藻；重点验证后续正文能继承章节蓝图、人物声音、因果推进、数值账本和禁用漂移规则。</textarea></label>
+            <label><span>真人参考样本（用于校准 AIGC，可选）</span><textarea id="style-profile-human-baseline" rows="5" placeholder="建议粘贴 2–5 段同题材真人文本。先校准：如果真人文本也被大量判 AI，就不能盲目要求生成器一直重写。"></textarea></label>
+            <div class="field-grid">
+              <label><span>AIGC 校验方式</span><select id="style-profile-aigc-mode">
+                <option value="merged_balanced" selected>合并短句 + 平衡策略（推荐创作）</option>
+                <option value="node09_strict">流程同款硬门禁（复现旧结果）</option>
+                <option value="sentence_strict">逐句严格（压力测试）</option>
+                <option value="paragraph_overall">按段落 + 只看整体分</option>
+              </select></label>
+              <label><span>合并短句到至少</span><input id="style-profile-aigc-min-segment-chars" type="number" min="20" max="500" step="10" value="120"></label>
+            </div>
+            <div class="field-grid">
+              <label><span>样例章节</span><input id="style-profile-sample-chapter" type="number" min="1" value="1"></label>
+              <label><span>蓝图数量</span><input id="style-profile-blueprint-count-display" type="text" value="—" readonly></label>
+              <label><span>最大迭代轮数</span><input id="style-profile-max-rounds" type="number" min="1" max="12" value="6"></label>
+            </div>
+            <p class="input-note compact">样例章节只用来校准文风样段，不会保存为正式正文。AIGC 校验推荐先用“合并短句 + 平衡策略”，如果要复现旧节点结果再切换到“流程同款硬门禁”。</p>
+            <div class="temperature-row"><label for="style-profile-temperature">创造性</label><input id="style-profile-temperature" type="range" min="0" max="1.2" step="0.05" value="0.20"><output id="style-profile-temperature-value">0.20</output></div>
+            <button class="run-button secondary-run-button" id="style-profile-aigc-calibration-button" type="button" disabled><span>◎</span><span>先校准 AIGC 检测器</span></button>
+            <button class="run-button" id="style-profile-run-button" type="submit" disabled><span>▶</span><span>运行文风自进化节点</span></button>
+            <button class="run-button secondary-run-button" id="style-profile-freeze-button" type="button" disabled><span>◆</span><span>冻结当前候选为正式文风合同</span></button>
+          </form>
+        </div>
+
+        <div id="single-chapter-context-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">CHAPTER CONTEXT</span><h1>单章上下文输入</h1></div>
+            <span class="isolated">确定性组装</span>
+          </div>
+          <p class="input-note">读取已冻结的文风合同、章节蓝图和正典边界，为指定章节生成“写作输入包”。本节点不调用模型、不写正文，只明确这一章允许写什么、必须继承什么、禁止碰什么。</p>
+          <section class="upstream-card">
+            <span class="eyebrow">FROZEN STYLE</span>
+            <h2 id="single-chapter-context-upstream-title">等待第 9 节点冻结</h2>
+            <p id="single-chapter-context-upstream-detail">请先完成第 9 节点，并点击“冻结当前候选为正式文风合同”。</p>
+            <dl><div><dt>文风 Run</dt><dd id="single-chapter-context-style-run-id">—</dd></div><div><dt>可选章节</dt><dd id="single-chapter-context-range">—</dd></div></dl>
+          </section>
+          <form id="single-chapter-context-run-form">
+            <label><span>上下文关注点</span><textarea id="single-chapter-context-focus" rows="4">为下一步正文生成准备最小但完整的单章写作输入包：明确本章目标、主角决定、不可逆变化、交接压力、冻结文风、AIGC 修复规则和禁止漂移项。</textarea></label>
+            <div class="field-grid">
+              <label><span>章节号</span><input id="single-chapter-context-chapter" type="number" min="1" value="1"></label>
+              <label><span>目标字数</span><input id="single-chapter-context-target-words" type="number" min="800" max="10000" step="100" value="2500"></label>
+            </div>
+            <button class="run-button" id="single-chapter-context-run-button" type="submit" disabled><span>▶</span><span>生成单章上下文包</span></button>
+          </form>
+        </div>
+
+        <div id="chapter-draft-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">SINGLE CHAPTER</span><h1>单章完整生产</h1></div>
+            <span class="isolated">内部闭环</span>
+          </div>
+          <p class="input-note">读取第 10 节点的单章上下文包，一键完成正文生成、基础门禁、AIGC 检测和失败修复 loop。本节点仍是调试沙盒：通过后生成最终正文候选，但不会自动写入正式章节库。</p>
+          <section class="upstream-card">
+            <span class="eyebrow">CONTEXT PACKAGE</span>
+            <h2 id="chapter-draft-upstream-title">等待第 10 节点</h2>
+            <p id="chapter-draft-upstream-detail">请先生成并通过单章上下文包。</p>
+            <dl><div><dt>上下文 Run</dt><dd id="chapter-draft-context-run-id">—</dd></div><div><dt>章节</dt><dd id="chapter-draft-chapter-display">—</dd></div></dl>
+          </section>
+          <form id="chapter-draft-run-form">
+            <label><span>单章生产关注点</span><textarea id="chapter-draft-focus" rows="4">完整生产本章：承接上一章状态，完成本章目标，写出主角决定、不可逆变化和下一章压力；基础门禁或 AIGC 不通过时，自动根据错误信息重写完整正文。</textarea></label>
+            <div class="field-grid">
+              <label><span>目标字数</span><input id="chapter-draft-target-words" type="number" min="800" max="12000" step="100" value="2500"></label>
+              <label><span>上下文章节</span><input id="chapter-draft-chapter" type="text" value="—" readonly></label>
+              <label><span>最大修复轮数</span><input id="chapter-draft-max-repair-rounds" type="number" min="0" max="12" value="3"></label>
+              <label><span>AIGC 策略</span><select id="chapter-draft-aigc-policy"><option value="balanced">平衡策略</option><option value="strict_any_sentence">严格短句</option><option value="overall_only">只看整体分</option></select></label>
+            </div>
+            <div class="temperature-row"><label for="chapter-draft-temperature">创造性</label><input id="chapter-draft-temperature" type="range" min="0" max="1.2" step="0.05" value="0.35"><output id="chapter-draft-temperature-value">0.35</output></div>
+            <button class="run-button" id="chapter-draft-run-button" type="submit" disabled><span>▶</span><span>运行单章完整生产</span></button>
+          </form>
+        </div>
+
+        <div id="chapter-commit-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">COMMIT CHAPTER</span><h1>章节正文冻结</h1></div>
+            <span class="isolated">本地冻结</span>
+          </div>
+          <p class="input-note">读取第 11 节点已通过的最终正文候选，把它冻结为可追溯章节资产。当前先写入调试资产目录，不直接污染生产数据库；确认流程稳定后再融合正式小说工厂。</p>
+          <section class="upstream-card">
+            <span class="eyebrow">FINAL CANDIDATE</span>
+            <h2 id="chapter-commit-upstream-title">等待第 11 节点</h2>
+            <p id="chapter-commit-upstream-detail">请先生成并通过单章完整生产。</p>
+            <dl>
+              <div><dt>正文 Run</dt><dd id="chapter-commit-draft-run-id">—</dd></div>
+              <div><dt>章节</dt><dd id="chapter-commit-chapter-display">—</dd></div>
+              <div><dt>冻结资产</dt><dd id="chapter-commit-frozen-path">—</dd></div>
+            </dl>
+          </section>
+          <form id="chapter-commit-run-form">
+            <label><span>冻结备注</span><textarea id="chapter-commit-note" rows="4" placeholder="可选：记录为什么接受这一版正文。">人工确认第 11 节点最终正文候选可作为本章正式调试资产。</textarea></label>
+            <button class="run-button" id="chapter-commit-run-button" type="submit" disabled><span>◆</span><span>冻结为章节正文资产</span></button>
+          </form>
+        </div>
+
+        <div id="continuous-chapter-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">BATCH CHAPTERS</span><h1>连续章节生产</h1></div>
+            <span class="isolated">10→11→12</span>
+          </div>
+          <p class="input-note">自动串联单章上下文、单章完整生产和章节冻结。系统会先扫描已冻结章节，默认从下一章续写；如果手动选择已冻结章节，会直接拦截，避免重复生成和重复花费。</p>
+          <section class="upstream-card">
+            <span class="eyebrow">STYLE + BLUEPRINTS</span>
+            <h2 id="continuous-chapter-upstream-title">等待第 9 节点冻结</h2>
+            <p id="continuous-chapter-upstream-detail">请先完成并冻结文风合同。</p>
+            <dl><div><dt>文风 Run</dt><dd id="continuous-chapter-style-run-id">—</dd></div><div><dt>蓝图范围</dt><dd id="continuous-chapter-range">—</dd></div></dl>
+          </section>
+          <form id="continuous-chapter-run-form">
+            <label><span>连续生产关注点</span><textarea id="continuous-chapter-focus" rows="4">逐章完成章节蓝图：每章必须承接上一章交接压力，完成本章主角决定和不可逆变化；正文不满意或 AIGC 未过时自动修复，成功后自动冻结。</textarea></label>
+            <div class="field-grid">
+              <label><span>起始章</span><input id="continuous-chapter-start" type="number" min="1" max="9999" value="1"></label>
+              <label><span>结束章</span><input id="continuous-chapter-end" type="number" min="1" max="9999" value="3"></label>
+              <label><span>每章目标字数</span><input id="continuous-chapter-target-words" type="number" min="800" max="12000" step="100" value="2500"></label>
+              <label><span>最大修复轮数</span><input id="continuous-chapter-max-repair-rounds" type="number" min="0" max="12" value="3"></label>
+              <label><span>AIGC 策略</span><select id="continuous-chapter-aigc-policy"><option value="balanced">平衡策略</option><option value="strict_any_sentence">严格短句</option><option value="overall_only">只看整体分</option></select></label>
+            </div>
+            <div class="temperature-row"><label for="continuous-chapter-temperature">创造性</label><input id="continuous-chapter-temperature" type="range" min="0" max="1.2" step="0.05" value="0.35"><output id="continuous-chapter-temperature-value">0.35</output></div>
+            <button class="run-button" id="continuous-chapter-run-button" type="submit" disabled><span>▶</span><span>开始连续生产并自动冻结</span></button>
+            <button class="run-button secondary-run-button" id="continuous-chapter-auto-button" type="button" disabled><span>∞</span><span>自动续跑到第一卷结束</span></button>
+            <button class="run-button secondary-run-button" id="continuous-chapter-stop-button" type="button" disabled><span>■</span><span>停止自动续跑</span></button>
+            <p class="input-note" id="continuous-chapter-auto-status">自动续跑：每批 3 章，直到第一卷完成。</p>
+          </form>
+        </div>
+
+        <div id="chapter-review-input-panel" hidden>
+          <div class="panel-title">
+            <div><span class="eyebrow">READING REVIEW</span><h1>章节阅读复盘</h1></div>
+            <span class="isolated">只读检查</span>
+          </div>
+          <p class="input-note">不继续生成新章节，不调用模型。只读取已经冻结的正文、对应蓝图和门禁日志，快速判断当前情节、主线、世界观、连续性和文风问题。</p>
+          <section class="upstream-card">
+            <span class="eyebrow">COMMITTED CHAPTERS</span>
+            <h2 id="chapter-review-upstream-title">等待章节资产</h2>
+            <p id="chapter-review-upstream-detail">先完成至少一章正文冻结。</p>
+            <dl>
+              <div><dt>已冻结</dt><dd id="chapter-review-count">0</dd></div>
+              <div><dt>连续到</dt><dd id="chapter-review-last">—</dd></div>
+              <div><dt>下一章</dt><dd id="chapter-review-next">—</dd></div>
+            </dl>
+          </section>
+          <form id="chapter-review-run-form">
+            <div class="field-grid">
+              <label><span>起始章</span><input id="chapter-review-start" type="number" min="1" max="9999" value="1"></label>
+              <label><span>结束章</span><input id="chapter-review-end" type="number" min="1" max="9999" value="22"></label>
+            </div>
+            <button class="run-button" id="chapter-review-run-button" type="submit"><span>◎</span><span>读取并生成复盘</span></button>
+          </form>
+        </div>
+      </aside>
+
+      <section class="execution-panel">
+        <div class="run-status idle" id="run-status">
+          <span class="status-light"></span>
+          <div><span class="eyebrow">CURRENT RUN</span><h2 id="run-status-title">尚未运行</h2><p id="run-status-detail">填写左侧输入，然后手动启动一次真实模型调用。</p></div>
+          <dl><div><dt>Run ID</dt><dd id="run-id">—</dd></div><div><dt>模型</dt><dd id="model-name">—</dd></div><div><dt>耗时</dt><dd id="elapsed">0 ms</dd></div></dl>
+          <button class="pause-run-button" id="pause-run-button" type="button" hidden>暂停运行</button>
+        </div>
+
+        <section class="style-sample-monitor" id="style-sample-monitor" hidden>
+          <header>
+            <div><span class="eyebrow">STYLE SAMPLE</span><h2>文风样段查看器</h2><p id="style-sample-monitor-meta">等待节点 09 输出样段。</p></div>
+            <button type="button" id="style-sample-copy-button">复制完整样段</button>
+          </header>
+          <pre id="style-sample-monitor-text">等待完整样段。</pre>
+          <div class="style-score-strip" id="style-score-strip"></div>
+        </section>
+
+        <section class="log-panel">
+          <header class="section-header"><div><h2>实时执行日志</h2><p>来自本次 run，不混入历史项目事件。</p></div><span id="event-count">0 events</span></header>
+          <div class="event-stream" id="event-stream"><div class="empty">等待你手动运行节点。</div></div>
+        </section>
+
+        <section class="evidence-panel">
+          <header class="evidence-tabs" id="evidence-tabs">
+            <button class="active" type="button" data-tab="input">输入</button>
+            <button type="button" data-tab="sample">样段/正文</button>
+            <button type="button" data-tab="chapters">章节库</button>
+            <button type="button" data-tab="prompt">实际 Prompt</button>
+            <button type="button" data-tab="raw">原始响应</button>
+            <button type="button" data-tab="result">结构化结果</button>
+            <button type="button" data-tab="audit">正典审计</button>
+            <button type="button" data-tab="learning">学习记忆</button>
+            <button type="button" data-tab="validation">验证</button>
+            <button type="button" data-tab="workflow">工作流轨迹</button>
+          </header>
+          <div class="evidence-content" id="evidence-content"><div class="empty">启动后，这里会显示本次运行的完整证据。</div></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="flow-debug.js?v=46"></script>
+</body>
+</html>

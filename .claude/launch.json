@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "studio",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/pengfei.chen/Desktop/github/ai-novel-factory/packages/ai-novel-server/dist/index.js",
+        "--root-dir", "/Users/pengfei.chen/Desktop/github/ai-novel-factory",
+        "--static-dir", "/Users/pengfei.chen/Desktop/github/ai-novel-factory/apps/desktop",
+        "--port", "4310",
+        "--embedded-worker"
+      ],
+      "port": 4310
+    }
+  ]
+}

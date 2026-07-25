@@ -1,8 +1,8 @@
-import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-tGpa3fau.js';
+import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-Db-lXjCB.js';
 import { P as ProductionReadinessSnapshot, a as ProductionGateIssue, b as ProductionReadinessItem, c as ProductionReadinessGroup } from './production-contracts-C1il9ao8.js';
-import { S as StyleEvolutionSnapshot, a as StyleLoopRuntimeIterationRecord, b as StyleEvolutionEvaluation, c as StyleEvolutionRefinement, d as StyleGenerationVerification, P as ProjectRuntimeState } from './production-style-evolution-B0dFU9D-.js';
+import { S as StyleEvolutionSnapshot, a as StyleLoopRuntimeIterationRecord, b as StyleEvolutionEvaluation, c as StyleEvolutionRefinement, d as StyleGenerationVerification, P as ProjectRuntimeState } from './production-style-evolution-C4LSl5F8.js';
 import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-Rvjshu2J.js';
-import { N as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, d as CharacterDossier, e as AssetStatus, T as TaskStatus } from './cli-types-dnbh9JaE.js';
+import { a as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, N as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, d as CharacterDossier, e as AssetStatus, T as TaskStatus } from './cli-types-3z9cP1VA.js';
 import { AigcDetectionResult, AigcBatchDetectionResult } from './aigc-detector.js';
 import http from 'node:http';
 import { KnowledgeBenchmarkResult } from './knowledge.js';
@@ -1484,6 +1484,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1498,6 +1499,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1528,6 +1532,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1542,6 +1547,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1583,6 +1591,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1597,6 +1606,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1638,6 +1650,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1652,6 +1665,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1682,6 +1698,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1696,6 +1713,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1726,6 +1746,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1740,6 +1761,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1794,6 +1818,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1808,6 +1833,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1838,6 +1866,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1852,6 +1881,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1882,6 +1914,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1896,6 +1929,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1926,6 +1962,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1940,6 +1977,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -1970,6 +2010,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         factory?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -1984,6 +2025,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2016,6 +2060,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2030,6 +2075,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2107,6 +2155,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2121,6 +2170,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2151,6 +2203,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         state?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2165,6 +2218,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2175,6 +2231,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
     status: number;
     payload: {
         error: string;
+        status: string;
         reason: string | undefined;
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
@@ -2272,6 +2329,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2470,6 +2530,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         freezePreview?: undefined;
         styleFreezeApproval?: undefined;
@@ -2480,6 +2541,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2628,6 +2692,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2641,6 +2706,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -2758,6 +2826,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2771,6 +2840,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -2848,6 +2920,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -2861,6 +2934,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -3014,6 +3090,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3026,6 +3103,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3056,6 +3136,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3070,6 +3151,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3101,6 +3185,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3114,6 +3199,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3146,6 +3234,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3158,6 +3247,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3291,6 +3383,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3303,6 +3396,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -3420,6 +3516,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3433,6 +3530,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -3474,6 +3574,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3487,6 +3588,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3564,6 +3668,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3578,6 +3683,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3610,6 +3718,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -3622,6 +3731,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         snapshotVersion?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -3996,6 +4108,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4006,6 +4119,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         transcript?: undefined;
         notModified?: undefined;
         snapshotVersion?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -4037,6 +4153,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4050,6 +4167,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         chapterNumber?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -4082,6 +4202,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4094,6 +4215,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         snapshotVersion?: undefined;
         chapterNumber?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -4127,6 +4251,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4140,6 +4265,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         chapterNumber?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -4475,6 +4603,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4487,6 +4616,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -4605,6 +4737,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4618,6 +4751,717 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        error: string;
+        missingFields: ("name" | "relationshipPressure" | "identity" | "coreDesire" | "fearOrWound" | "behaviorHabit" | "speechMarker" | "relationshipName")[];
+        requiredInput: string;
+        artifactPath: string;
+        projects: never[] | NovelProjectRecord[];
+        envStatus: PublicProjectEnvStatus;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        activeProjectId?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        state?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        snapshotVersion?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        productionReadiness?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        envStatus: PublicProjectEnvStatus;
+        entries: {
+            key: string;
+            role: string;
+            content: string;
+        }[];
+        meta: {
+            totalEntries: number;
+            returnedEntries: number;
+            truncated: boolean;
+            transcriptBytes: number;
+        };
+        snapshotVersion: string;
+        transcript: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        protagonistProfile: {
+            path: string;
+            name: string;
+            identity: string;
+            coreDesire: string;
+            fearOrWound: string;
+            behaviorHabit: string;
+            speechMarker: string;
+            relationshipName: string;
+            relationshipPressure: string;
+            note: string;
+            confirmedBy: string;
+        };
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    } | {
+        envStatus: PublicProjectEnvStatus;
+        snapshotVersion: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        protagonistProfile: {
+            path: string;
+            name: string;
+            identity: string;
+            coreDesire: string;
+            fearOrWound: string;
+            behaviorHabit: string;
+            speechMarker: string;
+            relationshipName: string;
+            relationshipPressure: string;
+            note: string;
+            confirmedBy: string;
+        };
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        error: string;
+        message: string;
+        projects: never[] | NovelProjectRecord[];
+        envStatus: PublicProjectEnvStatus;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        activeProjectId?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        state?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        snapshotVersion?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        settings?: undefined;
+        productionReadiness?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        envStatus: PublicProjectEnvStatus;
+        entries: {
+            key: string;
+            role: string;
+            content: string;
+        }[];
+        meta: {
+            totalEntries: number;
+            returnedEntries: number;
+            truncated: boolean;
+            transcriptBytes: number;
+        };
+        snapshotVersion: string;
+        transcript: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        settingReviewApproval: {
+            version: number;
+            status: string;
+            approved: boolean;
+            reviewedAt: string;
+            reviewedBy: string;
+            note: string;
+            rejectionReason: string;
+            settingReviewPath: string;
+            approvalScope: string;
+        };
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    } | {
+        envStatus: PublicProjectEnvStatus;
+        snapshotVersion: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        settingReviewApproval: {
+            version: number;
+            status: string;
+            approved: boolean;
+            reviewedAt: string;
+            reviewedBy: string;
+            note: string;
+            rejectionReason: string;
+            settingReviewPath: string;
+            approvalScope: string;
+        };
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        success?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -4759,6 +5603,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4771,6 +5616,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -4897,6 +5745,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -4910,6 +5759,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5043,6 +5895,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5055,6 +5908,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5173,6 +6029,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5186,6 +6043,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5323,6 +6183,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5335,6 +6196,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5457,6 +6321,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5470,6 +6335,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5500,6 +6368,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5514,6 +6383,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
         readerStats?: undefined;
@@ -5673,6 +6545,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5685,6 +6558,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5829,6 +6705,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5842,6 +6719,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -5975,6 +6855,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -5987,6 +6868,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6105,6 +6989,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6118,6 +7003,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6147,6 +7035,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6161,6 +7050,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -6329,6 +7221,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6341,6 +7234,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6493,6 +7389,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6506,6 +7403,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6645,6 +7545,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6657,6 +7558,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6781,6 +7685,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6794,6 +7699,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -6965,6 +7873,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -6977,6 +7886,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7133,6 +8045,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7146,6 +8059,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7218,6 +8134,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7232,6 +8149,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         productionReadiness?: undefined;
         readerStats?: undefined;
@@ -7261,6 +8181,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7275,6 +8196,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         productionReadiness?: undefined;
@@ -7393,6 +8317,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7406,6 +8331,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7484,6 +8412,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7497,6 +8426,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7614,6 +8546,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
         generatedCandidate?: undefined;
@@ -7626,6 +8559,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7704,6 +8640,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotJobId?: undefined;
         autopilotQueued?: undefined;
         state?: undefined;
+        status?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
         generatedCandidate?: undefined;
@@ -7716,6 +8653,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -7754,6 +8694,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         state?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
         generatedCandidate?: undefined;
@@ -7767,6 +8708,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
     };
@@ -7897,6 +8841,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -7909,6 +8854,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;
@@ -8026,6 +8974,7 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         autopilotQueued?: undefined;
         styleEvolution?: undefined;
         styleEvolutionAssets?: undefined;
+        status?: undefined;
         reason?: undefined;
         loopRun?: undefined;
         modelRouting?: undefined;
@@ -8039,6 +8988,9 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
         path?: undefined;
         content?: undefined;
         chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
         message?: undefined;
         settings?: undefined;
         readerStats?: undefined;

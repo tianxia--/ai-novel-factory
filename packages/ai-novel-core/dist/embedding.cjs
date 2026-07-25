@@ -55,7 +55,13 @@ var GENERIC_NAMES = /* @__PURE__ */ new Set([
   "\u957F\u5B89",
   "\u53BF\u8859",
   "\u5B8B\u5BB6",
-  "\u738B\u5BB6"
+  "\u738B\u5BB6",
+  "\u5E38\u5E74",
+  "\u6B63\u5E38",
+  "\u65B9\u8A00",
+  "\u6731\u7802",
+  "\u7F16\u53F7",
+  "\u987E\u5927"
 ]);
 var ROLE_TITLE_SUFFIXES = [
   "\u7BA1\u4E8B",
@@ -78,7 +84,9 @@ var ROLE_TITLE_SUFFIXES = [
   "\u90CE\u541B",
   "\u5A18\u5B50",
   "\u963F\u90CE",
-  "\u5A46\u5B50"
+  "\u5A46\u5B50",
+  "\u5927\u4EBA",
+  "\u5C5E\u4E0B"
 ];
 var VIEWPOINT_VERBS = [
   "\u9192",
@@ -166,7 +174,29 @@ var TRAILING_NON_NAME_CHARS = /* @__PURE__ */ new Set([
   "\u53EA",
   "\u5E76",
   "\u5219",
-  "\u4EE5"
+  "\u4EE5",
+  "\u5750",
+  "\u9760",
+  "\u70B9",
+  "\u5934",
+  "\u4F38",
+  "\u6536",
+  "\u7D27",
+  "\u677E",
+  "\u52A8",
+  "\u6478",
+  "\u62AC",
+  "\u7AEF",
+  "\u559D",
+  "\u62FF",
+  "\u653E",
+  "\u63A8",
+  "\u63A5",
+  "\u8F6C",
+  "\u6447",
+  "\u843D",
+  "\u7F16",
+  "\u53F7"
 ]);
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -190,6 +220,9 @@ function isRoleOrGenericName(name) {
     return true;
   }
   if (/阳光|月光|火光|金手指|黄河|马蹄|树皮|石板|案卷|田册|东西|温吞|官道/u.test(name)) {
+    return true;
+  }
+  if (/^(?:[李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢岳齐梅莫庄辛管祝左涂谷祁时舒耿牟卜詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂]印)$/u.test(name)) {
     return true;
   }
   if (/(?:家庄|河边|蹄声|木门|土墙|陶碗|草鞋|地铺|县衙|公文|契书)$/u.test(name)) {
@@ -222,7 +255,7 @@ function extractChinesePersonNames(text = "", limit = 12) {
     /(?:^|[“"'\n。！？；：，、\s])([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:是被|就被|被|睁开|翻身|坐起|抬头|撑着|咬住|开口|问|说|想|知道|意识到|没有|必须|终于|觉得|看见|听见|不敢|不能|需要|站|走|把|将|给|向|从|在))/gu,
     /[“"'\n。！？；：，、\s]([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})(?=[，。！？；：、\s“”"'\n])/gu,
     /(?:叫|名叫|唤作|自称|他叫|她叫)([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,3})/gu,
-    /([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:没有|必须|终于|觉得|看见|听见|知道|意识到|不敢|不能|需要|站|走|醒|说|问|想|把|将|给|向|从|在))/gu
+    /(?:^|[“"'\n。！？；：，、\s])([李王张刘陈杨赵黄周吴郑孙马朱胡林郭何高罗宋谢唐韩冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶洪翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜路詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳司马上官诸葛东方尉迟公孙慕容长孙][\u4e00-\u9fff]{1,2})(?=(?:没有|必须|终于|觉得|看见|听见|知道|意识到|不敢|不能|需要|站|走|醒|说|问|想|把|将|给|向|从|在))/gu
   ];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -280,9 +313,12 @@ function inferDominantProtagonistName(text = "") {
   return detectedNames.map((name) => ({ name, score: viewpointScore(body, name), count: countName(body, name) })).sort((left, right) => right.score - left.score || right.count - left.count)[0]?.name || "";
 }
 function inferLockedProtagonistName(profile = "") {
-  const explicit = profile.match(/(?:主角名|主人公名|姓名|名字|本名|canonicalName|protagonistName|name)\s*[:：]\s*([^\n，。；、\s]{2,4})/iu);
-  if (explicit?.[1] && !isRoleOrGenericName(explicit[1])) {
-    return explicit[1];
+  const explicit = profile.match(
+    /(?:主角名|主人公名|姓名|名字|本名|canonicalName|protagonistName|name)\s*[:：]\s*["“”']?([A-Za-z][A-Za-z0-9 ._-]{1,48}|[\u4e00-\u9fff]{2,4})["“”']?/iu
+  );
+  const name = explicit?.[1]?.trim().replace(/[,"'“”]+$/gu, "");
+  if (name && !isRoleOrGenericName(name)) {
+    return name;
   }
   return "";
 }
@@ -293,7 +329,8 @@ function countName(text, name) {
 function evaluateChapterConsistency(input) {
   if (process.env.AI_NOVEL_TEST_MODE === "1") {
     const isFirst = input.chapterNumber === 1 || !input.previousProtagonistName;
-    const name = input.previousProtagonistName || "\u9996\u7AE0\u4E3B\u89D2";
+    const text2 = normalizeChapterBody(input.text || "");
+    const name = input.previousProtagonistName || inferLockedProtagonistName(input.protagonistProfile || "") || inferDominantProtagonistName(text2) || "\u9996\u7AE0\u4E3B\u89D2";
     return {
       status: "eligible",
       reason: isFirst ? `\u9996\u7AE0\u5019\u9009\u4E3B\u89D2\u8BC6\u522B\u4E3A\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002` : `\u6CBF\u7528\u300C${name}\u300D\uFF0C\u6D4B\u8BD5\u6A21\u5F0F\u8DF3\u8FC7\u771F\u5B9E\u95E8\u7981\u3002`,
@@ -628,6 +665,10 @@ var FactoryDb = class _FactoryDb {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA cache_size = -65536;
+      PRAGMA mmap_size = 268435456;
 
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
@@ -680,6 +721,39 @@ var FactoryDb = class _FactoryDb {
         input_json TEXT,
         output_json TEXT,
         error TEXT,
+        node_id TEXT,
+        node_version TEXT,
+        execution_mode TEXT NOT NULL DEFAULT 'production',
+        validation_status TEXT NOT NULL DEFAULT 'pending',
+        idempotency_key TEXT,
+        parent_step_id TEXT,
+        metadata_json TEXT,
+        FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+        id TEXT PRIMARY KEY,
+        step_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        model_config_id TEXT,
+        model_name TEXT,
+        prompt_version TEXT,
+        prompt_hash TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        error_json TEXT,
+        usage_json TEXT,
+        metadata_json TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        UNIQUE(step_id, attempt, kind),
+        FOREIGN KEY(step_id) REFERENCES workflow_steps(id) ON DELETE CASCADE,
         FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
@@ -914,7 +988,10 @@ var FactoryDb = class _FactoryDb {
 
 
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_project_type_created ON events(project_id, type, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_steps_run_started ON workflow_steps(run_id, started_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_attempts_step_attempt ON workflow_step_attempts(step_id, attempt);
       CREATE INDEX IF NOT EXISTS idx_turns_run_started ON agent_turns(run_id, started_at);
       CREATE INDEX IF NOT EXISTS idx_artifacts_project_updated ON artifacts(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_jobs_project_status ON jobs(project_id, status);
@@ -930,6 +1007,14 @@ var FactoryDb = class _FactoryDb {
     `);
     this.migrateColumn("memory_items", "embedding_id", "TEXT");
     this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'");
+    this.migrateColumn("workflow_steps", "node_id", "TEXT");
+    this.migrateColumn("workflow_steps", "node_version", "TEXT");
+    this.migrateColumn("workflow_steps", "execution_mode", "TEXT NOT NULL DEFAULT 'production'");
+    this.migrateColumn("workflow_steps", "validation_status", "TEXT NOT NULL DEFAULT 'pending'");
+    this.migrateColumn("workflow_steps", "idempotency_key", "TEXT");
+    this.migrateColumn("workflow_steps", "parent_step_id", "TEXT");
+    this.migrateColumn("workflow_steps", "metadata_json", "TEXT");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_workflow_steps_node_status ON workflow_steps(project_id, node_id, status)");
     this.migrateGraphTablePrimaryKey("graph_nodes", `
       CREATE TABLE graph_nodes (
         id TEXT NOT NULL,
@@ -1087,6 +1172,14 @@ var FactoryDb = class _FactoryDb {
   getProject(projectId) {
     return this.listProjects().find((project) => project.id === projectId) ?? null;
   }
+  /**
+   * 轻量脏标记：只读 projects 行的 updated_at/created_at（走主键，<1ms）。
+   * 用于 SSE 判断"项目有没有变化"，避免每 2s 全量重算 snapshot。
+   */
+  getProjectDirtyStamp(projectId) {
+    const row = this.db.prepare("SELECT updated_at, created_at FROM projects WHERE id = ?").get(projectId);
+    return row?.updated_at || row?.created_at || "";
+  }
   createRun(input) {
     const now = nowIso();
     this.db.prepare(`
@@ -1123,6 +1216,126 @@ var FactoryDb = class _FactoryDb {
       error: patch.error ?? null,
       stage: patch.stage ?? null
     });
+  }
+  createWorkflowStep(input) {
+    const now = input.startedAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_steps (
+        id, run_id, project_id, name, node_id, node_version, status, stage,
+        execution_mode, validation_status, started_at, updated_at, input_json,
+        output_json, error, idempotency_key, parent_step_id, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.runId,
+      input.projectId,
+      input.name,
+      input.nodeId,
+      input.nodeVersion ?? null,
+      input.status,
+      input.stage,
+      input.executionMode ?? "production",
+      input.validationStatus ?? "pending",
+      now,
+      now,
+      input.input === void 0 ? null : jsonString(input.input),
+      input.output === void 0 ? null : jsonString(input.output),
+      input.error ?? null,
+      input.idempotencyKey ?? null,
+      input.parentStepId ?? null,
+      input.metadata === void 0 ? null : jsonString(input.metadata)
+    );
+    this.recordEvent(input.projectId, input.runId, "WORKFLOW_STEP_STARTED", {
+      stepId: input.id,
+      nodeId: input.nodeId,
+      executionMode: input.executionMode ?? "production"
+    });
+  }
+  updateWorkflowStep(stepId, status, patch = {}) {
+    const now = nowIso();
+    this.db.prepare(`
+      UPDATE workflow_steps
+      SET status = ?, output_json = COALESCE(?, output_json), error = COALESCE(?, error),
+          validation_status = COALESCE(?, validation_status), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === void 0 ? null : jsonString(patch.output),
+      patch.error ?? null,
+      patch.validationStatus ?? null,
+      patch.metadata === void 0 ? null : jsonString(patch.metadata),
+      now,
+      status,
+      now,
+      stepId
+    );
+    const step = this.db.prepare("SELECT project_id, run_id, node_id FROM workflow_steps WHERE id = ?").get(stepId);
+    this.recordEvent(typeof step?.project_id === "string" ? step.project_id : null, typeof step?.run_id === "string" ? step.run_id : null, "WORKFLOW_STEP_UPDATED", {
+      stepId,
+      nodeId: step?.node_id ?? null,
+      status,
+      validationStatus: patch.validationStatus ?? null,
+      error: patch.error ?? null
+    });
+  }
+  createWorkflowStepAttempt(input) {
+    const now = input.startedAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_step_attempts (
+        id, step_id, run_id, project_id, attempt, kind, status, model_config_id,
+        model_name, prompt_version, prompt_hash, input_json, output_json,
+        error_json, usage_json, metadata_json, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.stepId,
+      input.runId,
+      input.projectId,
+      input.attempt,
+      input.kind,
+      input.status,
+      input.modelConfigId ?? null,
+      input.modelName ?? null,
+      input.promptVersion ?? null,
+      input.promptHash ?? null,
+      input.input === void 0 ? null : jsonString(input.input),
+      input.output === void 0 ? null : jsonString(input.output),
+      input.error === void 0 ? null : jsonString(input.error),
+      input.usage === void 0 ? null : jsonString(input.usage),
+      input.metadata === void 0 ? null : jsonString(input.metadata),
+      now,
+      now
+    );
+  }
+  updateWorkflowStepAttempt(attemptId, status, patch = {}) {
+    const now = nowIso();
+    this.db.prepare(`
+      UPDATE workflow_step_attempts
+      SET status = ?, output_json = COALESCE(?, output_json), error_json = COALESCE(?, error_json),
+          usage_json = COALESCE(?, usage_json), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === void 0 ? null : jsonString(patch.output),
+      patch.error === void 0 ? null : jsonString(patch.error),
+      patch.usage === void 0 ? null : jsonString(patch.usage),
+      patch.metadata === void 0 ? null : jsonString(patch.metadata),
+      now,
+      status,
+      now,
+      attemptId
+    );
+  }
+  listWorkflowSteps(runId) {
+    return this.db.prepare("SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY started_at, id").all(runId);
+  }
+  getWorkflowRun(runId) {
+    return this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) ?? null;
+  }
+  listWorkflowStepAttempts(stepId) {
+    return this.db.prepare("SELECT * FROM workflow_step_attempts WHERE step_id = ? ORDER BY attempt, started_at").all(stepId);
   }
   recoverStaleRuns(options = {}) {
     const now = nowIso();
@@ -1832,11 +2045,12 @@ var FactoryDb = class _FactoryDb {
   }
   recordCheckpoint(input) {
     const now = nowIso();
+    const checkpointRecordId = input.id || makeId("chk");
     this.db.prepare(`
       INSERT INTO checkpoints (id, project_id, run_id, label, path, drift_json, state_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      makeId("chk"),
+      checkpointRecordId,
       input.projectId,
       input.runId ?? null,
       input.label,
@@ -1852,6 +2066,63 @@ var FactoryDb = class _FactoryDb {
       status: "completed",
       metadata: { label: input.label, drift: input.drift ?? null }
     });
+    return checkpointRecordId;
+  }
+  getCheckpoint(checkpointRecordId) {
+    const row = this.db.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointRecordId);
+    return row ? {
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null)
+    } : null;
+  }
+  listWorkflowCheckpoints(projectId, query) {
+    const namespace = query.checkpointNamespace ?? "";
+    const limit = Math.max(1, Math.min(1e3, Math.round(query.limit || 100)));
+    const conditions = [
+      "project_id = ?",
+      "json_extract(drift_json, '$.kind') = 'langgraph'",
+      "json_extract(drift_json, '$.threadId') = ?",
+      "COALESCE(json_extract(drift_json, '$.checkpointNamespace'), '') = ?"
+    ];
+    const values = [projectId, query.threadId, namespace];
+    if (query.checkpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') = ?");
+      values.push(query.checkpointId);
+    }
+    if (query.beforeCheckpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') < ?");
+      values.push(query.beforeCheckpointId);
+    }
+    return this.db.prepare(`
+      SELECT * FROM checkpoints
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY json_extract(drift_json, '$.checkpointId') DESC, created_at DESC
+      LIMIT ${limit}
+    `).all(...values).map((row) => ({
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null)
+    }));
+  }
+  updateWorkflowCheckpoint(checkpointRecordId, patch) {
+    this.db.prepare(`
+      UPDATE checkpoints
+      SET drift_json = COALESCE(?, drift_json), state_json = COALESCE(?, state_json)
+      WHERE id = ?
+    `).run(
+      patch.drift === void 0 ? null : jsonString(patch.drift),
+      patch.state === void 0 ? null : jsonString(patch.state),
+      checkpointRecordId
+    );
+  }
+  deleteWorkflowCheckpointThread(projectId, threadId) {
+    this.db.prepare(`
+      DELETE FROM checkpoints
+      WHERE project_id = ?
+        AND json_extract(drift_json, '$.kind') = 'langgraph'
+        AND json_extract(drift_json, '$.threadId') = ?
+    `).run(projectId, threadId);
   }
   recordEvent(projectId, runId, type, payload) {
     this.db.prepare(`
@@ -2509,6 +2780,60 @@ var FactoryDb = class _FactoryDb {
       }
     }
     return [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber);
+  }
+  /**
+   * 轻量摘要：专为列表/刷新场景设计。避免 getSnapshot 的全量构建
+   * (不解析完整 state_json、不查 artifacts/memory/graph/pinned)。
+   * 走 idx_events_project_type_created / idx_jobs_project_status 等索引，单项目 < 5ms。
+   * 返回列表页所需的最小字段集：章节状态聚合 + 任务数 + 最新事件。
+   */
+  getProjectSummaryMeta(projectId) {
+    const taskStatusRows = this.db.prepare(`
+      SELECT chapter_number, status
+      FROM (
+        SELECT
+          payload_json->>'$.chapterNumber' AS chapter_number,
+          payload_json->>'$.status' AS status,
+          ROW_NUMBER() OVER (
+            PARTITION BY payload_json->>'$.chapterNumber'
+            ORDER BY created_at DESC
+          ) AS rn
+        FROM events
+        WHERE project_id = ? AND type = 'CHAPTER_TASK_STATUS_UPDATED'
+      )
+      WHERE rn = 1
+    `).all(projectId);
+    const statusCounts = /* @__PURE__ */ new Map();
+    let latestChapter = 0;
+    for (const row of taskStatusRows) {
+      if (row.chapter_number == null) continue;
+      latestChapter = Math.max(latestChapter, Number(row.chapter_number));
+      const st = String(row.status || "unknown");
+      statusCounts.set(st, (statusCounts.get(st) || 0) + 1);
+    }
+    const chapterStatusCounts = [...statusCounts.entries()].map(([status, n]) => ({ status, n }));
+    const jobCounts = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN status IN ('queued','pending') THEN 1 ELSE 0 END) AS runnable
+      FROM jobs
+      WHERE project_id = ?
+    `).get(projectId);
+    const latestEvent = this.db.prepare(`
+      SELECT type, created_at
+      FROM events
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(projectId);
+    return {
+      chapterStatusCounts,
+      latestChapterNumber: latestChapter,
+      activeJobs: Number(jobCounts?.active || 0),
+      runnableJobs: Number(jobCounts?.runnable || 0),
+      latestEventType: latestEvent?.type || "",
+      latestEventAt: latestEvent?.created_at || ""
+    };
   }
   getSnapshot(projectId) {
     const project = this.getProject(projectId);

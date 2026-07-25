@@ -24,7 +24,7 @@ const chapterConsistencyCache = new Map<
 type DbValue = string | number | null
 type DbRecord = Record<string, unknown>
 type RunStatus = "idle" | "running" | "paused" | "blocked" | "failed" | "completed"
-type StepStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+export type StepStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled"
 type JobStatus = RunStatus | "cancelled"
 
 function normalizeLlmApiMode(value: unknown) {
@@ -66,6 +66,46 @@ export interface WorkflowRunInput {
   parentRunId?: string | null
 }
 
+export interface WorkflowStepInput {
+  id: string
+  runId: string
+  projectId: string
+  name: string
+  nodeId: string
+  nodeVersion?: string
+  stage: string
+  status: StepStatus
+  executionMode?: "production" | "debug" | "manual" | "repair"
+  validationStatus?: "pending" | "passed" | "failed" | "warning"
+  input?: unknown
+  output?: unknown
+  error?: string | null
+  idempotencyKey?: string | null
+  parentStepId?: string | null
+  metadata?: unknown
+  startedAt?: string
+}
+
+export interface WorkflowStepAttemptInput {
+  id: string
+  stepId: string
+  runId: string
+  projectId: string
+  attempt: number
+  kind: "generate" | "parse" | "validate" | "audit" | "repair" | "promote"
+  status: StepStatus
+  modelConfigId?: string | null
+  modelName?: string | null
+  promptVersion?: string | null
+  promptHash?: string | null
+  input?: unknown
+  output?: unknown
+  error?: unknown
+  usage?: unknown
+  metadata?: unknown
+  startedAt?: string
+}
+
 export interface ArtifactRecordInput {
   projectId: string
   kind: "state" | "consensus" | "transcript" | "context" | "chapter" | "plan" | "memory" | "style" | "graph" | "checkpoint"
@@ -76,12 +116,21 @@ export interface ArtifactRecordInput {
 }
 
 export interface CheckpointInput {
+  id?: string
   projectId: string
   runId?: string | null
   path: string
   label: string
   drift?: unknown
   state?: unknown
+}
+
+export interface WorkflowCheckpointQuery {
+  threadId: string
+  checkpointNamespace?: string
+  checkpointId?: string
+  beforeCheckpointId?: string
+  limit?: number
 }
 
 export interface ProjectSnapshot {
@@ -579,6 +628,10 @@ export class FactoryDb {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA cache_size = -65536;
+      PRAGMA mmap_size = 268435456;
 
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
@@ -631,6 +684,39 @@ export class FactoryDb {
         input_json TEXT,
         output_json TEXT,
         error TEXT,
+        node_id TEXT,
+        node_version TEXT,
+        execution_mode TEXT NOT NULL DEFAULT 'production',
+        validation_status TEXT NOT NULL DEFAULT 'pending',
+        idempotency_key TEXT,
+        parent_step_id TEXT,
+        metadata_json TEXT,
+        FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+        id TEXT PRIMARY KEY,
+        step_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        model_config_id TEXT,
+        model_name TEXT,
+        prompt_version TEXT,
+        prompt_hash TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        error_json TEXT,
+        usage_json TEXT,
+        metadata_json TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        UNIQUE(step_id, attempt, kind),
+        FOREIGN KEY(step_id) REFERENCES workflow_steps(id) ON DELETE CASCADE,
         FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
@@ -865,7 +951,10 @@ export class FactoryDb {
 
 
       CREATE INDEX IF NOT EXISTS idx_events_project_created ON events(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_project_type_created ON events(project_id, type, created_at);
       CREATE INDEX IF NOT EXISTS idx_runs_project_updated ON workflow_runs(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_steps_run_started ON workflow_steps(run_id, started_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_attempts_step_attempt ON workflow_step_attempts(step_id, attempt);
       CREATE INDEX IF NOT EXISTS idx_turns_run_started ON agent_turns(run_id, started_at);
       CREATE INDEX IF NOT EXISTS idx_artifacts_project_updated ON artifacts(project_id, updated_at);
       CREATE INDEX IF NOT EXISTS idx_jobs_project_status ON jobs(project_id, status);
@@ -881,6 +970,14 @@ export class FactoryDb {
     `)
     this.migrateColumn("memory_items", "embedding_id", "TEXT")
     this.migrateColumn("llm_configs", "api_mode", "TEXT NOT NULL DEFAULT 'chat'")
+    this.migrateColumn("workflow_steps", "node_id", "TEXT")
+    this.migrateColumn("workflow_steps", "node_version", "TEXT")
+    this.migrateColumn("workflow_steps", "execution_mode", "TEXT NOT NULL DEFAULT 'production'")
+    this.migrateColumn("workflow_steps", "validation_status", "TEXT NOT NULL DEFAULT 'pending'")
+    this.migrateColumn("workflow_steps", "idempotency_key", "TEXT")
+    this.migrateColumn("workflow_steps", "parent_step_id", "TEXT")
+    this.migrateColumn("workflow_steps", "metadata_json", "TEXT")
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_workflow_steps_node_status ON workflow_steps(project_id, node_id, status)")
     this.migrateGraphTablePrimaryKey("graph_nodes", `
       CREATE TABLE graph_nodes (
         id TEXT NOT NULL,
@@ -1048,6 +1145,15 @@ export class FactoryDb {
     return this.listProjects().find((project) => project.id === projectId) ?? null
   }
 
+  /**
+   * 轻量脏标记：只读 projects 行的 updated_at/created_at（走主键，<1ms）。
+   * 用于 SSE 判断"项目有没有变化"，避免每 2s 全量重算 snapshot。
+   */
+  getProjectDirtyStamp(projectId: string): string {
+    const row = this.db.prepare("SELECT updated_at, created_at FROM projects WHERE id = ?").get(projectId) as { updated_at?: string; created_at?: string } | undefined
+    return row?.updated_at || row?.created_at || ""
+  }
+
   createRun(input: WorkflowRunInput) {
     const now = nowIso()
     this.db.prepare(`
@@ -1085,6 +1191,141 @@ export class FactoryDb {
       error: patch.error ?? null,
       stage: patch.stage ?? null,
     })
+  }
+
+  createWorkflowStep(input: WorkflowStepInput) {
+    const now = input.startedAt ?? nowIso()
+    this.db.prepare(`
+      INSERT INTO workflow_steps (
+        id, run_id, project_id, name, node_id, node_version, status, stage,
+        execution_mode, validation_status, started_at, updated_at, input_json,
+        output_json, error, idempotency_key, parent_step_id, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.runId,
+      input.projectId,
+      input.name,
+      input.nodeId,
+      input.nodeVersion ?? null,
+      input.status,
+      input.stage,
+      input.executionMode ?? "production",
+      input.validationStatus ?? "pending",
+      now,
+      now,
+      input.input === undefined ? null : jsonString(input.input),
+      input.output === undefined ? null : jsonString(input.output),
+      input.error ?? null,
+      input.idempotencyKey ?? null,
+      input.parentStepId ?? null,
+      input.metadata === undefined ? null : jsonString(input.metadata),
+    )
+    this.recordEvent(input.projectId, input.runId, "WORKFLOW_STEP_STARTED", {
+      stepId: input.id,
+      nodeId: input.nodeId,
+      executionMode: input.executionMode ?? "production",
+    })
+  }
+
+  updateWorkflowStep(
+    stepId: string,
+    status: StepStatus,
+    patch: { output?: unknown; error?: string | null; validationStatus?: WorkflowStepInput["validationStatus"]; metadata?: unknown } = {},
+  ) {
+    const now = nowIso()
+    this.db.prepare(`
+      UPDATE workflow_steps
+      SET status = ?, output_json = COALESCE(?, output_json), error = COALESCE(?, error),
+          validation_status = COALESCE(?, validation_status), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === undefined ? null : jsonString(patch.output),
+      patch.error ?? null,
+      patch.validationStatus ?? null,
+      patch.metadata === undefined ? null : jsonString(patch.metadata),
+      now,
+      status,
+      now,
+      stepId,
+    )
+    const step = this.db.prepare("SELECT project_id, run_id, node_id FROM workflow_steps WHERE id = ?").get(stepId)
+    this.recordEvent(typeof step?.project_id === "string" ? step.project_id : null, typeof step?.run_id === "string" ? step.run_id : null, "WORKFLOW_STEP_UPDATED", {
+      stepId,
+      nodeId: step?.node_id ?? null,
+      status,
+      validationStatus: patch.validationStatus ?? null,
+      error: patch.error ?? null,
+    })
+  }
+
+  createWorkflowStepAttempt(input: WorkflowStepAttemptInput) {
+    const now = input.startedAt ?? nowIso()
+    this.db.prepare(`
+      INSERT INTO workflow_step_attempts (
+        id, step_id, run_id, project_id, attempt, kind, status, model_config_id,
+        model_name, prompt_version, prompt_hash, input_json, output_json,
+        error_json, usage_json, metadata_json, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.stepId,
+      input.runId,
+      input.projectId,
+      input.attempt,
+      input.kind,
+      input.status,
+      input.modelConfigId ?? null,
+      input.modelName ?? null,
+      input.promptVersion ?? null,
+      input.promptHash ?? null,
+      input.input === undefined ? null : jsonString(input.input),
+      input.output === undefined ? null : jsonString(input.output),
+      input.error === undefined ? null : jsonString(input.error),
+      input.usage === undefined ? null : jsonString(input.usage),
+      input.metadata === undefined ? null : jsonString(input.metadata),
+      now,
+      now,
+    )
+  }
+
+  updateWorkflowStepAttempt(
+    attemptId: string,
+    status: StepStatus,
+    patch: { output?: unknown; error?: unknown; usage?: unknown; metadata?: unknown } = {},
+  ) {
+    const now = nowIso()
+    this.db.prepare(`
+      UPDATE workflow_step_attempts
+      SET status = ?, output_json = COALESCE(?, output_json), error_json = COALESCE(?, error_json),
+          usage_json = COALESCE(?, usage_json), metadata_json = COALESCE(?, metadata_json),
+          updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
+      WHERE id = ?
+    `).run(
+      status,
+      patch.output === undefined ? null : jsonString(patch.output),
+      patch.error === undefined ? null : jsonString(patch.error),
+      patch.usage === undefined ? null : jsonString(patch.usage),
+      patch.metadata === undefined ? null : jsonString(patch.metadata),
+      now,
+      status,
+      now,
+      attemptId,
+    )
+  }
+
+  listWorkflowSteps(runId: string) {
+    return this.db.prepare("SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY started_at, id").all(runId)
+  }
+
+  getWorkflowRun(runId: string) {
+    return this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) ?? null
+  }
+
+  listWorkflowStepAttempts(stepId: string) {
+    return this.db.prepare("SELECT * FROM workflow_step_attempts WHERE step_id = ? ORDER BY attempt, started_at").all(stepId)
   }
 
   recoverStaleRuns(options: { olderThan?: Date; error?: string } = {}) {
@@ -1870,11 +2111,12 @@ export class FactoryDb {
 
   recordCheckpoint(input: CheckpointInput) {
     const now = nowIso()
+    const checkpointRecordId = input.id || makeId("chk")
     this.db.prepare(`
       INSERT INTO checkpoints (id, project_id, run_id, label, path, drift_json, state_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      makeId("chk"),
+      checkpointRecordId,
       input.projectId,
       input.runId ?? null,
       input.label,
@@ -1890,6 +2132,67 @@ export class FactoryDb {
       status: "completed",
       metadata: { label: input.label, drift: input.drift ?? null },
     })
+    return checkpointRecordId
+  }
+
+  getCheckpoint(checkpointRecordId: string) {
+    const row = this.db.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointRecordId)
+    return row ? {
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null),
+    } : null
+  }
+
+  listWorkflowCheckpoints(projectId: string, query: WorkflowCheckpointQuery) {
+    const namespace = query.checkpointNamespace ?? ""
+    const limit = Math.max(1, Math.min(1000, Math.round(query.limit || 100)))
+    const conditions = [
+      "project_id = ?",
+      "json_extract(drift_json, '$.kind') = 'langgraph'",
+      "json_extract(drift_json, '$.threadId') = ?",
+      "COALESCE(json_extract(drift_json, '$.checkpointNamespace'), '') = ?",
+    ]
+    const values: DbValue[] = [projectId, query.threadId, namespace]
+    if (query.checkpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') = ?")
+      values.push(query.checkpointId)
+    }
+    if (query.beforeCheckpointId) {
+      conditions.push("json_extract(drift_json, '$.checkpointId') < ?")
+      values.push(query.beforeCheckpointId)
+    }
+    return this.db.prepare(`
+      SELECT * FROM checkpoints
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY json_extract(drift_json, '$.checkpointId') DESC, created_at DESC
+      LIMIT ${limit}
+    `).all(...values).map((row) => ({
+      ...row,
+      drift: readJson(row.drift_json, null),
+      state: readJson(row.state_json, null),
+    }))
+  }
+
+  updateWorkflowCheckpoint(checkpointRecordId: string, patch: { drift?: unknown; state?: unknown }) {
+    this.db.prepare(`
+      UPDATE checkpoints
+      SET drift_json = COALESCE(?, drift_json), state_json = COALESCE(?, state_json)
+      WHERE id = ?
+    `).run(
+      patch.drift === undefined ? null : jsonString(patch.drift),
+      patch.state === undefined ? null : jsonString(patch.state),
+      checkpointRecordId,
+    )
+  }
+
+  deleteWorkflowCheckpointThread(projectId: string, threadId: string) {
+    this.db.prepare(`
+      DELETE FROM checkpoints
+      WHERE project_id = ?
+        AND json_extract(drift_json, '$.kind') = 'langgraph'
+        AND json_extract(drift_json, '$.threadId') = ?
+    `).run(projectId, threadId)
   }
 
   recordEvent(projectId: string | null, runId: string | null, type: string, payload: unknown) {
@@ -2640,6 +2943,76 @@ export class FactoryDb {
     }
 
     return [...facts.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)
+  }
+
+  /**
+   * 轻量摘要：专为列表/刷新场景设计。避免 getSnapshot 的全量构建
+   * (不解析完整 state_json、不查 artifacts/memory/graph/pinned)。
+   * 走 idx_events_project_type_created / idx_jobs_project_status 等索引，单项目 < 5ms。
+   * 返回列表页所需的最小字段集：章节状态聚合 + 任务数 + 最新事件。
+   */
+  getProjectSummaryMeta(projectId: string): {
+    chapterStatusCounts: { status: string; n: number }[]
+    latestChapterNumber: number
+    activeJobs: number
+    runnableJobs: number
+    latestEventType: string
+    latestEventAt: string
+  } {
+    // 章节状态聚合：CHAPTER_TASK_STATUS_UPDATED 记录每章最新状态，取每章最新一条。
+    // 走新索引 idx_events_project_type_created，单项目通常几百行。
+    const taskStatusRows = this.db.prepare(`
+      SELECT chapter_number, status
+      FROM (
+        SELECT
+          payload_json->>'$.chapterNumber' AS chapter_number,
+          payload_json->>'$.status' AS status,
+          ROW_NUMBER() OVER (
+            PARTITION BY payload_json->>'$.chapterNumber'
+            ORDER BY created_at DESC
+          ) AS rn
+        FROM events
+        WHERE project_id = ? AND type = 'CHAPTER_TASK_STATUS_UPDATED'
+      )
+      WHERE rn = 1
+    `).all(projectId) as { chapter_number: number | null; status: string | null }[]
+
+    const statusCounts = new Map<string, number>()
+    let latestChapter = 0
+    for (const row of taskStatusRows) {
+      if (row.chapter_number == null) continue
+      latestChapter = Math.max(latestChapter, Number(row.chapter_number))
+      const st = String(row.status || "unknown")
+      statusCounts.set(st, (statusCounts.get(st) || 0) + 1)
+    }
+    const chapterStatusCounts = [...statusCounts.entries()].map(([status, n]) => ({ status, n }))
+
+    // 任务数：走 idx_jobs_project_status。
+    const jobCounts = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN status IN ('queued','pending') THEN 1 ELSE 0 END) AS runnable
+      FROM jobs
+      WHERE project_id = ?
+    `).get(projectId) as { active: number | null; runnable: number | null }
+
+    // 最新事件：走 idx_events_project_created（任意类型，取最新一条）。
+    const latestEvent = this.db.prepare(`
+      SELECT type, created_at
+      FROM events
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(projectId) as { type: string | null; created_at: string | null } | undefined
+
+    return {
+      chapterStatusCounts,
+      latestChapterNumber: latestChapter,
+      activeJobs: Number(jobCounts?.active || 0),
+      runnableJobs: Number(jobCounts?.runnable || 0),
+      latestEventType: latestEvent?.type || "",
+      latestEventAt: latestEvent?.created_at || "",
+    }
   }
 
   getSnapshot(projectId: string): ProjectSnapshot {

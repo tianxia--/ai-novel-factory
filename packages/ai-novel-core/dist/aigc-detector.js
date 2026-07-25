@@ -7,8 +7,8 @@ import {
   getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-QJPQANB5.js";
-import "./chunk-JD3MNOTZ.js";
+} from "./chunk-5Z26A3S7.js";
+import "./chunk-CJRUVXRQ.js";
 export {
   createAigcDetectorClient,
   detectAigcSegments,

@@ -1,9 +1,12 @@
 import {
+  ProductionPlanningBlockedError,
   ProductionReadinessBlockedError,
   buildChapterInheritanceAdapterPayload,
+  commitChapterProductionStage,
   compactPreviousSegmentTail,
   createContinuityContract,
   createDetailedChapterBlueprint,
+  createDraftBody,
   createDraftBodyFromBlueprint,
   createDraftSegmentCompositionPlan,
   createDraftSegmentPlan,
@@ -16,7 +19,9 @@ import {
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSceneCardCharacterObligations,
   evaluateSemanticPreservation,
+  evaluateUnplannedCharacterDrift,
   evaluateWritingResourceUsage,
   formatApprovedWritingStylePrompt,
   inferGenreProfile,
@@ -30,29 +35,36 @@ import {
   memoryCacheTracker,
   normalizeAigcWritingDetectionReport,
   parseQualityGate,
+  prepareChapterProductionInputs,
   repairAigcHighRiskDraft,
   resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runAigcWritingDetection,
+  runChapterNaturalnessStage,
   runChapterProductionPipeline,
+  runQualityGateWithRevisions,
+  sanitizeKnownCastNames,
   skippedAigcWritingDetectionReport,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-JKZ4W4KL.js";
-import "./chunk-QJPQANB5.js";
-import "./chunk-E4OGC67J.js";
-import "./chunk-4A6LNSPI.js";
-import "./chunk-JD3MNOTZ.js";
+} from "./chunk-PJFTMRLC.js";
+import "./chunk-5Z26A3S7.js";
+import "./chunk-YV6Y5W7F.js";
+import "./chunk-YFTWM6FA.js";
+import "./chunk-CJRUVXRQ.js";
 import "./chunk-GZKJNHMN.js";
 export {
+  ProductionPlanningBlockedError,
   ProductionReadinessBlockedError,
   buildChapterInheritanceAdapterPayload,
+  commitChapterProductionStage,
   compactPreviousSegmentTail,
   createContinuityContract,
   createDetailedChapterBlueprint,
+  createDraftBody,
   createDraftBodyFromBlueprint,
   createDraftSegmentCompositionPlan,
   createDraftSegmentPlan,
@@ -65,7 +77,9 @@ export {
   evaluateCharacterProfilePresence,
   evaluateNarrativeStyleQuality,
   evaluatePlotContinuityBridge,
+  evaluateSceneCardCharacterObligations,
   evaluateSemanticPreservation,
+  evaluateUnplannedCharacterDrift,
   evaluateWritingResourceUsage,
   formatApprovedWritingStylePrompt,
   inferGenreProfile,
@@ -79,11 +93,15 @@ export {
   memoryCacheTracker,
   normalizeAigcWritingDetectionReport,
   parseQualityGate,
+  prepareChapterProductionInputs,
   repairAigcHighRiskDraft,
   resourcesCacheTracker,
   retrieveFactoryMemoryContext,
   runAigcWritingDetection,
+  runChapterNaturalnessStage,
   runChapterProductionPipeline,
+  runQualityGateWithRevisions,
+  sanitizeKnownCastNames,
   skippedAigcWritingDetectionReport,
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,

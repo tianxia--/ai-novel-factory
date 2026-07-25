@@ -1,3 +1,4 @@
+import "./chunk-SDIPDDNZ.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage
@@ -13,9 +14,11 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-M5VRL6NF.js";
-import "./chunk-UIQAXZB3.js";
-import "./chunk-SDIPDDNZ.js";
+} from "./chunk-GJI2PIUA.js";
+import "./chunk-VOQWLW5S.js";
+import {
+  runMultiAgentDiscussion
+} from "./chunk-N2LAI6O4.js";
 import {
   buildSuperGraphIndex,
   createManagedAutonomousProject,
@@ -27,13 +30,12 @@ import {
   loadAutonomousState,
   prepareCoverGeneration,
   resolveManagedProjectRoot,
-  runMultiAgentDiscussion,
   saveAutonomousState,
   superGraphFromDbRows,
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-VZ57WIIL.js";
+} from "./chunk-EVOZRM5F.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -72,27 +74,32 @@ import {
   repairAigcHighRiskDraft,
   requestLlmTextCompletion,
   testProviderConnectivity,
+  writeAllDetailedChapterBlueprints,
+  writeProductionMasterOutline,
   writeProductionStoryBibleAssets
-} from "./chunk-JKZ4W4KL.js";
+} from "./chunk-PJFTMRLC.js";
+import "./chunk-ZWH2XUVC.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-QJPQANB5.js";
+} from "./chunk-5Z26A3S7.js";
+import "./chunk-DETBSEC6.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-E4OGC67J.js";
-import "./chunk-4A6LNSPI.js";
+} from "./chunk-YV6Y5W7F.js";
+import "./chunk-YFTWM6FA.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-JD3MNOTZ.js";
+} from "./chunk-CJRUVXRQ.js";
 import {
   createStatusMessage,
   createToolMessage,
   createUserMessage
 } from "./chunk-GZKJNHMN.js";
+import "./chunk-UIQAXZB3.js";
 
 // src/studio-server.ts
 import fs from "fs/promises";
@@ -339,6 +346,8 @@ function resolveStyleCandidateCount(value, fallback) {
 function normalizeStylePreviewText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
+var STYLE_FREEZE_CONTRACT_EXTRACTION_MAX_TOKENS = 4200;
+var STYLE_FREEZE_ADVICE_MAX_TOKENS = 1800;
 function buildLocalFallbackStyleContract(sample, prompt = "") {
   const shortSample = sample.replace(/\s+/g, " ").trim().slice(0, 120);
   const voice = prompt.match(/克制|冷感|轻松|幽默|热血|悬疑|古风|白描/u)?.[0];
@@ -368,6 +377,7 @@ function studioStyleEntryVerification(entry) {
   if (!entry) return buildStyleGenerationVerification({});
   return entry.verification || buildStyleGenerationVerification({
     evaluation: entry.evaluation,
+    sample: entry.sample,
     version: entry.version,
     checkedAt: entry.createdAt
   });
@@ -428,6 +438,27 @@ async function readStyleEvolutionAssetSnapshot(projectRoot) {
       antiPatterns: await readAsset(path.join(styleRoot, "anti-patterns.md"))
     }
   };
+}
+function styleEvolutionArtifactItems(styleEvolutionAssets, options = {}) {
+  const freezePackage = styleEvolutionAssets?.freezePackage || {};
+  const fromSnapshot = (key, label, kind = "style") => {
+    const asset = freezePackage?.[key] || {};
+    return {
+      path: typeof asset.path === "string" && asset.path.trim() ? asset.path.trim() : "",
+      label,
+      kind,
+      status: asset.exists === false ? "missing" : "completed",
+      chars: typeof asset.chars === "number" ? asset.chars : void 0
+    };
+  };
+  return [
+    { path: ".ai-novel/style/evolution/style-contract.json", label: "Style contract", kind: "style-contract", status: "completed" },
+    { path: ".ai-novel/style/evolution/style-evolution-history.json", label: "Style evolution history", kind: "style-history", status: "completed" },
+    fromSnapshot("freezeLedger", "Style freeze ledger", "style-freeze-ledger"),
+    fromSnapshot("loopRuntime", "Style loop runtime", "style-loop-runtime"),
+    fromSnapshot("loopRuns", "Style loop runs", "style-loop-runs"),
+    ...options.includeApprovedSample ? [fromSnapshot("approvedSample", "User approved sample", "style-approved-sample")] : []
+  ].filter((item) => item.path && item.status !== "missing");
 }
 async function buildStyleEvolutionWorkspacePayload(rootDir, context, state) {
   const [styleEvolution, styleEvolutionAssets, workspacePayload] = await Promise.all([
@@ -509,7 +540,7 @@ async function buildStyleFreezePreview(input) {
         apiMode: textConfig.provider.apiMode,
         timeoutMs: textConfig.provider.timeoutMs,
         temperature: 0.1,
-        maxTokens: 1600,
+        maxTokens: STYLE_FREEZE_CONTRACT_EXTRACTION_MAX_TOKENS,
         messages: [
           { role: "system", content: extractionPrompt.system },
           { role: "user", content: extractionPrompt.user }
@@ -545,7 +576,7 @@ async function buildStyleFreezePreview(input) {
         apiMode: textConfig.provider.apiMode,
         timeoutMs: textConfig.provider.timeoutMs,
         temperature: 0.1,
-        maxTokens: 1200,
+        maxTokens: STYLE_FREEZE_ADVICE_MAX_TOKENS,
         messages: [
           { role: "system", content: freezePrompt.system },
           { role: "user", content: freezePrompt.user }
@@ -583,6 +614,7 @@ async function buildStyleFreezePreview(input) {
   const freezeSummary = freezeAdvice?.freezeSummary || currentStyleEvolution.contract.approval?.freezeSummary || (selected?.readyReasons?.length ? `\u5982\u679C\u73B0\u5728\u51BB\u7ED3\uFF0C\u5C06\u4EE5 v${selected.version} \u4F5C\u4E3A\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\uFF1A${selected.readyReasons.join(" ")}` : selected?.version ? `\u5982\u679C\u73B0\u5728\u51BB\u7ED3\uFF0C\u5C06\u4EE5 v${selected.version} \u4F5C\u4E3A\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\u3002` : "\u5982\u679C\u73B0\u5728\u51BB\u7ED3\uFF0C\u5C06\u6309\u5F53\u524D\u6837\u6BB5\u51BB\u7ED3\u4E3A\u5168\u4E66\u7EDF\u4E00\u5199\u6CD5\u5408\u540C\u3002");
   const previewVerification = buildStyleGenerationVerification({
     evaluation: selected?.evaluation,
+    sample: sampleForExtraction,
     version: selected?.version,
     checkedAt: selected?.createdAt
   });
@@ -612,6 +644,11 @@ async function buildStyleFreezePreview(input) {
   };
 }
 async function runStyleEvolutionLoop(options) {
+  const STYLE_EVALUATION_MAX_TOKENS = 2200;
+  const STYLE_REFINEMENT_MAX_TOKENS = 2200;
+  const STYLE_FREEZE_MAX_TOKENS = 1800;
+  const STYLE_COMBINED_CRITIC_MAX_TOKENS = 2600;
+  const STYLE_JSON_REPAIR_MAX_TOKENS = 2600;
   let styleEvolution = await loadStyleEvolution(options.projectRoot);
   const iterations = [];
   const loopRuntime = createStyleLoopRuntimeRecord({
@@ -635,6 +672,34 @@ async function runStyleEvolutionLoop(options) {
   const approvalMinRounds = Math.max(1, Number(retryPolicy.approvalMinRounds || 2));
   const maxForbiddenHitCount = Math.max(0, Number(retryPolicy.maxForbiddenHitCount || 1));
   let stopReason = "max_iterations_reached";
+  const repairStyleJson = async (kind, rawText) => requestLlmTextCompletion({
+    baseUrl: options.textConfig.provider.baseUrl,
+    apiKey: options.apiKey,
+    modelName: options.textConfig.provider.modelName,
+    apiMode: options.textConfig.provider.apiMode,
+    timeoutMs: options.textConfig.provider.timeoutMs,
+    temperature: 0,
+    maxTokens: STYLE_JSON_REPAIR_MAX_TOKENS,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "\u4F60\u662F JSON \u4FEE\u590D\u5668\u3002\u53EA\u8F93\u51FA\u4E25\u683C JSON\uFF0C\u4E0D\u8981\u89E3\u91CA\u3002",
+          "\u4E0D\u5F97\u65B0\u589E\u8BC4\u4EF7\u89C2\u70B9\uFF0C\u53EA\u80FD\u628A\u8F93\u5165\u4E2D\u5DF2\u6709\u7684\u4FE1\u606F\u6574\u7406\u8FDB\u6307\u5B9A\u7ED3\u6784\u3002",
+          "\u5982\u679C\u7F3A\u5C11\u5B57\u6BB5\uFF0C\u7528\u7A7A\u6570\u7EC4\u3001\u7A7A\u5B57\u7B26\u4E32\u6216\u4FDD\u5B88\u9ED8\u8BA4\u503C\u8865\u9F50\u3002"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: [
+          `\u76EE\u6807\u7ED3\u6784\uFF1A${kind}`,
+          kind === "evaluation" ? '\u8F93\u51FA\u5F62\u5982 {"evaluation":{"verdict":"candidate|approve|reject","summary":"...","scores":{"overall":0},"strengths":[],"deviations":[],"forbiddenHits":[],"nextFocus":[]}}' : kind === "refinement" ? '\u8F93\u51FA\u5F62\u5982 {"refinement":{"summary":"...","promptAdjustments":[],"contractAdjustments":[],"nextPrompt":""}}' : '\u8F93\u51FA\u5F62\u5982 {"freezeVerdict":"ready|continue|block","freezeSummary":"...","blockingReasons":[],"contractAdjustments":[],"forbiddenPatterns":[],"positiveExamples":[],"inheritedRules":[]}',
+          "\u5F85\u4FEE\u590D\u6587\u672C\uFF1A",
+          rawText
+        ].join("\n\n")
+      }
+    ]
+  });
   for (let iteration = 0; iteration < options.maxIterations; iteration += 1) {
     const latest = Array.isArray(styleEvolution.contract.evolutionHistory) ? styleEvolution.contract.evolutionHistory.at(-1) : null;
     const carriedFeedback = [
@@ -729,18 +794,29 @@ async function runStyleEvolutionLoop(options) {
           apiMode: options.textConfig.provider.apiMode,
           timeoutMs: options.textConfig.provider.timeoutMs,
           temperature: 0.1,
-          maxTokens: 900,
+          maxTokens: STYLE_EVALUATION_MAX_TOKENS,
           messages: [
             { role: "system", content: evaluationPrompt.system },
             { role: "user", content: evaluationPrompt.user }
           ]
         });
-        const parsedEvaluation = parseStyleEvolutionEvaluationFromText(rawEvaluation);
+        let parsedEvaluation = parseStyleEvolutionEvaluationFromText(rawEvaluation);
+        if (!parsedEvaluation) {
+          try {
+            parsedEvaluation = parseStyleEvolutionEvaluationFromText(await repairStyleJson("evaluation", rawEvaluation));
+          } catch (repairError) {
+            fallbackReasons.push(`evaluation_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360));
+          }
+        }
+        if (!parsedEvaluation) {
+          fallbackReasons.push(`evaluation_parse_failed: ${rawEvaluation.slice(0, 180).replace(/\s+/gu, " ")}`);
+        }
         if (parsedEvaluation) {
           evaluation2 = mergeStyleEvaluationWithAigc(parsedEvaluation.evaluation, aigcSignal);
         }
         const directApprovalVerification = buildStyleGenerationVerification({
           evaluation: evaluation2,
+          sample: sample2,
           checkedAt: (/* @__PURE__ */ new Date()).toISOString()
         });
         if (isStyleEvaluatorDirectApproval({
@@ -783,13 +859,23 @@ async function runStyleEvolutionLoop(options) {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 1400,
+            maxTokens: STYLE_REFINEMENT_MAX_TOKENS,
             messages: [
               { role: "system", content: refinementPrompt.system },
               { role: "user", content: refinementPrompt.user }
             ]
           });
-          const parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement);
+          let parsedRefinement = parseStyleEvolutionRefinementFromText(rawRefinement);
+          if (!parsedRefinement) {
+            try {
+              parsedRefinement = parseStyleEvolutionRefinementFromText(await repairStyleJson("refinement", rawRefinement));
+            } catch (repairError) {
+              fallbackReasons.push(`refinement_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360));
+            }
+          }
+          if (!parsedRefinement) {
+            fallbackReasons.push(`refinement_parse_failed: ${rawRefinement.slice(0, 180).replace(/\s+/gu, " ")}`);
+          }
           if (parsedRefinement) {
             refinement2 = reinforceRefinementWithAigc(parsedRefinement.refinement, aigcSignal);
           }
@@ -811,13 +897,23 @@ async function runStyleEvolutionLoop(options) {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 800,
+            maxTokens: STYLE_FREEZE_MAX_TOKENS,
             messages: [
               { role: "system", content: freezePrompt.system },
               { role: "user", content: freezePrompt.user }
             ]
           });
           freezeAdvice2 = parseStyleFreezeAdviceFromText(rawFreezeAdvice);
+          if (!freezeAdvice2) {
+            try {
+              freezeAdvice2 = parseStyleFreezeAdviceFromText(await repairStyleJson("freezer", rawFreezeAdvice));
+            } catch (repairError) {
+              fallbackReasons.push(`freezer_json_repair_failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`.slice(0, 360));
+            }
+          }
+          if (!freezeAdvice2) {
+            fallbackReasons.push(`freezer_parse_failed: ${rawFreezeAdvice.slice(0, 180).replace(/\s+/gu, " ")}`);
+          }
           if (freezeAdvice2) {
             refinement2 = {
               ...refinement2,
@@ -850,7 +946,7 @@ async function runStyleEvolutionLoop(options) {
             apiMode: options.textConfig.provider.apiMode,
             timeoutMs: options.textConfig.provider.timeoutMs,
             temperature: 0.1,
-            maxTokens: 1e3,
+            maxTokens: STYLE_COMBINED_CRITIC_MAX_TOKENS,
             messages: [
               { role: "system", content: critiquePrompt.system },
               { role: "user", content: critiquePrompt.user }
@@ -870,6 +966,7 @@ async function runStyleEvolutionLoop(options) {
       }
       const verification2 = buildStyleGenerationVerification({
         evaluation: evaluation2,
+        sample: sample2,
         checkedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
       const freezer2 = buildStyleFreezerGateRecord(freezeAdvice2, { evaluation: evaluation2, verification: verification2 });
@@ -1241,6 +1338,10 @@ function isJsonApiRequest(method, pathname) {
       "/api/init",
       "/api/advance",
       "/api/production/story-assets/repair",
+      "/api/production/protagonist-profile/confirm",
+      "/api/production/setting-review/approve",
+      "/api/production/setting-review/reject",
+      "/api/production/story-foundation/approve",
       "/api/chapters/retry",
       "/api/cover",
       "/api/provider-test",
@@ -1440,18 +1541,51 @@ function statusMessageParts(messageId, input) {
   ];
 }
 function toolMessageParts(messageId, input) {
+  const metadata = input.metadata || {};
+  const artifactItems = [
+    typeof metadata.artifactPath === "string" && metadata.artifactPath.trim() ? {
+      path: metadata.artifactPath.trim(),
+      label: typeof metadata.artifactLabel === "string" && metadata.artifactLabel.trim() ? metadata.artifactLabel.trim() : metadata.artifactPath.trim(),
+      kind: typeof metadata.artifactKind === "string" && metadata.artifactKind.trim() ? metadata.artifactKind.trim() : "artifact",
+      status: input.status
+    } : null,
+    ...Array.isArray(metadata.artifacts) ? metadata.artifacts : []
+  ].filter((artifact) => Boolean(artifact) && typeof artifact === "object").map((artifact) => ({
+    path: typeof artifact.path === "string" ? artifact.path.trim() : "",
+    label: typeof artifact.label === "string" ? artifact.label.trim() : "",
+    kind: typeof artifact.kind === "string" ? artifact.kind.trim() : "artifact",
+    status: typeof artifact.status === "string" ? artifact.status.trim() : input.status,
+    role: typeof artifact.role === "string" ? artifact.role.trim() : "",
+    chars: typeof artifact.chars === "number" ? artifact.chars : null
+  })).filter(
+    (artifact, index, artifacts) => artifact.path && artifacts.findIndex((candidate) => candidate.path === artifact.path) === index
+  );
   const parts = [
     messagePart(messageId, 0, "markdown", { text: input.content || `${input.toolName}: ${input.status}` }, input.createdAt),
     messagePart(messageId, 1, "tool_call", {
       toolName: input.toolName,
-      input: input.toolInput ?? null
+      input: input.toolInput ?? null,
+      artifactPath: artifactItems[0]?.path || "",
+      artifacts: artifactItems
     }, input.createdAt)
   ];
   parts.push(messagePart(messageId, 2, input.error ? "tool_result" : "tool_result", {
     status: input.status,
     output: input.output ?? null,
-    error: input.error ?? null
+    error: input.error ?? null,
+    artifactPath: artifactItems[0]?.path || "",
+    artifacts: artifactItems
   }, input.createdAt));
+  for (const artifact of artifactItems) {
+    parts.push(messagePart(messageId, parts.length, "artifact", {
+      path: artifact.path,
+      label: artifact.label || artifact.path,
+      kind: artifact.kind || "artifact",
+      status: artifact.status || input.status,
+      role: artifact.role || "",
+      chars: artifact.chars
+    }, input.createdAt));
+  }
   return parts;
 }
 async function recordToolMessage(rootDir, input) {
@@ -1478,7 +1612,8 @@ async function recordToolMessage(rootDir, input) {
     output: input.output,
     error: input.error,
     content: input.content,
-    createdAt: message.createdAt
+    createdAt: message.createdAt,
+    metadata: input.metadata
   }))).catch(() => void 0);
   return message;
 }
@@ -1615,6 +1750,24 @@ async function writeWorkspaceText(rootDir, content, ...parts) {
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.writeFile(targetPath, content, "utf8");
 }
+function extractConcreteProtagonistNameForRepair(source = "") {
+  const candidates = [
+    ...[...source.matchAll(/(?:Canonical Protagonist|核心主角|主角姓名)[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\s*主角[:：]\s*([\u4e00-\u9fff·]{2,8})/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^#{3,6}\s*([^（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]\*\*/gmu)].map((match) => match[1]),
+    ...[...source.matchAll(/^\*\*([^*（(\n]{2,8})\*\*[（(][^）)]*(?:主角|主人公|protagonist)[^）)]*[）)]/gmu)].map((match) => match[1])
+  ].map((name) => String(name || "").trim());
+  return candidates.find(
+    (name) => /^[\u4e00-\u9fff·]{2,8}$/u.test(name) && !/^(?:主角|主人公|待定|未命名|姓名|角色)$/u.test(name)
+  ) || "";
+}
+function extractVisibleMasterProtagonistNameForRepair(masterOutline = "") {
+  const characterSpineMatch = masterOutline.match(/##\s+Character Spine\b([\s\S]*?)(?:\n##\s+|\s*$)/u);
+  const stateLedgerMatch = masterOutline.match(/##\s+Character State Ledger Plan\b([\s\S]*?)(?:\n##\s+|\s*$)/u);
+  const source = [characterSpineMatch?.[1] || "", stateLedgerMatch?.[1] || ""].filter(Boolean).join("\n\n");
+  return extractConcreteProtagonistNameForRepair(source || masterOutline);
+}
 function getNovelWorkspacePaths(projectRoot) {
   const workspaceDir = path.join(projectRoot, ".ai-novel");
   const styleDir = path.join(workspaceDir, "style");
@@ -1643,7 +1796,26 @@ function getNovelWorkspacePaths(projectRoot) {
     chapterBlueprintsDir: path.join(plansDir, "chapter-blueprints")
   };
 }
+var SETTING_REVIEW_APPROVAL_FILE = "setting-review-approval.json";
+var SETTING_REVIEW_FILE = "setting-freeze.md";
 var STORY_FOUNDATION_APPROVAL_FILE = "story-foundation-approval.json";
+async function writeSettingReviewApproval(projectRoot, input) {
+  const reviewedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const approval = {
+    version: 1,
+    status: input.approved ? "approved" : "rejected",
+    approved: input.approved,
+    reviewedAt,
+    reviewedBy: input.reviewedBy || "user",
+    note: input.note || (input.approved ? "\u7528\u6237\u5DF2\u786E\u8BA4\u5F53\u524D setting review packet \u53EF\u4F5C\u4E3A\u540E\u7EED\u4E3B\u7EBF\u89C4\u5212\u7684\u8BBE\u5B9A\u63D0\u6848\u6765\u6E90\u3002" : "\u7528\u6237\u62D2\u7EDD\u5F53\u524D setting review packet\uFF1B\u540E\u7EED\u89C4\u5212\u524D\u5FC5\u987B\u5148\u4FEE\u6B63\u4E16\u754C\u89C2\u3001\u4EBA\u7269\u6216\u4E3B\u7EBF\u5047\u8BBE\u3002"),
+    rejectionReason: input.approved ? "" : input.reason || input.note || "\u7528\u6237\u62D2\u7EDD\u5F53\u524D setting review packet\u3002",
+    settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+    approvalScope: "setting_review"
+  };
+  await writeWorkspaceText(projectRoot, `${JSON.stringify(approval, null, 2)}
+`, "plans", SETTING_REVIEW_APPROVAL_FILE);
+  return approval;
+}
 async function loadStoryFoundationApproval(projectRoot) {
   const approval = await readWorkspaceJson(projectRoot, "plans", STORY_FOUNDATION_APPROVAL_FILE);
   if (!approval || typeof approval !== "object" || Array.isArray(approval)) {
@@ -1677,6 +1849,76 @@ async function writeStoryFoundationApproval(projectRoot, input) {
   await writeWorkspaceText(projectRoot, `${JSON.stringify(approval, null, 2)}
 `, "plans", STORY_FOUNDATION_APPROVAL_FILE);
   return approval;
+}
+function readProfileField(body, key, aliases = []) {
+  const source = body.protagonistProfile && typeof body.protagonistProfile === "object" && !Array.isArray(body.protagonistProfile) ? body.protagonistProfile : body;
+  for (const field of [key, ...aliases]) {
+    const value = source[field];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+function buildConfirmedProtagonistProfile(body) {
+  const profile = {
+    name: readProfileField(body, "name", ["protagonistName", "canonicalName"]),
+    identity: readProfileField(body, "identity", ["identityAndRole", "role"]),
+    coreDesire: readProfileField(body, "coreDesire", ["desire"]),
+    fearOrWound: readProfileField(body, "fearOrWound", ["wound", "fear"]),
+    behaviorHabit: readProfileField(body, "behaviorHabit", ["habit"]),
+    speechMarker: readProfileField(body, "speechMarker", ["speech", "dialogueHabit"]),
+    relationshipName: readProfileField(body, "relationshipName", ["pressureCharacter", "namedRelationship"]),
+    relationshipPressure: readProfileField(body, "relationshipPressure", ["pressure"]),
+    note: readProfileField(body, "note", ["sourceNote"]),
+    confirmedBy: readProfileField(body, "confirmedBy", ["reviewedBy"]) || "user"
+  };
+  const requiredFields = [
+    "name",
+    "identity",
+    "coreDesire",
+    "fearOrWound",
+    "behaviorHabit",
+    "speechMarker",
+    "relationshipName",
+    "relationshipPressure"
+  ];
+  const missingFields = requiredFields.filter((field) => !profile[field]);
+  return { profile, missingFields };
+}
+function formatConfirmedProtagonistProfileMarkdown(input) {
+  const confirmedAt = (/* @__PURE__ */ new Date()).toISOString();
+  return [
+    "# Confirmed Protagonist Profile",
+    "",
+    "Status: confirmed",
+    `Confirmed At: ${confirmedAt}`,
+    `Confirmed By: ${input.confirmedBy || "user"}`,
+    "",
+    `Canonical Protagonist: ${input.name}`,
+    `\u6838\u5FC3\u4E3B\u89D2: ${input.name}`,
+    `\u4E3B\u89D2\u59D3\u540D: ${input.name}`,
+    "",
+    `#### ${input.name}\uFF08\u4E3B\u89D2 / protagonist\uFF09`,
+    "",
+    `- id: protagonist`,
+    `- role: protagonist`,
+    `- aliases: ${input.name}\u3001\u4E3B\u89D2`,
+    `- identity and role: ${input.identity}`,
+    `- core desire: ${input.coreDesire}`,
+    `- fear or wound: ${input.fearOrWound}`,
+    `- contradiction: ${input.name} \u5FC5\u987B\u5728\u300C${input.coreDesire}\u300D\u548C\u300C${input.fearOrWound}\u300D\u4E4B\u95F4\u6301\u7EED\u505A\u9009\u62E9\u3002`,
+    `- behavior habits: ${input.behaviorHabit}`,
+    `- speech markers: ${input.speechMarker}`,
+    `- named relationship pressure: ${input.relationshipName} - ${input.relationshipPressure}`,
+    "",
+    "## Production Contract",
+    "",
+    "- Master planning must use this concrete protagonist and must not replace the name with a role label.",
+    "- Story foundation and chapter blueprints must preserve the named relationship pressure above.",
+    "- Drafting may add minor scene characters only when the blueprint or quality gate allows them.",
+    input.note ? ["", "## User Note", "", input.note].join("\n") : ""
+  ].filter(Boolean).join("\n");
 }
 async function syncCurrentContextPacketState(projectRoot, state) {
   if (!state) return;
@@ -3887,12 +4129,9 @@ async function stopInProcessAutopilotBeforeProjectDelete(projectRoot) {
   return true;
 }
 async function buildProjectSummary(rootDir, project) {
-  let dbSnapshot = null;
-  try {
-    dbSnapshot = await withFactoryDb(rootDir, async (db) => db.getSnapshot(project.id)).catch(() => null);
-  } catch (e) {
-  }
-  const state = dbSnapshot?.state || await tryLoadState(project.projectRoot).catch(() => null);
+  const summaryMeta = await withFactoryDb(rootDir, async (db) => db.getProjectSummaryMeta(project.id)).catch(() => null);
+  const state = await tryLoadState(project.projectRoot).catch(() => null);
+  const dbSnapshot = null;
   if (!state) {
     const projectRuntime2 = deriveProjectRuntimeState({
       state: null,
@@ -3916,38 +4155,29 @@ async function buildProjectSummary(rootDir, project) {
     };
   }
   const tasks = Array.isArray(state.plan?.chapterTasks) ? state.plan.chapterTasks : [];
-  const chapterFacts = Array.isArray(dbSnapshot?.chapterFacts) ? dbSnapshot.chapterFacts : [];
   const totalChapters = Number(state.plan?.totalChapters || project.totalChapters || tasks.length || 0);
-  const passedChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "complete").length : tasks.filter((task) => task.status === "complete").length;
-  let contiguousCompletedChapters = 0;
-  if (chapterFacts.length > 0) {
-    const factsByChapter = new Map(chapterFacts.map((fact) => [Number(fact.chapterNumber), fact]));
-    for (let ch = 1; ch <= totalChapters; ch += 1) {
-      const factRecord = factsByChapter.get(ch);
-      if (factRecord?.status !== "complete") break;
-      contiguousCompletedChapters += 1;
+  const statusCount = (st) => {
+    if (summaryMeta) {
+      const hit = summaryMeta.chapterStatusCounts.find((row) => row.status === st);
+      if (hit) return Number(hit.n);
+      return 0;
     }
-  } else {
-    for (const task of tasks) {
-      if (task.status !== "complete") break;
-      contiguousCompletedChapters += 1;
-    }
-  }
-  const completedChapters = Math.min(passedChapters, contiguousCompletedChapters);
-  const inProgressChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "in_progress").length : tasks.filter((task) => task.status === "in_progress").length;
-  const blockedChapters = chapterFacts.length > 0 ? chapterFacts.filter((fact) => fact.status === "blocked").length : tasks.filter((task) => task.status === "blocked").length;
+    return tasks.filter((task) => task.status === st).length;
+  };
+  const completedChapters = statusCount("complete");
+  const inProgressChapters = statusCount("in_progress");
+  const blockedChapters = statusCount("blocked");
   const pendingChapters = Math.max(0, totalChapters - completedChapters - inProgressChapters - blockedChapters);
   const progressPercent = totalChapters > 0 ? Math.max(0, Math.min(100, Math.round(completedChapters / totalChapters * 100))) : 0;
-  const activeJobs = Array.isArray(dbSnapshot?.activeJobs) ? dbSnapshot.activeJobs.length : 0;
-  const runnableJobs = Array.isArray(dbSnapshot?.runnableJobs) ? dbSnapshot.runnableJobs.length : 0;
-  const latestEvent = Array.isArray(dbSnapshot?.latestEvents) ? dbSnapshot.latestEvents[0] : null;
+  const activeJobs = summaryMeta?.activeJobs || 0;
+  const runnableJobs = summaryMeta?.runnableJobs || 0;
   const projectRuntime = deriveProjectRuntimeState({
     state,
     factorySnapshot: dbSnapshot
   });
   const progress = projectRuntime.chapterProgress;
   return {
-    source: dbSnapshot ? "db" : "state",
+    source: summaryMeta ? "db" : "state",
     stage: projectRuntime.workflowStage,
     progressPercent: progress.progressPercent || progressPercent,
     totalChapters: progress.totalChapters || totalChapters,
@@ -3957,8 +4187,8 @@ async function buildProjectSummary(rootDir, project) {
     blockedChapters: progress.blockedChapters,
     activeJobs,
     runnableJobs,
-    latestEventType: latestEvent?.type || "",
-    latestEventAt: latestEvent?.created_at || latestEvent?.updated_at || "",
+    latestEventType: summaryMeta?.latestEventType || "",
+    latestEventAt: summaryMeta?.latestEventAt || "",
     updatedAt: state.runtime?.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString(),
     projectRuntime,
     coverStatus: state.assets?.cover?.status || "pending",
@@ -4441,6 +4671,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     });
     const verification = buildStyleGenerationVerification({
       evaluation,
+      sample,
       checkedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
     const freezer = buildStyleFreezerGateRecord(null, { evaluation, verification });
@@ -4454,6 +4685,28 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       source: "manual"
     });
     const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+    const latest = Array.isArray(styleEvolution.contract.evolutionHistory) ? styleEvolution.contract.evolutionHistory.at(-1) : null;
+    await recordToolMessage(rootDir, {
+      projectId: context.projectId,
+      conversationId: "workflow-control",
+      toolName: "style-evolution.candidate",
+      status: "completed",
+      input: { source: "manual", sampleChars: sample.length },
+      output: {
+        version: latest?.version,
+        verificationStatus: latest?.verification?.status || styleEvolution.contract.verification?.status || "missing",
+        freezerVerdict: latest?.freezer?.verdict || "missing",
+        gateStatus: styleEvolution.gate.status
+      },
+      content: `Style candidate v${latest?.version || "?"} recorded for review.`,
+      metadata: {
+        source: "api_style_evolution_candidate",
+        artifactPath: ".ai-novel/style/evolution/style-contract.json",
+        artifactLabel: "Style contract",
+        artifactKind: "style-contract",
+        artifacts: styleEvolutionArtifactItems(styleEvolutionAssets)
+      }
+    });
     return {
       status: 200,
       payload: {
@@ -4523,11 +4776,40 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     const latestIteration = loopRun.iterations.at(-1);
     if (!latestIteration?.sample?.trim()) {
       const allBlocked = loopRun.stopReason === "style_candidates_all_blocked";
+      const styleEvolutionAssets2 = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        runId: loopRun.loopRuntime.runId,
+        toolName: "style-evolution.generate-candidate",
+        status: allBlocked ? "completed" : "failed",
+        input: {
+          loopIterations: resolveStyleLoopIterations(body.loopIterations, 1),
+          candidateCount: resolveStyleCandidateCount(body.candidateCount, 1),
+          userStylePrompt: userStylePrompt || styleEvolution.contract.userStylePrompt || ""
+        },
+        output: {
+          stopReason: loopRun.stopReason,
+          completedIterations: loopRun.iterations.length,
+          finalLoopStatus: loopRun.loopRuntime.finalLoopStatus,
+          finalConvergence: loopRun.loopRuntime.finalConvergence
+        },
+        error: allBlocked ? void 0 : "style_candidate_empty_response",
+        content: allBlocked ? "Style Evolution generated candidates, but all were blocked by Generation Verification Gate. The blocked candidates and reasons are available in the loop runtime artifact." : "Style Evolution did not return a usable candidate sample.",
+        metadata: {
+          source: "api_style_evolution_generate_candidate",
+          artifactPath: ".ai-novel/style/evolution/style-loop-runtime.json",
+          artifactLabel: "Style loop runtime",
+          artifactKind: "style-loop-runtime",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets2)
+        }
+      });
       return {
-        status: allBlocked ? 409 : 502,
+        status: allBlocked ? 200 : 502,
         payload: {
           error: allBlocked ? "style_candidates_all_blocked" : "style_candidate_empty_response",
-          reason: allBlocked ? "\u672C\u8F6E\u6240\u6709\u5019\u9009\u90FD\u672A\u901A\u8FC7 Generation Verification Gate\uFF0C\u7CFB\u7EDF\u6CA1\u6709\u628A\u5931\u8D25\u6837\u6BB5\u5199\u5165\u6B63\u5F0F\u5019\u9009\u5386\u53F2\u3002\u8BF7\u8C03\u6574\u98CE\u683C\u8981\u6C42\u3001\u7981\u5FCC\u6216 AIGC \u914D\u7F6E\u540E\u91CD\u8BD5\u3002" : void 0,
+          status: allBlocked ? "blocked" : "failed",
+          reason: allBlocked ? "\u672C\u8F6E\u6240\u6709\u5019\u9009\u90FD\u672A\u901A\u8FC7 Generation Verification Gate\uFF0C\u7CFB\u7EDF\u6CA1\u6709\u628A\u5931\u8D25\u6837\u6BB5\u5199\u5165\u6B63\u5F0F\u5019\u9009\u5386\u53F2\uFF1B\u53EF\u6839\u636E loopRun.iterations \u4E2D\u7684\u5019\u9009\u4E0E\u539F\u56E0\u7EE7\u7EED\u91CD\u8BD5\u3002" : void 0,
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
@@ -4552,13 +4834,46 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         }
       };
     }
+    const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+    const latest = Array.isArray(styleEvolution.contract.evolutionHistory) ? styleEvolution.contract.evolutionHistory.at(-1) : null;
+    await recordToolMessage(rootDir, {
+      projectId: context.projectId,
+      conversationId: "workflow-control",
+      runId: loopRun.loopRuntime.runId,
+      toolName: "style-evolution.generate-candidate",
+      status: "completed",
+      input: {
+        loopIterations: resolveStyleLoopIterations(body.loopIterations, 1),
+        candidateCount: resolveStyleCandidateCount(body.candidateCount, 1),
+        userStylePrompt: userStylePrompt || styleEvolution.contract.userStylePrompt || ""
+      },
+      output: {
+        version: styleEvolution.contract.evolutionHistory?.at(-1)?.version,
+        candidateIndex: latestIteration.candidates?.[0]?.candidateIndex ? latestIteration.candidates.find((entry) => entry.sample === latestIteration.sample)?.candidateIndex : 1,
+        stopReason: loopRun.stopReason,
+        completedIterations: loopRun.iterations.length,
+        finalLoopStatus: loopRun.loopRuntime.finalLoopStatus,
+        finalConvergence: loopRun.loopRuntime.finalConvergence,
+        verificationStatus: latest?.verification?.status || latestIteration.verification?.status || "missing",
+        freezerVerdict: latest?.freezer?.verdict || latestIteration.freezer?.verdict || "missing",
+        modelName: textConfig.provider.modelName
+      },
+      content: `Style Evolution candidate v${latest?.version || "?"} generated: ${loopRun.stopReason}.`,
+      metadata: {
+        source: "api_style_evolution_generate_candidate",
+        artifactPath: ".ai-novel/style/evolution/style-contract.json",
+        artifactLabel: "Style contract",
+        artifactKind: "style-contract",
+        artifacts: styleEvolutionArtifactItems(styleEvolutionAssets)
+      }
+    });
     return {
       status: 200,
       payload: {
         activeProjectId: context.projectId,
         projects: context.projects,
         styleEvolution,
-        styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+        styleEvolutionAssets,
         generatedCandidate: {
           prompt: latestIteration.prompt,
           sample: latestIteration.sample,
@@ -4621,13 +4936,36 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         antiPatterns
       });
       const styleEvolution = await loadStyleEvolution(context.projectRoot);
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.freeze-preview",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : void 0 },
+        output: {
+          version: freezePreview.version,
+          contractExtractionSource: freezePreview.contractExtractionSource,
+          freezeAdviceSource: freezePreview.freezeAdviceSource,
+          llmFallbackUsed: freezePreview.llmFallbackUsed,
+          freezerVerdict: freezePreview.freezer?.verdict || "missing"
+        },
+        content: `Style freeze preview prepared for v${freezePreview.version || "?"}.`,
+        metadata: {
+          source: "api_style_evolution_freeze_preview",
+          artifactPath: ".ai-novel/style/evolution/style-contract.json",
+          artifactLabel: "Style contract",
+          artifactKind: "style-contract",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets)
+        }
+      });
       return {
         status: 200,
         payload: {
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           freezePreview,
           envStatus: getPublicProjectEnvStatus2(rootDir)
         }
@@ -4703,7 +5041,36 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         freezeSummary: freezePreview?.freezeSummary,
         positiveExamples: freezePreview?.positiveExamples,
         inheritedRules: freezePreview?.inheritedRules,
-        freezer: freezePreview?.freezer
+        // 冻结预审在 approve 阶段仅作参考：候选已通过循环 ready 判定并被用户 accept，
+        // 预审的 continue 不应再否决用户确认（否则启发式评分低于阈值时 approve 会永久卡死），
+        // 回落到 undefined 让 approveStyleEvolutionSample 沿用候选自身的 ready 评审记录。
+        freezer: freezePreview?.freezer?.verdict === "ready" ? freezePreview.freezer : void 0
+      });
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.approve",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : void 0 },
+        output: {
+          version: styleEvolution.contract.approval?.approvedVersion || version,
+          approvalStatus: styleEvolution.contract.approval?.status || "missing",
+          gateStatus: styleEvolution.gate.status,
+          canProceed: styleEvolution.gate.canProceed,
+          contractExtractionSource: styleFreezeApproval.contractExtractionSource,
+          freezeAdviceSource: styleFreezeApproval.freezeAdviceSource,
+          llmFallbackUsed: styleFreezeApproval.llmFallbackUsed,
+          fallbackReasons: styleFreezeApproval.fallbackReasons
+        },
+        content: `Style contract approved and frozen at v${styleEvolution.contract.approval?.approvedVersion || version || "?"}.`,
+        metadata: {
+          source: "api_style_evolution_approve",
+          artifactPath: ".ai-novel/style/evolution/user-approved-sample.md",
+          artifactLabel: "User approved sample",
+          artifactKind: "style-approved-sample",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets, { includeApprovedSample: true })
+        }
       });
       return {
         status: 200,
@@ -4711,7 +5078,7 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           freezePreview,
           styleFreezeApproval,
           envStatus: getPublicProjectEnvStatus2(rootDir)
@@ -4740,13 +5107,35 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         version: Number.isFinite(version) ? version : void 0,
         acceptedAt: typeof body.acceptedAt === "string" ? body.acceptedAt : void 0
       });
+      const styleEvolutionAssets = await readStyleEvolutionAssetSnapshot(context.projectRoot);
+      await recordToolMessage(rootDir, {
+        projectId: context.projectId,
+        conversationId: "workflow-control",
+        toolName: "style-evolution.accept",
+        status: "completed",
+        input: { version: Number.isFinite(version) ? version : void 0 },
+        output: {
+          version: styleEvolution.contract.approval?.approvedVersion || version,
+          approvalStatus: styleEvolution.contract.approval?.status || "missing",
+          gateStatus: styleEvolution.gate.status,
+          canProceed: styleEvolution.gate.canProceed
+        },
+        content: `Style candidate v${version || "?"} accepted for freeze review.`,
+        metadata: {
+          source: "api_style_evolution_accept",
+          artifactPath: ".ai-novel/style/evolution/style-freeze-ledger.json",
+          artifactLabel: "Style freeze ledger",
+          artifactKind: "style-freeze-ledger",
+          artifacts: styleEvolutionArtifactItems(styleEvolutionAssets)
+        }
+      });
       return {
         status: 200,
         payload: {
           activeProjectId: context.projectId,
           projects: context.projects,
           styleEvolution,
-          styleEvolutionAssets: await readStyleEvolutionAssetSnapshot(context.projectRoot),
+          styleEvolutionAssets,
           envStatus: getPublicProjectEnvStatus2(rootDir)
         }
       };
@@ -5119,15 +5508,33 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
       protagonist: await readWorkspaceText(context.projectRoot, "memory", "characters", "core", "protagonist.md"),
       style: await readWorkspaceText(context.projectRoot, "style", "profile.md")
     };
-    const written = await writeProductionStoryBibleAssets(context.projectRoot, paths, state, storyContext, {
+    const existingMasterOutline = await readWorkspaceText(context.projectRoot, "plans", "master-outline.md");
+    const masterProtagonist = extractVisibleMasterProtagonistNameForRepair(existingMasterOutline);
+    const profileProtagonist = extractConcreteProtagonistNameForRepair(storyContext.protagonist);
+    const repairedMasterOutlinePaths = [];
+    if (!masterProtagonist && profileProtagonist) {
+      await writeProductionMasterOutline(context.projectRoot, paths, state, storyContext, {
+        factoryRootDir: rootDir,
+        projectId: context.projectId,
+        preferDeterministicPlanning: true
+      });
+      repairedMasterOutlinePaths.push(paths.masterOutlinePath);
+    }
+    const storyAssetPaths = await writeProductionStoryBibleAssets(context.projectRoot, paths, state, storyContext, {
       factoryRootDir: rootDir,
       projectId: context.projectId
     });
+    const blueprintPaths = await writeAllDetailedChapterBlueprints(context.projectRoot, paths, state, storyContext, {
+      factoryRootDir: rootDir,
+      projectId: context.projectId,
+      preferDeterministicPlanning: true
+    });
+    const written = [...repairedMasterOutlinePaths, ...storyAssetPaths, ...blueprintPaths];
     await recordStatusMessage(rootDir, {
       projectId: context.mode === "managed" ? context.projectId : null,
       conversationId: "workflow-control",
-      title: "\u6545\u4E8B\u57FA\u5EFA\u5DF2\u8865\u9F50",
-      content: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u548C\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u5DF2\u91CD\u65B0\u751F\u6210\u3002",
+      title: "\u6545\u4E8B\u57FA\u5EFA\u4E0E\u7AE0\u8282\u84DD\u56FE\u5DF2\u8865\u9F50",
+      content: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u8BE6\u7EC6\u7AE0\u8282\u84DD\u56FE\u5DF2\u91CD\u65B0\u751F\u6210\u3002",
       metadata: {
         source: "api_story_assets_repair",
         written: written.map((item) => path.relative(context.projectRoot, item).replaceAll("\\", "/"))
@@ -5149,6 +5556,222 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
         activeProjectId: context.projectId,
         projects: context.projects,
         repairedStoryAssets: written.map((item) => `.ai-novel/${path.relative(path.join(context.projectRoot, ".ai-novel"), item).replaceAll("\\", "/")}`),
+        ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
+        envStatus: getPublicProjectEnvStatus2(rootDir)
+      }
+    };
+  }
+  if (method === "POST" && requestPathname === "/api/production/protagonist-profile/confirm") {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    const snapshotState = context.projectId ? await withFactoryDb(rootDir, async (db) => db.getSnapshot(context.projectId).state).catch(() => null) : null;
+    const fileState = await tryLoadState(context.projectRoot);
+    const state = snapshotState ?? fileState;
+    if (!state) {
+      return { status: 404, payload: { error: "workspace_not_initialized", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    const { profile, missingFields } = buildConfirmedProtagonistProfile(body);
+    if (missingFields.length) {
+      return {
+        status: 400,
+        payload: {
+          error: "protagonist_profile_incomplete",
+          missingFields,
+          requiredInput: "name, identity, coreDesire, fearOrWound, behaviorHabit, speechMarker, relationshipName, relationshipPressure",
+          artifactPath: ".ai-novel/memory/characters/core/protagonist.md",
+          projects: context.projects,
+          envStatus: getPublicProjectEnvStatus2(rootDir)
+        }
+      };
+    }
+    const profileMarkdown = formatConfirmedProtagonistProfileMarkdown(profile);
+    const profilePath = ".ai-novel/memory/characters/core/protagonist.md";
+    await writeWorkspaceText(context.projectRoot, `${profileMarkdown}
+`, "memory", "characters", "core", "protagonist.md");
+    state.runtime.statusMessage = `Protagonist profile confirmed for ${profile.name}. Master planning can now consume the locked profile.`;
+    await saveAutonomousState(context.projectRoot, state);
+    if (context.mode === "managed" && context.projectId) {
+      await syncManagedProjectState(rootDir, context.projectId, state).catch(() => void 0);
+      await withFactoryDb(rootDir, async (db) => {
+        db.recordArtifact({
+          projectId: context.projectId,
+          kind: "memory",
+          path: profilePath,
+          status: "completed",
+          metadata: {
+            production: true,
+            stage: "protagonist_profile_confirmed",
+            source: "api_protagonist_profile_confirm",
+            protagonistName: profile.name,
+            relationshipName: profile.relationshipName
+          }
+        });
+      }).catch(() => void 0);
+    }
+    await recordUserMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      content: [
+        `\u8BF7\u51BB\u7ED3\u4E3B\u89D2\u8D44\u6599\uFF1A\u4E3B\u89D2\u59D3\u540D\u662F\u300C${profile.name}\u300D\u3002`,
+        `\u8EAB\u4EFD\u662F\u300C${profile.identity}\u300D\u3002`,
+        `\u6838\u5FC3\u6B32\u671B\u662F\u300C${profile.coreDesire}\u300D\u3002`,
+        `\u4F24\u53E3/\u6050\u60E7\u662F\u300C${profile.fearOrWound}\u300D\u3002`,
+        `\u884C\u4E3A\u4E60\u60EF\u662F\u300C${profile.behaviorHabit}\u300D\u3002`,
+        `\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C${profile.speechMarker}\u300D\u3002`,
+        `\u4E0E\u300C${profile.relationshipName}\u300D\u7684\u5173\u7CFB\u538B\u529B\u662F\u300C${profile.relationshipPressure}\u300D\u3002`
+      ].join("\n"),
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath
+      }
+    });
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: "\u4E3B\u89D2\u8D44\u6599\u5DF2\u786E\u8BA4",
+      content: `\u4E3B\u89D2\u300C${profile.name}\u300D\u7684\u8EAB\u4EFD\u3001\u6B32\u671B\u3001\u4F24\u53E3\u3001\u884C\u4E3A\u4E60\u60EF\u3001\u8BF4\u8BDD\u65B9\u5F0F\u548C\u5177\u540D\u5173\u7CFB\u538B\u529B\u5DF2\u5199\u5165\u89D2\u8272\u6838\u5FC3\u6863\u6848\uFF1B\u4E3B\u7EBF\u89C4\u5212\u53EF\u4EE5\u7EE7\u7EED\u6D88\u8D39\u8FD9\u4E2A\u9501\u5B9A\u6863\u6848\u3002`,
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath,
+        protagonistName: profile.name
+      }
+    });
+    await recordToolMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      toolName: "protagonist-profile.confirm",
+      status: "completed",
+      input: { projectId: context.projectId, protagonistName: profile.name },
+      output: {
+        protagonistName: profile.name,
+        artifactPath: profilePath,
+        relationshipName: profile.relationshipName
+      },
+      content: "\u4E3B\u89D2\u6838\u5FC3\u6863\u6848\u5DF2\u5199\u5165\u751F\u4EA7\u8BB0\u5FC6\u6587\u4EF6\uFF0C\u5E76\u4F5C\u4E3A\u53EF\u9884\u89C8 artifact \u8FDB\u5165\u4F1A\u8BDD\u65F6\u95F4\u7EBF\u3002",
+      metadata: {
+        source: "api_protagonist_profile_confirm",
+        artifactPath: profilePath,
+        artifactKind: "character-profile",
+        artifactLabel: "protagonist.md"
+      }
+    });
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        protagonistProfile: {
+          ...profile,
+          path: profilePath
+        },
+        ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
+        envStatus: getPublicProjectEnvStatus2(rootDir)
+      }
+    };
+  }
+  if (method === "POST" && (requestPathname === "/api/production/setting-review/approve" || requestPathname === "/api/production/setting-review/reject")) {
+    const context = await resolveProjectContext(rootDir, options.projectId ?? (typeof body.projectId === "string" ? body.projectId : null));
+    if (!context.projectRoot) {
+      return { status: 404, payload: { error: "project_required", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    const state = await tryLoadState(context.projectRoot);
+    if (!state) {
+      return { status: 404, payload: { error: "workspace_not_initialized", projects: context.projects, envStatus: getPublicProjectEnvStatus2(rootDir) } };
+    }
+    const settingReviewText = await readWorkspaceText(context.projectRoot, "plans", SETTING_REVIEW_FILE);
+    if (!settingReviewText.trim()) {
+      return {
+        status: 409,
+        payload: {
+          error: "setting_review_missing",
+          message: "Setting review packet is missing. Run worldbuilding advance before approving or rejecting setting review.",
+          projects: context.projects,
+          envStatus: getPublicProjectEnvStatus2(rootDir)
+        }
+      };
+    }
+    const approved = requestPathname.endsWith("/approve");
+    const note = typeof body.note === "string" ? body.note.trim() : void 0;
+    const reviewedBy = typeof body.reviewedBy === "string" ? body.reviewedBy.trim() : void 0;
+    const reason = typeof body.reason === "string" ? body.reason.trim() : void 0;
+    const approval = await writeSettingReviewApproval(context.projectRoot, {
+      approved,
+      reviewedBy,
+      note,
+      reason
+    });
+    if (context.mode === "managed" && context.projectId) {
+      await withFactoryDb(rootDir, async (db) => {
+        db.recordArtifact({
+          projectId: context.projectId,
+          kind: "plan",
+          path: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+          status: "completed",
+          metadata: {
+            production: true,
+            stage: "setting_review",
+            reviewStatus: approval.status,
+            approved: approval.approved,
+            settingReviewPath: approval.settingReviewPath
+          }
+        });
+      }).catch(() => void 0);
+    }
+    await recordStatusMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      title: approved ? "\u8BBE\u5B9A\u8BC4\u5BA1\u5DF2\u786E\u8BA4" : "\u8BBE\u5B9A\u8BC4\u5BA1\u5DF2\u9000\u56DE",
+      content: approved ? "\u7528\u6237\u5DF2\u786E\u8BA4\u5F53\u524D\u8BBE\u5B9A\u8BC4\u5BA1\u5305\uFF1B\u540E\u7EED\u4E3B\u7EBF\u89C4\u5212\u53EF\u4EE5\u628A\u5B83\u4F5C\u4E3A\u5DF2\u5BA1\u9605\u7684\u63D0\u6848\u6765\u6E90\u3002" : "\u7528\u6237\u5DF2\u9000\u56DE\u5F53\u524D\u8BBE\u5B9A\u8BC4\u5BA1\u5305\uFF1B\u7EE7\u7EED\u89C4\u5212\u524D\u9700\u8981\u4FEE\u6B63\u4E16\u754C\u89C2\u3001\u4EBA\u7269\u6216\u4E3B\u7EBF\u5047\u8BBE\u3002",
+      metadata: {
+        source: approved ? "api_setting_review_approve" : "api_setting_review_reject",
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+        reviewedAt: approval.reviewedAt,
+        reviewStatus: approval.status
+      }
+    });
+    await recordToolMessage(rootDir, {
+      projectId: context.mode === "managed" ? context.projectId : null,
+      conversationId: "workflow-control",
+      toolName: approved ? "setting-review.approve" : "setting-review.reject",
+      status: "completed",
+      input: { projectId: context.projectId, note, reason },
+      output: {
+        approvalPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        settingReviewPath: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+        reviewedAt: approval.reviewedAt,
+        reviewStatus: approval.status
+      },
+      content: approved ? "\u8BBE\u5B9A\u8BC4\u5BA1\u7528\u6237\u786E\u8BA4\u5DF2\u5199\u5165\u751F\u4EA7\u5BA1\u6279\u6587\u4EF6\u3002" : "\u8BBE\u5B9A\u8BC4\u5BA1\u9000\u56DE\u539F\u56E0\u5DF2\u5199\u5165\u751F\u4EA7\u5BA1\u6279\u6587\u4EF6\u3002",
+      metadata: {
+        source: approved ? "api_setting_review_approve" : "api_setting_review_reject",
+        artifactPath: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+        artifactKind: "setting-review-approval",
+        artifactLabel: "setting-review-approval.json",
+        artifacts: [
+          {
+            path: `.ai-novel/plans/${SETTING_REVIEW_APPROVAL_FILE}`,
+            label: "setting-review-approval.json",
+            kind: "setting-review-approval",
+            status: "completed"
+          },
+          {
+            path: `.ai-novel/plans/${SETTING_REVIEW_FILE}`,
+            label: SETTING_REVIEW_FILE,
+            kind: "setting-review",
+            status: approval.status
+          }
+        ]
+      }
+    });
+    return {
+      status: 200,
+      payload: {
+        activeProjectId: context.projectId,
+        projects: context.projects,
+        settingReviewApproval: approval,
         ...await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true }),
         envStatus: getPublicProjectEnvStatus2(rootDir)
       }
@@ -6401,8 +7024,26 @@ async function startNovelStudioServer(options = {}) {
           job.listeners.add(listener);
         }
         let lastStreamSnapshotVersion = "";
+        let lastDirtyCheckAt = "";
         const writeSnapshot = async (options2 = {}) => {
           if (response.writableEnded || response.destroyed || !response.writable) return;
+          if (!options2.force) {
+            const dirtyStamp = await withFactoryDb(rootDir, async (db) => {
+              return db.getProjectDirtyStamp(context.projectId);
+            }).catch(() => "");
+            if (dirtyStamp && dirtyStamp === lastDirtyCheckAt) {
+              if (!response.writableEnded && !response.destroyed && response.writable) {
+                try {
+                  response.write(`: snapshot unchanged ${(/* @__PURE__ */ new Date()).toISOString()}
+
+`);
+                } catch {
+                }
+              }
+              return;
+            }
+            lastDirtyCheckAt = dirtyStamp;
+          }
           const state = await tryLoadState(context.projectRoot);
           const snapshotPayload = {
             activeProjectId: context.projectId,

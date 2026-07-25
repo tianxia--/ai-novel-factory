@@ -1,6 +1,6 @@
 import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-Rvjshu2J.cjs';
-import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-DdCUw3Hq.cjs';
-import { A as AutonomousNovelState, C as CreativeProfile, a as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, e as AssetStatus, T as TaskStatus } from './cli-types-dnbh9JaE.cjs';
+import { P as ProjectSnapshot, F as FactoryOperationalStatus } from './factory-db-CA4bu7Jl.cjs';
+import { A as AutonomousNovelState, C as CreativeProfile, N as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, e as AssetStatus, T as TaskStatus } from './cli-types-3z9cP1VA.cjs';
 import './messages.cjs';
 
 declare function createWorkerWorkspacePayload(projectRoot: string, state?: AutonomousNovelState | null, options?: {

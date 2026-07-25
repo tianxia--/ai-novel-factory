@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>AIGC 文风检测实验室</title>
+  <link rel="stylesheet" href="aigc-lab.css?v=4">
+</head>
+<body>
+  <main class="lab-shell">
+    <header class="hero">
+      <div>
+        <span class="eyebrow">AIGC STYLE LAB</span>
+        <h1>AIGC 文风检测实验室</h1>
+        <p>单独测试任意文章/风格样段，查看整体评分、逐句风险、问题信号和检测器原始判断。</p>
+      </div>
+      <a href="/flow-debug" class="back-link">返回流程调试</a>
+    </header>
+
+    <section class="workspace">
+      <aside class="input-card">
+        <label>
+          <span>待检测文本</span>
+          <textarea id="input-text" placeholder="粘贴你想测试的文章、章节片段、文风样段……"></textarea>
+        </label>
+        <div class="settings">
+          <label>
+            <span>通过阈值</span>
+            <input id="threshold" type="number" min="0.01" max="0.99" step="0.01" value="0.80">
+          </label>
+          <label>
+            <span>样例</span>
+            <select id="sample-select">
+              <option value="">不使用样例</option>
+              <option value="human">真人参考片段</option>
+              <option value="ai">高 AI 风险片段</option>
+              <option value="mixed">混合片段</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings advanced-settings">
+          <label>
+            <span>检测粒度</span>
+            <select id="granularity">
+              <option value="node09" selected>节点09同款（推荐对齐流程）</option>
+              <option value="merged_sentence">合并短句（局部分析）</option>
+              <option value="sentence">逐句严格</option>
+              <option value="paragraph">按段落</option>
+            </select>
+          </label>
+          <label>
+            <span>短句合并到至少</span>
+            <input id="min-segment-chars" type="number" min="20" max="500" step="10" value="120">
+          </label>
+        </div>
+        <label>
+          <span>通过策略</span>
+          <select id="policy">
+            <option value="balanced" selected>平衡：整体分 + 多个高风险句才拦截</option>
+            <option value="strict_any_sentence">严格：任一句高风险就不通过</option>
+            <option value="overall_only">宽松：只看整体分，高风险句只提示</option>
+          </select>
+        </label>
+        <button id="detect-button" type="button">开始检测</button>
+        <p class="hint">分数越接近 1，越可能被当前检测器判断为 AI。要复现第 9 节点结果，请使用“节点09同款”；要找局部问题句，再切到“合并短句/逐句严格”。</p>
+      </aside>
+
+      <section class="result-card">
+        <div id="empty-state" class="empty-state">
+          粘贴文本后点击「开始检测」。这里会显示整体分、逐句风险和具体问题句。
+        </div>
+
+        <div id="result-view" hidden>
+          <section class="summary" id="summary"></section>
+          <section class="decision-note" id="decision-note"></section>
+          <section class="problem-panel">
+            <header>
+              <div>
+                <span class="eyebrow">RISK SENTENCES</span>
+                <h2>问题句 / 高风险短段</h2>
+              </div>
+              <span id="risk-count">0</span>
+            </header>
+            <div id="risk-list" class="sentence-list"></div>
+          </section>
+          <section class="all-panel">
+            <header>
+              <div>
+                <span class="eyebrow">ALL SENTENCES</span>
+                <h2>全部句子评分</h2>
+              </div>
+              <span id="sentence-count">0</span>
+            </header>
+            <div id="sentence-list" class="sentence-list"></div>
+          </section>
+          <details class="raw-box">
+            <summary>查看完整 JSON</summary>
+            <pre id="raw-json"></pre>
+          </details>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="aigc-lab.js?v=3"></script>
+</body>
+</html>
