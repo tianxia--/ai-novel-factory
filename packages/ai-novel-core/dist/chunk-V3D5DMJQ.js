@@ -3,7 +3,7 @@ import {
 } from "./chunk-VOQWLW5S.js";
 import {
   runMultiAgentDiscussion
-} from "./chunk-N2LAI6O4.js";
+} from "./chunk-UQOLHNQ4.js";
 import {
   advanceAutonomousProject,
   getPublicProjectEnvStatus,
@@ -14,12 +14,12 @@ import {
   reviewInterruption,
   saveAutonomousState,
   upsertCheckpointInSuperGraph
-} from "./chunk-EVOZRM5F.js";
+} from "./chunk-QL554L2D.js";
 import {
   createAutopilotStopError,
   isAutopilotStopError,
   throwIfStopped
-} from "./chunk-PJFTMRLC.js";
+} from "./chunk-ROO5DEKO.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   ingestGlobalWritingResources,
@@ -765,6 +765,38 @@ async function markAutopilotRecoveryBlocked(rootDir, projectRoot, projectId, job
   });
   return true;
 }
+function isWaitingForSettingReviewApproval(state) {
+  if (state.runtime.stage !== "setting_review") return false;
+  const lastAction = String(state.runtime.lastAction || "");
+  const statusMessage = String(state.runtime.statusMessage || "");
+  return lastAction === "setting_review_waiting_for_approval" || /waiting for explicit user approval|等待.*(?:用户)?(?:审批|审阅|确认|批准)/iu.test(statusMessage);
+}
+async function pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner) {
+  const pauseMessage = "\u8BBE\u5B9A\u5BA1\u67E5\u5305\u5DF2\u751F\u6210\uFF0C\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1B\u8BF7\u5148\u786E\u8BA4\u8BBE\u5B9A\u540E\u518D\u8FDB\u5165\u4E3B\u7EBF\u89C4\u5212\u3002";
+  await markAutopilot(projectRoot, {
+    running: false,
+    stopRequested: false,
+    mode: "idle",
+    lastStep: "setting_review_waiting_for_approval",
+    driftStatus: "ok",
+    driftReason: null,
+    statusMessage: pauseMessage
+  }, autopilotStateStore(rootDir, projectId));
+  if (jobId) {
+    await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => void 0);
+  }
+  await withFactoryDb(rootDir, async (db) => {
+    if (!projectId) return;
+    db.recordEvent(projectId, null, "AUTOPILOT_SETTING_REVIEW_AWAITING_APPROVAL", {
+      jobId,
+      message: pauseMessage
+    });
+  }).catch(() => void 0);
+  emitAutopilotEvent(projectRoot, "autopilot_status", {
+    stage: "setting_review",
+    message: pauseMessage
+  });
+}
 async function runAutopilotBackground(options, controller, leaseOwner = makeWorkerOwner()) {
   const { signal } = controller;
   const {
@@ -955,6 +987,10 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
           await recordAutopilotDirectorCommandEvent(rootDir, projectId, "DIRECTOR_COMMAND_COMPLETED", directorCommand, {
             resultingStage: advanced2.runtime.stage
           });
+          if (isWaitingForSettingReviewApproval(advanced2)) {
+            await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner);
+            break;
+          }
           networkRetryAttempt = 0;
           await backoffIfNoWorkflowProgress(rootDir, projectRoot, projectId, beforeDiscussion, advanced2, signal);
           continue;
@@ -1168,6 +1204,10 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
           driftStatus: drift.status,
           parentCommandId: directorCommand.id
         });
+        if (isWaitingForSettingReviewApproval(advanced)) {
+          await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner);
+          break;
+        }
         networkRetryAttempt = 0;
         await backoffIfNoWorkflowProgress(rootDir, projectRoot, projectId, afterDiscussion, advanced, signal);
       } catch (error) {
@@ -1234,8 +1274,9 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
     const isSemiPaused = previousAutopilot.lastStep === "semi_auto_paused";
     const isGuardBlocked = previousAutopilot.lastStep === "guard_blocked";
     const isNetworkRetryPaused = previousAutopilot.lastStep === "network_retry_paused";
-    const finalLastStep = isSemiPaused ? "semi_auto_paused" : isGuardBlocked ? "guard_blocked" : isNetworkRetryPaused ? "network_retry_paused" : recoveryBlocked ? "recovery_blocked" : "stopped";
-    const finalStatusMessage = fullyComplete ? "\u81EA\u52A8\u521B\u4F5C\u5DF2\u5B8C\u6210\u5168\u90E8\u7AE0\u8282\u4EFB\u52A1\u3002" : recoveryBlocked ? `\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1A\u7B2C ${recoveryBlocked.chapterNumber} \u7AE0\u8FBE\u5230\u81EA\u52A8\u6062\u590D\u4E0A\u9650\uFF0C\u9700\u8981\u4EBA\u5DE5\u5BA1\u9605\u3002` : isSemiPaused || isGuardBlocked || isNetworkRetryPaused ? latestState.runtime.statusMessage || previousAutopilot.statusMessage || "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002" : "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002";
+    const isSettingReviewPaused = previousAutopilot.lastStep === "setting_review_waiting_for_approval";
+    const finalLastStep = isSemiPaused ? "semi_auto_paused" : isGuardBlocked ? "guard_blocked" : isNetworkRetryPaused ? "network_retry_paused" : isSettingReviewPaused ? "setting_review_waiting_for_approval" : recoveryBlocked ? "recovery_blocked" : "stopped";
+    const finalStatusMessage = fullyComplete ? "\u81EA\u52A8\u521B\u4F5C\u5DF2\u5B8C\u6210\u5168\u90E8\u7AE0\u8282\u4EFB\u52A1\u3002" : recoveryBlocked ? `\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1A\u7B2C ${recoveryBlocked.chapterNumber} \u7AE0\u8FBE\u5230\u81EA\u52A8\u6062\u590D\u4E0A\u9650\uFF0C\u9700\u8981\u4EBA\u5DE5\u5BA1\u9605\u3002` : isSemiPaused || isGuardBlocked || isNetworkRetryPaused || isSettingReviewPaused ? latestState.runtime.statusMessage || previousAutopilot.statusMessage || "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002" : "\u81EA\u52A8\u521B\u4F5C\u5DF2\u505C\u6B62\uFF0C\u8FDB\u5EA6\u548C\u8BA8\u8BBA\u8BB0\u5F55\u5DF2\u4FDD\u5B58\u3002";
     const finalState = await markAutopilot(projectRoot, {
       running: false,
       stopRequested: false,
@@ -1482,8 +1523,11 @@ async function restoreAutopilotJobs(rootDir, createSnapshot) {
     const payload = typeof job.payload === "object" && job.payload ? job.payload : {};
     const message = typeof payload.message === "string" ? payload.message : "";
     const hasWakeupSignal = isGenericAutopilotMessage(message);
+    const settingReviewApprovalPaused = Boolean(
+      state && (state.runtime.autopilot?.lastStep === "setting_review_waiting_for_approval" || isWaitingForSettingReviewApproval(state)) && !hasWakeupSignal
+    );
     const manuallyPaused = Boolean(
-      autopilot && !autopilot.running && (autopilot.stopRequested || autopilot.lastStep === "stopped" || autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal)
+      autopilot && !autopilot.running && (autopilot.stopRequested || autopilot.lastStep === "stopped" || autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal || settingReviewApprovalPaused)
     );
     if (manuallyPaused) {
       continue;

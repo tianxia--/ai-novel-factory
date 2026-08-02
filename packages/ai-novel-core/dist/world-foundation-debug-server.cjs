@@ -3936,6 +3936,8 @@ var AUTONOMOUS_DISCUSSION_PROTOCOL = [
   "- \u4E0D\u5141\u8BB8\u8D8A\u7EA7\u58F0\u79F0\u5DF2\u7ECF\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\uFF1B\u5982\u679C\u5F53\u524D\u8FD8\u5728\u4E16\u754C\u89C2\u9636\u6BB5\uFF0C\u5C31\u4E0D\u80FD\u5047\u88C5\u5DF2\u7ECF\u5728\u5199\u7B2C 2 \u7AE0\u3002",
   "- \u6743\u5A01\u8FDB\u5EA6\u53EA\u6765\u81EA\u7CFB\u7EDF\u63D0\u4F9B\u7684 `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5`\uFF1B\u4E0D\u5F97\u6839\u636E\u8BA8\u8BBA\u5185\u5BB9\u81EA\u884C\u5BA3\u5E03\u9636\u6BB5\u5DF2\u5B8C\u6210\u3001\u5DF2\u8FDB\u5165\u4E0B\u4E00\u9636\u6BB5\u3001\u67D0\u5F27\u84DD\u56FE\u5DF2\u5B8C\u6210\u3002",
   "- \u53EF\u4EE5\u63D0\u51FA `\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u63A8\u8FDB\u5230...`\uFF0C\u4F46\u4E0D\u80FD\u5199\u6210 `\u5F53\u524D\u5DF2\u7ECF\u8FDB\u5165...`\uFF0C\u9664\u975E `\u5F53\u524D\u5DE5\u4F5C\u6D41\u9636\u6BB5` \u5DF2\u7ECF\u53D8\u66F4\u3002",
+  "- \u4E25\u7981\u8F93\u51FA\u4EFB\u4F55\u5F62\u5F0F\u7684\u5B8C\u6574\u6B63\u6587\u8BD5\u5199\u7247\u6BB5\u3001\u6B63\u6587\u8349\u7A3F\u6216\u5305\u542B\u2018\u7B2CX\u7AE0\u2019/\u2018\u7B2C\u4E00\u7AE0\u2019\u4F5C\u4E3A\u5C0F\u6807\u9898\u7684\u6837\u7AE0\u793A\u8303\u3002",
+  "- \u5728\u975E\u6B63\u6587\u5199\u4F5C\u9636\u6BB5\uFF0C\u5982\u9700\u5206\u6790\u6216\u5F15\u7528\u5F00\u7BC7\u903B\u8F91\uFF0C\u8BF7\u4F7F\u7528\u6982\u5FF5\u6027\u63CF\u8FF0\uFF08\u5982\u2018\u5F00\u7BC7\u573A\u666F\u2019\u3001\u2018\u9996\u7AE0\u94A9\u5B50\u2019\uFF09\uFF0C\u5207\u52FF\u6DFB\u52A0\u2018# \u7B2C\u4E00\u7AE0\u2019\u7B49\u6B63\u6587\u7AE0\u8282\u6807\u9898\u6216\u8BD5\u5199\u6587\u672C\u3002",
   "- \u6BCF\u4E2A specialist \u81F3\u5C11\u6307\u51FA\u4E00\u4E2A\u98CE\u9669\u3001\u5F31\u70B9\u6216\u51B2\u7A81\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
   "- Reviewer\u3001Editor\u3001Prose Stylist \u4E0D\u5141\u8BB8\u53EA\u7ED9\u7EAF\u901A\u8FC7\u7ED3\u8BBA\u3002",
   "- \u6700\u7EC8 Showrunner \u603B\u7ED3\u5FC5\u987B\u5305\u542B\uFF1AFinal Consensus\u3001Remaining Risk\u3001Next Step\u3002"
@@ -4420,6 +4422,7 @@ Target instruction: ${options.discussionTarget.instruction}` : "",
       isDrafting ? "- \u5FC5\u987B\u9075\u5FAA\u5C0F\u8BF4\u4EBA\u7269\u6863\u6848\uFF0C\u4FDD\u8BC1\u4EBA\u540D\u4E0E\u60C5\u8282\u7684\u8FDE\u7EED\u6027\u3002" : isArtifact ? "- \u4E0D\u8981\u8F93\u51FA\u5BD2\u6684\u3001\u5BF9\u8BDD\u5F0F\u5F00\u573A\u3001\u5143\u53D9\u8FF0\u6216\u6267\u884C\u8FC7\u7A0B\u8BF4\u660E\u3002" : "- \u53EF\u4EE5\u4F7F\u7528\u7B80\u77ED markdown \u5C0F\u8282\u4E0E\u5217\u8868\u3002",
       "- \u5FC5\u987B\u505C\u7559\u5728\u5F53\u524D target \u5185\u3002",
       isDrafting ? "" : "- \u9664\u975E\u660E\u786E\u8FDB\u5165 drafting \u9636\u6BB5\uFF0C\u5426\u5219\u4E0D\u80FD\u4EA7\u51FA\u8131\u79BB\u9636\u6BB5\u7684\u7AE0\u8282\u6B63\u6587\u3002",
+      isDrafting || isArtifact ? "" : "- \u4E25\u7981\u8F93\u51FA\u5F62\u5982\u2018# \u7B2C\u4E00\u7AE0\u2019\u7684\u6B63\u6587\u6807\u9898\u6216\u6B63\u6587\u8349\u7A3F/\u8BD5\u5199\uFF0C\u63D0\u53CA\u5F00\u7BC7\u8BF7\u7528\u2018\u9996\u7AE0\u94A9\u5B50\u2019\u7B49\u6982\u5FF5\u63CF\u8FF0\u3002",
       isDrafting || isArtifact ? "" : "- Specialists \u5FC5\u987B\u5148\u7ED9\u4E00\u4E2A\u660E\u786E\u98CE\u9669/\u6279\u8BC4/\u5931\u8D25\u6A21\u5F0F\uFF0C\u518D\u7ED9\u5EFA\u8BAE\u3002",
       isDrafting || isArtifact ? "" : "- Final synthesis \u5FC5\u987B\u5305\u542B `Final Consensus`\u3001`Remaining Risk`\u3001`Next Step`\u3002"
     ].filter(Boolean).join("\n"),
@@ -21592,14 +21595,12 @@ async function advanceAutonomousProject(rootDir2, options = {}) {
         });
       }).catch(() => void 0);
     }
-    const coverState = await prepareCoverGeneration(rootDir2, {
-      factoryRootDir: pipelineOptions.factoryRootDir,
-      projectId: pipelineOptions.projectId,
-      reason: "worldbuilding_completed"
-    }).catch(() => void 0);
-    if (coverState?.assets?.cover) {
-      state.assets.cover = coverState.assets.cover;
-    }
+    state.assets.cover.status = "in_progress";
+    state.assets.cover.briefPath = ".ai-novel/assets/cover/cover-brief.md";
+    state.assets.cover.promptPath = COVER_PROMPT_PATH;
+    state.assets.cover.imagePath = state.assets.cover.imagePath || COVER_IMAGE_PATH;
+    state.assets.cover.metadataPath = COVER_METADATA_PATH;
+    delete state.assets.cover.error;
     state.runtime.stage = "setting_review";
     state.runtime.statusMessage = "Setting review packet drafted. Review the proposed world assumptions before they are treated as canon.";
     stampRuntimeProgress(state, "setting_freeze_generated");
@@ -21607,6 +21608,13 @@ async function advanceAutonomousProject(rootDir2, options = {}) {
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => void 0);
     }
+    void prepareCoverGeneration(rootDir2, {
+      factoryRootDir: pipelineOptions.factoryRootDir,
+      projectId: pipelineOptions.projectId,
+      reason: "worldbuilding_completed"
+    }).catch((error) => {
+      console.error("Background cover generation failed:", error);
+    });
     return state;
   }
   if (state.runtime.stage === "setting_review") {

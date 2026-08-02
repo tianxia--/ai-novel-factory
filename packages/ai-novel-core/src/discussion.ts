@@ -454,7 +454,7 @@ function detectDiscussionStageViolation(
     reasons.push("当前仍是设定冻结阶段，但讨论输出把主线规划或章节蓝图描述成既成状态。")
   }
 
-  if (target.kind !== "chapter" && /第\s*[一二三四五六七八九十百千万\d]+\s*章.{0,20}(目标|冲突|场景|开篇|结尾|钩子)/u.test(positiveClaimText)) {
+  if (target.kind !== "chapter" && /(^|\n)\s*(#{1,6}\s*)?第\s*[一二三四五六七八九十百千万\d]+\s*章.{0,20}(目标|冲突|场景|开篇|结尾|钩子)/u.test(positiveClaimText)) {
     reasons.push("当前讨论目标不是章节蓝图，却输出了具体章次执行内容。")
   }
 

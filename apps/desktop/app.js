@@ -136,6 +136,7 @@ const chapterPreviewTitle = document.getElementById("chapter-preview-title")
 const chapterPreviewPath = document.getElementById("chapter-preview-path")
 const chapterPreviewBody = document.getElementById("chapter-preview-body")
 const chapterCopyButton = document.getElementById("chapter-copy-button")
+const DEBUG_NODE_API = "http://127.0.0.1:4314"
 const ACTIVE_PROJECT_STORAGE_KEY = "ai-novel-factory.activeProjectId"
 const PANEL_LAYOUT_STORAGE_KEY = "ai-novel-factory.panelLayout"
 const READER_SETTINGS_STORAGE_KEY = "ai-novel-factory.readerSettings"
@@ -264,6 +265,13 @@ const dashboardState = {
     rejectionReasonDraft: "",
     lastCandidateBatch: [],
     freezePreview: null,
+  },
+  debugBridge: {
+    projectId: "",
+    loading: false,
+    coverage: null,
+    error: "",
+    updatedAt: "",
   },
   coverPolling: {
     projectId: "",
@@ -1961,6 +1969,53 @@ async function apiRequest(path, options = {}) {
   return { ok: response.ok, status: response.status, payload }
 }
 
+async function loadDebugBridgeCoverage(projectId = dashboardState.activeProjectId, options = {}) {
+  const normalizedProjectId = String(projectId || "").trim()
+  if (!normalizedProjectId) {
+    dashboardState.debugBridge = { projectId: "", loading: false, coverage: null, error: "", updatedAt: "" }
+    return null
+  }
+  const existing = dashboardState.debugBridge || {}
+  dashboardState.debugBridge = {
+    ...existing,
+    projectId: normalizedProjectId,
+    loading: !options.silent,
+    error: "",
+  }
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), Number(options.timeoutMs || 2500))
+  try {
+    const params = new URLSearchParams({ factoryProjectId: normalizedProjectId, firstChapter: "1" })
+    const response = await fetch(`${DEBUG_NODE_API}/committed-chapters?${params.toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload?.error || `HTTP ${response.status}`)
+    }
+    dashboardState.debugBridge = {
+      projectId: normalizedProjectId,
+      loading: false,
+      coverage: payload,
+      error: "",
+      updatedAt: new Date().toISOString(),
+    }
+    return payload
+  } catch (error) {
+    dashboardState.debugBridge = {
+      projectId: normalizedProjectId,
+      loading: false,
+      coverage: null,
+      error: error?.name === "AbortError" ? "调试服务响应超时" : networkErrorMessage(error),
+      updatedAt: new Date().toISOString(),
+    }
+    return null
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
 function updateSnapshot(payload = {}) {
   const previousProjectId = dashboardState.activeProjectId
   dashboardState.projects = Array.isArray(payload.projects) ? payload.projects : dashboardState.projects
@@ -2779,6 +2834,35 @@ function renderWorkflow(model) {
     const latestDraftSegmentBriefPath = pipeline.latestDraftSegmentBriefPath || ""
     const latestDraftSegmentMaterialPath = pipeline.latestDraftSegmentMaterialPath || ""
     const latestDraftSegmentManifestPath = pipeline.latestDraftSegmentManifestPath || ""
+    const activeProjectId = dashboardState.activeProjectId || dashboardState.factorySnapshot?.projectId || dashboardState.factorySnapshot?.project?.id || ""
+    const debugBridge = dashboardState.debugBridge || {}
+    const debugCoverage = debugBridge.projectId === activeProjectId ? debugBridge.coverage : null
+    const debugCoverageCount = Number(debugCoverage?.count || 0)
+    const debugCoverageChapters = Array.isArray(debugCoverage?.chapters) ? debugCoverage.chapters : []
+    const debugLastChapter = Number(debugCoverage?.lastContinuousChapter || 0)
+    const debugNextChapter = Number(debugCoverage?.nextChapter || (debugLastChapter ? debugLastChapter + 1 : 1))
+    const debugBridgeStatusHtml = debugBridge.loading
+      ? `<div class="workflow-debug-status is-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>正在读取调试章节资产…</span></div>`
+      : debugBridge.error && debugBridge.projectId === activeProjectId
+        ? `<div class="workflow-debug-status is-warning"><i class="fa-solid fa-plug-circle-xmark"></i><span>调试服务未连接：${escapeHtml(debugBridge.error)}</span></div>`
+        : debugCoverageCount > 0
+          ? `
+            <div class="workflow-debug-status is-ready">
+              <i class="fa-solid fa-circle-check"></i>
+              <span>调试链路已冻结 ${debugCoverageCount} 章，连续到第 ${debugLastChapter || "?"} 章，下一章 ${debugNextChapter || "?"}。</span>
+            </div>
+            <div class="workflow-debug-chapter-strip" title="${escapeHtml(debugCoverageChapters.join(", "))}">
+              ${debugCoverageChapters.slice(0, 36).map((chapterNumber) => `<span>${Number(chapterNumber)}</span>`).join("")}
+              ${debugCoverageChapters.length > 36 ? `<em>+${debugCoverageChapters.length - 36}</em>` : ""}
+            </div>
+          `
+          : `<div class="workflow-debug-status"><i class="fa-regular fa-circle"></i><span>当前项目还没有调试冻结章节；可先进入节点 11/13 生成并冻结。</span></div>`
+    const debugNodeLink = (nodeId) => {
+      const params = new URLSearchParams()
+      if (activeProjectId) params.set("projectId", activeProjectId)
+      params.set("node", nodeId)
+      return `flow-debug?${params.toString()}`
+    }
     productionNode.classList.toggle("has-artifacts", Boolean(pipeline.hasProductionArtifacts))
     productionNode.innerHTML = `
       <div class="workflow-production-summary">
@@ -2835,6 +2919,21 @@ function renderWorkflow(model) {
         <span>片段 manifest <strong>${Number(pipeline.draftSegmentManifestArtifacts || 0)}</strong></span>
         <span>待写 <strong>${Number(summary.pendingChapters || 0)}</strong></span>
         <span>阻塞 <strong>${Number(summary.blockedChapters || 0)}</strong></span>
+      </div>
+      <div class="workflow-debug-bridge">
+        <div class="workflow-debug-bridge-head">
+          <span><i class="fa-solid fa-screwdriver-wrench"></i> 节点调试入口</span>
+          <small>${activeProjectId ? `已绑定当前项目：${escapeHtml(activeProjectId)}` : "进入项目后会自动绑定项目 ID"}</small>
+        </div>
+        ${debugBridgeStatusHtml}
+        <div class="workflow-debug-bridge-grid">
+          <a href="${escapeHtml(debugNodeLink("chapter-blueprints"))}" target="_blank" rel="noopener">08 章节蓝图</a>
+          <a href="${escapeHtml(debugNodeLink("style-profile"))}" target="_blank" rel="noopener">09 文风进化</a>
+          <a href="${escapeHtml(debugNodeLink("chapter-draft"))}" target="_blank" rel="noopener">11 单章生产</a>
+          <a href="${escapeHtml(debugNodeLink("continuous-chapter-production"))}" target="_blank" rel="noopener">13 连续生产</a>
+          <a href="${escapeHtml(debugNodeLink("chapter-review"))}" target="_blank" rel="noopener">14 阅读复盘</a>
+        </div>
+        <p>这些入口只打开调试页，不会直接启动生产；调试资产与正式 DB 资产会分开显示，避免混账。</p>
       </div>
       ${latestDraftSegmentPath ? `
         <button class="workflow-context-package" type="button" data-artifact-path="${escapeHtml(latestDraftSegmentPath)}" title="查看最近章节片段">
@@ -9509,8 +9608,12 @@ async function refreshDashboard(options = {}) {
     if (typeof response.payload.snapshotVersion === "string") {
       dashboardState.snapshotVersion = response.payload.snapshotVersion
     }
+    await loadDebugBridgeCoverage(dashboardState.activeProjectId, { silent: true })
     await loadStyleEvolutionSnapshot()
     renderStyleEvolutionPanel()
+    if (dashboardState.currentView === "studio") {
+      renderDashboard()
+    }
     renderAutopilotControls()
     return
   }
@@ -9519,6 +9622,7 @@ async function refreshDashboard(options = {}) {
     if (options.includeTranscript || options.includeDiscussionHistory) {
       await loadDiscussionHistory({ silent: true })
     }
+    await loadDebugBridgeCoverage(dashboardState.activeProjectId, { silent: true })
     await loadStyleEvolutionSnapshot()
     showStudioView()
     renderDashboard()
@@ -10938,6 +11042,7 @@ async function selectProject(projectId) {
   dashboardState.discussionStaticSignature = ""
   dashboardState.styleEvolution = null
   dashboardState.styleEvolutionUi = { loading: false, message: "", error: "" }
+  dashboardState.debugBridge = { projectId, loading: false, coverage: null, error: "", updatedAt: "" }
   clearLiveConversation()
   window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId)
   await refreshDashboard({ includeDiscussionHistory: true })
@@ -11864,4 +11969,131 @@ async function runComposerAction(action) {
     window.clearTimeout(startupMaskFallbackTimer)
     hideAppLoadingMask()
   }
+
+  // ===== Progressive Disclosure Overlay Modal Event Handling =====
+  const overlayModal = document.getElementById("app-overlay-modal")
+  const overlayBackButton = document.getElementById("overlay-back-button")
+  const overlayTitle = document.getElementById("overlay-modal-title")
+  const overlaySubtitle = document.getElementById("overlay-modal-subtitle")
+  const overlayDynamicContent = document.getElementById("overlay-dynamic-content")
+
+  const btnTriggerCharacters = document.getElementById("btn-trigger-characters")
+  const btnTriggerFactions = document.getElementById("btn-trigger-factions")
+  const btnTriggerGlobalDash = document.getElementById("btn-trigger-global-dash")
+
+  function openOverlayModal(titleHtml, subtitleText, contentHtml) {
+    if (!overlayModal) return
+    if (overlayTitle) overlayTitle.innerHTML = titleHtml
+    if (overlaySubtitle) overlaySubtitle.textContent = subtitleText
+    if (overlayDynamicContent) overlayDynamicContent.innerHTML = contentHtml
+
+    overlayModal.classList.remove("hidden")
+    overlayModal.style.pointerEvents = "auto"
+    overlayModal.style.opacity = "1"
+  }
+
+  function closeOverlayModal() {
+    if (!overlayModal) return
+    overlayModal.style.opacity = "0"
+    overlayModal.style.pointerEvents = "none"
+    window.setTimeout(() => {
+      overlayModal.classList.add("hidden")
+    }, 300)
+  }
+
+  overlayBackButton?.addEventListener("click", closeOverlayModal)
+
+  btnTriggerCharacters?.addEventListener("click", () => {
+    openOverlayModal(
+      '<i class="fa-solid fa-users-gear" style="color: #38bdf8;"></i> 角色与心智全景 (Character Psych & DNA)',
+      '大五人格量化画像 (OCEAN) · 认知偏差 · 三层 DNA · POV 知识盲区',
+      `<div style="display: flex; gap: 24px; min-height: 500px;">
+        <div style="width: 300px; background: rgba(30, 41, 59, 0.4); border-radius: 12px; padding: 16px; border: 1px solid rgba(255, 255, 255, 0.08);">
+          <h4 style="margin:0 0 12px 0; color:#f8fafc; font-size:14px;">项目主要角色列表</h4>
+          <div style="padding:10px; background:rgba(15, 23, 42, 0.5); border-radius:8px; color:#38bdf8; font-size:13px; font-weight:600;">林澈 (核心主角)</div>
+          <div style="padding:10px; color:#94a3b8; font-size:13px; margin-top:8px;">沈知遥 (女主 / 核心配角)</div>
+          <div style="padding:10px; color:#94a3b8; font-size:13px;">贺骁 (主角团配角)</div>
+        </div>
+        <div style="flex:1; background: rgba(15, 23, 42, 0.5); border-radius: 12px; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.08);">
+          <h3 style="margin:0 0 16px 0; color:#f8fafc;">林澈 · 角色心智画像</h3>
+          <div style="background:rgba(30, 41, 59, 0.5); border-radius:10px; padding:16px; margin-bottom:20px;">
+            <h5 style="margin:0 0 12px 0; color:#94a3b8; font-size:12px;">大五人格 (OCEAN) 评分</h5>
+            <div style="display:flex; gap:16px; font-size:12px; color:#cbd5e1;">
+              <div>开放性 (O): <strong style="color:#38bdf8;">78</strong></div>
+              <div>尽责性 (C): <strong style="color:#38bdf8;">68</strong></div>
+              <div>外向性 (E): <strong style="color:#38bdf8;">72</strong></div>
+              <div>宜人性 (A): <strong style="color:#38bdf8;">61</strong></div>
+              <div>神经质 (N): <strong style="color:#f43f5e;">42</strong></div>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+            <div style="padding:12px; background:rgba(30,41,59,0.3); border-radius:8px; border-left:3px solid #38bdf8;">
+              <strong style="color:#f8fafc; font-size:13px;">显性行为</strong>
+              <p style="margin:6px 0 0 0; font-size:12px; color:#94a3b8;">大厂失业返乡，绑定花钱系统；嘴硬心软...</p>
+            </div>
+            <div style="padding:12px; background:rgba(30,41,59,0.3); border-radius:8px; border-left:3px solid #f59e0b;">
+              <strong style="color:#f8fafc; font-size:13px;">隐性欲望</strong>
+              <p style="margin:6px 0 0 0; font-size:12px; color:#94a3b8;">渴望证明自己，对亲人失落眼神极度敏感...</p>
+            </div>
+            <div style="padding:12px; background:rgba(30,41,59,0.3); border-radius:8px; border-left:3px solid #f43f5e;">
+              <strong style="color:#f8fafc; font-size:13px;">突变黑化点</strong>
+              <p style="margin:6px 0 0 0; font-size:12px; color:#94a3b8;">在终局把系统资源转化为硬核规则...</p>
+            </div>
+          </div>
+        </div>
+      </div>`
+    )
+  })
+
+  btnTriggerFactions?.addEventListener("click", () => {
+    openOverlayModal(
+      '<i class="fa-solid fa-chess-board" style="color: #f59e0b;"></i> 离屏世界与势力 (Offscreen World & Faction Clocks)',
+      '后台模拟推演 · 舆论与社会情绪 · 派系时钟 (Faction Clocks)',
+      `<div style="display:flex; flex-direction:column; gap:20px;">
+        <div style="background:rgba(30, 41, 59, 0.4); border-radius:12px; padding:20px; border:1px solid rgba(255, 255, 255, 0.08);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h4 style="margin:0; color:#f8fafc;">社会氛围与舆论传播</h4>
+            <span style="background:rgba(56,189,248,0.1); color:#38bdf8; padding:4px 10px; border-radius:12px; font-size:12px;">社会情绪强度: 54%</span>
+          </div>
+          <p style="color:#94a3b8; font-size:13px; margin:10px 0;">夜经济衰退，居民嘴上嫌乱嫌贵，心里又盼着县里能热闹起来...</p>
+        </div>
+        <div style="background:rgba(30, 41, 59, 0.4); border-radius:12px; padding:20px; border:1px solid rgba(255, 255, 255, 0.08);">
+          <h4 style="margin:0 0 16px 0; color:#f8fafc;">派系进度钟 (Blades in the Dark 范式)</h4>
+          <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:16px;">
+            <div style="padding:16px; background:rgba(15,23,42,0.6); border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:18px; font-weight:700; color:#38bdf8;">0 / 8</div>
+              <strong style="color:#f8fafc; font-size:14px;">林澈青山项目组</strong>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#64748b;">每弧 1 段重大成功 2 段</p>
+            </div>
+            <div style="padding:16px; background:rgba(15,23,42,0.6); border-radius:10px; border:1px solid rgba(245,158,11,0.3);">
+              <div style="font-size:18px; font-weight:700; color:#f59e0b;">1 / 6</div>
+              <strong style="color:#f8fafc; font-size:14px;">本地旧商会</strong>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#64748b;">走满 -> 本地商会第一次正面对抗</p>
+            </div>
+          </div>
+        </div>
+      </div>`
+    )
+  })
+
+  btnTriggerGlobalDash?.addEventListener("click", () => {
+    openOverlayModal(
+      '<i class="fa-solid fa-chart-pie" style="color: #a78bfa;"></i> 全局生产与算力大盘 (Global Production & Cost)',
+      '多项目概览 · 正文积累实算 · API 算力成本折算 ($)',
+      `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:14px;">
+        <div style="padding:16px; background:rgba(30,41,59,0.5); border-radius:12px; border:1px solid rgba(255,255,255,0.08);">
+          <div style="font-size:12px; color:#94a3b8;">项目总数</div>
+          <div style="font-size:24px; font-weight:700; color:#f8fafc;">5</div>
+        </div>
+        <div style="padding:16px; background:rgba(30,41,59,0.5); border-radius:12px; border:1px solid rgba(255,255,255,0.08);">
+          <div style="font-size:12px; color:#94a3b8;">正文实算字数</div>
+          <div style="font-size:24px; font-weight:700; color:#38bdf8;">4.3 万</div>
+        </div>
+        <div style="padding:16px; background:rgba(30,41,59,0.5); border-radius:12px; border:1px solid rgba(99,102,241,0.3);">
+          <div style="font-size:12px; color:#94a3b8;">累计算力花费</div>
+          <div style="font-size:24px; font-weight:700; color:#818cf8;">$306.59</div>
+        </div>
+      </div>`
+    )
+  })
 })

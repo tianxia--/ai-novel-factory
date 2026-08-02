@@ -875,6 +875,47 @@ async function markAutopilotRecoveryBlocked(
   return true
 }
 
+function isWaitingForSettingReviewApproval(state: AutonomousNovelState) {
+  if (state.runtime.stage !== "setting_review") return false
+  const lastAction = String(state.runtime.lastAction || "")
+  const statusMessage = String(state.runtime.statusMessage || "")
+  return lastAction === "setting_review_waiting_for_approval"
+    || /waiting for explicit user approval|等待.*(?:用户)?(?:审批|审阅|确认|批准)/iu.test(statusMessage)
+}
+
+async function pauseAutopilotForSettingReviewApproval(
+  rootDir: string,
+  projectRoot: string,
+  projectId: string | null,
+  jobId: string | null | undefined,
+  leaseOwner: string,
+) {
+  const pauseMessage = "设定审查包已生成，自动创作已暂停；请先确认设定后再进入主线规划。"
+  await markAutopilot(projectRoot, {
+    running: false,
+    stopRequested: false,
+    mode: "idle",
+    lastStep: "setting_review_waiting_for_approval",
+    driftStatus: "ok",
+    driftReason: null,
+    statusMessage: pauseMessage,
+  }, autopilotStateStore(rootDir, projectId))
+  if (jobId) {
+    await withFactoryDb(rootDir, async (db) => db.pauseJob(jobId, leaseOwner)).catch(() => undefined)
+  }
+  await withFactoryDb(rootDir, async (db) => {
+    if (!projectId) return
+    db.recordEvent(projectId, null, "AUTOPILOT_SETTING_REVIEW_AWAITING_APPROVAL", {
+      jobId,
+      message: pauseMessage,
+    })
+  }).catch(() => undefined)
+  emitAutopilotEvent(projectRoot, "autopilot_status", {
+    stage: "setting_review",
+    message: pauseMessage,
+  })
+}
+
 async function runAutopilotBackground(
   options: AutopilotStartOptions,
   controller: AbortController,
@@ -1080,6 +1121,10 @@ async function runAutopilotBackground(
         await recordAutopilotDirectorCommandEvent(rootDir, projectId, "DIRECTOR_COMMAND_COMPLETED", directorCommand, {
           resultingStage: advanced.runtime.stage,
         })
+        if (isWaitingForSettingReviewApproval(advanced)) {
+          await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner)
+          break
+        }
         networkRetryAttempt = 0
         await backoffIfNoWorkflowProgress(rootDir, projectRoot, projectId, beforeDiscussion, advanced, signal)
         continue
@@ -1313,6 +1358,10 @@ async function runAutopilotBackground(
         driftStatus: drift.status,
         parentCommandId: directorCommand.id,
       })
+      if (isWaitingForSettingReviewApproval(advanced)) {
+        await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner)
+        break
+      }
       networkRetryAttempt = 0
       await backoffIfNoWorkflowProgress(rootDir, projectRoot, projectId, afterDiscussion, advanced, signal)
       } catch (error) {
@@ -1379,6 +1428,7 @@ async function runAutopilotBackground(
     const isSemiPaused = previousAutopilot.lastStep === "semi_auto_paused"
     const isGuardBlocked = previousAutopilot.lastStep === "guard_blocked"
     const isNetworkRetryPaused = previousAutopilot.lastStep === "network_retry_paused"
+    const isSettingReviewPaused = previousAutopilot.lastStep === "setting_review_waiting_for_approval"
 
     const finalLastStep = isSemiPaused
       ? "semi_auto_paused"
@@ -1386,15 +1436,17 @@ async function runAutopilotBackground(
         ? "guard_blocked"
         : isNetworkRetryPaused
           ? "network_retry_paused"
-          : recoveryBlocked
-            ? "recovery_blocked"
-            : "stopped"
+          : isSettingReviewPaused
+            ? "setting_review_waiting_for_approval"
+            : recoveryBlocked
+              ? "recovery_blocked"
+              : "stopped"
 
     const finalStatusMessage = fullyComplete
       ? "自动创作已完成全部章节任务。"
       : recoveryBlocked
         ? `自动创作已暂停：第 ${recoveryBlocked.chapterNumber} 章达到自动恢复上限，需要人工审阅。`
-        : isSemiPaused || isGuardBlocked || isNetworkRetryPaused
+        : isSemiPaused || isGuardBlocked || isNetworkRetryPaused || isSettingReviewPaused
           ? (latestState.runtime.statusMessage || previousAutopilot.statusMessage || "自动创作已停止，进度和讨论记录已保存。")
           : "自动创作已停止，进度和讨论记录已保存。"
 
@@ -1656,6 +1708,14 @@ export async function restoreAutopilotJobs(rootDir: string, createSnapshot: Auto
     const payload = typeof job.payload === "object" && job.payload ? job.payload as Record<string, unknown> : {}
     const message = typeof payload.message === "string" ? payload.message : ""
     const hasWakeupSignal = isGenericAutopilotMessage(message)
+    const settingReviewApprovalPaused = Boolean(
+      state
+      && (
+        state.runtime.autopilot?.lastStep === "setting_review_waiting_for_approval"
+        || isWaitingForSettingReviewApproval(state)
+      )
+      && !hasWakeupSignal
+    )
 
     const manuallyPaused = Boolean(
       autopilot
@@ -1664,6 +1724,7 @@ export async function restoreAutopilotJobs(rootDir: string, createSnapshot: Auto
         autopilot.stopRequested 
         || autopilot.lastStep === "stopped"
         || (autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal)
+        || settingReviewApprovalPaused
       ),
     )
     if (manuallyPaused) {

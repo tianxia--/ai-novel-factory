@@ -832,6 +832,135 @@ body.dark-mode::before {
   font-size: 11px;
 }
 
+.workflow-debug-bridge {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid rgba(168, 85, 247, 0.18);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(124, 92, 252, 0.1), rgba(6, 182, 212, 0.045));
+}
+
+.workflow-debug-bridge-head {
+  display: grid;
+  gap: 3px;
+}
+
+.workflow-debug-bridge-head span {
+  color: #ede9fe;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.workflow-debug-bridge-head i {
+  color: #c084fc;
+  margin-right: 4px;
+}
+
+.workflow-debug-bridge-head small {
+  color: var(--text-dark);
+  font-size: 9px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.workflow-debug-bridge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workflow-debug-bridge-grid a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 6px;
+  border: 1px solid rgba(192, 132, 252, 0.2);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.42);
+  color: #ddd6fe;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-decoration: none;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.workflow-debug-bridge-grid a:hover {
+  border-color: rgba(192, 132, 252, 0.48);
+  background: rgba(124, 92, 252, 0.18);
+  transform: translateY(-1px);
+}
+
+.workflow-debug-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.34);
+  color: var(--text-dark);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.workflow-debug-status i {
+  margin-top: 2px;
+  color: #94a3b8;
+}
+
+.workflow-debug-status.is-ready {
+  border-color: rgba(52, 211, 153, 0.22);
+  background: rgba(16, 185, 129, 0.08);
+  color: #bbf7d0;
+}
+
+.workflow-debug-status.is-ready i {
+  color: #34d399;
+}
+
+.workflow-debug-status.is-loading {
+  border-color: rgba(6, 182, 212, 0.18);
+  color: #cffafe;
+}
+
+.workflow-debug-status.is-loading i {
+  color: #22d3ee;
+}
+
+.workflow-debug-status.is-warning {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fde68a;
+}
+
+.workflow-debug-status.is-warning i {
+  color: #fbbf24;
+}
+
+.workflow-debug-chapter-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workflow-debug-chapter-strip span,
+.workflow-debug-chapter-strip em {
+  min-width: 22px;
+  padding: 3px 5px;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 5px;
+  background: rgba(16, 185, 129, 0.08);
+  color: #86efac;
+  font-family: 'Outfit', sans-serif;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-align: center;
+}
+
 .workflow-context-package {
   width: 100%;
   min-width: 0;

@@ -15,11 +15,31 @@ const CONTINUOUS_CHAPTER_NODE = "continuous-chapter-production"
 const CHAPTER_REVIEW_NODE = "chapter-review"
 const TERMINAL_STATUSES = ["completed", "invalid", "failed", "paused"]
 const CHAPTER_BLUEPRINT_STABLE_BATCH_LIMIT = 5
+const DEBUG_URL_PARAMS = new URLSearchParams(window.location.search)
 const $ = (selector) => document.querySelector(selector)
 const $$ = (selector) => Array.from(document.querySelectorAll(selector))
 
+function isDebugNodeId(nodeId) {
+  return nodeId === WORLD_NODE
+    || nodeId === CHARACTER_NODE
+    || nodeId === INITIAL_STATE_NODE
+    || nodeId === WORLD_MATRIX_NODE
+    || nodeId === PLOT_ARCHITECTURE_NODE
+    || nodeId === STORY_BIBLE_NODE
+    || nodeId === VOLUME_STRATEGY_NODE
+    || nodeId === CHAPTER_BLUEPRINTS_NODE
+    || nodeId === STYLE_PROFILE_NODE
+    || nodeId === SINGLE_CHAPTER_CONTEXT_NODE
+    || nodeId === CHAPTER_DRAFT_NODE
+    || nodeId === CHAPTER_COMMIT_NODE
+    || nodeId === CONTINUOUS_CHAPTER_NODE
+    || nodeId === CHAPTER_REVIEW_NODE
+}
+
 const state = {
-  activeNode: WORLD_NODE,
+  activeNode: isDebugNodeId(DEBUG_URL_PARAMS.get("node") || DEBUG_URL_PARAMS.get("debugNode"))
+    ? (DEBUG_URL_PARAMS.get("node") || DEBUG_URL_PARAMS.get("debugNode"))
+    : WORLD_NODE,
   runs: { [WORLD_NODE]: null, [CHARACTER_NODE]: null, [INITIAL_STATE_NODE]: null, [WORLD_MATRIX_NODE]: null, [PLOT_ARCHITECTURE_NODE]: null, [STORY_BIBLE_NODE]: null, [VOLUME_STRATEGY_NODE]: null, [CHAPTER_BLUEPRINTS_NODE]: null, [STYLE_PROFILE_NODE]: null, [SINGLE_CHAPTER_CONTEXT_NODE]: null, [CHAPTER_DRAFT_NODE]: null, [CHAPTER_COMMIT_NODE]: null, [CONTINUOUS_CHAPTER_NODE]: null, [CHAPTER_REVIEW_NODE]: null },
   runIds: { [WORLD_NODE]: null, [CHARACTER_NODE]: null, [INITIAL_STATE_NODE]: null, [WORLD_MATRIX_NODE]: null, [PLOT_ARCHITECTURE_NODE]: null, [STORY_BIBLE_NODE]: null, [VOLUME_STRATEGY_NODE]: null, [CHAPTER_BLUEPRINTS_NODE]: null, [STYLE_PROFILE_NODE]: null, [SINGLE_CHAPTER_CONTEXT_NODE]: null, [CHAPTER_DRAFT_NODE]: null, [CHAPTER_COMMIT_NODE]: null, [CONTINUOUS_CHAPTER_NODE]: null, [CHAPTER_REVIEW_NODE]: null },
   pollTimers: { [WORLD_NODE]: null, [CHARACTER_NODE]: null, [INITIAL_STATE_NODE]: null, [WORLD_MATRIX_NODE]: null, [PLOT_ARCHITECTURE_NODE]: null, [STORY_BIBLE_NODE]: null, [VOLUME_STRATEGY_NODE]: null, [CHAPTER_BLUEPRINTS_NODE]: null, [STYLE_PROFILE_NODE]: null, [SINGLE_CHAPTER_CONTEXT_NODE]: null, [CHAPTER_DRAFT_NODE]: null, [CHAPTER_COMMIT_NODE]: null, [CONTINUOUS_CHAPTER_NODE]: null, [CHAPTER_REVIEW_NODE]: null },
@@ -28,7 +48,7 @@ const state = {
   modelConfigs: [],
   projects: [],
   selectedModelConfigId: window.localStorage.getItem("flow-debug.model-config-id") || "",
-  selectedProjectId: window.localStorage.getItem("flow-debug.project-id") || "",
+  selectedProjectId: DEBUG_URL_PARAMS.get("factoryProjectId") || DEBUG_URL_PARAMS.get("projectId") || window.localStorage.getItem("flow-debug.project-id") || "",
   modelConfigError: "",
   projectError: "",
   productionSandbox: null,
@@ -3079,7 +3099,7 @@ async function hydrateRuns() {
 }
 
 function switchNode(nodeId) {
-  if (nodeId !== WORLD_NODE && nodeId !== CHARACTER_NODE && nodeId !== INITIAL_STATE_NODE && nodeId !== WORLD_MATRIX_NODE && nodeId !== PLOT_ARCHITECTURE_NODE && nodeId !== STORY_BIBLE_NODE && nodeId !== VOLUME_STRATEGY_NODE && nodeId !== CHAPTER_BLUEPRINTS_NODE && nodeId !== STYLE_PROFILE_NODE && nodeId !== SINGLE_CHAPTER_CONTEXT_NODE && nodeId !== CHAPTER_DRAFT_NODE && nodeId !== CHAPTER_COMMIT_NODE && nodeId !== CONTINUOUS_CHAPTER_NODE && nodeId !== CHAPTER_REVIEW_NODE) return
+  if (!isDebugNodeId(nodeId)) return
   state.activeNode = nodeId
   state.lastEventCount[nodeId] = 0
   renderAll()

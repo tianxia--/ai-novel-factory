@@ -1,11 +1,11 @@
 import {
   saveAutonomousState,
   upsertDiscussionInSuperGraph
-} from "./chunk-EVOZRM5F.js";
+} from "./chunk-QL554L2D.js";
 import {
   generateAgentReply,
   throwIfStopped
-} from "./chunk-PJFTMRLC.js";
+} from "./chunk-ROO5DEKO.js";
 import {
   retrieveKnowledge
 } from "./chunk-YV6Y5W7F.js";
@@ -471,7 +471,7 @@ function detectDiscussionStageViolation(state, target, text) {
   if (currentStage === "setting_review" && /(当前已|已进入|进入|已经完成).{0,20}(master_planning|主线规划|章节蓝图|chapter_task_generation|总体规划|弧线蓝图)/i.test(positiveClaimText)) {
     reasons.push("\u5F53\u524D\u4ECD\u662F\u8BBE\u5B9A\u51BB\u7ED3\u9636\u6BB5\uFF0C\u4F46\u8BA8\u8BBA\u8F93\u51FA\u628A\u4E3B\u7EBF\u89C4\u5212\u6216\u7AE0\u8282\u84DD\u56FE\u63CF\u8FF0\u6210\u65E2\u6210\u72B6\u6001\u3002");
   }
-  if (target.kind !== "chapter" && /第\s*[一二三四五六七八九十百千万\d]+\s*章.{0,20}(目标|冲突|场景|开篇|结尾|钩子)/u.test(positiveClaimText)) {
+  if (target.kind !== "chapter" && /(^|\n)\s*(#{1,6}\s*)?第\s*[一二三四五六七八九十百千万\d]+\s*章.{0,20}(目标|冲突|场景|开篇|结尾|钩子)/u.test(positiveClaimText)) {
     reasons.push("\u5F53\u524D\u8BA8\u8BBA\u76EE\u6807\u4E0D\u662F\u7AE0\u8282\u84DD\u56FE\uFF0C\u5374\u8F93\u51FA\u4E86\u5177\u4F53\u7AE0\u6B21\u6267\u884C\u5185\u5BB9\u3002");
   }
   return {

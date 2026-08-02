@@ -14,11 +14,11 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-GJI2PIUA.js";
+} from "./chunk-V3D5DMJQ.js";
 import "./chunk-VOQWLW5S.js";
 import {
   runMultiAgentDiscussion
-} from "./chunk-N2LAI6O4.js";
+} from "./chunk-UQOLHNQ4.js";
 import {
   buildSuperGraphIndex,
   createManagedAutonomousProject,
@@ -35,7 +35,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-EVOZRM5F.js";
+} from "./chunk-QL554L2D.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -77,7 +77,7 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionStoryBibleAssets
-} from "./chunk-PJFTMRLC.js";
+} from "./chunk-ROO5DEKO.js";
 import "./chunk-ZWH2XUVC.js";
 import {
   detectAigcSegments,

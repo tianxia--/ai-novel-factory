@@ -2568,14 +2568,12 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
         })
       }).catch(() => undefined)
     }
-    const coverState = await prepareCoverGeneration(rootDir, {
-      factoryRootDir: pipelineOptions.factoryRootDir,
-      projectId: pipelineOptions.projectId,
-      reason: "worldbuilding_completed",
-    }).catch(() => undefined)
-    if (coverState?.assets?.cover) {
-      state.assets.cover = coverState.assets.cover
-    }
+    state.assets.cover.status = "in_progress"
+    state.assets.cover.briefPath = ".ai-novel/assets/cover/cover-brief.md"
+    state.assets.cover.promptPath = COVER_PROMPT_PATH
+    state.assets.cover.imagePath = state.assets.cover.imagePath || COVER_IMAGE_PATH
+    state.assets.cover.metadataPath = COVER_METADATA_PATH
+    delete state.assets.cover.error
     state.runtime.stage = "setting_review"
     state.runtime.statusMessage = "Setting review packet drafted. Review the proposed world assumptions before they are treated as canon."
     stampRuntimeProgress(state, "setting_freeze_generated")
@@ -2583,6 +2581,13 @@ export async function advanceAutonomousProject(rootDir: string, options: Product
     if (pipelineOptions.factoryRootDir && pipelineOptions.projectId) {
       await syncManagedProjectState(pipelineOptions.factoryRootDir, pipelineOptions.projectId, state).catch(() => undefined)
     }
+    void prepareCoverGeneration(rootDir, {
+      factoryRootDir: pipelineOptions.factoryRootDir,
+      projectId: pipelineOptions.projectId,
+      reason: "worldbuilding_completed",
+    }).catch((error) => {
+      console.error("Background cover generation failed:", error)
+    })
     return state
   }
 

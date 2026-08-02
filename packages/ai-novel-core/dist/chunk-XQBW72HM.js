@@ -2,12 +2,12 @@ import {
   executeProductionChapterNode,
   inspectProductionChapterNode,
   listProductionChapterNodes
-} from "./chunk-473UU5WW.js";
+} from "./chunk-W7AEZKQ5.js";
 import {
   executeProductionPlanningNode,
   inspectProductionPlanningNode,
   listProductionPlanningNodes
-} from "./chunk-5BNDTIGH.js";
+} from "./chunk-MUAIWKCP.js";
 import {
   executeProductionAdvanceThroughKernel,
   listProductionWorkflowNodes,
@@ -17,7 +17,7 @@ import {
   advanceAutonomousProject,
   loadAutonomousState,
   resolveManagedProjectRoot
-} from "./chunk-EVOZRM5F.js";
+} from "./chunk-QL554L2D.js";
 import {
   FactoryWorkflowTraceRecorder
 } from "./chunk-ZWH2XUVC.js";
