@@ -1,6 +1,6 @@
 import {
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 
 // src/aigc-detector.ts
 import fs from "fs";

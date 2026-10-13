@@ -1,15 +1,15 @@
 import {
   ProductionWorkflowSandboxManager
-} from "./chunk-XQBW72HM.js";
+} from "./chunk-Y64E22I7.js";
 import {
   listProductionChapterNodes
-} from "./chunk-W7AEZKQ5.js";
+} from "./chunk-AJQ5T55D.js";
 import {
   listProductionPlanningNodes
-} from "./chunk-MUAIWKCP.js";
+} from "./chunk-H334SUAV.js";
 import {
   FactoryWorkflowDebugBranchManager
-} from "./chunk-ZZ3KQILH.js";
+} from "./chunk-AJ2JFFWG.js";
 import {
   chapterBlueprintLearningShouldStop,
   compileChapterBlueprintLearningPrompt,
@@ -19,8 +19,8 @@ import {
 } from "./chunk-5276HDEF.js";
 import {
   listProductionWorkflowNodes
-} from "./chunk-VOQWLW5S.js";
-import "./chunk-QL554L2D.js";
+} from "./chunk-EQE2YYQ4.js";
+import "./chunk-TCUIONV5.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -38,21 +38,21 @@ import {
   normalizeStyleAigcSignal,
   parseStyleEvolutionEvaluationFromText,
   parseStyleEvolutionRefinementFromText
-} from "./chunk-ROO5DEKO.js";
+} from "./chunk-RONTFH57.js";
 import {
   FactoryWorkflowTraceRecorder,
   WorkflowKernel
-} from "./chunk-ZWH2XUVC.js";
+} from "./chunk-CCGWT4D7.js";
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-5Z26A3S7.js";
-import "./chunk-DETBSEC6.js";
-import "./chunk-YV6Y5W7F.js";
-import "./chunk-YFTWM6FA.js";
+} from "./chunk-MOILZS2E.js";
+import "./chunk-7YOH46DX.js";
+import "./chunk-U2MJEJYM.js";
+import "./chunk-LC7E6N2W.js";
 import {
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 import "./chunk-GZKJNHMN.js";
 
 // src/world-foundation-debug-server.ts
@@ -272,6 +272,12 @@ var productionWorkflowSandboxes = new ProductionWorkflowSandboxManager(rootDir);
 function isDebugTextModel(modelName) {
   return !/(?:^|[-_.:])(image|video|audio|embedding)(?:[-_.:]|$)/iu.test(String(modelName || "").trim());
 }
+function normalizeDebugLlmApiMode(value) {
+  const normalized = String(value || "chat").trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
+}
 async function listDebugTextModels() {
   return withFactoryDb(rootDir, async (db) => {
     const textRoute = db.listLlmConfigRoutes().find((route) => route.capability === "text");
@@ -280,7 +286,7 @@ async function listDebugTextModels() {
       name: String(row.name || row.model_name),
       baseUrl: String(row.base_url),
       modelName: String(row.model_name),
-      apiMode: String(row.api_mode || "chat") === "responses" ? "responses" : "chat",
+      apiMode: normalizeDebugLlmApiMode(row.api_mode),
       timeoutMs: Number(row.timeout_ms) || 12e4,
       isGlobalTextRoute: String(textRoute?.config_id || "") === String(row.id)
     }));
@@ -300,7 +306,7 @@ async function loadDebugLlmConfig(run) {
       baseUrl: String(row.base_url),
       apiKeyEnv: "DB_DEBUG_CONFIG",
       modelName: String(row.model_name),
-      apiMode: String(row.api_mode || "chat") === "responses" ? "responses" : "chat",
+      apiMode: normalizeDebugLlmApiMode(row.api_mode),
       timeoutMs: Number(row.timeout_ms) || 12e4,
       temperature: Number(row.temperature) || 0.1,
       reactMaxSteps: 25

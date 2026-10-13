@@ -295,6 +295,12 @@
           <h3><i class="fa-solid fa-route"></i> 创作工作流</h3>
           <span class="stage-tag badge" id="stage-badge">等待状态</span>
         </div>
+        <div class="agent-canon-status" id="agent-canon-status">
+          <div class="agent-canon-empty">
+            <i class="fa-solid fa-brain"></i>
+            <span>等待同步 Agent 确定状态。</span>
+          </div>
+        </div>
         <div class="workflow-stepper" id="workflow-stepper">
           <div class="workflow-empty">
             <i class="fa-solid fa-route"></i>
@@ -557,12 +563,12 @@
       </footer>
     </main>
 
-    <!-- RIGHT PANEL: Chapter Tasks -->
+    <!-- RIGHT PANEL: Workflow Modules -->
     <aside class="sidebar-right" id="sidebar-right">
       <div class="card-header border-bottom sidebar-right-titlebar">
         <div>
-          <h3><i class="fa-solid fa-list-check"></i> 正式章节任务</h3>
-          <p class="sidebar-right-subtitle">右侧模块可单独展开，便于聚焦章节任务。</p>
+          <h3><i class="fa-solid fa-layer-group"></i> 创作侧栏</h3>
+          <p class="sidebar-right-subtitle">章节、文风、观察与日志按模块折叠展示。</p>
         </div>
         <div class="sidebar-right-actions">
           <span class="badge badge-secondary" id="total-progress-badge">0% 已完成</span>
@@ -572,15 +578,15 @@
         </div>
       </div>
 
-      <section class="sidebar-module is-expanded" data-panel-module="overview">
-        <button class="sidebar-module-header" type="button" data-panel-toggle="overview" aria-expanded="true">
+      <section class="sidebar-module is-expanded" data-panel-module="chapters">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="chapters" aria-expanded="true">
           <span><i class="fa-solid fa-chart-line"></i> 章节总览</span>
           <div class="sidebar-module-meta">
-            <small id="overview-panel-summary">等待同步</small>
+            <small id="chapter-panel-summary">等待同步</small>
             <i class="fa-solid fa-chevron-down"></i>
           </div>
         </button>
-        <div class="sidebar-module-body">
+        <div class="sidebar-module-body sidebar-module-body-chapters">
           <div class="global-progress-card">
             <div class="progress-info">
               <span id="progress-total-label">总进度</span>
@@ -590,11 +596,17 @@
               <div class="progress-bar-fill" id="global-progress-fill" style="width: 0%;"></div>
             </div>
           </div>
+          <div class="chapter-tasks-list" id="chapter-list-container">
+            <div class="chapter-list-empty">
+              <i class="fa-solid fa-list-check"></i>
+              <span>等待数据库快照同步章节任务。</span>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="sidebar-module is-expanded" data-panel-module="style">
-        <button class="sidebar-module-header" type="button" data-panel-toggle="style" aria-expanded="true">
+      <section class="sidebar-module" data-panel-module="style">
+        <button class="sidebar-module-header" type="button" data-panel-toggle="style" aria-expanded="false">
           <span><i class="fa-solid fa-pen-fancy"></i> Style Evolution Engine</span>
           <div class="sidebar-module-meta">
             <small id="style-panel-summary">等待 Engine</small>
@@ -606,24 +618,6 @@
             <div class="style-evolution-empty">
               <i class="fa-solid fa-pen-fancy"></i>
               <span>等待 Style Evolution Engine 状态同步。</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="sidebar-module is-expanded" data-panel-module="chapters">
-        <button class="sidebar-module-header" type="button" data-panel-toggle="chapters" aria-expanded="true">
-          <span><i class="fa-solid fa-book-open-reader"></i> 正式章节任务</span>
-          <div class="sidebar-module-meta">
-            <small id="chapter-panel-summary">等待同步</small>
-            <i class="fa-solid fa-chevron-down"></i>
-          </div>
-        </button>
-        <div class="sidebar-module-body sidebar-module-body-chapters">
-          <div class="chapter-tasks-list" id="chapter-list-container">
-            <div class="chapter-list-empty">
-              <i class="fa-solid fa-list-check"></i>
-              <span>等待数据库快照同步章节任务。</span>
             </div>
           </div>
         </div>
@@ -869,6 +863,7 @@
             <select id="provider-api-mode-input">
               <option value="chat">OpenAI Chat (/chat/completions)</option>
               <option value="responses">OpenAI Responses (/responses)</option>
+              <option value="codex-cli">Codex CLI (本机登录态)</option>
             </select>
           </label>
           <label class="modal-field">
@@ -1189,6 +1184,6 @@
   </div>
 
   <!-- Custom Scripts -->
-  <script type="module" src="app.js?v=1.0.3"></script>
+  <script type="module" src="app.js?v=1.0.5"></script>
 </body>
 </html>

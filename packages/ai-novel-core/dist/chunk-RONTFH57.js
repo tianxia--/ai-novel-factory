@@ -1,21 +1,21 @@
 import {
   detectAigcSegments,
   getAigcDetectorConfig
-} from "./chunk-5Z26A3S7.js";
+} from "./chunk-MOILZS2E.js";
 import {
   formatKnowledgeForPrompt,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-YV6Y5W7F.js";
+} from "./chunk-U2MJEJYM.js";
 import {
   createLocalTextEmbedding
-} from "./chunk-YFTWM6FA.js";
+} from "./chunk-LC7E6N2W.js";
 import {
   evaluateChapterConsistency,
   extractChinesePersonNames,
   inferLockedProtagonistName,
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 import {
   agentTypeFromLabel,
   createAgentMessage,
@@ -23,14 +23,23 @@ import {
 } from "./chunk-GZKJNHMN.js";
 
 // src/writing-pipeline.ts
-import fs2 from "fs/promises";
-import path3 from "path";
+import fs3 from "fs/promises";
+import path4 from "path";
+
+// src/runtime-llm.ts
+import { spawn } from "child_process";
+import fs from "fs/promises";
+import os from "os";
+import path2 from "path";
 
 // src/llm-config.ts
 import fsSync from "fs";
 import path from "path";
 function readApiMode(value) {
-  return value?.trim().toLowerCase() === "responses" ? "responses" : "chat";
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
 }
 function loadLlmConfigFromEnv(rootDir = process.cwd()) {
   void rootDir;
@@ -474,6 +483,124 @@ function buildResponsesInput(messages) {
     content: message.content
   }));
 }
+function isCodexCliApiMode(apiMode) {
+  return apiMode === "codex-cli";
+}
+function requiresHttpProviderAuth(apiMode) {
+  return !isCodexCliApiMode(apiMode);
+}
+function buildCodexCliPrompt(messages) {
+  const sections = [
+    "\u4F60\u6B63\u5728\u4F5C\u4E3A AI Novel Factory \u7684\u5E95\u5C42\u6587\u672C\u751F\u6210\u6A21\u578B\u5DE5\u4F5C\u3002",
+    "\u8BF7\u628A\u672C\u6B21\u8C03\u7528\u5F53\u6210\u4E00\u6B21\u666E\u901A LLM Completion\uFF1A\u4E25\u683C\u9075\u5FAA system/user \u6307\u4EE4\uFF0C\u53EA\u8F93\u51FA\u6700\u7EC8\u7ED3\u679C\uFF0C\u4E0D\u8981\u89E3\u91CA\u4F60\u4F7F\u7528\u4E86 Codex\uFF0C\u4E5F\u4E0D\u8981\u6DFB\u52A0\u989D\u5916\u5BD2\u6684\u3002",
+    "\u5982\u679C\u7528\u6237\u8981\u6C42 JSON\uFF0C\u53EA\u8F93\u51FA\u5408\u6CD5 JSON\uFF0C\u4E0D\u8981\u5305\u88F9 Markdown \u4EE3\u7801\u5757\u3002",
+    ""
+  ];
+  for (const message of messages) {
+    sections.push(`<${message.role}>`, message.content.trim(), `</${message.role}>`, "");
+  }
+  return sections.join("\n").trim();
+}
+async function requestCodexCliCompletion(options, messages, requestStartTime) {
+  const selectedTemperature = options.temperature ?? 0.1;
+  const prompt = buildCodexCliPrompt(messages);
+  const tempDir = await fs.mkdtemp(path2.join(os.tmpdir(), "ai-novel-codex-cli-"));
+  const outputPath = path2.join(tempDir, "last-message.txt");
+  console.log(`[LLM CODEX CLI SEND] \u51C6\u5907\u8C03\u7528\u672C\u673A Codex CLI...`);
+  console.log(`- Model: ${options.modelName}`);
+  console.log(`- API Mode: ${options.apiMode}`);
+  console.log(`- Temperature: ${selectedTemperature}\uFF08Codex CLI \u5F53\u524D\u4E0D\u652F\u6301\u4ECE\u8FD9\u91CC\u5F3A\u5236\u8BBE\u7F6E\uFF0C\u4EC5\u8BB0\u5F55\uFF09`);
+  console.log(`- Messages Count: ${messages.length}`);
+  console.log(`- Prompt Length: ${prompt.length} chars`);
+  try {
+    return await withTimeout(options.timeoutMs, async (signal, markActivity) => {
+      await options.onProviderActivity?.();
+      markActivity();
+      const args = [
+        "exec",
+        "--ephemeral",
+        "--ignore-rules",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-C",
+        tempDir,
+        "--model",
+        options.modelName,
+        "--output-last-message",
+        outputPath,
+        "-"
+      ];
+      const child = spawn("codex", args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: process.env
+      });
+      let stdout = "";
+      let stderr = "";
+      let completed = false;
+      let lastActivityAt = Date.now();
+      const abortChild = () => {
+        if (!completed && child.pid) {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (!completed && child.pid) child.kill("SIGKILL");
+          }, 2500).unref();
+        }
+      };
+      signal.addEventListener("abort", abortChild, { once: true });
+      const noteActivity = async () => {
+        const now = Date.now();
+        if (now - lastActivityAt < 250) return;
+        lastActivityAt = now;
+        markActivity();
+        await options.onProviderActivity?.();
+      };
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+        void noteActivity();
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+        void noteActivity();
+      });
+      const exit = new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, childSignal) => resolve({ code, signal: childSignal }));
+      });
+      child.stdin.end(prompt);
+      const result = await exit.finally(() => {
+        completed = true;
+        signal.removeEventListener("abort", abortChild);
+      });
+      if (signal.aborted) {
+        throw new Error("Codex CLI request aborted.");
+      }
+      if (result.code !== 0) {
+        const detail = (stderr || stdout || `exit signal ${result.signal || "unknown"}`).trim().slice(-2e3);
+        throw new Error(`Codex CLI request failed with exit code ${result.code}: ${detail}`);
+      }
+      let content = "";
+      try {
+        content = (await fs.readFile(outputPath, "utf8")).trim();
+      } catch {
+        content = stdout.trim();
+      }
+      const totalTime = Date.now() - requestStartTime;
+      console.log(`[LLM CODEX CLI END] Codex CLI \u8C03\u7528\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${content.length}`);
+      console.log(`
+========== [LLM RESPONSE START] ==========
+${content}
+========== [LLM RESPONSE END] ==========
+`);
+      if (options.stream && options.onDelta && content) {
+        await options.onDelta(content);
+      }
+      return content;
+    }, options.signal);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
 function extractResponsesOutput(payload) {
   if (!payload || typeof payload !== "object") {
     return "";
@@ -519,14 +646,17 @@ async function parseProviderError(response) {
   }
 }
 async function requestLlmTextCompletion(options) {
-  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions";
   const requestStartTime = Date.now();
-  const baseUrl = options.baseUrl.replace(/\/$/, "");
   const selectedTemperature = options.temperature ?? 0.1;
   const messages = options.messages.filter((message) => message.content.trim());
   const system = getMessageContent(messages, "system");
   const user = getMessageContent(messages, "user");
   const effectiveStream = Boolean(options.stream);
+  if (isCodexCliApiMode(options.apiMode)) {
+    return requestCodexCliCompletion(options, messages, requestStartTime);
+  }
+  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions";
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
   console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 ${endpoint} \u8BF7\u6C42...`);
   console.log(`- BaseUrl: ${options.baseUrl}`);
   console.log(`- Model: ${options.modelName}`);
@@ -606,8 +736,9 @@ async function generateAgentReply(options) {
     return reply;
   }
   const override = options.providerOverride;
+  const overrideApiMode = override?.apiMode;
   const completeOverride = Boolean(
-    override?.baseUrl?.trim() && override.apiKey?.trim() && override.modelName?.trim()
+    (isCodexCliApiMode(overrideApiMode) || override?.baseUrl?.trim() && override.apiKey?.trim()) && override?.modelName?.trim()
   );
   const config = completeOverride ? null : await loadLlmConfigForCapability(options.envRootDir, "text");
   const baseUrl = override?.baseUrl?.trim() || config?.provider.baseUrl || "";
@@ -615,7 +746,7 @@ async function generateAgentReply(options) {
   const modelName = override?.modelName?.trim() || config?.provider.modelName || "";
   const apiMode = override?.apiMode || config?.provider.apiMode || "chat";
   const timeoutMs = Number(override?.timeoutMs) > 0 ? Number(override?.timeoutMs) : config?.provider.timeoutMs || 12e4;
-  if (!baseUrl || !apiKey || !modelName) {
+  if (!modelName || requiresHttpProviderAuth(apiMode) && (!baseUrl || !apiKey)) {
     throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.");
   }
   const responseMode = options.responseMode || (options.currentStage === "drafting" ? "drafting" : "discussion");
@@ -727,7 +858,7 @@ async function testProviderConnectivity(overrides = {}, rootDir = process.cwd())
       message: `Provider connectivity check passed in test mode (${apiMode}).`
     };
   }
-  if (!baseUrl || !modelName || !apiKey) {
+  if (!modelName || requiresHttpProviderAuth(apiMode) && (!baseUrl || !apiKey)) {
     return {
       ok: false,
       checkedAt,
@@ -736,6 +867,37 @@ async function testProviderConnectivity(overrides = {}, rootDir = process.cwd())
       apiMode,
       message: "Missing provider config. Configure a model in settings first."
     };
+  }
+  if (isCodexCliApiMode(apiMode)) {
+    try {
+      const content = await requestLlmTextCompletion({
+        baseUrl: baseUrl || "codex-cli://local",
+        apiKey: apiKey || "[codex-cli]",
+        modelName,
+        apiMode,
+        timeoutMs,
+        maxTokens: 8,
+        messages: [{ role: "user", content: "\u8BF7\u53EA\u56DE\u590D\uFF1Apong" }]
+      });
+      return {
+        ok: Boolean(content.trim()),
+        checkedAt,
+        baseUrl: baseUrl || "codex-cli://local",
+        modelName,
+        apiMode,
+        message: content.trim() ? `Codex CLI reachable. \u672C\u673A\u767B\u5F55\u6001\u53EF\u7528\uFF0C\u6A21\u578B\u8FD4\u56DE\uFF1A${content.trim().slice(0, 40)}` : "Codex CLI returned an empty response."
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        checkedAt,
+        baseUrl: baseUrl || "codex-cli://local",
+        modelName,
+        apiMode,
+        message: `Codex CLI test failed: ${message}`
+      };
+    }
   }
   try {
     const response = await withTimeout(
@@ -1611,8 +1773,8 @@ function evaluateProductionReadiness(input) {
 }
 
 // src/production-style-evolution.ts
-import fs from "fs/promises";
-import path2 from "path";
+import fs2 from "fs/promises";
+import path3 from "path";
 var STYLE_EVOLUTION_DIR = ".ai-novel/style/evolution";
 var STYLE_SAMPLES_DIR = ".ai-novel/style/evolution/samples";
 var STYLE_SEED_PATH = ".ai-novel/style/evolution/style-seed.md";
@@ -2334,9 +2496,9 @@ function deriveStyleLoopProtocol(contract) {
 }
 async function persistStyleFreezeLedger(projectRoot, contract) {
   const paths = absolutePaths(projectRoot);
-  await fs.mkdir(path2.dirname(paths.freezeLedger), { recursive: true });
+  await fs2.mkdir(path3.dirname(paths.freezeLedger), { recursive: true });
   const ledger = buildStyleFreezeLedger(contract);
-  await fs.writeFile(paths.freezeLedger, `${JSON.stringify(ledger, null, 2)}
+  await fs2.writeFile(paths.freezeLedger, `${JSON.stringify(ledger, null, 2)}
 `);
   return ledger;
 }
@@ -2449,16 +2611,16 @@ async function materializeApprovedStyleAssets(projectRoot, contract) {
   if (!contract?.approvedAt || !contract.styleContract) {
     return;
   }
-  const styleDir = path2.join(projectRoot, ".ai-novel", "style");
-  await fs.mkdir(styleDir, { recursive: true });
+  const styleDir = path3.join(projectRoot, ".ai-novel", "style");
+  await fs2.mkdir(styleDir, { recursive: true });
   const writes = [
-    [path2.join(styleDir, "rulebook.md"), formatApprovedStyleRulebook(contract)],
-    [path2.join(styleDir, "references.md"), formatApprovedStyleReferences(contract)],
-    [path2.join(styleDir, "anti-patterns.md"), formatApprovedStyleAntiPatterns(contract)]
+    [path3.join(styleDir, "rulebook.md"), formatApprovedStyleRulebook(contract)],
+    [path3.join(styleDir, "references.md"), formatApprovedStyleReferences(contract)],
+    [path3.join(styleDir, "anti-patterns.md"), formatApprovedStyleAntiPatterns(contract)]
   ];
   for (const [filePath, content] of writes) {
     if (!content.trim()) continue;
-    await fs.writeFile(filePath, `${content.trimEnd()}
+    await fs2.writeFile(filePath, `${content.trimEnd()}
 `);
   }
 }
@@ -2472,7 +2634,7 @@ async function persistStyleEvolutionContractState(projectRoot, partial) {
   next.retryPolicy = next.retryPolicy || current.retryPolicy || defaultRetryPolicy();
   next.loop = deriveLoopState(next);
   next.loopProtocol = deriveStyleLoopProtocol(next);
-  await fs.writeFile(paths.styleContract, `${JSON.stringify(next, null, 2)}
+  await fs2.writeFile(paths.styleContract, `${JSON.stringify(next, null, 2)}
 `);
   await persistStyleFreezeLedger(projectRoot, next);
   return next;
@@ -2508,17 +2670,17 @@ function relativePaths() {
 function absolutePaths(projectRoot) {
   const paths = relativePaths();
   return {
-    dir: path2.join(projectRoot, paths.dir),
-    samplesDir: path2.join(projectRoot, paths.samplesDir),
-    seedPrompt: path2.join(projectRoot, paths.seedPrompt),
-    userStylePrompt: path2.join(projectRoot, paths.userStylePrompt),
-    referenceText: path2.join(projectRoot, paths.referenceText),
-    history: path2.join(projectRoot, paths.history),
-    styleContract: path2.join(projectRoot, paths.styleContract),
-    approvedSample: path2.join(projectRoot, paths.approvedSample),
-    freezeLedger: path2.join(projectRoot, paths.freezeLedger),
-    loopRuntime: path2.join(projectRoot, paths.loopRuntime),
-    loopRuns: path2.join(projectRoot, paths.loopRuns)
+    dir: path3.join(projectRoot, paths.dir),
+    samplesDir: path3.join(projectRoot, paths.samplesDir),
+    seedPrompt: path3.join(projectRoot, paths.seedPrompt),
+    userStylePrompt: path3.join(projectRoot, paths.userStylePrompt),
+    referenceText: path3.join(projectRoot, paths.referenceText),
+    history: path3.join(projectRoot, paths.history),
+    styleContract: path3.join(projectRoot, paths.styleContract),
+    approvedSample: path3.join(projectRoot, paths.approvedSample),
+    freezeLedger: path3.join(projectRoot, paths.freezeLedger),
+    loopRuntime: path3.join(projectRoot, paths.loopRuntime),
+    loopRuns: path3.join(projectRoot, paths.loopRuns)
   };
 }
 function createLoopRunId() {
@@ -2552,14 +2714,14 @@ function createStyleLoopRuntimeRecord(input) {
 }
 async function persistStyleLoopRuntime(projectRoot, runtime) {
   const paths = absolutePaths(projectRoot);
-  await fs.mkdir(path2.dirname(paths.loopRuntime), { recursive: true });
-  await fs.writeFile(paths.loopRuntime, `${JSON.stringify(runtime, null, 2)}
+  await fs2.mkdir(path3.dirname(paths.loopRuntime), { recursive: true });
+  await fs2.writeFile(paths.loopRuntime, `${JSON.stringify(runtime, null, 2)}
 `);
   return runtime;
 }
 async function appendStyleLoopRunLedger(projectRoot, runtime) {
   const paths = absolutePaths(projectRoot);
-  await fs.mkdir(path2.dirname(paths.loopRuns), { recursive: true });
+  await fs2.mkdir(path3.dirname(paths.loopRuns), { recursive: true });
   const record = {
     recordedAt: (/* @__PURE__ */ new Date()).toISOString(),
     runId: runtime.runId,
@@ -2605,7 +2767,7 @@ async function appendStyleLoopRunLedger(projectRoot, runtime) {
       }))
     }))
   };
-  await fs.appendFile(paths.loopRuns, `${JSON.stringify(record)}
+  await fs2.appendFile(paths.loopRuns, `${JSON.stringify(record)}
 `);
   return record;
 }
@@ -2615,7 +2777,7 @@ async function readStyleLoopRuntime(projectRoot) {
 }
 async function readOptionalText(filePath) {
   try {
-    return await fs.readFile(filePath, "utf8");
+    return await fs2.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return "";
     throw error;
@@ -2635,7 +2797,7 @@ async function writeTextIfNeeded(filePath, content, overwrite) {
     const existing = await readOptionalText(filePath);
     if (existing.trim()) return;
   }
-  await fs.writeFile(filePath, content.endsWith("\n") ? content : `${content}
+  await fs2.writeFile(filePath, content.endsWith("\n") ? content : `${content}
 `);
 }
 function normalizeText(value) {
@@ -3322,8 +3484,8 @@ function getStyleEvolutionAssetPaths(projectRoot) {
 async function initializeStyleEvolution(projectRoot, options = {}) {
   const paths = absolutePaths(projectRoot);
   const overwrite = options.overwrite === true;
-  await fs.mkdir(paths.dir, { recursive: true });
-  await fs.mkdir(paths.samplesDir, { recursive: true });
+  await fs2.mkdir(paths.dir, { recursive: true });
+  await fs2.mkdir(paths.samplesDir, { recursive: true });
   await writeTextIfNeeded(paths.seedPrompt, normalizeText(options.seedPrompt) || defaultSeedPrompt(options), overwrite);
   if (normalizeText(options.userStylePrompt) || overwrite) {
     await writeTextIfNeeded(paths.userStylePrompt, normalizeText(options.userStylePrompt), overwrite);
@@ -3333,11 +3495,11 @@ async function initializeStyleEvolution(projectRoot, options = {}) {
   }
   const existingHistory = await readOptionalText(paths.history);
   if (!existingHistory.trim() || overwrite) {
-    await fs.writeFile(paths.history, "[]\n");
+    await fs2.writeFile(paths.history, "[]\n");
   }
   const existingLedger = await readOptionalText(paths.freezeLedger);
   if (!existingLedger.trim() || overwrite) {
-    await fs.writeFile(paths.freezeLedger, `${JSON.stringify({
+    await fs2.writeFile(paths.freezeLedger, `${JSON.stringify({
       version: 1,
       generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
       latestVersion: 0,
@@ -3349,7 +3511,7 @@ async function initializeStyleEvolution(projectRoot, options = {}) {
   }
   const existingRuntime = await readOptionalText(paths.loopRuntime);
   if (!existingRuntime.trim() || overwrite) {
-    await fs.writeFile(paths.loopRuntime, "null\n");
+    await fs2.writeFile(paths.loopRuntime, "null\n");
   }
   await persistStyleEvolutionContractState(projectRoot, {
     runtime: {
@@ -3370,10 +3532,10 @@ async function initializeStyleEvolution(projectRoot, options = {}) {
 }
 async function appendStyleEvolutionCandidate(projectRoot, input) {
   const paths = absolutePaths(projectRoot);
-  await fs.mkdir(paths.samplesDir, { recursive: true });
+  await fs2.mkdir(paths.samplesDir, { recursive: true });
   const history = await readOptionalJson(paths.history, []);
   const version = Math.max(0, ...history.map((entry) => entry.version || 0)) + 1;
-  const samplePath = path2.join(paths.samplesDir, `v${String(version).padStart(3, "0")}.md`);
+  const samplePath = path3.join(paths.samplesDir, `v${String(version).padStart(3, "0")}.md`);
   const prompt = normalizeText(input.prompt);
   const sample = normalizeText(input.sample);
   const review = normalizeText(input.review);
@@ -3396,7 +3558,7 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     sample,
     review,
     createdAt,
-    samplePath: path2.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
+    samplePath: path3.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
     iterationFeedback: normalizeText(input.iterationFeedback),
     source: input.source || "manual",
     userDecision: "pending",
@@ -3423,7 +3585,7 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     stable: projectedStableState.stable,
     freezer
   });
-  await fs.writeFile(samplePath, `${sample}
+  await fs2.writeFile(samplePath, `${sample}
 `);
   history.push({
     version,
@@ -3431,7 +3593,7 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     sample,
     review,
     createdAt,
-    samplePath: path2.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
+    samplePath: path3.relative(projectRoot, samplePath).replace(/\\/gu, "/"),
     iterationFeedback: normalizeText(input.iterationFeedback),
     source: input.source || "manual",
     readyForApproval,
@@ -3451,7 +3613,7 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
     evaluation: input.evaluation,
     refinement: input.refinement
   });
-  await fs.writeFile(paths.history, `${JSON.stringify(history, null, 2)}
+  await fs2.writeFile(paths.history, `${JSON.stringify(history, null, 2)}
 `);
   await persistStyleEvolutionContractState(projectRoot, {
     evolutionHistory: history,
@@ -3470,7 +3632,7 @@ async function appendStyleEvolutionCandidate(projectRoot, input) {
 }
 async function approveStyleEvolutionSample(projectRoot, input) {
   const paths = absolutePaths(projectRoot);
-  await fs.mkdir(paths.dir, { recursive: true });
+  await fs2.mkdir(paths.dir, { recursive: true });
   const history = await readOptionalJson(paths.history, []);
   const currentContract = await readOptionalJson(paths.styleContract, {});
   const selected = input.version ? history.find((entry) => entry.version === input.version) : null;
@@ -3609,11 +3771,11 @@ async function approveStyleEvolutionSample(projectRoot, input) {
   });
   contract.loopProtocol = deriveStyleLoopProtocol(contract);
   validateStyleContractForFreeze(contract);
-  await fs.writeFile(paths.approvedSample, `${sample}
+  await fs2.writeFile(paths.approvedSample, `${sample}
 `);
-  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+  await fs2.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
 `);
-  await fs.writeFile(paths.styleContract, `${JSON.stringify(contract, null, 2)}
+  await fs2.writeFile(paths.styleContract, `${JSON.stringify(contract, null, 2)}
 `);
   await persistStyleFreezeLedger(projectRoot, contract);
   await materializeApprovedStyleAssets(projectRoot, contract);
@@ -3658,7 +3820,7 @@ async function acceptStyleEvolutionCandidate(projectRoot, input) {
     }
     return entry;
   });
-  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+  await fs2.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
 `);
   await persistStyleEvolutionContractState(projectRoot, {
     approval: {
@@ -3701,7 +3863,7 @@ async function rejectStyleEvolutionSample(projectRoot, input) {
     }
     return entry;
   });
-  await fs.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
+  await fs2.writeFile(paths.history, `${JSON.stringify(nextHistory, null, 2)}
 `);
   await persistStyleEvolutionContractState(projectRoot, {
     approval: {
@@ -3811,17 +3973,17 @@ function currentBundleDir() {
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return path3.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return path4.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return path3.dirname(fileMatch[1]);
+      return path4.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${path3.sep}.ai-novel-projects${path3.sep}`;
+  const marker = `${path4.sep}.ai-novel-projects${path4.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
@@ -3830,7 +3992,7 @@ function workspaceRootForProject(projectRoot) {
 }
 async function readOptionalText2(filePath) {
   try {
-    return (await fs2.readFile(filePath, "utf8")).trim();
+    return (await fs3.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
@@ -3838,18 +4000,18 @@ async function readOptionalText2(filePath) {
 async function readCharacterDossiers(filePath) {
   if (!filePath) return [];
   try {
-    const parsed = JSON.parse(await fs2.readFile(filePath, "utf8"));
+    const parsed = JSON.parse(await fs3.readFile(filePath, "utf8"));
     return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string") : [];
   } catch {
     return [];
   }
 }
 async function writeJsonFileAtomic(filePath, value) {
-  await fs2.mkdir(path3.dirname(filePath), { recursive: true });
-  const tempPath = path3.join(path3.dirname(filePath), `.${path3.basename(filePath)}.${Date.now()}.tmp`);
-  await fs2.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await fs3.mkdir(path4.dirname(filePath), { recursive: true });
+  const tempPath = path4.join(path4.dirname(filePath), `.${path4.basename(filePath)}.${Date.now()}.tmp`);
+  await fs3.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await fs2.rename(tempPath, filePath);
+  await fs3.rename(tempPath, filePath);
 }
 async function writeChapterVersionManifest(input) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -3911,7 +4073,7 @@ async function writeChapterVersionManifest(input) {
     },
     versions
   };
-  const manifestPath = path3.join(path3.dirname(input.finalPath), `${input.chapterId}.versions.json`);
+  const manifestPath = path4.join(path4.dirname(input.finalPath), `${input.chapterId}.versions.json`);
   await writeJsonFileAtomic(manifestPath, manifest);
   await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
     chapterNumber: input.task.chapterNumber,
@@ -3929,7 +4091,7 @@ async function writeChapterVersionManifest(input) {
 }
 async function fileHasContent(filePath) {
   try {
-    const stat = await fs2.stat(filePath);
+    const stat = await fs3.stat(filePath);
     return stat.isFile() && stat.size > 0;
   } catch {
     return false;
@@ -4644,7 +4806,7 @@ function updateCharacterDossiersAfterChapter(input) {
   return nextDossiers;
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return path3.relative(projectRoot, absolutePath).replaceAll(path3.sep, "/");
+  return path4.relative(projectRoot, absolutePath).replaceAll(path4.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -5426,7 +5588,7 @@ async function updateStyleFingerprintFromFirstChapter(input) {
     "Production selection contract:",
     `- style fingerprint: ${extracted}`
   ].join("\n");
-  await fs2.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
+  await fs3.writeFile(input.paths.styleProfilePath, `${updatedStyleProfile.trimEnd()}
 `);
   return extracted;
 }
@@ -5738,7 +5900,7 @@ async function persistApprovedWritingStyleAssets(projectRoot, paths, approvedSty
   if (approvedStyleContext.status !== "ready") {
     return;
   }
-  await fs2.mkdir(paths.styleDir, { recursive: true });
+  await fs3.mkdir(paths.styleDir, { recursive: true });
   const writes = [
     [paths.styleRulebookPath, approvedStyleContext.rulebook || "", "style_rulebook"],
     [paths.styleReferencesPath, approvedStyleContext.references || "", "style_references"],
@@ -5746,7 +5908,7 @@ async function persistApprovedWritingStyleAssets(projectRoot, paths, approvedSty
   ];
   for (const [filePath, content, kind] of writes) {
     if (!content.trim()) continue;
-    await fs2.writeFile(filePath, `${content.trimEnd()}
+    await fs3.writeFile(filePath, `${content.trimEnd()}
 `);
     await recordPipelineArtifact(projectRoot, filePath, "style", options, {
       kind,
@@ -7175,7 +7337,7 @@ async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
     ...PRODUCTION_STORY_ASSET_FILES
   ]);
   for (const filename of contextFileOrder) {
-    const content = await readOptionalText2(path3.join(paths.plansDir, filename));
+    const content = await readOptionalText2(path4.join(paths.plansDir, filename));
     if (!content) continue;
     const relevant = extractStoryAssetRelevantLines(content, task);
     if (!relevant.length) continue;
@@ -7749,7 +7911,7 @@ function createProductionWritingPlanContract(state) {
 }
 async function writeProductionWritingPlan(projectRoot, paths, state, options = {}) {
   const writingPlan = createProductionWritingPlanContract(state);
-  const writingPlanPath = path3.join(paths.plansDir, "writing-plan.json");
+  const writingPlanPath = path4.join(paths.plansDir, "writing-plan.json");
   await writeJsonFileAtomic(writingPlanPath, writingPlan);
   await recordPipelineArtifact(projectRoot, writingPlanPath, "plan", options, {
     stage: "writing_plan",
@@ -9189,9 +9351,9 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir();
   const candidates = [
-    path3.resolve(bundleDir, "..", "resources", "writing"),
-    path3.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    path3.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    path4.resolve(bundleDir, "..", "resources", "writing"),
+    path4.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    path4.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
@@ -9203,7 +9365,7 @@ async function loadProductionWritingResources(rootDir) {
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText2(path3.join(candidate, relativePath));
+        const text = await readOptionalText2(path4.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -9242,9 +9404,9 @@ async function loadProductionWritingResources(rootDir) {
 async function writeProductionWritingResourceArtifacts(projectRoot, paths, state, options = {}) {
   invalidateWritingResourcesCache();
   const resources = await loadProductionWritingResources(projectRoot);
-  const resourceDir = path3.join(paths.styleDir, "production-resources");
-  await fs2.mkdir(resourceDir, { recursive: true });
-  const guidePath = path3.join(resourceDir, "production-writing-assets.md");
+  const resourceDir = path4.join(paths.styleDir, "production-resources");
+  await fs3.mkdir(resourceDir, { recursive: true });
+  const guidePath = path4.join(resourceDir, "production-writing-assets.md");
   const genre = inferGenreProfile(state);
   const content = [
     "# Production Writing Resources",
@@ -9270,7 +9432,7 @@ async function writeProductionWritingResourceArtifacts(projectRoot, paths, state
     ensureMarkdownSection("Style Controller Guide", resources.styleControllerGuide || "Production style controller guide not found."),
     ensureMarkdownSection("Consistency Guide", resources.consistencyGuide || "Production consistency guide not found.")
   ].join("\n");
-  await fs2.writeFile(guidePath, content);
+  await fs3.writeFile(guidePath, content);
   if (options.factoryRootDir && options.projectId) {
     await withFactoryDb(options.factoryRootDir, async (db) => {
       db.recordArtifact({
@@ -10855,7 +11017,7 @@ async function loadAndPruneGlobalContext(params) {
   let previousDraftFragment = "";
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
   if (paths && previousChapterId) {
-    const previousFinalDraft = await readOptionalText2(path3.join(paths.chaptersDir, `${previousChapterId}.final.md`));
+    const previousFinalDraft = await readOptionalText2(path4.join(paths.chaptersDir, `${previousChapterId}.final.md`));
     if (previousFinalDraft) {
       previousDraftFragment = previousFinalDraft.slice(-1200);
     }
@@ -10883,7 +11045,7 @@ async function loadAndPruneGlobalContext(params) {
   });
   let rawMemory = "";
   if (paths && previousChapterId) {
-    rawMemory = await readOptionalText2(path3.join(paths.memoryDir, `${previousChapterId}-memory.md`));
+    rawMemory = await readOptionalText2(path4.join(paths.memoryDir, `${previousChapterId}-memory.md`));
   }
   const recalledMemory = await retrieveFactoryMemoryContext({
     state,
@@ -11394,17 +11556,17 @@ function formatChapterContextPackage(input) {
 }
 async function writeChapterContextPackage(input) {
   const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
-  const checkpointsRoot = path3.join(input.paths.workspaceDir, "checkpoints");
-  const contextDir = path3.join(checkpointsRoot, "chapter-contexts");
-  const contextPath = path3.join(contextDir, `${chapterId}-context.md`);
-  const activeWorldSliceDir = path3.join(checkpointsRoot, "active-world-slices");
-  const activeWorldSlicePath = path3.join(activeWorldSliceDir, `${chapterId}-world-slice.md`);
-  await fs2.mkdir(contextDir, { recursive: true });
-  await fs2.mkdir(activeWorldSliceDir, { recursive: true });
+  const checkpointsRoot = path4.join(input.paths.workspaceDir, "checkpoints");
+  const contextDir = path4.join(checkpointsRoot, "chapter-contexts");
+  const contextPath = path4.join(contextDir, `${chapterId}-context.md`);
+  const activeWorldSliceDir = path4.join(checkpointsRoot, "active-world-slices");
+  const activeWorldSlicePath = path4.join(activeWorldSliceDir, `${chapterId}-world-slice.md`);
+  await fs3.mkdir(contextDir, { recursive: true });
+  await fs3.mkdir(activeWorldSliceDir, { recursive: true });
   const content = formatChapterContextPackage(input);
-  await fs2.writeFile(contextPath, `${content.trimEnd()}
+  await fs3.writeFile(contextPath, `${content.trimEnd()}
 `);
-  await fs2.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}
+  await fs3.writeFile(activeWorldSlicePath, `${input.prunedContext.activeWorldSlice.trimEnd()}
 `);
   const relativePath = relativeArtifactPath(input.projectRoot, contextPath);
   const segmentationSource = input.segmentPlan.some((segment) => segment.source === "scene_card") ? "scene_card" : "timeline";
@@ -11593,7 +11755,7 @@ async function writeDraftSegmentSubArtifacts(input) {
   ];
   const written = [];
   for (const brief of briefs) {
-    const briefPath = path3.join(input.segmentDir, brief.filename);
+    const briefPath = path4.join(input.segmentDir, brief.filename);
     const content = formatSegmentBriefArtifact({
       title: brief.title,
       kind: brief.kind,
@@ -11604,7 +11766,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       executionPrompt: brief.executionPrompt,
       generatedBody: brief.body
     });
-    await fs2.writeFile(briefPath, `${content.trimEnd()}
+    await fs3.writeFile(briefPath, `${content.trimEnd()}
 `);
     const relativePath = relativeArtifactPath(input.projectRoot, briefPath);
     await recordPipelineArtifact(input.projectRoot, briefPath, "checkpoint", input.options, {
@@ -11622,7 +11784,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       relativePath,
       chars: content.length
     });
-    const materialPath = path3.join(input.segmentDir, brief.materialFilename);
+    const materialPath = path4.join(input.segmentDir, brief.materialFilename);
     const override = input.materialOverrides?.[brief.kind]?.trim();
     const materialContent = override ? [
       `# ${brief.title.replace("Brief", "Material")}`,
@@ -11645,7 +11807,7 @@ async function writeDraftSegmentSubArtifacts(input) {
       task: input.task,
       generatedBody: input.generatedBody
     });
-    await fs2.writeFile(materialPath, `${materialContent.trimEnd()}
+    await fs3.writeFile(materialPath, `${materialContent.trimEnd()}
 `);
     const materialRelativePath = relativeArtifactPath(input.projectRoot, materialPath);
     await recordPipelineArtifact(input.projectRoot, materialPath, "checkpoint", input.options, {
@@ -11970,7 +12132,7 @@ function isUsableDraftAssemblyBody(text = "", fallbackBody = "") {
   return true;
 }
 async function writeDraftSegmentManifest(input) {
-  const manifestPath = path3.join(input.segmentDir, "segment-manifest.json");
+  const manifestPath = path4.join(input.segmentDir, "segment-manifest.json");
   const byKind = input.subArtifacts.reduce((acc, artifact) => {
     const current = acc[artifact.kind] || {};
     current[artifact.role] = artifact.relativePath;
@@ -12019,7 +12181,7 @@ async function writeDraftSegmentManifest(input) {
       }
     }
   };
-  await fs2.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
+  await fs3.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
 `);
   const relativePath = relativeArtifactPath(input.projectRoot, manifestPath);
   await recordPipelineArtifact(input.projectRoot, manifestPath, "checkpoint", input.options, {
@@ -12036,10 +12198,10 @@ async function writeDraftSegmentManifest(input) {
 async function writeDraftSegmentArtifact(input) {
   const chapterId = `chapter-${String(input.task.chapterNumber).padStart(3, "0")}`;
   const segmentId = `segment-${String(input.segment.index).padStart(2, "0")}`;
-  const segmentsRoot = path3.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId);
-  const segmentDir = path3.join(segmentsRoot, segmentId);
-  const segmentPath = path3.join(segmentDir, `${segmentId}.md`);
-  await fs2.mkdir(segmentDir, { recursive: true });
+  const segmentsRoot = path4.join(input.paths.workspaceDir, "checkpoints", "chapter-segments", chapterId);
+  const segmentDir = path4.join(segmentsRoot, segmentId);
+  const segmentPath = path4.join(segmentDir, `${segmentId}.md`);
+  await fs3.mkdir(segmentDir, { recursive: true });
   const sceneCardLines = input.segment.sceneCard ? [
     "## Scene Card",
     `- Index: ${input.segment.sceneCard.index}`,
@@ -12089,7 +12251,7 @@ ${input.previousSegmentTail}
     "## Generated Body",
     input.content.trim()
   ].filter((line) => line !== void 0).join("\n");
-  await fs2.writeFile(segmentPath, `${content.trimEnd()}
+  await fs3.writeFile(segmentPath, `${content.trimEnd()}
 `);
   const subArtifacts = await writeDraftSegmentSubArtifacts({
     projectRoot: input.projectRoot,
@@ -13935,8 +14097,8 @@ async function writeProductionMasterOutline(projectRoot, paths, state, context, 
   await blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, state, context, options);
   const { resources } = await writeProductionWritingResourceArtifacts(projectRoot, paths, state, options);
   const content = await createMasterOutlineContent(state, context, resources, options);
-  await fs2.mkdir(paths.plansDir, { recursive: true });
-  await fs2.writeFile(paths.masterOutlinePath, `${content}
+  await fs3.mkdir(paths.plansDir, { recursive: true });
+  await fs3.writeFile(paths.masterOutlinePath, `${content}
 `);
   await recordPipelineArtifact(projectRoot, paths.masterOutlinePath, "plan", options, {
     stage: "master_planning",
@@ -13959,8 +14121,8 @@ async function blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, s
     context.consensus
   ].filter(Boolean).join("\n")) || lockedProtagonistFromState(state, context.protagonist);
   if (sourceProtagonist) return;
-  await fs2.mkdir(paths.plansDir, { recursive: true });
-  const briefPath = path3.join(paths.plansDir, "master-planning-protagonist-brief.md");
+  await fs3.mkdir(paths.plansDir, { recursive: true });
+  const briefPath = path4.join(paths.plansDir, "master-planning-protagonist-brief.md");
   const briefArtifactPath = relativeArtifactPath(projectRoot, briefPath);
   const reason = "planning protagonist missing: source context does not declare a concrete protagonist";
   const profileExcerpt = sanitizeMasterOutlineCharacterProfile(context.protagonist || "").split(/\r?\n/u).slice(0, 18).join("\n");
@@ -14000,7 +14162,7 @@ async function blockMasterPlanningWithoutSourceProtagonist(projectRoot, paths, s
     "",
     "\u8BF7\u5148\u51BB\u7ED3\u4E3B\u89D2\u8D44\u6599\uFF1A\u4E3B\u89D2\u59D3\u540D\u662F\u300C___\u300D\uFF0C\u8EAB\u4EFD\u662F\u300C___\u300D\uFF0C\u6838\u5FC3\u6B32\u671B\u662F\u300C___\u300D\uFF0C\u4F24\u53E3/\u6050\u60E7\u662F\u300C___\u300D\uFF0C\u884C\u4E3A\u4E60\u60EF\u662F\u300C___\u300D\uFF0C\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C___\u300D\uFF0C\u4E0E\u300C___\u300D\u7684\u5173\u7CFB\u538B\u529B\u662F\u300C___\u300D\u3002"
   ].join("\n");
-  await fs2.writeFile(briefPath, `${brief}
+  await fs3.writeFile(briefPath, `${brief}
 `);
   await recordPipelineArtifact(projectRoot, briefPath, "plan", options, {
     stage: "master_planning_blocked",
@@ -14044,9 +14206,9 @@ async function blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, 
   if (!masterOutline.trim()) return;
   const planningCast = extractPlanningCastContract(masterOutline);
   if (planningCast.protagonistName) return;
-  await fs2.mkdir(paths.plansDir, { recursive: true });
+  await fs3.mkdir(paths.plansDir, { recursive: true });
   const masterOutlineArtifactPath = relativeArtifactPath(projectRoot, paths.masterOutlinePath);
-  const namingBriefPath = path3.join(paths.plansDir, "protagonist-naming-brief.md");
+  const namingBriefPath = path4.join(paths.plansDir, "protagonist-naming-brief.md");
   const namingBriefArtifactPath = relativeArtifactPath(projectRoot, namingBriefPath);
   const reason = "planning protagonist missing: master outline does not declare a concrete protagonist";
   const namingBrief = [
@@ -14082,7 +14244,7 @@ async function blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, 
     "",
     "\u8BF7\u628A\u4E3B\u89D2\u59D3\u540D\u51BB\u7ED3\u4E3A\u300C___\u300D\uFF0C\u8EAB\u4EFD\u662F\u300C___\u300D\uFF0C\u6838\u5FC3\u6B32\u671B\u662F\u300C___\u300D\uFF0C\u4F24\u53E3/\u6050\u60E7\u662F\u300C___\u300D\uFF0C\u884C\u4E3A\u4E60\u60EF\u662F\u300C___\u300D\uFF0C\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C___\u300D\uFF0C\u5E76\u8BF4\u660E\u4ED6/\u5979\u4E0E\u5DF2\u51FA\u73B0\u914D\u89D2\u7684\u5173\u7CFB\u538B\u529B\u3002"
   ].join("\n");
-  await fs2.writeFile(namingBriefPath, `${namingBrief}
+  await fs3.writeFile(namingBriefPath, `${namingBrief}
 `);
   await recordPipelineArtifact(projectRoot, namingBriefPath, "plan", options, {
     stage: "story_foundation_blocked",
@@ -14137,11 +14299,11 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
   const masterOutline = await readOptionalText2(paths.masterOutlinePath);
   await blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, masterOutline, options);
   const assets = createProductionStoryBibleAssets(state, context, resources, { masterOutline });
-  await fs2.mkdir(paths.plansDir, { recursive: true });
+  await fs3.mkdir(paths.plansDir, { recursive: true });
   const written = [];
   for (const asset of assets) {
-    const assetPath = path3.join(paths.plansDir, asset.filename);
-    await fs2.writeFile(assetPath, `${asset.content}
+    const assetPath = path4.join(paths.plansDir, asset.filename);
+    await fs3.writeFile(assetPath, `${asset.content}
 `);
     await recordPipelineArtifact(projectRoot, assetPath, "plan", options, {
       stage: asset.stage,
@@ -14157,12 +14319,12 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
     role: "Showrunner",
     status: "completed",
     message: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\u5DF2\u4FDD\u5B58\u3002",
-    artifactPath: relativeArtifactPath(projectRoot, path3.join(paths.plansDir, "story-bible.md")),
+    artifactPath: relativeArtifactPath(projectRoot, path4.join(paths.plansDir, "story-bible.md")),
     artifactLabel: "story-bible.md",
     artifactKind: "plan",
     artifacts: written.map((artifactPath) => ({
       path: relativeArtifactPath(projectRoot, artifactPath),
-      label: path3.basename(artifactPath),
+      label: path4.basename(artifactPath),
       kind: "plan",
       status: "completed"
     })),
@@ -14172,7 +14334,7 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
       kind: "artifact_saved",
       stage: "story_foundation",
       summary: "Story foundation asset bundle saved.",
-      expandableArtifactPath: relativeArtifactPath(projectRoot, path3.join(paths.plansDir, "story-bible.md"))
+      expandableArtifactPath: relativeArtifactPath(projectRoot, path4.join(paths.plansDir, "story-bible.md"))
     }
   });
   return written;
@@ -14181,7 +14343,7 @@ async function ensureProductionStoryBibleAssets(projectRoot, paths, state, conte
   const required = [...PRODUCTION_STORY_ASSET_FILES, "writing-plan.json"];
   const missing = [];
   for (const filename of required) {
-    const content = await readOptionalText2(path3.join(paths.plansDir, filename));
+    const content = await readOptionalText2(path4.join(paths.plansDir, filename));
     if (!content.trim()) missing.push(filename);
   }
   if (missing.length === 0) return [];
@@ -14197,7 +14359,7 @@ async function ensureProductionStoryBibleAssets(projectRoot, paths, state, conte
 }
 async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  await fs2.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+  await fs3.mkdir(paths.chapterBlueprintsDir, { recursive: true });
   const written = [];
   for (const task of state.plan.chapterTasks) {
     const storyAssetContext = await loadProductionStoryAssetContext(paths, task);
@@ -14235,8 +14397,8 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = path3.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
-    await fs2.writeFile(blueprintPath, `${content}
+    const blueprintPath = path4.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    await fs3.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -14272,9 +14434,9 @@ async function prepareChapterProductionInputs(projectRoot, paths, state, task, o
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText2(path3.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText2(path3.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = path3.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText2(path4.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText2(path4.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = path4.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
     consensus: await readOptionalText2(paths.consensusPath),
     protagonist: protagonistProfile,
@@ -14296,8 +14458,8 @@ async function prepareChapterProductionInputs(projectRoot, paths, state, task, o
       previousFinalDraft
     });
     blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext);
-    await fs2.mkdir(paths.chapterBlueprintsDir, { recursive: true });
-    await fs2.writeFile(blueprintPath, `${blueprint}
+    await fs3.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+    await fs3.writeFile(blueprintPath, `${blueprint}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -14532,43 +14694,43 @@ async function commitChapterProductionStage(projectRoot, paths, state, task, pre
     formatFinalQualityGateReport(finalGate)
   ].join("\n\n");
   throwIfPipelineAborted(options);
-  const draftPath = path3.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = path3.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = path3.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = path3.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = path3.join(paths.memoryDir, `${chapterId}-memory.md`);
-  const characterRelationshipsPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relationships.json") : "";
-  const characterRelationsMarkdownPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relations.md") : "";
+  const draftPath = path4.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = path4.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = path4.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = path4.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = path4.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const characterRelationshipsPath = paths.characterDossiersPath ? path4.join(path4.dirname(paths.characterDossiersPath), "relationships.json") : "";
+  const characterRelationsMarkdownPath = paths.characterDossiersPath ? path4.join(path4.dirname(paths.characterDossiersPath), "relations.md") : "";
   const characterRelationshipGraph = updatedCharacterDossiers.length ? createCharacterRelationshipGraph(updatedCharacterDossiers) : null;
-  await fs2.mkdir(paths.chaptersDir, { recursive: true });
-  await fs2.mkdir(paths.reportsDir, { recursive: true });
-  await fs2.mkdir(paths.memoryDir, { recursive: true });
-  await fs2.writeFile(draftPath, `${draft}
+  await fs3.mkdir(paths.chaptersDir, { recursive: true });
+  await fs3.mkdir(paths.reportsDir, { recursive: true });
+  await fs3.mkdir(paths.memoryDir, { recursive: true });
+  await fs3.writeFile(draftPath, `${draft}
 `);
-  await fs2.writeFile(reportPath, `${reportWithAigcDetection}
+  await fs3.writeFile(reportPath, `${reportWithAigcDetection}
 `);
-  await fs2.writeFile(reviewedPath, `${draft}
+  await fs3.writeFile(reviewedPath, `${draft}
 
 ---
 
 ${reportWithAigcDetection}
 `);
-  await fs2.writeFile(finalPath, `${finalDraft}
+  await fs3.writeFile(finalPath, `${finalDraft}
 `);
-  await fs2.writeFile(memoryPath, `${memoryUpdate}
+  await fs3.writeFile(memoryPath, `${memoryUpdate}
 `);
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
   }
   if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
-    await fs2.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+    await fs3.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
 `);
   }
   if (characterRelationshipsPath && characterRelationshipGraph) {
     await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph);
   }
   if (characterRelationsMarkdownPath && characterRelationshipGraph) {
-    await fs2.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
+    await fs3.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
 `);
   }
   const versionManifestPath = await writeChapterVersionManifest({
@@ -14723,9 +14885,9 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
   const characterDossiers = await readCharacterDossiers(paths.characterDossiersPath);
   const chapterId = `chapter-${String(task.chapterNumber).padStart(3, "0")}`;
   const previousChapterId = task.chapterNumber > 1 ? `chapter-${String(task.chapterNumber - 1).padStart(3, "0")}` : "";
-  const previousMemory = previousChapterId ? await readOptionalText2(path3.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
-  const previousFinalDraft = previousChapterId ? await readOptionalText2(path3.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
-  const blueprintPath = path3.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
+  const previousMemory = previousChapterId ? await readOptionalText2(path4.join(paths.memoryDir, `${previousChapterId}-memory.md`)) : "";
+  const previousFinalDraft = previousChapterId ? await readOptionalText2(path4.join(paths.chaptersDir, `${previousChapterId}.final.md`)) : "";
+  const blueprintPath = path4.join(paths.chapterBlueprintsDir, `${chapterId}.md`);
   const context = {
     consensus: await readOptionalText2(paths.consensusPath),
     protagonist: protagonistProfile,
@@ -14755,8 +14917,8 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
       previousFinalDraft
     });
     blueprint = createDetailedChapterBlueprint(state, task, context, resources, planningContract, storyAssetContext);
-    await fs2.mkdir(paths.chapterBlueprintsDir, { recursive: true });
-    await fs2.writeFile(blueprintPath, `${blueprint}
+    await fs3.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+    await fs3.writeFile(blueprintPath, `${blueprint}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -15033,43 +15195,43 @@ async function runChapterProductionPipeline(projectRoot, paths, state, task, opt
     formatFinalQualityGateReport(finalGate)
   ].join("\n\n");
   throwIfPipelineAborted(options);
-  const draftPath = path3.join(paths.chaptersDir, `${chapterId}.draft.md`);
-  const reviewedPath = path3.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
-  const finalPath = path3.join(paths.chaptersDir, `${chapterId}.final.md`);
-  const reportPath = path3.join(paths.reportsDir, `${chapterId}-quality.md`);
-  const memoryPath = path3.join(paths.memoryDir, `${chapterId}-memory.md`);
-  const characterRelationshipsPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relationships.json") : "";
-  const characterRelationsMarkdownPath = paths.characterDossiersPath ? path3.join(path3.dirname(paths.characterDossiersPath), "relations.md") : "";
+  const draftPath = path4.join(paths.chaptersDir, `${chapterId}.draft.md`);
+  const reviewedPath = path4.join(paths.chaptersDir, `${chapterId}.reviewed.md`);
+  const finalPath = path4.join(paths.chaptersDir, `${chapterId}.final.md`);
+  const reportPath = path4.join(paths.reportsDir, `${chapterId}-quality.md`);
+  const memoryPath = path4.join(paths.memoryDir, `${chapterId}-memory.md`);
+  const characterRelationshipsPath = paths.characterDossiersPath ? path4.join(path4.dirname(paths.characterDossiersPath), "relationships.json") : "";
+  const characterRelationsMarkdownPath = paths.characterDossiersPath ? path4.join(path4.dirname(paths.characterDossiersPath), "relations.md") : "";
   const characterRelationshipGraph = updatedCharacterDossiers.length ? createCharacterRelationshipGraph(updatedCharacterDossiers) : null;
-  await fs2.mkdir(paths.chaptersDir, { recursive: true });
-  await fs2.mkdir(paths.reportsDir, { recursive: true });
-  await fs2.mkdir(paths.memoryDir, { recursive: true });
-  await fs2.writeFile(draftPath, `${draft}
+  await fs3.mkdir(paths.chaptersDir, { recursive: true });
+  await fs3.mkdir(paths.reportsDir, { recursive: true });
+  await fs3.mkdir(paths.memoryDir, { recursive: true });
+  await fs3.writeFile(draftPath, `${draft}
 `);
-  await fs2.writeFile(reportPath, `${reportWithAigcDetection}
+  await fs3.writeFile(reportPath, `${reportWithAigcDetection}
 `);
-  await fs2.writeFile(reviewedPath, `${draft}
+  await fs3.writeFile(reviewedPath, `${draft}
 
 ---
 
 ${reportWithAigcDetection}
 `);
-  await fs2.writeFile(finalPath, `${finalDraft}
+  await fs3.writeFile(finalPath, `${finalDraft}
 `);
-  await fs2.writeFile(memoryPath, `${memoryUpdate}
+  await fs3.writeFile(memoryPath, `${memoryUpdate}
 `);
   if (paths.characterDossiersPath && updatedCharacterDossiers.length) {
     await writeJsonFileAtomic(paths.characterDossiersPath, updatedCharacterDossiers);
   }
   if (paths.characterDossiersMarkdownPath && updatedCharacterDossiers.length) {
-    await fs2.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
+    await fs3.writeFile(paths.characterDossiersMarkdownPath, `${formatCharacterDossiersMarkdown(updatedCharacterDossiers)}
 `);
   }
   if (characterRelationshipsPath && characterRelationshipGraph) {
     await writeJsonFileAtomic(characterRelationshipsPath, characterRelationshipGraph);
   }
   if (characterRelationsMarkdownPath && characterRelationshipGraph) {
-    await fs2.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
+    await fs3.writeFile(characterRelationsMarkdownPath, `${formatCharacterRelationshipGraphMarkdown(characterRelationshipGraph)}
 `);
   }
   const versionManifestPath = await writeChapterVersionManifest({

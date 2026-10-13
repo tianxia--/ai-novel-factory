@@ -940,6 +940,12 @@ async function runAutopilotBackground(
     }
   }
 
+  const initialState = await loadAutonomousState(projectRoot).catch(() => null)
+  if (initialState && isWaitingForSettingReviewApproval(initialState)) {
+    await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner)
+    return
+  }
+
   await markAutopilot(projectRoot, {
     running: true,
     stopRequested: false,
@@ -1008,6 +1014,10 @@ async function runAutopilotBackground(
       }
       const currentLoopCount = beforeDiscussion.runtime.autopilot?.loopCount || 0
       if (await markAutopilotRecoveryBlocked(rootDir, projectRoot, projectId, jobId, leaseOwner, beforeDiscussion)) {
+        break
+      }
+      if (isWaitingForSettingReviewApproval(beforeDiscussion)) {
+        await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner)
         break
       }
       if (await backoffIfActiveWritingMessage(rootDir, projectRoot, projectId, beforeDiscussion, signal)) {
@@ -1707,15 +1717,14 @@ export async function restoreAutopilotJobs(rootDir: string, createSnapshot: Auto
     const autopilot = state?.runtime?.autopilot || null
     const payload = typeof job.payload === "object" && job.payload ? job.payload as Record<string, unknown> : {}
     const message = typeof payload.message === "string" ? payload.message : ""
-    const hasWakeupSignal = isGenericAutopilotMessage(message)
     const settingReviewApprovalPaused = Boolean(
       state
       && (
         state.runtime.autopilot?.lastStep === "setting_review_waiting_for_approval"
         || isWaitingForSettingReviewApproval(state)
       )
-      && !hasWakeupSignal
     )
+    const hasWakeupSignal = isGenericAutopilotMessage(message) && !settingReviewApprovalPaused
 
     const manuallyPaused = Boolean(
       autopilot

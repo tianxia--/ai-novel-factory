@@ -57,7 +57,7 @@ interface LlmProviderConfig {
         chapterWordMinimum: number;
     };
 }
-type LlmApiMode = "chat" | "responses";
+type LlmApiMode = "chat" | "responses" | "codex-cli";
 declare function loadLlmConfigFromEnv(rootDir?: string): LlmProviderConfig;
 interface ActiveLlmConfig extends LlmProviderConfig {
     _dbApiKey?: string;

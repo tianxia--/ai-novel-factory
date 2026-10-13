@@ -349,7 +349,10 @@ import fs from "fs/promises";
 import path from "path";
 var chapterConsistencyCache = /* @__PURE__ */ new Map();
 function normalizeLlmApiMode(value) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
+  const normalized = String(value || "chat").trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
 }
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";

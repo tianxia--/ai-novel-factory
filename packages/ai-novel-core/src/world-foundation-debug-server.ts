@@ -374,6 +374,13 @@ function isDebugTextModel(modelName: unknown) {
   return !/(?:^|[-_.:])(image|video|audio|embedding)(?:[-_.:]|$)/iu.test(String(modelName || "").trim())
 }
 
+function normalizeDebugLlmApiMode(value: unknown) {
+  const normalized = String(value || "chat").trim().toLowerCase()
+  if (normalized === "responses") return "responses"
+  if (normalized === "codex-cli") return "codex-cli"
+  return "chat"
+}
+
 async function listDebugTextModels() {
   return withFactoryDb(rootDir, async (db) => {
     const textRoute = db.listLlmConfigRoutes().find((route) => route.capability === "text")
@@ -384,7 +391,7 @@ async function listDebugTextModels() {
         name: String(row.name || row.model_name),
         baseUrl: String(row.base_url),
         modelName: String(row.model_name),
-        apiMode: String(row.api_mode || "chat") === "responses" ? "responses" : "chat",
+        apiMode: normalizeDebugLlmApiMode(row.api_mode),
         timeoutMs: Number(row.timeout_ms) || 120000,
         isGlobalTextRoute: String(textRoute?.config_id || "") === String(row.id),
       }))
@@ -407,7 +414,7 @@ async function loadDebugLlmConfig(run: DebugRun): Promise<DebugLlmConfig | null>
       baseUrl: String(row.base_url),
       apiKeyEnv: "DB_DEBUG_CONFIG",
       modelName: String(row.model_name),
-      apiMode: String(row.api_mode || "chat") === "responses" ? "responses" : "chat",
+      apiMode: normalizeDebugLlmApiMode(row.api_mode),
       timeoutMs: Number(row.timeout_ms) || 120000,
       temperature: Number(row.temperature) || 0.1,
       reactMaxSteps: 25,

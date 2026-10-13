@@ -2,7 +2,7 @@ import "./chunk-SDIPDDNZ.js";
 import {
   deriveProjectRuntimeState,
   routeUserMessage
-} from "./chunk-ZEQLUYVF.js";
+} from "./chunk-MCPKQHMF.js";
 import {
   ensureAutopilotJob,
   executeManualAdvanceCommand,
@@ -14,11 +14,11 @@ import {
   restoreAutopilotJobs,
   scheduleAutopilotRestore,
   stopAutopilotJob
-} from "./chunk-V3D5DMJQ.js";
-import "./chunk-VOQWLW5S.js";
+} from "./chunk-SYHKX5PP.js";
+import "./chunk-EQE2YYQ4.js";
 import {
   runMultiAgentDiscussion
-} from "./chunk-UQOLHNQ4.js";
+} from "./chunk-TAJFQUYO.js";
 import {
   buildSuperGraphIndex,
   createManagedAutonomousProject,
@@ -35,7 +35,7 @@ import {
   syncCurrentContextPacketFile,
   syncManagedProjectState,
   validateSuperGraph
-} from "./chunk-QL554L2D.js";
+} from "./chunk-TCUIONV5.js";
 import {
   acceptStyleEvolutionCandidate,
   appendStyleEvolutionCandidate,
@@ -77,23 +77,23 @@ import {
   writeAllDetailedChapterBlueprints,
   writeProductionMasterOutline,
   writeProductionStoryBibleAssets
-} from "./chunk-ROO5DEKO.js";
-import "./chunk-ZWH2XUVC.js";
+} from "./chunk-RONTFH57.js";
+import "./chunk-CCGWT4D7.js";
 import {
   detectAigcSegments,
   detectAigcText,
   getAigcDetectorConfig
-} from "./chunk-5Z26A3S7.js";
-import "./chunk-DETBSEC6.js";
+} from "./chunk-MOILZS2E.js";
+import "./chunk-7YOH46DX.js";
 import {
   evaluateKnowledgeBenchmark,
   retrieveKnowledge
-} from "./chunk-YV6Y5W7F.js";
-import "./chunk-YFTWM6FA.js";
+} from "./chunk-U2MJEJYM.js";
+import "./chunk-LC7E6N2W.js";
 import {
   makeRunId,
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 import {
   createStatusMessage,
   createToolMessage,
@@ -248,7 +248,10 @@ function redactLlmRoutes(routes) {
   }));
 }
 function normalizeLlmApiMode(value) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
+  const normalized = String(value || "chat").trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
 }
 async function loadStyleEvolutionLlmConfig(rootDir) {
   return await loadLlmConfigForCapability(rootDir, "style_evolution") || await loadLlmConfigForCapability(rootDir, "text");
@@ -4070,6 +4073,13 @@ function createAutopilotKickoffMessage(state) {
     "\u4E0D\u8981\u5411\u6211\u63D0\u95EE\u9009\u9879\uFF0C\u7F3A\u5931\u4FE1\u606F\u8BF7\u81EA\u884C\u5EFA\u7ACB\u9AD8\u8D28\u91CF\u5DE5\u4F5C\u5047\u8BBE\uFF0C\u5E76\u7ED9\u51FA\u7EDF\u4E00\u7ED3\u8BBA\u3002"
   ].join("");
 }
+function isSettingReviewWaitingForApprovalState(state) {
+  if (state?.runtime?.stage !== "setting_review") return false;
+  const lastAction = String(state.runtime.lastAction || "");
+  const statusMessage = String(state.runtime.statusMessage || "");
+  const lastStep = String(state.runtime.autopilot?.lastStep || "");
+  return lastAction === "setting_review_waiting_for_approval" || lastStep === "setting_review_waiting_for_approval" || /waiting for explicit user approval|等待.*(?:用户)?(?:审批|审阅|确认|批准)|请先确认设定/iu.test(statusMessage);
+}
 async function enqueueKnowledgeReindexJobs(rootDir, projectId, scope = "all", options = {}) {
   return withFactoryDb(rootDir, async (db) => {
     const snapshot = db.getSnapshot(projectId);
@@ -4293,28 +4303,31 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     const apiKey = String(body.apiKey || "").trim();
     const modelName = String(body.modelName || "").trim();
     const apiMode = normalizeLlmApiMode(body.apiMode ?? body.api_mode);
+    const usesCodexCli = apiMode === "codex-cli";
     const temperature = typeof body.temperature === "number" ? body.temperature : 0.1;
     const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 12e4;
     const configId = typeof body.id === "string" ? body.id.trim() : null;
     const isConfiguredPlaceholder = apiKey === "[configured]";
-    if (!name || !baseUrl || !apiKey && !configId || !modelName) {
+    if (!name || !modelName || !usesCodexCli && (!baseUrl || !apiKey && !configId)) {
       return { status: 400, payload: { error: "missing_fields" } };
     }
+    const effectiveBaseUrl = usesCodexCli ? baseUrl || "codex-cli://local" : baseUrl;
+    const effectiveApiKey = usesCodexCli ? apiKey || "[codex-cli]" : apiKey;
     await withFactoryDb(rootDir, async (db) => {
       if (configId) {
         const currentConfig = db.listLlmConfigs().find((config) => config.id === configId);
         if (!currentConfig) {
           throw new Error("llm_config_not_found");
         }
-        const nextApiKey = isConfiguredPlaceholder && typeof currentConfig?.api_key === "string" ? currentConfig.api_key : apiKey;
+        const nextApiKey = usesCodexCli ? effectiveApiKey : isConfiguredPlaceholder && typeof currentConfig?.api_key === "string" ? currentConfig.api_key : effectiveApiKey;
         if (!nextApiKey) {
           throw new Error("missing_api_key");
         }
-        db.updateLlmConfig(configId, { name, baseUrl, apiKey: nextApiKey, modelName, apiMode, temperature, timeoutMs });
+        db.updateLlmConfig(configId, { name, baseUrl: effectiveBaseUrl, apiKey: nextApiKey, modelName, apiMode, temperature, timeoutMs });
       } else {
         const existingConfigs = db.listLlmConfigs();
         const hasActiveConfig = existingConfigs.some((config) => Number(config.is_active) === 1);
-        db.addLlmConfig({ name, baseUrl, apiKey, modelName, apiMode, temperature, timeoutMs, isActive: !hasActiveConfig });
+        db.addLlmConfig({ name, baseUrl: effectiveBaseUrl, apiKey: effectiveApiKey, modelName, apiMode, temperature, timeoutMs, isActive: !hasActiveConfig });
       }
     });
     await loadActiveLlmConfig(rootDir);
@@ -6850,6 +6863,29 @@ async function handleNovelStudioApi(rootDir, method, pathname, body = {}, option
     const latestState = await tryLoadState(context.projectRoot);
     if (!message && latestState) {
       message = createAutopilotKickoffMessage(latestState);
+    }
+    if (isSettingReviewWaitingForApprovalState(latestState)) {
+      const state2 = await markAutopilot(context.projectRoot, {
+        running: false,
+        stopRequested: false,
+        mode: "idle",
+        lastStep: "setting_review_waiting_for_approval",
+        target: null,
+        driftStatus: "ok",
+        driftReason: null,
+        statusMessage: "\u8BBE\u5B9A\u5BA1\u67E5\u5305\u5DF2\u751F\u6210\uFF0C\u81EA\u52A8\u521B\u4F5C\u5DF2\u6682\u505C\uFF1B\u8BF7\u5148\u786E\u8BA4\u8BBE\u5B9A\u540E\u518D\u8FDB\u5165\u4E3B\u7EBF\u89C4\u5212\u3002"
+      }, { factoryRootDir: rootDir, projectId: context.projectId });
+      return {
+        status: 200,
+        payload: {
+          success: false,
+          actionRequired: "setting_review_approval",
+          activeProjectId: context.projectId,
+          projects: context.projects,
+          ...await createWorkspacePayload(context.projectRoot, state2, { rootDir, projectId: context.projectId, syncState: true }),
+          envStatus: getPublicProjectEnvStatus2(rootDir)
+        }
+      };
     }
     let jobId = null;
     if (context.projectId) {

@@ -20,7 +20,7 @@ export interface LlmProviderConfig {
   }
 }
 
-export type LlmApiMode = "chat" | "responses"
+export type LlmApiMode = "chat" | "responses" | "codex-cli"
 
 function readNumber(value: string | undefined, fallback: number) {
   if (!value) {
@@ -32,7 +32,10 @@ function readNumber(value: string | undefined, fallback: number) {
 }
 
 function readApiMode(value: string | undefined): LlmApiMode {
-  return value?.trim().toLowerCase() === "responses" ? "responses" : "chat"
+  const normalized = value?.trim().toLowerCase()
+  if (normalized === "responses") return "responses"
+  if (normalized === "codex-cli") return "codex-cli"
+  return "chat"
 }
 
 export function loadLlmConfigFromEnv(rootDir = process.cwd()): LlmProviderConfig {

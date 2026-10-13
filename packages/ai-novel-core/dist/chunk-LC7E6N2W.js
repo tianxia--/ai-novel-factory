@@ -1,6 +1,6 @@
 import {
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 
 // src/embedding.ts
 var LOCAL_EMBEDDING_MODEL = "local-hash-v1";

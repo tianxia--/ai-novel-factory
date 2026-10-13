@@ -1,3 +1,7 @@
+import { spawn } from "node:child_process"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import { loadLlmConfigForCapability, loadActiveLlmConfig, type LlmApiMode } from "./llm-config"
 import { createAutopilotStopError } from "./abort"
 import type { ProviderTestResult } from "./cli-types"
@@ -458,6 +462,144 @@ function buildResponsesInput(messages: LlmTextMessage[]) {
   }))
 }
 
+function isCodexCliApiMode(apiMode: LlmApiMode | undefined) {
+  return apiMode === "codex-cli"
+}
+
+function requiresHttpProviderAuth(apiMode: LlmApiMode | undefined) {
+  return !isCodexCliApiMode(apiMode)
+}
+
+function buildCodexCliPrompt(messages: LlmTextMessage[]) {
+  const sections = [
+    "你正在作为 AI Novel Factory 的底层文本生成模型工作。",
+    "请把本次调用当成一次普通 LLM Completion：严格遵循 system/user 指令，只输出最终结果，不要解释你使用了 Codex，也不要添加额外寒暄。",
+    "如果用户要求 JSON，只输出合法 JSON，不要包裹 Markdown 代码块。",
+    "",
+  ]
+
+  for (const message of messages) {
+    sections.push(`<${message.role}>`, message.content.trim(), `</${message.role}>`, "")
+  }
+
+  return sections.join("\n").trim()
+}
+
+async function requestCodexCliCompletion(
+  options: LlmTextCompletionOptions,
+  messages: LlmTextMessage[],
+  requestStartTime: number,
+) {
+  const selectedTemperature = options.temperature ?? 0.1
+  const prompt = buildCodexCliPrompt(messages)
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-novel-codex-cli-"))
+  const outputPath = path.join(tempDir, "last-message.txt")
+
+  console.log(`[LLM CODEX CLI SEND] 准备调用本机 Codex CLI...`)
+  console.log(`- Model: ${options.modelName}`)
+  console.log(`- API Mode: ${options.apiMode}`)
+  console.log(`- Temperature: ${selectedTemperature}（Codex CLI 当前不支持从这里强制设置，仅记录）`)
+  console.log(`- Messages Count: ${messages.length}`)
+  console.log(`- Prompt Length: ${prompt.length} chars`)
+
+  try {
+    return await withTimeout(options.timeoutMs, async (signal, markActivity) => {
+      await options.onProviderActivity?.()
+      markActivity()
+
+      const args = [
+        "exec",
+        "--ephemeral",
+        "--ignore-rules",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-C",
+        tempDir,
+        "--model",
+        options.modelName,
+        "--output-last-message",
+        outputPath,
+        "-",
+      ]
+
+      const child = spawn("codex", args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: process.env,
+      })
+
+      let stdout = ""
+      let stderr = ""
+      let completed = false
+      let lastActivityAt = Date.now()
+      const abortChild = () => {
+        if (!completed && child.pid) {
+          child.kill("SIGTERM")
+          setTimeout(() => {
+            if (!completed && child.pid) child.kill("SIGKILL")
+          }, 2500).unref()
+        }
+      }
+      signal.addEventListener("abort", abortChild, { once: true })
+
+      const noteActivity = async () => {
+        const now = Date.now()
+        if (now - lastActivityAt < 250) return
+        lastActivityAt = now
+        markActivity()
+        await options.onProviderActivity?.()
+      }
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8")
+        void noteActivity()
+      })
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8")
+        void noteActivity()
+      })
+
+      const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        child.once("error", reject)
+        child.once("close", (code, childSignal) => resolve({ code, signal: childSignal }))
+      })
+
+      child.stdin.end(prompt)
+      const result = await exit.finally(() => {
+        completed = true
+        signal.removeEventListener("abort", abortChild)
+      })
+
+      if (signal.aborted) {
+        throw new Error("Codex CLI request aborted.")
+      }
+      if (result.code !== 0) {
+        const detail = (stderr || stdout || `exit signal ${result.signal || "unknown"}`).trim().slice(-2000)
+        throw new Error(`Codex CLI request failed with exit code ${result.code}: ${detail}`)
+      }
+
+      let content = ""
+      try {
+        content = (await fs.readFile(outputPath, "utf8")).trim()
+      } catch {
+        content = stdout.trim()
+      }
+
+      const totalTime = Date.now() - requestStartTime
+      console.log(`[LLM CODEX CLI END] Codex CLI 调用完成。总耗时: ${totalTime}ms，返回内容长度: ${content.length}`)
+      console.log(`\n========== [LLM RESPONSE START] ==========\n${content}\n========== [LLM RESPONSE END] ==========\n`)
+
+      if (options.stream && options.onDelta && content) {
+        await options.onDelta(content)
+      }
+
+      return content
+    }, options.signal)
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
 function extractResponsesOutput(payload: unknown) {
   if (!payload || typeof payload !== "object") {
     return ""
@@ -512,14 +654,19 @@ async function parseProviderError(response: Response) {
 }
 
 export async function requestLlmTextCompletion(options: LlmTextCompletionOptions) {
-  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions"
   const requestStartTime = Date.now()
-  const baseUrl = options.baseUrl.replace(/\/$/, "")
   const selectedTemperature = options.temperature ?? 0.1
   const messages = options.messages.filter((message) => message.content.trim())
   const system = getMessageContent(messages, "system")
   const user = getMessageContent(messages, "user")
   const effectiveStream = Boolean(options.stream)
+
+  if (isCodexCliApiMode(options.apiMode)) {
+    return requestCodexCliCompletion(options, messages, requestStartTime)
+  }
+
+  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions"
+  const baseUrl = options.baseUrl.replace(/\/$/, "")
 
   console.log(`[LLM REQUEST SEND] 准备向 API 发送 ${endpoint} 请求...`)
   console.log(`- BaseUrl: ${options.baseUrl}`)
@@ -613,10 +760,10 @@ export async function generateAgentReply(options: AgentReplyOptions) {
   }
 
   const override = options.providerOverride
+  const overrideApiMode = override?.apiMode
   const completeOverride = Boolean(
-    override?.baseUrl?.trim()
-    && override.apiKey?.trim()
-    && override.modelName?.trim(),
+    (isCodexCliApiMode(overrideApiMode) || (override?.baseUrl?.trim() && override.apiKey?.trim()))
+    && override?.modelName?.trim(),
   )
   const config = completeOverride ? null : await loadLlmConfigForCapability(options.envRootDir, "text")
   const baseUrl = override?.baseUrl?.trim() || config?.provider.baseUrl || ""
@@ -625,7 +772,7 @@ export async function generateAgentReply(options: AgentReplyOptions) {
   const apiMode = override?.apiMode || config?.provider.apiMode || "chat"
   const timeoutMs = Number(override?.timeoutMs) > 0 ? Number(override?.timeoutMs) : (config?.provider.timeoutMs || 120000)
 
-  if (!baseUrl || !apiKey || !modelName) {
+  if (!modelName || (requiresHttpProviderAuth(apiMode) && (!baseUrl || !apiKey))) {
     throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.")
   }
 
@@ -758,7 +905,7 @@ export async function testProviderConnectivity(
     }
   }
 
-  if (!baseUrl || !modelName || !apiKey) {
+  if (!modelName || (requiresHttpProviderAuth(apiMode) && (!baseUrl || !apiKey))) {
     return {
       ok: false,
       checkedAt,
@@ -766,6 +913,40 @@ export async function testProviderConnectivity(
       modelName,
       apiMode,
       message: "Missing provider config. Configure a model in settings first.",
+    }
+  }
+
+  if (isCodexCliApiMode(apiMode)) {
+    try {
+      const content = await requestLlmTextCompletion({
+        baseUrl: baseUrl || "codex-cli://local",
+        apiKey: apiKey || "[codex-cli]",
+        modelName,
+        apiMode,
+        timeoutMs,
+        maxTokens: 8,
+        messages: [{ role: "user", content: "请只回复：pong" }],
+      })
+      return {
+        ok: Boolean(content.trim()),
+        checkedAt,
+        baseUrl: baseUrl || "codex-cli://local",
+        modelName,
+        apiMode,
+        message: content.trim()
+          ? `Codex CLI reachable. 本机登录态可用，模型返回：${content.trim().slice(0, 40)}`
+          : "Codex CLI returned an empty response.",
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return {
+        ok: false,
+        checkedAt,
+        baseUrl: baseUrl || "codex-cli://local",
+        modelName,
+        apiMode,
+        message: `Codex CLI test failed: ${message}`,
+      }
     }
   }
 

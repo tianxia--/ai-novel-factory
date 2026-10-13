@@ -1,7 +1,7 @@
 import { F as FactoryOperationalStatus, K as KnowledgeScope, D as DiscussionTarget } from './factory-db-Db-lXjCB.js';
 import { P as ProductionReadinessSnapshot, a as ProductionGateIssue, b as ProductionReadinessItem, c as ProductionReadinessGroup } from './production-contracts-C1il9ao8.js';
 import { S as StyleEvolutionSnapshot, a as StyleLoopRuntimeIterationRecord, b as StyleEvolutionEvaluation, c as StyleEvolutionRefinement, d as StyleGenerationVerification, P as ProjectRuntimeState } from './production-style-evolution-C4LSl5F8.js';
-import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-Rvjshu2J.js';
+import { P as PublicProjectEnvStatus, L as LlmApiMode } from './llm-config-iK4g0Gg4.js';
 import { a as NovelProjectRecord, A as AutonomousNovelState, C as CreativeProfile, N as NovelStage, I as InterruptionReview, P as ProviderTestResult, b as AutopilotRuntime, c as ChapterTask, d as CharacterDossier, e as AssetStatus, T as TaskStatus } from './cli-types-3z9cP1VA.js';
 import { AigcDetectionResult, AigcBatchDetectionResult } from './aigc-detector.js';
 import http from 'node:http';
@@ -8956,6 +8956,290 @@ declare function handleNovelStudioApi(rootDir: string, method: string, pathname:
             }[];
         } | null;
         success: boolean;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        transcript?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    };
+} | {
+    status: number;
+    payload: {
+        envStatus: PublicProjectEnvStatus;
+        entries: {
+            key: string;
+            role: string;
+            content: string;
+        }[];
+        meta: {
+            totalEntries: number;
+            returnedEntries: number;
+            truncated: boolean;
+            transcriptBytes: number;
+        };
+        snapshotVersion: string;
+        transcript: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        success: boolean;
+        actionRequired: string;
+        activeProjectId: string;
+        projects: never[] | NovelProjectRecord[];
+        error?: undefined;
+        result?: undefined;
+        configs?: undefined;
+        routes?: undefined;
+        deletedProject?: undefined;
+        stoppedInProcess?: undefined;
+        ok?: undefined;
+        service?: undefined;
+        checkedAt?: undefined;
+        factory?: undefined;
+        projectId?: undefined;
+        kickoffQueued?: undefined;
+        autopilotJobId?: undefined;
+        autopilotQueued?: undefined;
+        styleEvolution?: undefined;
+        styleEvolutionAssets?: undefined;
+        status?: undefined;
+        reason?: undefined;
+        loopRun?: undefined;
+        modelRouting?: undefined;
+        generatedCandidate?: undefined;
+        loopIteration?: undefined;
+        freezePreview?: undefined;
+        styleFreezeApproval?: undefined;
+        notModified?: undefined;
+        chapterNumber?: undefined;
+        path?: undefined;
+        content?: undefined;
+        chapter?: undefined;
+        missingFields?: undefined;
+        requiredInput?: undefined;
+        artifactPath?: undefined;
+        message?: undefined;
+        settings?: undefined;
+        readerStats?: undefined;
+        blockedChapters?: undefined;
+    } | {
+        envStatus: PublicProjectEnvStatus;
+        snapshotVersion: string;
+        state: {
+            project: {
+                title: string;
+                idea: string;
+                createdAt: string;
+                workspaceVersion: number;
+                autoMode?: "full" | "semi";
+                creativeProfile?: CreativeProfile;
+            };
+            runtime: {
+                stage: NovelStage;
+                statusMessage: string;
+                lastUpdatedAt: string;
+                lastInterruption: InterruptionReview | null;
+                lastRoute?: string;
+                lastAction?: string;
+                lastProviderCheck?: ProviderTestResult | null;
+                autopilot?: AutopilotRuntime;
+            };
+            reactSetup: {
+                discussionGoals: string[];
+                unansweredQuestions: string[];
+            };
+            plan: {
+                totalChapters: number;
+                chapterWordTarget: number;
+                pendingChapters: number;
+                chapterTasks: ChapterTask[];
+            };
+            memory: {
+                characterDossiers: CharacterDossier[];
+            } | undefined;
+            assets: {
+                cover: {
+                    status: AssetStatus;
+                    briefPath: string;
+                    promptPath?: string;
+                    imagePath?: string;
+                    metadataPath?: string;
+                    generatedAt?: string;
+                    error?: string;
+                };
+                comic: {
+                    status: TaskStatus;
+                    planPath: string;
+                };
+            };
+        } | null;
+        projectRuntime: ProjectRuntimeState;
+        consensus: string;
+        contextPacket: string;
+        graphIndex: any;
+        graphViolations: any;
+        productionReadiness: ProductionReadinessSnapshot | {
+            status: "blocked";
+            canProceed: boolean;
+            blockedReason: string;
+            summary: string;
+            issues: (ProductionGateIssue | {
+                code: string;
+                severity: "critical";
+                message: string;
+                action: string;
+            })[];
+            score: number;
+            items: ProductionReadinessItem[];
+            groups: ProductionReadinessGroup[];
+        };
+        factorySnapshot: {
+            latestRuns: {
+                [x: string]: unknown;
+            }[];
+            latestEvents: {
+                [x: string]: unknown;
+            }[];
+            artifacts: {
+                [x: string]: unknown;
+            }[];
+            recentMemory: {
+                [x: string]: unknown;
+            }[];
+            checkpoints: {
+                [x: string]: unknown;
+            }[];
+            graphNodes: {
+                [x: string]: unknown;
+            }[];
+            graphEdges: {
+                [x: string]: unknown;
+            }[];
+        } | null;
+        success: boolean;
+        actionRequired: string;
         activeProjectId: string;
         projects: never[] | NovelProjectRecord[];
         error?: undefined;

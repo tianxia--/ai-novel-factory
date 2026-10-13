@@ -36,8 +36,8 @@ __export(production_planning_workflow_exports, {
 });
 module.exports = __toCommonJS(production_planning_workflow_exports);
 var import_node_crypto5 = require("crypto");
-var import_promises8 = __toESM(require("fs/promises"), 1);
-var import_node_path11 = __toESM(require("path"), 1);
+var import_promises9 = __toESM(require("fs/promises"), 1);
+var import_node_path12 = __toESM(require("path"), 1);
 var import_langgraph = require("@langchain/langgraph");
 
 // src/factory-langgraph-checkpointer.ts
@@ -397,7 +397,10 @@ function evaluateChapterConsistency(input) {
 // src/factory-db.ts
 var chapterConsistencyCache = /* @__PURE__ */ new Map();
 function normalizeLlmApiMode(value) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat";
+  const normalized = String(value || "chat").trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
 }
 var FACTORY_DB_DIR = ".ai-novel-factory";
 var FACTORY_DB_FILE = "factory.sqlite";
@@ -3517,16 +3520,19 @@ var FactoryLangGraphCheckpointer = class extends import_langgraph_checkpoint.Bas
 };
 
 // src/orchestrator.ts
-var import_promises7 = __toESM(require("fs/promises"), 1);
+var import_promises8 = __toESM(require("fs/promises"), 1);
 var import_node_crypto3 = require("crypto");
-var import_node_path10 = __toESM(require("path"), 1);
+var import_node_path11 = __toESM(require("path"), 1);
 var import_node_crypto4 = require("crypto");
 
 // src/llm-config.ts
 var import_node_fs2 = __toESM(require("fs"), 1);
 var import_node_path2 = __toESM(require("path"), 1);
 function readApiMode(value) {
-  return value?.trim().toLowerCase() === "responses" ? "responses" : "chat";
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "responses") return "responses";
+  if (normalized === "codex-cli") return "codex-cli";
+  return "chat";
 }
 var cachedActiveLlmConfig = null;
 function isWorkspaceRoot(dir) {
@@ -3607,6 +3613,12 @@ async function loadLlmConfigForCapability(rootDir = process.cwd(), capability = 
     return null;
   }
 }
+
+// src/runtime-llm.ts
+var import_node_child_process = require("child_process");
+var import_promises2 = __toESM(require("fs/promises"), 1);
+var import_node_os = __toESM(require("os"), 1);
+var import_node_path3 = __toESM(require("path"), 1);
 
 // src/abort.ts
 var AUTOPILOT_STOP_MESSAGE = "Autopilot stopped by user.";
@@ -3936,6 +3948,124 @@ function buildResponsesInput(messages) {
     content: message.content
   }));
 }
+function isCodexCliApiMode(apiMode) {
+  return apiMode === "codex-cli";
+}
+function requiresHttpProviderAuth(apiMode) {
+  return !isCodexCliApiMode(apiMode);
+}
+function buildCodexCliPrompt(messages) {
+  const sections = [
+    "\u4F60\u6B63\u5728\u4F5C\u4E3A AI Novel Factory \u7684\u5E95\u5C42\u6587\u672C\u751F\u6210\u6A21\u578B\u5DE5\u4F5C\u3002",
+    "\u8BF7\u628A\u672C\u6B21\u8C03\u7528\u5F53\u6210\u4E00\u6B21\u666E\u901A LLM Completion\uFF1A\u4E25\u683C\u9075\u5FAA system/user \u6307\u4EE4\uFF0C\u53EA\u8F93\u51FA\u6700\u7EC8\u7ED3\u679C\uFF0C\u4E0D\u8981\u89E3\u91CA\u4F60\u4F7F\u7528\u4E86 Codex\uFF0C\u4E5F\u4E0D\u8981\u6DFB\u52A0\u989D\u5916\u5BD2\u6684\u3002",
+    "\u5982\u679C\u7528\u6237\u8981\u6C42 JSON\uFF0C\u53EA\u8F93\u51FA\u5408\u6CD5 JSON\uFF0C\u4E0D\u8981\u5305\u88F9 Markdown \u4EE3\u7801\u5757\u3002",
+    ""
+  ];
+  for (const message of messages) {
+    sections.push(`<${message.role}>`, message.content.trim(), `</${message.role}>`, "");
+  }
+  return sections.join("\n").trim();
+}
+async function requestCodexCliCompletion(options, messages, requestStartTime) {
+  const selectedTemperature = options.temperature ?? 0.1;
+  const prompt = buildCodexCliPrompt(messages);
+  const tempDir = await import_promises2.default.mkdtemp(import_node_path3.default.join(import_node_os.default.tmpdir(), "ai-novel-codex-cli-"));
+  const outputPath = import_node_path3.default.join(tempDir, "last-message.txt");
+  console.log(`[LLM CODEX CLI SEND] \u51C6\u5907\u8C03\u7528\u672C\u673A Codex CLI...`);
+  console.log(`- Model: ${options.modelName}`);
+  console.log(`- API Mode: ${options.apiMode}`);
+  console.log(`- Temperature: ${selectedTemperature}\uFF08Codex CLI \u5F53\u524D\u4E0D\u652F\u6301\u4ECE\u8FD9\u91CC\u5F3A\u5236\u8BBE\u7F6E\uFF0C\u4EC5\u8BB0\u5F55\uFF09`);
+  console.log(`- Messages Count: ${messages.length}`);
+  console.log(`- Prompt Length: ${prompt.length} chars`);
+  try {
+    return await withTimeout(options.timeoutMs, async (signal, markActivity) => {
+      await options.onProviderActivity?.();
+      markActivity();
+      const args = [
+        "exec",
+        "--ephemeral",
+        "--ignore-rules",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-C",
+        tempDir,
+        "--model",
+        options.modelName,
+        "--output-last-message",
+        outputPath,
+        "-"
+      ];
+      const child = (0, import_node_child_process.spawn)("codex", args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: process.env
+      });
+      let stdout = "";
+      let stderr = "";
+      let completed = false;
+      let lastActivityAt = Date.now();
+      const abortChild = () => {
+        if (!completed && child.pid) {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (!completed && child.pid) child.kill("SIGKILL");
+          }, 2500).unref();
+        }
+      };
+      signal.addEventListener("abort", abortChild, { once: true });
+      const noteActivity = async () => {
+        const now = Date.now();
+        if (now - lastActivityAt < 250) return;
+        lastActivityAt = now;
+        markActivity();
+        await options.onProviderActivity?.();
+      };
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+        void noteActivity();
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+        void noteActivity();
+      });
+      const exit = new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, childSignal) => resolve({ code, signal: childSignal }));
+      });
+      child.stdin.end(prompt);
+      const result = await exit.finally(() => {
+        completed = true;
+        signal.removeEventListener("abort", abortChild);
+      });
+      if (signal.aborted) {
+        throw new Error("Codex CLI request aborted.");
+      }
+      if (result.code !== 0) {
+        const detail = (stderr || stdout || `exit signal ${result.signal || "unknown"}`).trim().slice(-2e3);
+        throw new Error(`Codex CLI request failed with exit code ${result.code}: ${detail}`);
+      }
+      let content = "";
+      try {
+        content = (await import_promises2.default.readFile(outputPath, "utf8")).trim();
+      } catch {
+        content = stdout.trim();
+      }
+      const totalTime = Date.now() - requestStartTime;
+      console.log(`[LLM CODEX CLI END] Codex CLI \u8C03\u7528\u5B8C\u6210\u3002\u603B\u8017\u65F6: ${totalTime}ms\uFF0C\u8FD4\u56DE\u5185\u5BB9\u957F\u5EA6: ${content.length}`);
+      console.log(`
+========== [LLM RESPONSE START] ==========
+${content}
+========== [LLM RESPONSE END] ==========
+`);
+      if (options.stream && options.onDelta && content) {
+        await options.onDelta(content);
+      }
+      return content;
+    }, options.signal);
+  } finally {
+    await import_promises2.default.rm(tempDir, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
 function extractResponsesOutput(payload) {
   if (!payload || typeof payload !== "object") {
     return "";
@@ -3981,14 +4111,17 @@ async function parseProviderError(response) {
   }
 }
 async function requestLlmTextCompletion(options) {
-  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions";
   const requestStartTime = Date.now();
-  const baseUrl = options.baseUrl.replace(/\/$/, "");
   const selectedTemperature = options.temperature ?? 0.1;
   const messages = options.messages.filter((message) => message.content.trim());
   const system = getMessageContent(messages, "system");
   const user = getMessageContent(messages, "user");
   const effectiveStream = Boolean(options.stream);
+  if (isCodexCliApiMode(options.apiMode)) {
+    return requestCodexCliCompletion(options, messages, requestStartTime);
+  }
+  const endpoint = options.apiMode === "responses" ? "responses" : "chat/completions";
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
   console.log(`[LLM REQUEST SEND] \u51C6\u5907\u5411 API \u53D1\u9001 ${endpoint} \u8BF7\u6C42...`);
   console.log(`- BaseUrl: ${options.baseUrl}`);
   console.log(`- Model: ${options.modelName}`);
@@ -4068,8 +4201,9 @@ async function generateAgentReply(options) {
     return reply;
   }
   const override = options.providerOverride;
+  const overrideApiMode = override?.apiMode;
   const completeOverride = Boolean(
-    override?.baseUrl?.trim() && override.apiKey?.trim() && override.modelName?.trim()
+    (isCodexCliApiMode(overrideApiMode) || override?.baseUrl?.trim() && override.apiKey?.trim()) && override?.modelName?.trim()
   );
   const config = completeOverride ? null : await loadLlmConfigForCapability(options.envRootDir, "text");
   const baseUrl = override?.baseUrl?.trim() || config?.provider.baseUrl || "";
@@ -4077,7 +4211,7 @@ async function generateAgentReply(options) {
   const modelName = override?.modelName?.trim() || config?.provider.modelName || "";
   const apiMode = override?.apiMode || config?.provider.apiMode || "chat";
   const timeoutMs = Number(override?.timeoutMs) > 0 ? Number(override?.timeoutMs) : config?.provider.timeoutMs || 12e4;
-  if (!baseUrl || !apiKey || !modelName) {
+  if (!modelName || requiresHttpProviderAuth(apiMode) && (!baseUrl || !apiKey)) {
     throw new Error("No active LLM configuration found. Configure a text model in settings before generating content.");
   }
   const responseMode = options.responseMode || (options.currentStage === "drafting" ? "drafting" : "discussion");
@@ -4174,16 +4308,16 @@ ${options.message}
 
 // src/env-manager.ts
 var import_node_fs3 = __toESM(require("fs"), 1);
-var import_node_path3 = __toESM(require("path"), 1);
-var MANAGED_PROJECTS_SEGMENT = `${import_node_path3.default.sep}.ai-novel-projects${import_node_path3.default.sep}`;
+var import_node_path4 = __toESM(require("path"), 1);
+var MANAGED_PROJECTS_SEGMENT = `${import_node_path4.default.sep}.ai-novel-projects${import_node_path4.default.sep}`;
 
 // src/super-graph.ts
-var import_promises2 = __toESM(require("fs/promises"), 1);
-var import_node_path4 = __toESM(require("path"), 1);
+var import_promises3 = __toESM(require("fs/promises"), 1);
+var import_node_path5 = __toESM(require("path"), 1);
 
 // src/writing-pipeline.ts
-var import_promises5 = __toESM(require("fs/promises"), 1);
-var import_node_path8 = __toESM(require("path"), 1);
+var import_promises6 = __toESM(require("fs/promises"), 1);
+var import_node_path9 = __toESM(require("path"), 1);
 
 // src/embedding.ts
 var LOCAL_EMBEDDING_DIMENSIONS = 64;
@@ -4300,8 +4434,8 @@ function createArtifactMessage(input) {
 
 // src/knowledge.ts
 var import_node_crypto2 = __toESM(require("crypto"), 1);
-var import_promises3 = __toESM(require("fs/promises"), 1);
-var import_node_path5 = __toESM(require("path"), 1);
+var import_promises4 = __toESM(require("fs/promises"), 1);
+var import_node_path6 = __toESM(require("path"), 1);
 var DEFAULT_GLOBAL_RESOURCE_LIMIT = process.env.AI_NOVEL_TEST_MODE === "1" ? 12 : 5e3;
 var DEFAULT_ARTIFACT_CHUNK_LIMIT = process.env.AI_NOVEL_TEST_MODE === "1" ? 40 : 500;
 function chapterNumberFromKnowledgePath(value) {
@@ -4374,7 +4508,7 @@ function formatKnowledgeForPrompt(rows, limit = 8) {
   return rows.slice(0, limit).map((row, index) => {
     const source = row.source || {};
     const pathValue = String(source.path || row.source_path || "");
-    const title = String(source.title || row.source_title || import_node_path5.default.basename(pathValue) || "knowledge");
+    const title = String(source.title || row.source_title || import_node_path6.default.basename(pathValue) || "knowledge");
     return [
       `${index + 1}. [${String(row.chunk_type || "chunk")}] ${title}`,
       `Source: ${pathValue}`,
@@ -4586,13 +4720,13 @@ function findGenrePreset(searchText) {
 // src/aigc-detector.ts
 var import_node_fs4 = __toESM(require("fs"), 1);
 var import_node_module = require("module");
-var import_node_path6 = __toESM(require("path"), 1);
-var requireBuiltin = (0, import_node_module.createRequire)(import_node_path6.default.join(process.cwd(), "ai-novel-factory-runtime.js"));
-var MANAGED_PROJECTS_SEGMENT2 = `${import_node_path6.default.sep}.ai-novel-projects${import_node_path6.default.sep}`;
+var import_node_path7 = __toESM(require("path"), 1);
+var requireBuiltin = (0, import_node_module.createRequire)(import_node_path7.default.join(process.cwd(), "ai-novel-factory-runtime.js"));
+var MANAGED_PROJECTS_SEGMENT2 = `${import_node_path7.default.sep}.ai-novel-projects${import_node_path7.default.sep}`;
 
 // src/production-style-evolution.ts
-var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_node_path7 = __toESM(require("path"), 1);
+var import_promises5 = __toESM(require("fs/promises"), 1);
+var import_node_path8 = __toESM(require("path"), 1);
 
 // src/writing-pipeline.ts
 var ProductionPlanningBlockedError = class extends Error {
@@ -4608,17 +4742,17 @@ function currentBundleDir() {
   for (const line of stack.split("\n")) {
     const fileUrlMatch = line.match(/\(?file:\/\/([^):]+):\d+:\d+\)?/);
     if (fileUrlMatch) {
-      return import_node_path8.default.dirname(decodeURIComponent(fileUrlMatch[1]));
+      return import_node_path9.default.dirname(decodeURIComponent(fileUrlMatch[1]));
     }
     const fileMatch = line.match(/\((\/[^():]+):\d+:\d+\)/) || line.match(/at (\/[^():]+):\d+:\d+/);
     if (fileMatch) {
-      return import_node_path8.default.dirname(fileMatch[1]);
+      return import_node_path9.default.dirname(fileMatch[1]);
     }
   }
   return process.cwd();
 }
 function workspaceRootForProject(projectRoot) {
-  const marker = `${import_node_path8.default.sep}.ai-novel-projects${import_node_path8.default.sep}`;
+  const marker = `${import_node_path9.default.sep}.ai-novel-projects${import_node_path9.default.sep}`;
   const index = projectRoot.indexOf(marker);
   if (index >= 0) {
     return projectRoot.slice(0, index);
@@ -4627,17 +4761,17 @@ function workspaceRootForProject(projectRoot) {
 }
 async function readOptionalText(filePath) {
   try {
-    return (await import_promises5.default.readFile(filePath, "utf8")).trim();
+    return (await import_promises6.default.readFile(filePath, "utf8")).trim();
   } catch {
     return "";
   }
 }
 async function writeJsonFileAtomic(filePath, value) {
-  await import_promises5.default.mkdir(import_node_path8.default.dirname(filePath), { recursive: true });
-  const tempPath = import_node_path8.default.join(import_node_path8.default.dirname(filePath), `.${import_node_path8.default.basename(filePath)}.${Date.now()}.tmp`);
-  await import_promises5.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
+  await import_promises6.default.mkdir(import_node_path9.default.dirname(filePath), { recursive: true });
+  const tempPath = import_node_path9.default.join(import_node_path9.default.dirname(filePath), `.${import_node_path9.default.basename(filePath)}.${Date.now()}.tmp`);
+  await import_promises6.default.writeFile(tempPath, `${JSON.stringify(value, null, 2)}
 `);
-  await import_promises5.default.rename(tempPath, filePath);
+  await import_promises6.default.rename(tempPath, filePath);
 }
 function escapeRegExpLiteral(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -4673,7 +4807,7 @@ function isWorkflowProfileSignalNoise(value = "") {
   return /NaturalnessAgent|Production writing mode|Naturalness target|去 AI 味|硬门禁|质量链路|Final Quality Gate|Quality Gate|AIGC|Style Conformance|Polish Pass|Memory Keeper|artifact|Status:|Passed:|Score:|Attempts:|Word count:|Reason:|综合评分|角色差异化不足|角色档案合同|已执行.*(?:质量|硬门禁|Naturalness)|pursues the scene objective|pressure is tied to|relationship pressure follows|承接：|推进：围绕|本章结尾必须|角色状态必须发生|交棒：|不能只复用主角姓名/iu.test(text);
 }
 function relativeArtifactPath(projectRoot, absolutePath) {
-  return import_node_path8.default.relative(projectRoot, absolutePath).replaceAll(import_node_path8.default.sep, "/");
+  return import_node_path9.default.relative(projectRoot, absolutePath).replaceAll(import_node_path9.default.sep, "/");
 }
 function wordCount(text) {
   const chineseChars = text.match(/[\u4e00-\u9fff]/gu)?.length ?? 0;
@@ -6076,7 +6210,7 @@ async function loadProductionStoryAssetContext(paths, task, maxChars = 2200) {
     ...PRODUCTION_STORY_ASSET_FILES
   ]);
   for (const filename of contextFileOrder) {
-    const content = await readOptionalText(import_node_path8.default.join(paths.plansDir, filename));
+    const content = await readOptionalText(import_node_path9.default.join(paths.plansDir, filename));
     if (!content) continue;
     const relevant = extractStoryAssetRelevantLines(content, task);
     if (!relevant.length) continue;
@@ -6650,7 +6784,7 @@ function createProductionWritingPlanContract(state) {
 }
 async function writeProductionWritingPlan(projectRoot, paths, state, options = {}) {
   const writingPlan = createProductionWritingPlanContract(state);
-  const writingPlanPath = import_node_path8.default.join(paths.plansDir, "writing-plan.json");
+  const writingPlanPath = import_node_path9.default.join(paths.plansDir, "writing-plan.json");
   await writeJsonFileAtomic(writingPlanPath, writingPlan);
   await recordPipelineArtifact(projectRoot, writingPlanPath, "plan", options, {
     stage: "writing_plan",
@@ -7080,9 +7214,9 @@ async function loadProductionWritingResources(rootDir) {
   const workspaceRoot = workspaceRootForProject(rootDir);
   const bundleDir = currentBundleDir();
   const candidates = [
-    import_node_path8.default.resolve(bundleDir, "..", "resources", "writing"),
-    import_node_path8.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
-    import_node_path8.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
+    import_node_path9.default.resolve(bundleDir, "..", "resources", "writing"),
+    import_node_path9.default.join(workspaceRoot, "packages", "ai-novel-core", "resources", "writing"),
+    import_node_path9.default.join(process.cwd(), "packages", "ai-novel-core", "resources", "writing")
   ];
   const cacheKey = candidates.join("|");
   const cached = productionWritingResourcesCache.get(cacheKey);
@@ -7094,7 +7228,7 @@ async function loadProductionWritingResources(rootDir) {
   const loadPromise = (async () => {
     const find = async (relativePath) => {
       for (const candidate of candidates) {
-        const text = await readOptionalText(import_node_path8.default.join(candidate, relativePath));
+        const text = await readOptionalText(import_node_path9.default.join(candidate, relativePath));
         if (text) return text;
       }
       return "";
@@ -8110,9 +8244,9 @@ async function blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, 
   if (!masterOutline.trim()) return;
   const planningCast = extractPlanningCastContract(masterOutline);
   if (planningCast.protagonistName) return;
-  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  await import_promises6.default.mkdir(paths.plansDir, { recursive: true });
   const masterOutlineArtifactPath = relativeArtifactPath(projectRoot, paths.masterOutlinePath);
-  const namingBriefPath = import_node_path8.default.join(paths.plansDir, "protagonist-naming-brief.md");
+  const namingBriefPath = import_node_path9.default.join(paths.plansDir, "protagonist-naming-brief.md");
   const namingBriefArtifactPath = relativeArtifactPath(projectRoot, namingBriefPath);
   const reason = "planning protagonist missing: master outline does not declare a concrete protagonist";
   const namingBrief = [
@@ -8148,7 +8282,7 @@ async function blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, 
     "",
     "\u8BF7\u628A\u4E3B\u89D2\u59D3\u540D\u51BB\u7ED3\u4E3A\u300C___\u300D\uFF0C\u8EAB\u4EFD\u662F\u300C___\u300D\uFF0C\u6838\u5FC3\u6B32\u671B\u662F\u300C___\u300D\uFF0C\u4F24\u53E3/\u6050\u60E7\u662F\u300C___\u300D\uFF0C\u884C\u4E3A\u4E60\u60EF\u662F\u300C___\u300D\uFF0C\u8BF4\u8BDD\u65B9\u5F0F\u662F\u300C___\u300D\uFF0C\u5E76\u8BF4\u660E\u4ED6/\u5979\u4E0E\u5DF2\u51FA\u73B0\u914D\u89D2\u7684\u5173\u7CFB\u538B\u529B\u3002"
   ].join("\n");
-  await import_promises5.default.writeFile(namingBriefPath, `${namingBrief}
+  await import_promises6.default.writeFile(namingBriefPath, `${namingBrief}
 `);
   await recordPipelineArtifact(projectRoot, namingBriefPath, "plan", options, {
     stage: "story_foundation_blocked",
@@ -8203,11 +8337,11 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
   const masterOutline = await readOptionalText(paths.masterOutlinePath);
   await blockStoryFoundationWithoutMasterProtagonist(projectRoot, paths, masterOutline, options);
   const assets = createProductionStoryBibleAssets(state, context, resources, { masterOutline });
-  await import_promises5.default.mkdir(paths.plansDir, { recursive: true });
+  await import_promises6.default.mkdir(paths.plansDir, { recursive: true });
   const written = [];
   for (const asset of assets) {
-    const assetPath = import_node_path8.default.join(paths.plansDir, asset.filename);
-    await import_promises5.default.writeFile(assetPath, `${asset.content}
+    const assetPath = import_node_path9.default.join(paths.plansDir, asset.filename);
+    await import_promises6.default.writeFile(assetPath, `${asset.content}
 `);
     await recordPipelineArtifact(projectRoot, assetPath, "plan", options, {
       stage: asset.stage,
@@ -8223,12 +8357,12 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
     role: "Showrunner",
     status: "completed",
     message: "\u4E16\u754C\u77E9\u9635\u3001\u4E3B\u7EBF\u67B6\u6784\u3001\u6545\u4E8B\u5723\u7ECF\u3001\u5206\u5377\u7B56\u7565\u3001\u4F0F\u7B14\u8D26\u672C\u3001\u4EBA\u7269\u5173\u7CFB\u8D44\u4EA7\u548C\u5199\u4F5C\u6267\u884C\u8BA1\u5212\u5DF2\u4FDD\u5B58\u3002",
-    artifactPath: relativeArtifactPath(projectRoot, import_node_path8.default.join(paths.plansDir, "story-bible.md")),
+    artifactPath: relativeArtifactPath(projectRoot, import_node_path9.default.join(paths.plansDir, "story-bible.md")),
     artifactLabel: "story-bible.md",
     artifactKind: "plan",
     artifacts: written.map((artifactPath) => ({
       path: relativeArtifactPath(projectRoot, artifactPath),
-      label: import_node_path8.default.basename(artifactPath),
+      label: import_node_path9.default.basename(artifactPath),
       kind: "plan",
       status: "completed"
     })),
@@ -8238,14 +8372,14 @@ async function writeProductionStoryBibleAssets(projectRoot, paths, state, contex
       kind: "artifact_saved",
       stage: "story_foundation",
       summary: "Story foundation asset bundle saved.",
-      expandableArtifactPath: relativeArtifactPath(projectRoot, import_node_path8.default.join(paths.plansDir, "story-bible.md"))
+      expandableArtifactPath: relativeArtifactPath(projectRoot, import_node_path9.default.join(paths.plansDir, "story-bible.md"))
     }
   });
   return written;
 }
 async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, context, options = {}) {
   const resources = await loadProductionWritingResources(projectRoot);
-  await import_promises5.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
+  await import_promises6.default.mkdir(paths.chapterBlueprintsDir, { recursive: true });
   const written = [];
   for (const task of state.plan.chapterTasks) {
     const storyAssetContext = await loadProductionStoryAssetContext(paths, task);
@@ -8283,8 +8417,8 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
         wordCount: wordCount(content)
       });
     }
-    const blueprintPath = import_node_path8.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
-    await import_promises5.default.writeFile(blueprintPath, `${content}
+    const blueprintPath = import_node_path9.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    await import_promises6.default.writeFile(blueprintPath, `${content}
 `);
     await recordPipelineArtifact(projectRoot, blueprintPath, "plan", options, {
       chapterNumber: task.chapterNumber,
@@ -8309,8 +8443,8 @@ async function writeAllDetailedChapterBlueprints(projectRoot, paths, state, cont
 }
 
 // src/context-packet.ts
-var import_promises6 = __toESM(require("fs/promises"), 1);
-var import_node_path9 = __toESM(require("path"), 1);
+var import_promises7 = __toESM(require("fs/promises"), 1);
+var import_node_path10 = __toESM(require("path"), 1);
 function compactList(values = [], limit = 2) {
   return values.map((value) => value.trim()).filter(Boolean).slice(0, limit).join("; ") || "pending";
 }
@@ -8432,11 +8566,11 @@ function createCurrentContextPacketText(state) {
   ].join("\n");
 }
 async function syncCurrentContextPacketFile(projectRoot, state) {
-  const contextPath = import_node_path9.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
-  const current = await import_promises6.default.readFile(contextPath, "utf8").catch(() => "");
+  const contextPath = import_node_path10.default.join(projectRoot, ".ai-novel", "context", "current-context.md");
+  const current = await import_promises7.default.readFile(contextPath, "utf8").catch(() => "");
   if (!current) {
-    await import_promises6.default.mkdir(import_node_path9.default.dirname(contextPath), { recursive: true });
-    await import_promises6.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
+    await import_promises7.default.mkdir(import_node_path10.default.dirname(contextPath), { recursive: true });
+    await import_promises7.default.writeFile(contextPath, `${createCurrentContextPacketText(state)}
 `);
     return;
   }
@@ -8444,66 +8578,66 @@ async function syncCurrentContextPacketFile(projectRoot, state) {
   if (next === current) {
     return;
   }
-  await import_promises6.default.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
+  await import_promises7.default.writeFile(contextPath, next.endsWith("\n") ? next : `${next}
 `);
 }
 
 // src/orchestrator.ts
 var WORKSPACE_DIR = ".ai-novel";
 function getWorkspacePaths(rootDir) {
-  const workspaceDir = import_node_path10.default.join(rootDir, WORKSPACE_DIR);
+  const workspaceDir = import_node_path11.default.join(rootDir, WORKSPACE_DIR);
   return {
     workspaceDir,
-    statePath: import_node_path10.default.join(workspaceDir, "state.json"),
-    promptsDir: import_node_path10.default.join(workspaceDir, "prompts"),
-    agentPromptsDir: import_node_path10.default.join(workspaceDir, "prompts", "agents"),
-    consensusPath: import_node_path10.default.join(workspaceDir, "prompts", "global-consensus.md"),
-    plansDir: import_node_path10.default.join(workspaceDir, "plans"),
-    reportsDir: import_node_path10.default.join(workspaceDir, "reports"),
-    styleDir: import_node_path10.default.join(workspaceDir, "style"),
-    styleProfilePath: import_node_path10.default.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: import_node_path10.default.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: import_node_path10.default.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: import_node_path10.default.join(workspaceDir, "style", "anti-patterns.md"),
-    chaptersDir: import_node_path10.default.join(workspaceDir, "chapters"),
-    assetsDir: import_node_path10.default.join(workspaceDir, "assets"),
-    coverDir: import_node_path10.default.join(workspaceDir, "assets", "cover"),
-    comicDir: import_node_path10.default.join(workspaceDir, "assets", "comic"),
-    memoryDir: import_node_path10.default.join(workspaceDir, "memory"),
-    charactersDir: import_node_path10.default.join(workspaceDir, "memory", "characters"),
-    characterCoreDir: import_node_path10.default.join(workspaceDir, "memory", "characters", "core"),
-    characterDossiersPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
-    characterDossiersMarkdownPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
-    protagonistPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
-    relationsPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "relations.md"),
-    characterEvolutionPath: import_node_path10.default.join(workspaceDir, "memory", "characters", "evolution.md"),
-    configPath: import_node_path10.default.join(workspaceDir, "config.json"),
-    settingFreezePath: import_node_path10.default.join(workspaceDir, "plans", "setting-freeze.md"),
-    masterOutlinePath: import_node_path10.default.join(workspaceDir, "plans", "master-outline.md"),
-    chapterBlueprintsDir: import_node_path10.default.join(workspaceDir, "plans", "chapter-blueprints"),
-    coverPromptPath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover-prompt.md"),
-    coverImagePath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover.png"),
-    coverMetadataPath: import_node_path10.default.join(workspaceDir, "assets", "cover", "cover-metadata.json")
+    statePath: import_node_path11.default.join(workspaceDir, "state.json"),
+    promptsDir: import_node_path11.default.join(workspaceDir, "prompts"),
+    agentPromptsDir: import_node_path11.default.join(workspaceDir, "prompts", "agents"),
+    consensusPath: import_node_path11.default.join(workspaceDir, "prompts", "global-consensus.md"),
+    plansDir: import_node_path11.default.join(workspaceDir, "plans"),
+    reportsDir: import_node_path11.default.join(workspaceDir, "reports"),
+    styleDir: import_node_path11.default.join(workspaceDir, "style"),
+    styleProfilePath: import_node_path11.default.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: import_node_path11.default.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: import_node_path11.default.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: import_node_path11.default.join(workspaceDir, "style", "anti-patterns.md"),
+    chaptersDir: import_node_path11.default.join(workspaceDir, "chapters"),
+    assetsDir: import_node_path11.default.join(workspaceDir, "assets"),
+    coverDir: import_node_path11.default.join(workspaceDir, "assets", "cover"),
+    comicDir: import_node_path11.default.join(workspaceDir, "assets", "comic"),
+    memoryDir: import_node_path11.default.join(workspaceDir, "memory"),
+    charactersDir: import_node_path11.default.join(workspaceDir, "memory", "characters"),
+    characterCoreDir: import_node_path11.default.join(workspaceDir, "memory", "characters", "core"),
+    characterDossiersPath: import_node_path11.default.join(workspaceDir, "memory", "characters", "dossiers.json"),
+    characterDossiersMarkdownPath: import_node_path11.default.join(workspaceDir, "memory", "characters", "dossiers.md"),
+    protagonistPath: import_node_path11.default.join(workspaceDir, "memory", "characters", "core", "protagonist.md"),
+    relationsPath: import_node_path11.default.join(workspaceDir, "memory", "characters", "relations.md"),
+    characterEvolutionPath: import_node_path11.default.join(workspaceDir, "memory", "characters", "evolution.md"),
+    configPath: import_node_path11.default.join(workspaceDir, "config.json"),
+    settingFreezePath: import_node_path11.default.join(workspaceDir, "plans", "setting-freeze.md"),
+    masterOutlinePath: import_node_path11.default.join(workspaceDir, "plans", "master-outline.md"),
+    chapterBlueprintsDir: import_node_path11.default.join(workspaceDir, "plans", "chapter-blueprints"),
+    coverPromptPath: import_node_path11.default.join(workspaceDir, "assets", "cover", "cover-prompt.md"),
+    coverImagePath: import_node_path11.default.join(workspaceDir, "assets", "cover", "cover.png"),
+    coverMetadataPath: import_node_path11.default.join(workspaceDir, "assets", "cover", "cover-metadata.json")
   };
 }
 async function writeJsonFileAtomic2(filePath, value) {
   const data = `${JSON.stringify(value, null, 2)}
 `;
-  await import_promises7.default.mkdir(import_node_path10.default.dirname(filePath), { recursive: true });
+  await import_promises8.default.mkdir(import_node_path11.default.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const tempPath = import_node_path10.default.join(import_node_path10.default.dirname(filePath), `.${import_node_path10.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto3.randomUUID)()}.tmp`);
+    const tempPath = import_node_path11.default.join(import_node_path11.default.dirname(filePath), `.${import_node_path11.default.basename(filePath)}.${process.pid}.${Date.now()}.${(0, import_node_crypto3.randomUUID)()}.tmp`);
     try {
-      const handle = await import_promises7.default.open(tempPath, "wx");
+      const handle = await import_promises8.default.open(tempPath, "wx");
       try {
         await handle.writeFile(data, "utf8");
         await handle.sync();
       } finally {
         await handle.close();
       }
-      await import_promises7.default.rename(tempPath, filePath);
+      await import_promises8.default.rename(tempPath, filePath);
       return;
     } catch (error) {
-      await import_promises7.default.unlink(tempPath).catch(() => void 0);
+      await import_promises8.default.unlink(tempPath).catch(() => void 0);
       if (attempt === 0 && error instanceof Error && "code" in error && error.code === "ENOENT") {
         continue;
       }
@@ -8513,7 +8647,7 @@ async function writeJsonFileAtomic2(filePath, value) {
 }
 async function loadAutonomousState(rootDir) {
   const { statePath } = getWorkspacePaths(rootDir);
-  const raw = await import_promises7.default.readFile(statePath, "utf8");
+  const raw = await import_promises8.default.readFile(statePath, "utf8");
   return JSON.parse(raw);
 }
 async function saveAutonomousState(rootDir, state) {
@@ -8745,33 +8879,33 @@ var PlanningGraphState = import_langgraph.Annotation.Root({
   trace: (0, import_langgraph.Annotation)()
 });
 function workspacePaths(projectRoot) {
-  const workspaceDir = import_node_path11.default.join(projectRoot, ".ai-novel");
-  const plansDir = import_node_path11.default.join(workspaceDir, "plans");
-  const memoryDir = import_node_path11.default.join(workspaceDir, "memory");
-  const charactersDir = import_node_path11.default.join(memoryDir, "characters");
+  const workspaceDir = import_node_path12.default.join(projectRoot, ".ai-novel");
+  const plansDir = import_node_path12.default.join(workspaceDir, "plans");
+  const memoryDir = import_node_path12.default.join(workspaceDir, "memory");
+  const charactersDir = import_node_path12.default.join(memoryDir, "characters");
   return {
     workspaceDir,
     plansDir,
-    reportsDir: import_node_path11.default.join(workspaceDir, "reports"),
-    chaptersDir: import_node_path11.default.join(workspaceDir, "chapters"),
+    reportsDir: import_node_path12.default.join(workspaceDir, "reports"),
+    chaptersDir: import_node_path12.default.join(workspaceDir, "chapters"),
     memoryDir,
-    styleDir: import_node_path11.default.join(workspaceDir, "style"),
-    styleProfilePath: import_node_path11.default.join(workspaceDir, "style", "profile.md"),
-    styleRulebookPath: import_node_path11.default.join(workspaceDir, "style", "rulebook.md"),
-    styleReferencesPath: import_node_path11.default.join(workspaceDir, "style", "references.md"),
-    styleAntiPatternsPath: import_node_path11.default.join(workspaceDir, "style", "anti-patterns.md"),
-    consensusPath: import_node_path11.default.join(workspaceDir, "prompts", "global-consensus.md"),
-    characterDossiersPath: import_node_path11.default.join(charactersDir, "dossiers.json"),
-    characterDossiersMarkdownPath: import_node_path11.default.join(charactersDir, "dossiers.md"),
-    protagonistPath: import_node_path11.default.join(charactersDir, "core", "protagonist.md"),
-    relationsPath: import_node_path11.default.join(charactersDir, "relations.md"),
-    characterEvolutionPath: import_node_path11.default.join(charactersDir, "evolution.md"),
-    masterOutlinePath: import_node_path11.default.join(plansDir, "master-outline.md"),
-    chapterBlueprintsDir: import_node_path11.default.join(plansDir, "chapter-blueprints")
+    styleDir: import_node_path12.default.join(workspaceDir, "style"),
+    styleProfilePath: import_node_path12.default.join(workspaceDir, "style", "profile.md"),
+    styleRulebookPath: import_node_path12.default.join(workspaceDir, "style", "rulebook.md"),
+    styleReferencesPath: import_node_path12.default.join(workspaceDir, "style", "references.md"),
+    styleAntiPatternsPath: import_node_path12.default.join(workspaceDir, "style", "anti-patterns.md"),
+    consensusPath: import_node_path12.default.join(workspaceDir, "prompts", "global-consensus.md"),
+    characterDossiersPath: import_node_path12.default.join(charactersDir, "dossiers.json"),
+    characterDossiersMarkdownPath: import_node_path12.default.join(charactersDir, "dossiers.md"),
+    protagonistPath: import_node_path12.default.join(charactersDir, "core", "protagonist.md"),
+    relationsPath: import_node_path12.default.join(charactersDir, "relations.md"),
+    characterEvolutionPath: import_node_path12.default.join(charactersDir, "evolution.md"),
+    masterOutlinePath: import_node_path12.default.join(plansDir, "master-outline.md"),
+    chapterBlueprintsDir: import_node_path12.default.join(plansDir, "chapter-blueprints")
   };
 }
 async function readOptionalText2(filePath) {
-  return import_promises8.default.readFile(filePath, "utf8").catch(() => "");
+  return import_promises9.default.readFile(filePath, "utf8").catch(() => "");
 }
 async function loadPlanningContext(paths) {
   return {
@@ -8844,11 +8978,11 @@ async function inspectProductionPlanningNode(projectRoot, suppliedState) {
   const paths = workspacePaths(projectRoot);
   const missingFoundationArtifacts = [];
   for (const filename of FOUNDATION_FILES) {
-    if (!(await readOptionalText2(import_node_path11.default.join(paths.plansDir, filename))).trim()) missingFoundationArtifacts.push(filename);
+    if (!(await readOptionalText2(import_node_path12.default.join(paths.plansDir, filename))).trim()) missingFoundationArtifacts.push(filename);
   }
   const missingBlueprintChapters = [];
   for (const task of state.plan.chapterTasks) {
-    const blueprintPath = import_node_path11.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
+    const blueprintPath = import_node_path12.default.join(paths.chapterBlueprintsDir, `chapter-${String(task.chapterNumber).padStart(3, "0")}.md`);
     if (!(await readOptionalText2(blueprintPath)).trim()) missingBlueprintChapters.push(task.chapterNumber);
   }
   const currentNode = missingFoundationArtifacts.length > 0 ? planningNodes[0] : missingBlueprintChapters.length > 0 ? planningNodes[1] : null;

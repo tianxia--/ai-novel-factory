@@ -115,16 +115,36 @@ function summarizeDossiersForContext(dossiers: CharacterDossier[] = [], limit = 
 function extractDiscussionField(source: string, labels: string[]) {
   const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")
   const match = source.match(new RegExp(`(?:${labelPattern})\\s*(?:是|为|:|：)?\\s*[「“"]?([^，。；;\\n」”"]{2,80})`, "u"))
-  return match?.[1]?.trim() || ""
+  return sanitizeProtagonistField(match?.[1]?.trim() || "")
+}
+
+function sanitizeProtagonistField(value: string) {
+  const normalized = value.replace(/^[\s\-*#：:]+/u, "").replace(/[」”"']$/u, "").trim()
+  if (!normalized) return ""
+  if (/(?:小说想法|目标总章数|总章数|单章字数|workflow|当前阶段|不要向我提问|缺失信息|接管创作流程|先完成世界观|统一讨论)/iu.test(normalized)) {
+    return ""
+  }
+  return normalized
+}
+
+function isValidProtagonistName(rawName: string) {
+  const name = sanitizeProtagonistField(rawName)
+  if (!/^[\u4e00-\u9fff·]{2,8}$/u.test(name)) return false
+  if (/^(?:姓名|名字|冻结|确定|待定|未命名|主角|角色|人物|核心|小人物|外卖小哥|黑卡|世界观|主线方向)$/u.test(name)) {
+    return false
+  }
+  if (/(?:总章数|单章|目标|想法|流程|章节|设定|讨论)/u.test(name)) return false
+  return true
 }
 
 function extractConfirmedProtagonistDetails(message: string) {
   const namePatterns = [
-    /主角(?:姓名|名字)?\s*(?:冻结|确定|定为|设为|叫|是|为|:|：)?\s*(?:为|成|:|：)?\s*[「“"]?([\u4e00-\u9fff·]{2,8})/u,
+    /(?:^|\n)\s*[-*#\s]*姓名\s*[:：]\s*([\u4e00-\u9fff·]{2,8})/u,
+    /主角(?:姓名|名字)\s*(?:冻结|确定|定为|设为|叫|是|为|:|：)?\s*(?:为|成|:|：)?\s*[「“"]?([\u4e00-\u9fff·]{2,8})/u,
     /(?:Canonical Protagonist|核心主角|主角姓名)[:：]\s*([\u4e00-\u9fff·]{2,8})/u,
   ]
   const rawName = namePatterns.map((pattern) => message.match(pattern)?.[1] || "").find(Boolean) || ""
-  const name = /^(?:姓名|名字|冻结|确定|待定|未命名|主角|角色)$/u.test(rawName) ? "" : rawName
+  const name = isValidProtagonistName(rawName) ? sanitizeProtagonistField(rawName) : ""
   if (!name) return null
   return {
     name,
@@ -160,7 +180,10 @@ function updateCharacterDossiersFromDiscussion(input: {
     return []
   }
   const updatedAt = new Date().toISOString()
-  const evidence = `discussion ${input.runId}: ${input.message}`.slice(0, 240)
+  const cleanSummary = input.summary.replace(/\s+/g, " ").trim()
+  const cleanMessage = input.message.replace(/\s+/g, " ").trim()
+  const evidenceSource = cleanSummary || cleanMessage
+  const evidence = `discussion ${input.runId}: ${clipText(evidenceSource, 220)}`
   const continuityNote = `discussion ${input.runId}: ${input.summary.replace(/\s+/g, " ").slice(0, 220)}`
   const protagonistDetails = extractConfirmedProtagonistDetails(input.message)
   return input.dossiers.map((dossier) => {
@@ -179,7 +202,7 @@ function updateCharacterDossiersFromDiscussion(input: {
       behaviorHabits: protagonistDetails?.habit ? appendUnique(dossier.behaviorHabits || [], protagonistDetails.habit, 6) : dossier.behaviorHabits,
       speechMarkers: protagonistDetails?.speech ? appendUnique(dossier.speechMarkers || [], protagonistDetails.speech, 6) : dossier.speechMarkers,
       relationshipState: protagonistDetails?.relationship || dossier.relationshipState,
-      currentChapterDelta: `discussion: ${input.message}`,
+      currentChapterDelta: `discussion: ${clipText(evidenceSource, 220)}`,
       continuityNotes: appendUnique(dossier.continuityNotes, continuityNote),
       evidence: appendUnique(dossier.evidence, evidence),
       updatedAt,
@@ -1142,8 +1165,9 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
 
   const updatedConsensus = buildCompactConsensus(state, guardedSummary)
   const currentProtagonist = await readText(protagonistPath)
-  const protagonistDetails = extractConfirmedProtagonistDetails(message)
-  const updatedProtagonistBase = appendSection(currentProtagonist, "Discussion updates", protagonistUpdate)
+  const protagonistDetails = extractConfirmedProtagonistDetails(`${guardedSummary}\n${message}`)
+  const protagonistWritebackNote = guardedSummary.trim() || protagonistUpdate
+  const updatedProtagonistBase = appendSection(currentProtagonist, "Discussion updates", protagonistWritebackNote)
   const updatedProtagonist = protagonistDetails
     ? appendSection(updatedProtagonistBase, "Canonical protagonist lock", formatProtagonistLockSection(protagonistDetails))
     : updatedProtagonistBase
@@ -1153,7 +1177,7 @@ export async function runMultiAgentDiscussion(rootDir: string, message: string, 
   const updatedDossiers = updateCharacterDossiersFromDiscussion({
     dossiers: currentDossiers,
     targetKind: discussionTarget.kind,
-    message,
+    message: `${guardedSummary}\n${message}`,
     summary: guardedSummary,
     runId,
   })

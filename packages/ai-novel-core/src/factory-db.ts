@@ -28,7 +28,10 @@ export type StepStatus = "pending" | "in_progress" | "completed" | "failed" | "c
 type JobStatus = RunStatus | "cancelled"
 
 function normalizeLlmApiMode(value: unknown) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat"
+  const normalized = String(value || "chat").trim().toLowerCase()
+  if (normalized === "responses") return "responses"
+  if (normalized === "codex-cli") return "codex-cli"
+  return "chat"
 }
 
 interface SqliteStatement {

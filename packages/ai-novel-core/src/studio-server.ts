@@ -283,7 +283,10 @@ function redactLlmRoutes(routes: Record<string, unknown>[]) {
 }
 
 function normalizeLlmApiMode(value: unknown) {
-  return String(value || "chat").trim().toLowerCase() === "responses" ? "responses" : "chat"
+  const normalized = String(value || "chat").trim().toLowerCase()
+  if (normalized === "responses") return "responses"
+  if (normalized === "codex-cli") return "codex-cli"
+  return "chat"
 }
 
 async function loadStyleEvolutionLlmConfig(rootDir: string) {
@@ -4964,6 +4967,16 @@ function createAutopilotKickoffMessage(state: Awaited<ReturnType<typeof loadAuto
   ].join("")
 }
 
+function isSettingReviewWaitingForApprovalState(state: Awaited<ReturnType<typeof loadAutonomousState>> | null | undefined) {
+  if (state?.runtime?.stage !== "setting_review") return false
+  const lastAction = String(state.runtime.lastAction || "")
+  const statusMessage = String(state.runtime.statusMessage || "")
+  const lastStep = String(state.runtime.autopilot?.lastStep || "")
+  return lastAction === "setting_review_waiting_for_approval"
+    || lastStep === "setting_review_waiting_for_approval"
+    || /waiting for explicit user approval|等待.*(?:用户)?(?:审批|审阅|确认|批准)|请先确认设定/iu.test(statusMessage)
+}
+
 async function enqueueKnowledgeReindexJobs(
   rootDir: string,
   projectId: string,
@@ -5251,14 +5264,18 @@ export async function handleNovelStudioApi(
     const apiKey = String(body.apiKey || "").trim()
     const modelName = String(body.modelName || "").trim()
     const apiMode = normalizeLlmApiMode(body.apiMode ?? body.api_mode)
+    const usesCodexCli = apiMode === "codex-cli"
     const temperature = typeof body.temperature === "number" ? body.temperature : 0.1
     const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 120000
     const configId = typeof body.id === "string" ? body.id.trim() : null
     const isConfiguredPlaceholder = apiKey === "[configured]"
 
-    if (!name || !baseUrl || (!apiKey && !configId) || !modelName) {
+    if (!name || !modelName || (!usesCodexCli && (!baseUrl || (!apiKey && !configId)))) {
       return { status: 400, payload: { error: "missing_fields" } }
     }
+
+    const effectiveBaseUrl = usesCodexCli ? (baseUrl || "codex-cli://local") : baseUrl
+    const effectiveApiKey = usesCodexCli ? (apiKey || "[codex-cli]") : apiKey
 
     await withFactoryDb(rootDir, async (db) => {
       if (configId) {
@@ -5266,17 +5283,19 @@ export async function handleNovelStudioApi(
         if (!currentConfig) {
           throw new Error("llm_config_not_found")
         }
-        const nextApiKey = isConfiguredPlaceholder && typeof currentConfig?.api_key === "string"
+        const nextApiKey = usesCodexCli
+          ? effectiveApiKey
+          : isConfiguredPlaceholder && typeof currentConfig?.api_key === "string"
           ? currentConfig.api_key
-          : apiKey
+          : effectiveApiKey
         if (!nextApiKey) {
           throw new Error("missing_api_key")
         }
-        db.updateLlmConfig(configId, { name, baseUrl, apiKey: nextApiKey, modelName, apiMode, temperature, timeoutMs })
+        db.updateLlmConfig(configId, { name, baseUrl: effectiveBaseUrl, apiKey: nextApiKey, modelName, apiMode, temperature, timeoutMs })
       } else {
         const existingConfigs = db.listLlmConfigs()
         const hasActiveConfig = existingConfigs.some((config) => Number(config.is_active) === 1)
-        db.addLlmConfig({ name, baseUrl, apiKey, modelName, apiMode, temperature, timeoutMs, isActive: !hasActiveConfig })
+        db.addLlmConfig({ name, baseUrl: effectiveBaseUrl, apiKey: effectiveApiKey, modelName, apiMode, temperature, timeoutMs, isActive: !hasActiveConfig })
       }
     })
 
@@ -8046,6 +8065,29 @@ export async function handleNovelStudioApi(
     const latestState = await tryLoadState(context.projectRoot)
     if (!message && latestState) {
       message = createAutopilotKickoffMessage(latestState)
+    }
+    if (isSettingReviewWaitingForApprovalState(latestState)) {
+      const state = await markAutopilot(context.projectRoot, {
+        running: false,
+        stopRequested: false,
+        mode: "idle",
+        lastStep: "setting_review_waiting_for_approval",
+        target: null,
+        driftStatus: "ok",
+        driftReason: null,
+        statusMessage: "设定审查包已生成，自动创作已暂停；请先确认设定后再进入主线规划。",
+      }, { factoryRootDir: rootDir, projectId: context.projectId })
+      return {
+        status: 200,
+        payload: {
+          success: false,
+          actionRequired: "setting_review_approval",
+          activeProjectId: context.projectId,
+          projects: context.projects,
+          ...(await createWorkspacePayload(context.projectRoot, state, { rootDir, projectId: context.projectId, syncState: true })),
+          envStatus: getPublicProjectEnvStatus(rootDir),
+        },
+      }
     }
     let jobId: string | null = null
     if (context.projectId) {

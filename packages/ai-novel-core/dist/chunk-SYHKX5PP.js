@@ -1,9 +1,9 @@
 import {
   executeProductionAdvanceThroughKernel
-} from "./chunk-VOQWLW5S.js";
+} from "./chunk-EQE2YYQ4.js";
 import {
   runMultiAgentDiscussion
-} from "./chunk-UQOLHNQ4.js";
+} from "./chunk-TAJFQUYO.js";
 import {
   advanceAutonomousProject,
   getPublicProjectEnvStatus,
@@ -14,23 +14,23 @@ import {
   reviewInterruption,
   saveAutonomousState,
   upsertCheckpointInSuperGraph
-} from "./chunk-QL554L2D.js";
+} from "./chunk-TCUIONV5.js";
 import {
   createAutopilotStopError,
   isAutopilotStopError,
   throwIfStopped
-} from "./chunk-ROO5DEKO.js";
+} from "./chunk-RONTFH57.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   ingestGlobalWritingResources,
   ingestProjectArtifact
-} from "./chunk-YV6Y5W7F.js";
+} from "./chunk-U2MJEJYM.js";
 import {
   backfillPendingMemoryEmbeddings
-} from "./chunk-YFTWM6FA.js";
+} from "./chunk-LC7E6N2W.js";
 import {
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 import {
   createFollowUpAdvanceCommand,
   createManualAdvanceCommand,
@@ -815,6 +815,11 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
       return;
     }
   }
+  const initialState = await loadAutonomousState(projectRoot).catch(() => null);
+  if (initialState && isWaitingForSettingReviewApproval(initialState)) {
+    await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner);
+    return;
+  }
   await markAutopilot(projectRoot, {
     running: true,
     stopRequested: false,
@@ -881,6 +886,10 @@ async function runAutopilotBackground(options, controller, leaseOwner = makeWork
         }
         const currentLoopCount = beforeDiscussion.runtime.autopilot?.loopCount || 0;
         if (await markAutopilotRecoveryBlocked(rootDir, projectRoot, projectId, jobId, leaseOwner, beforeDiscussion)) {
+          break;
+        }
+        if (isWaitingForSettingReviewApproval(beforeDiscussion)) {
+          await pauseAutopilotForSettingReviewApproval(rootDir, projectRoot, projectId, jobId, leaseOwner);
           break;
         }
         if (await backoffIfActiveWritingMessage(rootDir, projectRoot, projectId, beforeDiscussion, signal)) {
@@ -1522,10 +1531,10 @@ async function restoreAutopilotJobs(rootDir, createSnapshot) {
     const autopilot = state?.runtime?.autopilot || null;
     const payload = typeof job.payload === "object" && job.payload ? job.payload : {};
     const message = typeof payload.message === "string" ? payload.message : "";
-    const hasWakeupSignal = isGenericAutopilotMessage(message);
     const settingReviewApprovalPaused = Boolean(
-      state && (state.runtime.autopilot?.lastStep === "setting_review_waiting_for_approval" || isWaitingForSettingReviewApproval(state)) && !hasWakeupSignal
+      state && (state.runtime.autopilot?.lastStep === "setting_review_waiting_for_approval" || isWaitingForSettingReviewApproval(state))
     );
+    const hasWakeupSignal = isGenericAutopilotMessage(message) && !settingReviewApprovalPaused;
     const manuallyPaused = Boolean(
       autopilot && !autopilot.running && (autopilot.stopRequested || autopilot.lastStep === "stopped" || autopilot.lastStep === "semi_auto_paused" && !hasWakeupSignal || settingReviewApprovalPaused)
     );

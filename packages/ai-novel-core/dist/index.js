@@ -1,24 +1,24 @@
 import {
   deriveProjectRuntimeState,
   routeUserMessage
-} from "./chunk-ZEQLUYVF.js";
+} from "./chunk-MCPKQHMF.js";
 import {
   createWorkerWorkspacePayload,
   getNovelAutopilotWorkerStatus,
   runNovelAutopilotWorkerCli,
   runNovelAutopilotWorkerOnce,
   startNovelAutopilotWorker
-} from "./chunk-76K75T6H.js";
+} from "./chunk-TIGAMVKD.js";
 import {
   executeManualAdvanceCommand,
   executeManualInterruptCommand,
   executeManualRetryChapterCommand,
   recordDirectorCommandEvent
-} from "./chunk-V3D5DMJQ.js";
-import "./chunk-VOQWLW5S.js";
+} from "./chunk-SYHKX5PP.js";
+import "./chunk-EQE2YYQ4.js";
 import {
   runMultiAgentDiscussion
-} from "./chunk-UQOLHNQ4.js";
+} from "./chunk-TAJFQUYO.js";
 import {
   advanceAutonomousProject,
   buildInitialSuperGraph,
@@ -51,7 +51,7 @@ import {
   upsertDiscussionInSuperGraph,
   upsertProjectEnvValues,
   validateSuperGraph
-} from "./chunk-QL554L2D.js";
+} from "./chunk-TCUIONV5.js";
 import {
   ProductionPlanningBlockedError,
   ProductionReadinessBlockedError,
@@ -147,8 +147,8 @@ import {
   writeProductionStoryBibleAssets,
   writeProductionWritingPlan,
   writeProductionWritingResourceArtifacts
-} from "./chunk-ROO5DEKO.js";
-import "./chunk-ZWH2XUVC.js";
+} from "./chunk-RONTFH57.js";
+import "./chunk-CCGWT4D7.js";
 import {
   createAigcDetectorClient,
   detectAigcSegments,
@@ -158,8 +158,8 @@ import {
   getAigcDetectorConfigFromSettings,
   parseAigcDetectorSse,
   splitAigcTextIntoSegments
-} from "./chunk-5Z26A3S7.js";
-import "./chunk-DETBSEC6.js";
+} from "./chunk-MOILZS2E.js";
+import "./chunk-7YOH46DX.js";
 import {
   backfillPendingKnowledgeEmbeddings,
   chunkKnowledgeContent,
@@ -170,11 +170,11 @@ import {
   ingestKnowledgeSource,
   ingestProjectArtifact,
   retrieveKnowledge
-} from "./chunk-YV6Y5W7F.js";
+} from "./chunk-U2MJEJYM.js";
 import {
   backfillPendingMemoryEmbeddings,
   createLocalTextEmbedding
-} from "./chunk-YFTWM6FA.js";
+} from "./chunk-LC7E6N2W.js";
 import {
   FactoryDb,
   evaluateChapterConsistency,
@@ -185,7 +185,7 @@ import {
   makeRunId,
   targetToArtifactKind,
   withFactoryDb
-} from "./chunk-CJRUVXRQ.js";
+} from "./chunk-4LKTP4RS.js";
 import {
   agentLabelFromType,
   agentTypeFromLabel,

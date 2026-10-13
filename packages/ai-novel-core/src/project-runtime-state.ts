@@ -296,6 +296,7 @@ function derivePrimaryAction(
   if (productionStatus === "complete") return "none"
   if (productionStatus === "blocked" || executionStatus === "blocked") return "retry_blocked"
   if (productionStatus === "reviewing") return "review"
+  if (stage === "setting_review") return "review"
   const hasChapterWork = progress.completedChapters > 0
     || progress.passedChapters > 0
     || progress.inProgressChapters > 0
@@ -316,6 +317,7 @@ function deriveNextTarget(
     || progress.passedChapters > 0
     || progress.inProgressChapters > 0
     || progress.blockedChapters > 0
+  if (stage === "setting_review") return { type: "stage", stage }
   if (progress.nextChapterNumber && (PRODUCTION_STAGES.has(stage) || hasChapterWork)) {
     return { type: "chapter", chapterNumber: progress.nextChapterNumber }
   }
@@ -337,6 +339,9 @@ function deriveReason(
     return `${chapterText}存在阻塞，需要修复后继续。`
   }
   if (productionStatus === "complete") return "全部章节任务已完成。"
+  if (nextTarget?.type === "stage" && nextTarget.stage === "setting_review") {
+    return "设定审查包已生成，需要确认或修改后才能进入主线规划。"
+  }
   if (nextTarget?.type === "chapter") {
     return `项目已进入正文写作，当前没有后台任务运行，可从第 ${nextTarget.chapterNumber} 章继续。`
   }

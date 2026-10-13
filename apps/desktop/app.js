@@ -245,6 +245,7 @@ const dashboardState = {
   consensus: "",
   contextPacket: "",
   factorySnapshot: null,
+  lastRenderedModel: null,
   projectRuntime: null,
   knowledgeEvaluation: null,
   knowledgeSearch: {
@@ -353,9 +354,8 @@ const dashboardState = {
     chapterFocus: false,
     workspace: "discussion",
     modules: {
-      overview: true,
-      style: true,
       chapters: true,
+      style: false,
       observability: false,
       logs: false,
     },
@@ -369,9 +369,8 @@ function defaultPanelLayout() {
     chapterFocus: false,
     workspace: "discussion",
     modules: {
-      overview: true,
-      style: true,
       chapters: true,
+      style: false,
       observability: false,
       logs: false,
     },
@@ -389,9 +388,8 @@ function normalizePanelLayout(layout = {}) {
     chapterFocus: Boolean(layout?.chapterFocus),
     workspace: layout?.workspace === "style" ? "style" : "discussion",
     modules: {
-      overview: modules.overview ?? defaults.modules.overview,
+      chapters: modules.chapters ?? modules.overview ?? defaults.modules.chapters,
       style: modules.style ?? defaults.modules.style,
-      chapters: modules.chapters ?? defaults.modules.chapters,
       observability: modules.observability ?? defaults.modules.observability,
       logs: modules.logs ?? defaults.modules.logs,
     },
@@ -1480,10 +1478,17 @@ const llmCapabilityLabels = {
 const llmApiModeLabels = {
   chat: "OpenAI Chat",
   responses: "OpenAI Responses",
+  "codex-cli": "Codex CLI",
 }
 
 function normalizeLlmApiMode(value) {
-  return value === "responses" ? "responses" : "chat"
+  if (value === "responses") return "responses"
+  if (value === "codex-cli") return "codex-cli"
+  return "chat"
+}
+
+function isCodexCliApiMode(value) {
+  return normalizeLlmApiMode(value) === "codex-cli"
 }
 
 let savedLlmConfigs = []
@@ -2708,6 +2713,117 @@ function renderWorkflowReadinessGroups(readiness) {
   `
 }
 
+function renderWorkflowReadinessCompact(readiness) {
+  const items = Array.isArray(readiness?.items) ? readiness.items : []
+  const attentionItems = items.filter((item) => item.status !== "passed")
+  const passedItems = items.filter((item) => item.status === "passed")
+  const visibleItems = [...attentionItems, ...passedItems].slice(0, 3)
+  const issueText = (Array.isArray(readiness?.issues) ? readiness.issues : [])
+    .find((issue) => issue?.severity !== "info")?.message || readiness?.blockedReason || ""
+  const counts = {
+    passed: passedItems.length,
+    warning: items.filter((item) => item.status === "warning").length,
+    blocked: items.filter((item) => item.status === "blocked").length,
+  }
+
+  return `
+    <div class="workflow-readiness-compact">
+      <div class="workflow-readiness-counts" aria-label="生产准备度摘要">
+        <span class="is-passed"><strong>${counts.passed}</strong> 已就绪</span>
+        <span class="is-warning"><strong>${counts.warning}</strong> 关注</span>
+        <span class="is-blocked"><strong>${counts.blocked}</strong> 阻塞</span>
+      </div>
+      ${visibleItems.length ? `
+        <div class="workflow-readiness-mini-list">
+          ${visibleItems.map((item) => {
+            const meta = workflowReadinessStatus(item.status)
+            return `
+              <div class="workflow-readiness-mini-item ${meta.klass}">
+                <i class="fa-solid ${meta.icon}"></i>
+                <span>${escapeHtml(item.label)}</span>
+                <small>${escapeHtml(item.detail || item.recoveryHint || "")}</small>
+              </div>
+            `
+          }).join("")}
+        </div>
+      ` : ""}
+      ${issueText ? `<p class="workflow-readiness-focus">${escapeHtml(issueText)}</p>` : ""}
+      <button class="workflow-readiness-detail-button" type="button" data-open-readiness-detail>
+        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+        查看全部准备项与资产
+      </button>
+    </div>
+  `
+}
+
+function openAppOverlayModal(titleHtml, subtitleText, contentHtml) {
+  const overlayModal = document.getElementById("app-overlay-modal")
+  const overlayTitle = document.getElementById("overlay-modal-title")
+  const overlaySubtitle = document.getElementById("overlay-modal-subtitle")
+  const overlayDynamicContent = document.getElementById("overlay-dynamic-content")
+  if (!overlayModal) return
+  if (overlayTitle) overlayTitle.innerHTML = titleHtml
+  if (overlaySubtitle) overlaySubtitle.textContent = subtitleText
+  if (overlayDynamicContent) overlayDynamicContent.innerHTML = contentHtml
+  overlayModal.classList.remove("hidden")
+  overlayModal.style.pointerEvents = "auto"
+  overlayModal.style.opacity = "1"
+}
+
+function closeAppOverlayModal() {
+  const overlayModal = document.getElementById("app-overlay-modal")
+  if (!overlayModal) return
+  overlayModal.style.opacity = "0"
+  overlayModal.style.pointerEvents = "none"
+  window.setTimeout(() => {
+    overlayModal.classList.add("hidden")
+  }, 300)
+}
+
+function openReadinessDetailOverlay(model = dashboardState.lastRenderedModel) {
+  if (!model) return
+  const readiness = buildWorkflowReadiness(model)
+  const items = Array.isArray(readiness.items) ? readiness.items : []
+  const groups = Array.isArray(readiness.groups) ? readiness.groups : []
+  const detailItems = items.map((item) => {
+    const meta = workflowReadinessStatus(item.status)
+    return `
+      <div class="overlay-readiness-item ${meta.klass}">
+        <i class="fa-solid ${meta.icon}"></i>
+        <div>
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(item.detail || "")}</span>
+          ${item.recoveryHint && item.status !== "passed" ? `<small>${escapeHtml(item.recoveryHint)}</small>` : ""}
+        </div>
+      </div>
+    `
+  }).join("")
+  const detailGroups = groups.length ? renderWorkflowReadinessGroups(readiness) : `<p class="overlay-muted">当前快照没有更细的资产分组。</p>`
+  openAppOverlayModal(
+    '<i class="fa-solid fa-clipboard-check" style="color:#a78bfa;"></i> 生产准备度详情',
+    '左侧只展示摘要；完整阻塞原因、资产清单与恢复建议集中在这里查看。',
+    `
+      <div class="overlay-grid-two">
+        <section class="overlay-panel">
+          <div class="overlay-panel-head">
+            <span>准备项</span>
+            <strong>${Number(readiness.score || 0)}%</strong>
+          </div>
+          <div class="overlay-readiness-list">${detailItems}</div>
+        </section>
+        <section class="overlay-panel">
+          <div class="overlay-panel-head">
+            <span>资产与恢复线索</span>
+            <small>${escapeHtml(readiness.summary || "")}</small>
+          </div>
+          ${renderWorkflowReadinessIssues(readiness)}
+          ${detailGroups}
+        </section>
+      </div>
+    `
+  )
+}
+
 function buildWorkflowReadiness(model) {
   if (model?.productionReadiness && Array.isArray(model.productionReadiness.items)) {
     return model.productionReadiness
@@ -2783,10 +2899,418 @@ function buildWorkflowReadiness(model) {
   }
 }
 
+function compactCanonText(value = "", max = 96) {
+  const text = String(value || "").replace(/\s+/gu, " ").trim()
+  if (!text) return ""
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function parseCanonJson(value, fallback = null) {
+  if (value && typeof value === "object") {
+    return value
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback
+  }
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
+  }
+}
+
+function agentArtifactExists(model = {}, pattern) {
+  const artifacts = Array.isArray(model.artifacts) ? model.artifacts : []
+  return artifacts.some((artifact) => pattern.test(String(artifact?.path || artifact?.key || "")))
+}
+
+function firstAgentArtifactContent(model = {}, pattern) {
+  const artifacts = Array.isArray(model.artifacts) ? model.artifacts : []
+  const artifact = artifacts.find((item) => pattern.test(String(item?.path || item?.key || "")))
+  return String(artifact?.content || "")
+}
+
+function extractProtagonistCanon(state = {}, model = {}) {
+  const protagonistNameLooksDirty = (value = "") => {
+    const text = String(value || "").trim()
+    return !text
+      || /pending|protagonist-name|总章数|核心$|^核心$|未命名|undefined|null/iu.test(text)
+      || text.length > 24
+  }
+  const dossiers = Array.isArray(state?.memory?.characterDossiers)
+    ? state.memory.characterDossiers
+    : Array.isArray(state?.memory?.characters)
+      ? state.memory.characters
+      : []
+  const protagonist = dossiers.find((item) => {
+    const joined = [
+      item?.id,
+      item?.role,
+      item?.archetype,
+      item?.canonicalName,
+      item?.name,
+    ].map((value) => String(value || "")).join(" ")
+    return /protagonist|主角|男主|女主|hero/iu.test(joined)
+  }) || dossiers[0] || null
+
+  if (protagonist) {
+    const name = protagonist.canonicalName || protagonist.name || protagonist.id || "已记录主角"
+    const detail = protagonist.identityAndRole
+      || protagonist.desire
+      || protagonist.externalGoal
+      || protagonist.currentChapterDelta
+      || protagonist.summary
+      || protagonist.role
+      || ""
+    if (protagonistNameLooksDirty(name)) {
+      return {
+        name: "疑似脏数据",
+        detail: `主角名异常：「${compactCanonText(name, 24)}」，需 Canon 修复。`,
+        source: "dirty",
+      }
+    }
+    return {
+      name: String(name || ""),
+      detail: compactCanonText(detail, 120),
+      source: "characterDossiers",
+    }
+  }
+
+  const consensus = String(model.storyMemory?.consensusSummary || model.storyMemory?.consensus || "")
+  const match = consensus.match(/(?:主角|主人公|protagonist)[：:\s]+([^，。；;\n]+)/iu)
+  if (match?.[1]) {
+    if (protagonistNameLooksDirty(match[1])) {
+      return {
+        name: "疑似脏数据",
+        detail: `共识主角名异常：「${compactCanonText(match[1], 24)}」，需重新确认。`,
+        source: "dirty",
+      }
+    }
+    return {
+      name: compactCanonText(match[1], 40),
+      detail: "来自共识摘要，建议后续提升为结构化人物状态。",
+      source: "consensus",
+    }
+  }
+
+  return {
+    name: "未锁定",
+    detail: "尚未从确定人物档案中读到主角。",
+    source: "missing",
+  }
+}
+
+function latestWorkflowErrorLike(snapshot = {}, state = {}) {
+  const latestEvents = Array.isArray(snapshot.latestEvents) ? snapshot.latestEvents : []
+  const event = latestEvents.find((item) =>
+    /FAILED|BLOCKED|REJECTED|ERROR|QUALITY|AIGC/iu.test(String(item?.type || "")))
+    || latestEvents[0]
+    || null
+  const payload = parseCanonJson(event?.payload_json, event?.payload || {})
+  const runtime = state?.runtime || {}
+  const message = payload?.error
+    || payload?.message
+    || payload?.reason
+    || runtime.statusMessage
+    || ""
+  return {
+    type: String(event?.type || runtime.lastAction || ""),
+    message: compactCanonText(message, 150),
+    at: event?.created_at || event?.updated_at || runtime.lastUpdatedAt || runtime.updatedAt || "",
+  }
+}
+
+function buildAgentCanonState(model = dashboardState.lastRenderedModel) {
+  const snapshot = dashboardState.factorySnapshot || {}
+  const state = snapshot.state || dashboardState.state || {}
+  const runtime = state.runtime || {}
+  const summary = model?.productionSummary || {}
+  const pipeline = model?.productionPipeline || {}
+  const readiness = buildWorkflowReadiness(model)
+  const stageKey = model?.workflow?.currentStage?.key || runtime.stage || "unknown"
+  const stageLabel = model?.workflow?.currentStage?.label || stageKey
+  const protagonist = extractProtagonistCanon(state, model)
+  const settingFrozen = agentArtifactExists(model, /setting-freeze\.md|story-foundation-contract\.json|world-matrix\.json/iu)
+  const mainlineFrozen = agentArtifactExists(model, /master-outline\.md|plot-architecture\.md|volume-strategy\.md|story-bible\.md/iu)
+  const characterCount = Number(model?.storyMemory?.characterDossier?.count || 0)
+    || (Array.isArray(state?.memory?.characterDossiers) ? state.memory.characterDossiers.length : 0)
+  const blueprintCount = Number(summary.blueprints || pipeline.blueprints || 0)
+  const totalChapters = Number(summary.totalChapters || model?.project?.totalChapters || 0)
+  const completedChapters = Number(summary.completedChapters || 0)
+  const blockedChapters = Number(summary.blockedChapters || 0)
+  const currentChapter = Number(model?.runtime?.chapterNumber || 0) || (completedChapters < totalChapters ? completedChapters + 1 : null)
+  const styleGate = dashboardState.styleEvolution?.gate || {}
+  const knowledge = model?.storyMemory?.knowledge || {}
+  const contextBudget = model?.storyMemory?.contextBudget || {}
+  const latestError = latestWorkflowErrorLike(snapshot, state)
+  const settingRejected = stageKey === "setting_review"
+    && (
+      runtime.lastAction === "setting_review_rejected"
+      || /rejected|退回|拒绝/iu.test(String(runtime.statusMessage || ""))
+    )
+  const waitingApproval = stageKey === "setting_review"
+    && (
+      runtime.lastAction === "setting_review_waiting_for_approval"
+      || /waiting.*approval|等待.*(?:审批|确认|审阅)/iu.test(String(runtime.statusMessage || ""))
+    )
+  const sourceLabel = summary.source === "db" ? "DB 主事实源" : summary.source === "state" ? "state 缓存" : "等待快照"
+  let nextAction = "等待用户指令或启动无人值守。"
+
+  if (!model?.initialized) {
+    nextAction = "先初始化小说项目。"
+  } else if (settingRejected) {
+    nextAction = "进入设定修复：按拒绝原因修世界观、主角或主线假设。"
+  } else if (waitingApproval) {
+    nextAction = "等待人工确认设定冻结包，确认后才进入主线规划。"
+  } else if (!settingFrozen && ["worldbuilding_dialogue", "setting_review"].includes(stageKey)) {
+    nextAction = "先冻结世界观、主角和规则边界。"
+  } else if (!mainlineFrozen && ["master_planning", "setting_review"].includes(stageKey)) {
+    nextAction = "补齐主线规划和弧线出口状态。"
+  } else if (totalChapters > 0 && blueprintCount < totalChapters) {
+    nextAction = `继续生成章节蓝图：已 ${blueprintCount}/${totalChapters}。`
+  } else if (blockedChapters > 0) {
+    nextAction = `先处理 ${blockedChapters} 个阻塞章节，再继续正文。`
+  } else if (totalChapters > 0 && completedChapters < totalChapters) {
+    nextAction = `继续正文生产：下一章 ${currentChapter || completedChapters + 1}。`
+  } else if (stageKey === "complete") {
+    nextAction = "全书主流程已完成，可进入阅读、导出和复盘。"
+  }
+
+  const mainlinePreview = compactCanonText(
+    firstAgentArtifactContent(model, /master-outline\.md|plot-architecture\.md|story-bible\.md/iu)
+      || model?.storyMemory?.consensusSummary
+      || model?.project?.idea
+      || "",
+    150,
+  )
+  const globalFacts = [
+    {
+      label: "项目",
+      value: model?.project?.title || "未初始化",
+      status: model?.initialized ? "good" : "blocked",
+    },
+    {
+      label: "阶段",
+      value: stageLabel,
+      status: settingRejected ? "blocked" : waitingApproval ? "warn" : "good",
+    },
+    {
+      label: "主角",
+      value: protagonist.name,
+      status: ["missing", "dirty"].includes(protagonist.source) ? "blocked" : protagonist.source === "consensus" ? "warn" : "good",
+    },
+    {
+      label: "主线",
+      value: mainlineFrozen ? "已冻结" : "未完全冻结",
+      status: mainlineFrozen ? "good" : "warn",
+    },
+    {
+      label: "章节",
+      value: totalChapters ? `${completedChapters}/${totalChapters} 完成` : "未规划",
+      status: totalChapters && completedChapters <= totalChapters ? "good" : "warn",
+    },
+    {
+      label: "阻塞",
+      value: blockedChapters ? `${blockedChapters} 章` : settingRejected ? "设定退回" : "无",
+      status: blockedChapters || settingRejected ? "blocked" : "good",
+    },
+  ]
+  const stageRows = []
+
+  if (["worldbuilding_dialogue", "setting_review"].includes(stageKey)) {
+    stageRows.push(
+      { label: "世界观", value: settingFrozen ? "已形成冻结资产" : "仍在候选/待冻结" },
+      { label: "人物", value: protagonist.source === "dirty" ? protagonist.detail : characterCount ? `${characterCount} 个确定档案` : "缺少结构化人物档案" },
+      { label: "审批", value: settingRejected ? "已退回，需修复" : waitingApproval ? "等待确认" : "未进入审批或已通过" },
+      { label: "边界", value: "候选不能进入正典；RAG 只能参考" },
+    )
+  } else if (stageKey === "master_planning") {
+    stageRows.push(
+      { label: "主线资产", value: mainlineFrozen ? "主线/故事圣经已存在" : "需要补齐主线规划" },
+      { label: "世界观", value: settingFrozen ? "可作为确定输入" : "世界观冻结不足" },
+      { label: "人物", value: characterCount ? `${characterCount} 个正典人物可用` : "人物状态不足" },
+      { label: "下一步", value: "输出卷结构、弧线出口和不可逆事件" },
+    )
+  } else if (stageKey === "chapter_task_generation") {
+    stageRows.push(
+      { label: "蓝图", value: totalChapters ? `${blueprintCount}/${totalChapters}` : `${blueprintCount} 个` },
+      { label: "当前窗口", value: model?.chapters?.window?.start ? `${model.chapters.window.start}-${model.chapters.window.end}` : "等待章节窗口" },
+      { label: "入口状态", value: "应来自上一批 exit / canon state，不由 RAG 猜测" },
+      { label: "审计", value: readiness.status === "passed" ? "准备度通过" : readiness.summary || "仍需检查" },
+    )
+  } else if (["drafting", "reviewing", "aigc_refinement"].includes(stageKey)) {
+    stageRows.push(
+      { label: "当前章", value: currentChapter ? `第 ${currentChapter} 章` : "无待写章节" },
+      { label: "蓝图", value: totalChapters ? `${blueprintCount}/${totalChapters}` : "等待蓝图" },
+      { label: "写法", value: styleGate.status === "passed" ? "Style Contract 已冻结" : "写法合同未完全通过" },
+      { label: "AIGC/质检", value: blockedChapters ? `${blockedChapters} 个阻塞项` : "无章节阻塞" },
+    )
+  } else {
+    stageRows.push(
+      { label: "阶段", value: stageLabel },
+      { label: "最近动作", value: runtime.lastAction || model?.runtime?.lastAction || "none" },
+      { label: "准备度", value: `${Number(readiness.score || 0)}% · ${readiness.summary || ""}` },
+      { label: "下一步", value: nextAction },
+    )
+  }
+
+  return {
+    sourceLabel,
+    stageKey,
+    stageLabel,
+    globalFacts,
+    stageRows,
+    protagonist,
+    mainlinePreview,
+    settingFrozen,
+    mainlineFrozen,
+    characterCount,
+    blueprintCount,
+    totalChapters,
+    completedChapters,
+    blockedChapters,
+    styleStatus: styleGate.status || "unknown",
+    knowledgeStatus: knowledge.label || knowledge.status || "unknown",
+    ragReferenceCount: Number(knowledge.summary?.readyChunks || 0),
+    contextBudgetPercent: Number(contextBudget.budgetPercent || 0),
+    latestError,
+    nextAction,
+    warning: "Canon 优先；RAG 只参考，不能覆盖主角、主线、世界规则和章节入口。",
+  }
+}
+
+function renderAgentCanonStatus(model = dashboardState.lastRenderedModel) {
+  const node = document.getElementById("agent-canon-status")
+  if (!node) return
+  if (!model?.initialized) {
+    node.innerHTML = `
+      <div class="agent-canon-empty">
+        <i class="fa-solid fa-brain"></i>
+        <span>等待同步 Agent 确定状态。</span>
+      </div>
+    `
+    return
+  }
+  const canon = buildAgentCanonState(model)
+  node.innerHTML = `
+    <div class="agent-canon-head">
+      <div class="agent-canon-title">
+        <strong><i class="fa-solid fa-brain"></i> Agent 状态栏 / Canon State</strong>
+        <small>${escapeHtml(canon.nextAction)}</small>
+      </div>
+      <span class="agent-canon-source"><i class="fa-solid fa-database"></i>${escapeHtml(canon.sourceLabel)}</span>
+    </div>
+    <div class="agent-canon-grid">
+      ${canon.globalFacts.map((fact) => `
+        <div class="agent-canon-pill is-${escapeHtml(fact.status || "good")}">
+          <span>${escapeHtml(fact.label)}</span>
+          <strong>${escapeHtml(compactCanonText(fact.value, 42) || "--")}</strong>
+        </div>
+      `).join("")}
+    </div>
+    <div class="agent-canon-focus">
+      <div class="agent-canon-focus-head">
+        <span><i class="fa-solid fa-crosshairs"></i> ${escapeHtml(canon.stageLabel)}阶段关注点</span>
+        <small>${escapeHtml(canon.stageKey)}</small>
+      </div>
+      <div class="agent-canon-rows">
+        ${canon.stageRows.map((row) => `
+          <div class="agent-canon-row">
+            <span>${escapeHtml(row.label)}</span>
+            <strong>${escapeHtml(compactCanonText(row.value, 98) || "--")}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="agent-canon-warning">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span>${escapeHtml(canon.warning)}</span>
+    </div>
+    <div class="agent-canon-actions">
+      <button class="agent-canon-detail-button" type="button" data-open-agent-canon-detail>
+        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+        查看完整确定状态
+      </button>
+    </div>
+  `
+}
+
+function openAgentCanonDetailOverlay(model = dashboardState.lastRenderedModel) {
+  if (!model) return
+  const canon = buildAgentCanonState(model)
+  const payload = {
+    source: canon.sourceLabel,
+    stage: {
+      key: canon.stageKey,
+      label: canon.stageLabel,
+    },
+    globalFacts: canon.globalFacts,
+    stageSpecificFacts: canon.stageRows,
+    protagonist: canon.protagonist,
+    mainlinePreview: canon.mainlinePreview,
+    production: {
+      totalChapters: canon.totalChapters,
+      completedChapters: canon.completedChapters,
+      blueprintCount: canon.blueprintCount,
+      blockedChapters: canon.blockedChapters,
+      styleStatus: canon.styleStatus,
+    },
+    contextPolicy: {
+      canonicalFacts: "DB/state/canon artifacts only",
+      rag: "reference only, never override canon",
+      candidate: "must not enter canon until approved/frozen",
+    },
+    observability: {
+      knowledgeStatus: canon.knowledgeStatus,
+      ragReferenceCount: canon.ragReferenceCount,
+      contextBudgetPercent: canon.contextBudgetPercent,
+      latestError: canon.latestError,
+      nextAction: canon.nextAction,
+    },
+  }
+  openAppOverlayModal(
+    '<i class="fa-solid fa-brain" style="color:#22d3ee;"></i> Agent 状态栏 / Canon State',
+    '这里展示 AI 应该相信的确定上下文；RAG 与历史讨论只作为参考，不能覆盖这些事实。',
+    `
+      <div class="overlay-grid-two">
+        <section class="overlay-panel overlay-canon-section">
+          <div class="overlay-panel-head">
+            <span>确定事实</span>
+            <small>${escapeHtml(canon.sourceLabel)}</small>
+          </div>
+          <div class="overlay-readiness-list">
+            ${canon.globalFacts.map((fact) => `
+              <div class="overlay-readiness-item is-${escapeHtml(fact.status === "good" ? "passed" : fact.status === "warn" ? "warning" : fact.status || "passed")}">
+                <i class="fa-solid ${fact.status === "blocked" ? "fa-lock" : fact.status === "warn" ? "fa-triangle-exclamation" : "fa-circle-check"}"></i>
+                <div>
+                  <strong>${escapeHtml(fact.label)}</strong>
+                  <span>${escapeHtml(String(fact.value || "--"))}</span>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+          <div class="agent-canon-warning">
+            <i class="fa-solid fa-shield-halved"></i>
+            <span>${escapeHtml(canon.warning)}</span>
+          </div>
+        </section>
+        <section class="overlay-panel overlay-canon-section">
+          <div class="overlay-panel-head">
+            <span>结构化状态包</span>
+            <small>后续接入 prompt / repair harness</small>
+          </div>
+          <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+        </section>
+      </div>
+    `
+  )
+}
+
 function renderWorkflow(model) {
   document.getElementById("stage-badge").textContent = model.workflow.currentStage.label
   document.getElementById("current-stage-text").textContent = model.workflow.currentStage.key
   document.getElementById("current-stage-desc").textContent = model.workflow.currentStage.description
+  renderAgentCanonStatus(model)
 
   const automationNode = document.getElementById("workflow-automation-status")
   if (automationNode) {
@@ -2890,21 +3414,7 @@ function renderWorkflow(model) {
           <strong>${readiness.score}%</strong>
           <small>${escapeHtml(readiness.summary)}</small>
         </div>
-        <div class="workflow-readiness-grid">
-          ${readiness.items.map((item) => {
-            const meta = workflowReadinessStatus(item.status)
-            return `
-              <div class="workflow-readiness-item ${meta.klass}">
-                <i class="fa-solid ${meta.icon}"></i>
-                <span>${escapeHtml(item.label)}</span>
-                <small>${escapeHtml(item.detail)}</small>
-                ${item.recoveryHint && item.status !== "passed" ? `<em>${escapeHtml(item.recoveryHint)}</em>` : ""}
-              </div>
-            `
-          }).join("")}
-        </div>
-        ${renderWorkflowReadinessIssues(readiness)}
-        ${renderWorkflowReadinessGroups(readiness)}
+        ${renderWorkflowReadinessCompact(readiness)}
       </div>
       <div class="workflow-production-grid">
         <span>蓝图 <strong>${Number(summary.blueprints || pipeline.blueprints || 0)}</strong></span>
@@ -3487,6 +3997,130 @@ function chapterStatusBadge(task) {
   return { klass: "badge-pending", label: "待完成", itemClass: "", progress: 0 }
 }
 
+function chapterMapStatus(task, chapterNumber, completedCount = 0) {
+  if (task?.displayStatus === "blocked_by_previous" || task?.blockedByPrevious) {
+    return { klass: "is-waiting", label: "等待前序", title: "前序章节未通过" }
+  }
+  if (task?.status === "complete") {
+    return { klass: "is-complete", label: "已完成", title: "正式章节已完成" }
+  }
+  if (task?.status === "in_progress") {
+    return { klass: "is-running", label: "进行中", title: "当前正在生成/处理" }
+  }
+  if (task?.status === "blocked") {
+    return { klass: "is-blocked", label: "阻塞", title: "章节门禁阻塞" }
+  }
+  if (!task && Number(chapterNumber || 0) <= completedCount) {
+    return { klass: "is-complete is-estimated", label: "已完成", title: "由完成数量推断，当前分页未加载该章详情" }
+  }
+  return { klass: "is-pending", label: "待写", title: "等待生产" }
+}
+
+function renderChapterNumberMap(model, options = {}) {
+  const summary = model.productionSummary || {}
+  const visibleItems = Array.isArray(model.chapters?.items) ? model.chapters.items : []
+  const taskByChapter = new Map(visibleItems.map((task) => [Number(task.chapterNumber || 0), task]))
+  const total = Number.isFinite(Number(summary.totalChapters)) && Number(summary.totalChapters) > 0
+    ? Number(summary.totalChapters)
+    : visibleItems.length
+  const completedCount = Number.isFinite(Number(summary.completedChapters))
+    ? Number(summary.completedChapters)
+    : visibleItems.filter((item) => item.status === "complete").length
+  const maxVisible = Math.max(1, Number(options.limit || total || 1))
+  const count = Math.min(total || visibleItems.length, maxVisible)
+  if (!count) {
+    return `<div class="chapter-map-empty">等待章节任务生成。</div>`
+  }
+  const chips = Array.from({ length: count }, (_, index) => {
+    const chapterNumber = index + 1
+    const task = taskByChapter.get(chapterNumber)
+    const meta = chapterMapStatus(task, chapterNumber, completedCount)
+    const title = task?.title ? `第 ${chapterNumber} 章：${task.title}` : `第 ${chapterNumber} 章 · ${meta.title}`
+    return `
+      <button class="chapter-map-chip ${meta.klass}" type="button" data-chapter-map-chip="${chapterNumber}" title="${escapeHtml(title)}">
+        ${chapterNumber}
+      </button>
+    `
+  }).join("")
+  const overflow = total > count ? `<span class="chapter-map-overflow">+${total - count}</span>` : ""
+  return `<div class="chapter-number-map">${chips}${overflow}</div>`
+}
+
+function renderChapterTaskCards(model) {
+  const visibleItems = Array.isArray(model.chapters?.items) ? model.chapters.items : []
+  if (!visibleItems.length) return ""
+  return visibleItems.map((task) => {
+    const badge = chapterStatusBadge(task)
+    const canRun = !task.blockedByPrevious && !task.recoveryBlocked && (task.status === "blocked"
+      || model.workflow.currentStage.key === "drafting"
+      || model.workflow.currentStage.key === "chapter_task_generation")
+    const qualityGate = task.qualityGate || null
+    const qualityLabel = task.blockedByPrevious
+      ? "⚠️ 前序章节存在阻塞：请先点击上方标红章节的「重试/介入」修复问题，后续章节将自动恢复。"
+      : qualityGate
+      ? `${task.recoveryBlocked ? "需人工审阅 · " : ""}评分 ${qualityGate.score}/10 · 返工 ${qualityGate.attempts || 0} 次${task.recoveryAttempts ? ` · 恢复 ${task.recoveryAttempts} 次` : ""}`
+      : ""
+    const blueprintPath = task.blueprintPath || ""
+    return `
+      <div class="chapter-task-item ${badge.itemClass}" data-chapter="${task.chapterNumber}">
+        <div class="chapter-info-row">
+          <span class="chapter-num">#${task.chapterNumber}</span>
+          <span class="chapter-title">${escapeHtml(task.title)}</span>
+          <span class="chapter-status-badge ${badge.klass}">${badge.label}</span>
+        </div>
+        <div class="chapter-details-row">
+          <span class="word-target"><i class="fa-solid fa-file-word"></i> ${task.targetWords} 字</span>
+          <span class="actions">
+            <button class="btn-action chapter-blueprint-button" data-artifact-path="${escapeHtml(blueprintPath)}" ${blueprintPath ? "" : "disabled"} title="${blueprintPath ? "预览章节蓝图" : "章节蓝图尚未生成"}">
+              <i class="fa-solid fa-route"></i>
+            </button>
+            <button class="btn-action chapter-preview-button" data-chapter="${task.chapterNumber}" title="预览正式章节文件">
+              <i class="fa-solid fa-book-open"></i>
+            </button>
+            <button class="btn-action chapter-run-button" data-chapter="${task.chapterNumber}" data-status="${escapeHtml(task.status)}" ${canRun ? "" : "disabled"} title="${task.blockedByPrevious ? "前序章节未通过，需先修复前序章节" : task.recoveryBlocked ? "已达到恢复上限，需要人工审阅" : "执行章节任务"}">
+              <i class="fa-solid ${task.recoveryBlocked ? "fa-lock" : task.status === "blocked" ? "fa-rotate-right" : "fa-play"}"></i>
+            </button>
+          </span>
+        </div>
+        ${qualityLabel ? `<div class="chapter-quality-row ${task.blockedByPrevious ? "is-blocked" : task.recoveryBlocked ? "is-limited" : qualityGate?.status === "blocked" ? "is-blocked" : ""}">${escapeHtml(qualityLabel)}</div>` : ""}
+        <div class="task-progress-bar">
+          <div class="task-progress-fill" style="width: ${badge.progress}%"></div>
+        </div>
+      </div>
+    `
+  }).join("")
+}
+
+function openChapterMapOverlay(model = dashboardState.lastRenderedModel) {
+  if (!model) return
+  const summary = model.productionSummary || {}
+  const total = Number(summary.totalChapters || model.project?.totalChapters || 0)
+  const completed = Number(summary.completedChapters || 0)
+  const blocked = Number(summary.blockedChapters || 0)
+  const pending = Number(summary.pendingChapters || Math.max(0, total - completed - blocked))
+  openAppOverlayModal(
+    '<i class="fa-solid fa-book-open-reader" style="color:#34d399;"></i> 全部章节地图',
+    '数字格子展示章节生产状态；点击已完成章节可直接预览，未完成章节会跳到所在任务窗口。',
+    `
+      <div class="overlay-panel chapter-map-overlay">
+        <div class="chapter-map-summary-row">
+          <span><strong>${completed}</strong> 已完成</span>
+          <span><strong>${blocked}</strong> 阻塞</span>
+          <span><strong>${pending}</strong> 待写</span>
+          <span><strong>${total}</strong> 总章节</span>
+        </div>
+        ${renderChapterNumberMap(model, { limit: Math.max(total, 1) })}
+        <div class="chapter-map-legend">
+          <span><i class="is-complete"></i> 已完成</span>
+          <span><i class="is-running"></i> 进行中</span>
+          <span><i class="is-blocked"></i> 阻塞</span>
+          <span><i class="is-pending"></i> 待写</span>
+        </div>
+      </div>
+    `
+  )
+}
+
 function renderChapters(model) {
   const container = document.getElementById("chapter-list-container")
   const summary = model.productionSummary || {}
@@ -3502,7 +4136,6 @@ function renderChapters(model) {
   document.getElementById("progress-total-label").textContent = `总进度 (${total}章)`
   document.getElementById("progress-percent").textContent = `${completed} / ${total} 章`
   document.getElementById("global-progress-fill").style.width = `${percentage}%`
-  updateSidebarModuleSummary("overview-panel-summary", `${completed} / ${total} 章 · ${percentage}%`)
   const draftOnlyNotice = model.productionPipeline?.transcriptDraftOnly
     ? `
       <div class="chapter-sync-notice">
@@ -3557,46 +4190,40 @@ function renderChapters(model) {
       </div>
     `
     : ""
-  container.innerHTML = `${draftOnlyNotice}${pagination}${windowNotice}${emptyState}${visibleItems.map((task) => {
-    const badge = chapterStatusBadge(task)
-    const canRun = !task.blockedByPrevious && !task.recoveryBlocked && (task.status === "blocked"
-      || model.workflow.currentStage.key === "drafting"
-      || model.workflow.currentStage.key === "chapter_task_generation")
-    const qualityGate = task.qualityGate || null
-    const qualityLabel = task.blockedByPrevious
-      ? "⚠️ 前序章节存在阻塞：请先点击上方标红章节的「重试/介入」修复问题，后续章节将自动恢复。"
-      : qualityGate
-      ? `${task.recoveryBlocked ? "需人工审阅 · " : ""}评分 ${qualityGate.score}/10 · 返工 ${qualityGate.attempts || 0} 次${task.recoveryAttempts ? ` · 恢复 ${task.recoveryAttempts} 次` : ""}`
-      : ""
-    const blueprintPath = task.blueprintPath || ""
-    return `
-      <div class="chapter-task-item ${badge.itemClass}" data-chapter="${task.chapterNumber}">
-        <div class="chapter-info-row">
-          <span class="chapter-num">#${task.chapterNumber}</span>
-          <span class="chapter-title">${escapeHtml(task.title)}</span>
-          <span class="chapter-status-badge ${badge.klass}">${badge.label}</span>
+  const taskCards = renderChapterTaskCards(model)
+  container.innerHTML = `
+    ${draftOnlyNotice}
+    <div class="chapter-map-panel">
+      <div class="chapter-map-panel-head">
+        <div>
+          <strong>章节地图</strong>
+          <small>${escapeHtml(visibleRangeLabel)}</small>
         </div>
-        <div class="chapter-details-row">
-          <span class="word-target"><i class="fa-solid fa-file-word"></i> ${task.targetWords} 字</span>
-          <span class="actions">
-            <button class="btn-action chapter-blueprint-button" data-artifact-path="${escapeHtml(blueprintPath)}" ${blueprintPath ? "" : "disabled"} title="${blueprintPath ? "预览章节蓝图" : "章节蓝图尚未生成"}">
-              <i class="fa-solid fa-route"></i>
-            </button>
-            <button class="btn-action chapter-preview-button" data-chapter="${task.chapterNumber}" title="预览正式章节文件">
-              <i class="fa-solid fa-book-open"></i>
-            </button>
-            <button class="btn-action chapter-run-button" data-chapter="${task.chapterNumber}" data-status="${escapeHtml(task.status)}" ${canRun ? "" : "disabled"} title="${task.blockedByPrevious ? "前序章节未通过，需先修复前序章节" : task.recoveryBlocked ? "已达到恢复上限，需要人工审阅" : "执行章节任务"}">
-              <i class="fa-solid ${task.recoveryBlocked ? "fa-lock" : task.status === "blocked" ? "fa-rotate-right" : "fa-play"}"></i>
-            </button>
-          </span>
-        </div>
-        ${qualityLabel ? `<div class="chapter-quality-row ${task.blockedByPrevious ? "is-blocked" : task.recoveryBlocked ? "is-limited" : qualityGate?.status === "blocked" ? "is-blocked" : ""}">${escapeHtml(qualityLabel)}</div>` : ""}
-        <div class="task-progress-bar">
-          <div class="task-progress-fill" style="width: ${badge.progress}%"></div>
-        </div>
+        <button class="chapter-map-open-button" type="button" data-open-chapter-map>
+          查看全部
+        </button>
       </div>
-    `
-  }).join("")}`
+      ${renderChapterNumberMap(model, { limit: 80 })}
+      <div class="chapter-map-legend">
+        <span><i class="is-complete"></i> 完成</span>
+        <span><i class="is-running"></i> 进行中</span>
+        <span><i class="is-blocked"></i> 阻塞</span>
+        <span><i class="is-pending"></i> 待写</span>
+      </div>
+    </div>
+    ${windowNotice}
+    ${emptyState}
+    ${taskCards ? `
+      <details class="chapter-window-details">
+        <summary>
+          <span>当前窗口操作</span>
+          <small>${windowStart || "?"}-${windowEnd || "?"} 章</small>
+        </summary>
+        ${pagination}
+        <div class="chapter-window-task-list">${taskCards}</div>
+      </details>
+    ` : ""}
+  `
 
   container.querySelectorAll(".chapter-run-button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3615,6 +4242,22 @@ function renderChapters(model) {
   container.querySelectorAll(".chapter-blueprint-button").forEach((button) => {
     button.addEventListener("click", () => {
       previewArtifact(button.dataset.artifactPath || "")
+    })
+  })
+  container.querySelectorAll("[data-open-chapter-map]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openChapterMapOverlay(model)
+    })
+  })
+  container.querySelectorAll("[data-chapter-map-chip]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const chapterNumber = Number(button.dataset.chapterMapChip || 0)
+      const task = visibleItems.find((item) => Number(item.chapterNumber || 0) === chapterNumber)
+      if (task?.status === "complete") {
+        previewChapter(chapterNumber)
+        return
+      }
+      setChapterPage(Math.max(1, Math.ceil(chapterNumber / pageSize)))
     })
   })
   container.querySelectorAll(".chapter-page-button").forEach((button) => {
@@ -9548,6 +10191,7 @@ function renderDashboard() {
     envStatus: dashboardState.envStatus,
     providerResult: dashboardState.providerResult,
   })
+  dashboardState.lastRenderedModel = model
 
   renderProjectCard(model)
   renderWorkflow(model)
@@ -10440,16 +11084,20 @@ async function runInterrupt(message) {
 
 async function runModalProviderTest() {
   const id = llmConfigIdInput.value.trim()
+  const apiMode = normalizeLlmApiMode(providerApiModeInput?.value)
   const apiKey = providerApiKeyInput.value.trim()
+  const usesCodexCli = isCodexCliApiMode(apiMode)
   const payload = {
-    LLM_BASE_URL: providerBaseUrlInput.value.trim(),
+    LLM_BASE_URL: usesCodexCli ? "codex-cli://local" : providerBaseUrlInput.value.trim(),
     LLM_MODEL_ID: providerModelInput.value.trim(),
-    LLM_API_MODE: normalizeLlmApiMode(providerApiModeInput?.value),
+    LLM_API_MODE: apiMode,
   }
   if (id) {
     payload.id = id
   }
-  if (apiKey) {
+  if (usesCodexCli) {
+    payload.LLM_API_KEY = "[codex-cli]"
+  } else if (apiKey) {
     payload.LLM_API_KEY = apiKey
   }
 
@@ -10478,13 +11126,14 @@ async function runModalProviderTest() {
 async function saveProviderConfigFromModal() {
   const id = llmConfigIdInput.value.trim()
   const name = llmConfigNameInput.value.trim()
-  const baseUrl = providerBaseUrlInput.value.trim()
-  const apiKey = providerApiKeyInput.value.trim()
   const modelName = providerModelInput.value.trim()
   const apiMode = normalizeLlmApiMode(providerApiModeInput?.value)
+  const usesCodexCli = isCodexCliApiMode(apiMode)
+  const baseUrl = usesCodexCli ? "codex-cli://local" : providerBaseUrlInput.value.trim()
+  const apiKey = usesCodexCli ? "[codex-cli]" : providerApiKeyInput.value.trim()
 
-  if (!name || !baseUrl || !apiKey || !modelName) {
-    setProviderModalStatus("is-error", "请填写所有必填字段（名称、URL、Key、Model ID）。")
+  if (!name || !modelName || (!usesCodexCli && (!baseUrl || !apiKey))) {
+    setProviderModalStatus("is-error", usesCodexCli ? "请填写配置名称和 Model ID。" : "请填写所有必填字段（名称、URL、Key、Model ID）。")
     return
   }
 
@@ -11263,6 +11912,12 @@ async function runComposerAction(action) {
   document.getElementById("cover-status")?.addEventListener("click", handleCoverClick)
   document.getElementById("sidebar-project-cover-container")?.addEventListener("click", handleCoverClick)
   document.getElementById("workflow-production-status")?.addEventListener("click", (event) => {
+    const readinessDetailButton = event.target.closest("[data-open-readiness-detail]")
+    if (readinessDetailButton) {
+      openReadinessDetailOverlay()
+      return
+    }
+
     const repairButton = event.target.closest("[data-repair-story-assets]")
     if (repairButton) {
       repairStoryAssets(repairButton)
@@ -11287,6 +11942,11 @@ async function runComposerAction(action) {
     const artifactButton = event.target.closest("[data-artifact-path]")
     if (!artifactButton) return
     previewArtifact(artifactButton.dataset.artifactPath || "")
+  })
+  document.getElementById("agent-canon-status")?.addEventListener("click", (event) => {
+    const canonDetailButton = event.target.closest("[data-open-agent-canon-detail]")
+    if (!canonDetailButton) return
+    openAgentCanonDetailOverlay()
   })
 
   // Listen to list container clicks for project covers (to open large lightboxes)
@@ -11993,15 +12653,34 @@ async function runComposerAction(action) {
   }
 
   function closeOverlayModal() {
-    if (!overlayModal) return
-    overlayModal.style.opacity = "0"
-    overlayModal.style.pointerEvents = "none"
-    window.setTimeout(() => {
-      overlayModal.classList.add("hidden")
-    }, 300)
+    closeAppOverlayModal()
   }
 
   overlayBackButton?.addEventListener("click", closeOverlayModal)
+  overlayDynamicContent?.addEventListener("click", (event) => {
+    const artifactButton = event.target.closest("[data-artifact-path]")
+    if (artifactButton) {
+      previewArtifact(artifactButton.dataset.artifactPath || "")
+      return
+    }
+
+    const chapterButton = event.target.closest("[data-chapter-map-chip]")
+    if (chapterButton) {
+      const chapterNumber = Number(chapterButton.dataset.chapterMapChip || 0)
+      if (!chapterNumber) return
+      const model = dashboardState.lastRenderedModel
+      const task = Array.isArray(model?.chapters?.items)
+        ? model.chapters.items.find((item) => Number(item.chapterNumber || 0) === chapterNumber)
+        : null
+      if (task?.status === "complete" || chapterButton.classList.contains("is-complete")) {
+        previewChapter(chapterNumber)
+        return
+      }
+      const pageSize = Number(dashboardState.chapterPageSize || model?.chapters?.window?.pageSize || 20)
+      setChapterPage(Math.max(1, Math.ceil(chapterNumber / pageSize)))
+      closeAppOverlayModal()
+    }
+  })
 
   btnTriggerCharacters?.addEventListener("click", () => {
     openOverlayModal(
