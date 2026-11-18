@@ -1,0 +1,26 @@
+{
+  "name": "ai-novel-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone AI Novel Factory API server for web and desktop clients",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ai-novel-server": "dist/index.js",
+    "ai-novel-worker": "dist/worker.js"
+  },
+  "scripts": {
+    "build": "npm --prefix ../ai-novel-core run build && tsup src/index.ts src/server.ts src/worker.ts --format esm --dts --clean",
+    "dev": "node dist/index.js --root-dir ../.. --static-dir ../../apps/desktop --port 4310",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "ai-novel-core": "file:../ai-novel-core"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

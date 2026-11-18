@@ -1,0 +1,35 @@
+# 输出内容（可选是否分享）
+studio/production/chapters/*.md
+!studio/production/chapters/chapter_template.md
+
+# 状态文件（可选）
+# studio/state/current_chapter.txt
+
+# 系统文件
+.DS_Store
+node_modules/
+*.zip
+pnpm-lock.yaml
+.env
+.env.*
+!.env.example
+.ai-novel/
+.ai-novel-projects/
+.ai-novel-factory/
+.kunsdd/
+.preview/
+
+# 截图文件（允许提交）
+!screenshots/**/*.png
+!screenshots/**/*.jpg
+!screenshots/**/*.jpeg
+!screenshots/**/*.gif
+scripts/__pycache__/
+.gitnexus
+
+# Independent IM checkout with its own Git repository and build lifecycle.
+projects/persona-im/
+
+# Independent capability services; never part of the novel source snapshot.
+projects/persona-capabilities/
+CLAUDE.local.md

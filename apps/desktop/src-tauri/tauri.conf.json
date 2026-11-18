@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI Novel Factory",
+  "version": "0.1.0",
+  "identifier": "com.ai-novel-factory.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:4310"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AI Novel Factory",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1200,
+        "minHeight": 780,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}

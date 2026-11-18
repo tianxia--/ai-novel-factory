@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "studio",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "packages/ai-novel-server/dist/index.js",
+        "--root-dir", ".",
+        "--static-dir", "apps/desktop",
+        "--port", "4310",
+        "--embedded-worker"
+      ],
+      "port": 4310
+    }
+  ]
+}

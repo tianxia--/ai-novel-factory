@@ -1,0 +1,35 @@
+{
+  "bindingId": "binding-writer-book-a",
+  "actorId": "actor-writer",
+  "workId": "work-book-a-chapter-1",
+  "installationId": "novel-local",
+  "capabilityId": "novel-writing",
+  "grantEpoch": 3,
+  "credentialRef": "secret-ref://work/book-a-writer",
+  "selectedTools": [
+    "project_get",
+    "chapter_context_get",
+    "chapter_draft_submit",
+    "artifact_get",
+    "operation_get",
+    "operation_cancel"
+  ],
+  "resources": [
+    {
+      "uri": "novel://projects/book-a/chapters/chapter-1",
+      "actions": ["context.read", "draft.submit"]
+    }
+  ],
+  "knowledgeBindings": [
+    {
+      "installationId": "novel-local",
+      "uri": "novel://projects/book-a/canon",
+      "version": "canon-v7",
+      "read": true,
+      "discloseTo": ["conversation-book-a"]
+    }
+  ],
+  "deliveryAudience": {
+    "conversationId": "conversation-book-a"
+  }
+}

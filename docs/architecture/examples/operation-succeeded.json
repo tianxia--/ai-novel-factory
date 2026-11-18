@@ -1,0 +1,22 @@
+{
+  "contractVersion": "1.0",
+  "invocationId": "invocation-draft-book-a-1",
+  "operationId": "operation-draft-book-a-1",
+  "revision": 3,
+  "status": "succeeded",
+  "artifacts": [
+    {
+      "uri": "novel://projects/book-a/chapters/chapter-1/drafts/draft-1",
+      "version": "draft-v1",
+      "mediaType": "text/markdown",
+      "title": "Chapter 1 draft",
+      "summary": "The persona's draft was stored as a candidate version."
+    }
+  ],
+  "usage": {
+    "modelCalls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0
+  }
+}

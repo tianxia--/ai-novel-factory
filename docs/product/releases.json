@@ -1,0 +1,67 @@
+{
+  "registryVersion": "1.0",
+  "updatedAt": "2026-10-20",
+  "product": "independent-persona-im",
+  "platform": [
+    {
+      "version": "v0.1",
+      "status": "implementing",
+      "acceptanceStatus": "pending",
+      "prd": "versions/v0.1/prd.md",
+      "plan": "versions/v0.1/implementation-plan.md",
+      "acceptance": "versions/v0.1/acceptance.md",
+      "requirements": ["P01-R01", "P01-R02", "P01-R03", "P01-R04", "P01-R05", "P01-R06", "P01-R07", "P01-R08", "P01-R09", "P01-R10"],
+      "cases": ["P01-A01", "P01-A02", "P01-A03", "P01-A04", "P01-A05", "P01-A06", "P01-A07", "P01-A08", "P01-A09", "P01-A10"],
+      "dependsOn": []
+    },
+    {
+      "version": "v0.2",
+      "status": "planned",
+      "acceptanceStatus": "pending",
+      "prd": "versions/v0.2/prd.md",
+      "plan": "versions/v0.2/implementation-plan.md",
+      "acceptance": "versions/v0.2/acceptance.md",
+      "requirements": ["P02-R01", "P02-R02", "P02-R03", "P02-R04", "P02-R05", "P02-R06", "P02-R07", "P02-R08", "P02-R09", "P02-R10"],
+      "cases": ["P02-A01", "P02-A02", "P02-A03", "P02-A04", "P02-A05", "P02-A06", "P02-A07", "P02-A08", "P02-A09", "P02-A10"],
+      "dependsOn": ["v0.1"]
+    },
+    {
+      "version": "v0.3",
+      "status": "planned",
+      "acceptanceStatus": "pending",
+      "prd": "versions/v0.3/prd.md",
+      "plan": "versions/v0.3/implementation-plan.md",
+      "acceptance": "versions/v0.3/acceptance.md",
+      "requirements": ["P03-R01", "P03-R02", "P03-R03", "P03-R04", "P03-R05", "P03-R06", "P03-R07", "P03-R08"],
+      "cases": ["P03-A01", "P03-A02", "P03-A03", "P03-A04", "P03-A05", "P03-A06", "P03-A07", "P03-A08"],
+      "dependsOn": ["v0.2"]
+    },
+    {
+      "version": "v1.0",
+      "status": "planned",
+      "acceptanceStatus": "pending",
+      "prd": "versions/v1.0/prd.md",
+      "plan": "versions/v1.0/implementation-plan.md",
+      "acceptance": "versions/v1.0/acceptance.md",
+      "requirements": ["P10-R01", "P10-R02", "P10-R03", "P10-R04", "P10-R05", "P10-R06", "P10-R07", "P10-R08"],
+      "cases": ["P10-A01", "P10-A02", "P10-A03", "P10-A04", "P10-A05", "P10-A06", "P10-A07", "P10-A08"],
+      "dependsOn": ["v0.3"]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "novel",
+      "version": "n0.1",
+      "status": "planned",
+      "acceptanceStatus": "pending",
+      "prd": "capabilities/novel/n0.1/prd.md",
+      "plan": "capabilities/novel/n0.1/implementation-plan.md",
+      "acceptance": "capabilities/novel/n0.1/acceptance.md",
+      "requirements": ["N01-R01", "N01-R02", "N01-R03", "N01-R04", "N01-R05", "N01-R06", "N01-R07", "N01-R08"],
+      "cases": ["N01-A01", "N01-A02", "N01-A03", "N01-A04", "N01-A05", "N01-A06", "N01-A07", "N01-A08"],
+      "integrationContract": "1.x",
+      "integrationPlatform": "v0.2",
+      "standaloneRequiresPlatform": false
+    }
+  ]
+}

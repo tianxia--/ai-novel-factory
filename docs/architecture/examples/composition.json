@@ -1,0 +1,17 @@
+{
+  "exampleVersion": "1.0",
+  "im": {
+    "baseUrl": "http://127.0.0.1:14840",
+    "storageOwner": "im-service"
+  },
+  "capabilities": [
+    {
+      "installationId": "novel-local",
+      "plugin": "novel",
+      "contractVersion": "1.0",
+      "serviceBaseUrl": "http://127.0.0.1:4311/api/capabilities/v1",
+      "credentialRef": "secret-ref://capabilities/novel-local",
+      "storageOwner": "novel-service"
+    }
+  ]
+}

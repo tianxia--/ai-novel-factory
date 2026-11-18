@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>小说知识图谱 · 穿越到大唐末期</title>
+<script src="src/d3.min.js"></script>
+<script>
+  if (typeof d3 === 'undefined') {
+    document.write('<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"><\/script>');
+  }
+  if (typeof d3 === 'undefined') {
+    document.write('<script src="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/d3/7.3.0/d3.min.js"><\/script>');
+  }
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#03050d;--panel:rgba(6,10,24,0.96);--bd:rgba(255,255,255,0.08);
+  --tx:#e2e8f0;--mu:#475569;--mu2:#64748b;
+  --c:#ff6b6b;--l:#38bdf8;--e:#fbbf24;--w:#a78bfa;
+}
+body{background:var(--bg);color:var(--tx);font-family:'Noto Sans SC',sans-serif;overflow:hidden;height:100vh;width:100vw}
+
+/* BG canvas */
+#bg-canvas{position:fixed;inset:0;pointer-events:none;z-index:0}
+#graph-container{position:fixed;inset:0;z-index:1}
+svg#main{width:100%;height:100%}
+
+/* ── TOP BAR ── */
+.topbar{position:fixed;top:0;left:0;right:0;z-index:20;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,rgba(3,5,13,.95) 60%,transparent);pointer-events:none}
+.topbar>*{pointer-events:all}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7c5cfc,#c084fc);display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 4px 14px rgba(124,92,252,.5)}
+.brand-title{font-size:15px;font-weight:700;background:linear-gradient(135deg,#e2e8f0 30%,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.brand-sub{font-size:11px;color:var(--mu2);margin-top:1px}
+
+.search-wrap{position:relative;flex:1;max-width:260px;margin:0 24px}
+.search-input{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 14px 8px 36px;color:var(--tx);font-size:13px;font-family:inherit;outline:none;transition:border-color .2s}
+.search-input::placeholder{color:var(--mu2)}
+.search-input:focus{border-color:rgba(124,92,252,.5);background:rgba(124,92,252,.06)}
+.search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--mu2);font-size:14px;pointer-events:none}
+.search-results{position:absolute;top:calc(100% + 6px);left:0;right:0;background:rgba(6,10,24,.98);border:1px solid rgba(255,255,255,.1);border-radius:10px;overflow:hidden;display:none;z-index:100}
+.search-results.show{display:block}
+.sr-item{padding:9px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s}
+.sr-item:hover{background:rgba(255,255,255,.06)}
+.sr-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+.filters{display:flex;gap:7px}
+.fb{display:flex;align-items:center;gap:5px;border:1px solid;border-radius:20px;padding:5px 13px;font-size:12px;font-family:inherit;cursor:pointer;transition:all .2s;backdrop-filter:blur(8px)}
+.fb.character{border-color:rgba(255,107,107,.35);color:#ff6b6b;background:rgba(255,107,107,.07)}
+.fb.location{border-color:rgba(56,189,248,.35);color:#38bdf8;background:rgba(56,189,248,.07)}
+.fb.event{border-color:rgba(251,191,36,.35);color:#fbbf24;background:rgba(251,191,36,.07)}
+.fb.world{border-color:rgba(167,139,250,.35);color:#a78bfa;background:rgba(167,139,250,.07)}
+.fb.off{opacity:.4;filter:grayscale(.8)}
+.fb .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 5px currentColor}
+
+/* ── SIDE PANEL ── */
+.side{position:fixed;left:0;top:0;bottom:0;width:310px;background:var(--panel);border-right:1px solid var(--bd);z-index:15;display:flex;flex-direction:column;transform:translateX(-320px);transition:transform .38s cubic-bezier(.4,0,.2,1)}
+.side.open{transform:translateX(0)}
+.side-head{padding:72px 22px 18px;border-bottom:1px solid var(--bd)}
+.side-type{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+.side-name{font-size:22px;font-weight:700;color:#fff;margin-bottom:8px;line-height:1.2}
+.side-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px}
+.side-tag{font-size:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:2px 9px;color:var(--mu2)}
+.side-desc{font-size:13px;color:#94a3b8;line-height:1.7}
+.side-body{flex:1;overflow-y:auto;padding:18px 22px}
+.side-body::-webkit-scrollbar{width:3px}
+.side-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+.sec-title{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mu2);margin-bottom:10px;margin-top:18px}
+.sec-title:first-child{margin-top:0}
+.rel-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer;transition:background .15s;margin-bottom:4px}
+.rel-item:hover{background:rgba(255,255,255,.05)}
+.rel-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.rel-name{font-size:13px;color:var(--tx);flex:1}
+.rel-type{font-size:11px;color:var(--mu2)}
+.rel-dir{font-size:10px;color:var(--mu);margin-right:2px}
+.close-btn{position:absolute;top:16px;right:16px;width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,.07);border:none;color:var(--mu2);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;z-index:5}
+.close-btn:hover{background:rgba(255,255,255,.12);color:var(--tx)}
+
+/* ── BOTTOM BAR ── */
+.btmbar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:12px;background:rgba(6,10,24,.85);border:1px solid var(--bd);border-radius:14px;padding:10px 18px;backdrop-filter:blur(20px)}
+.stat{text-align:center}
+.stat-val{font-size:17px;font-weight:700;background:linear-gradient(135deg,#a78bfa,#38bdf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+.stat-label{font-size:10px;color:var(--mu2);margin-top:3px}
+.btm-divider{width:1px;height:30px;background:var(--bd)}
+.legend-items{display:flex;gap:12px}
+.li{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu2)}
+.li-dot{width:7px;height:7px;border-radius:50%}
+
+/* ── ZOOM ── */
+.zoom-ctrl{position:fixed;right:20px;bottom:80px;display:flex;flex-direction:column;gap:5px;z-index:20}
+.zbtn{width:34px;height:34px;background:rgba(6,10,24,.85);border:1px solid var(--bd);border-radius:9px;color:var(--tx);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:inherit;backdrop-filter:blur(12px)}
+.zbtn:hover{background:rgba(255,255,255,.1);border-color:rgba(124,92,252,.4)}
+
+/* tooltip */
+.tip{position:fixed;background:rgba(6,10,24,.95);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:8px 13px;font-size:12px;pointer-events:none;z-index:50;opacity:0;transition:opacity .12s;white-space:nowrap;backdrop-filter:blur(12px)}
+.tip strong{color:#fff;display:block;font-size:13px;margin-bottom:2px}
+.tip span{color:var(--mu2)}
+</style>
+</head>
+<body>
+
+<div id="loading-mask" style="position:fixed;inset:0;background:#03050d;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.35s ease, visibility 0.35s;">
+  <div class="spinner" style="width:36px;height:36px;border:3px solid rgba(167,139,250,0.15);border-top-color:#a78bfa;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px;"></div>
+  <div style="font-size:13px;color:#94a3b8;letter-spacing:1px;font-weight:500;font-family:'Noto Sans SC',sans-serif;">正在同步故事全景设定数据...</div>
+</div>
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<canvas id="bg-canvas"></canvas>
+<div id="graph-container"><svg id="main"></svg></div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon">📖</div>
+    <div>
+      <div class="brand-title">知识图谱</div>
+      <div class="brand-sub">穿越到大唐末期</div>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <span class="search-icon">🔍</span>
+    <input class="search-input" id="search" placeholder="搜索节点…" autocomplete="off" oninput="onSearch(this.value)" onblur="setTimeout(()=>document.getElementById('sr').classList.remove('show'),200)">
+    <div class="search-results" id="sr"></div>
+  </div>
+  <div class="filters" id="filters">
+    <button class="fb character" onclick="toggleF('character')"><span class="dot"></span>人物</button>
+    <button class="fb location" onclick="toggleF('location')"><span class="dot"></span>地点</button>
+    <button class="fb event" onclick="toggleF('event')"><span class="dot"></span>事件</button>
+    <button class="fb world" onclick="toggleF('world')"><span class="dot"></span>世界观</button>
+  </div>
+</div>
+
+<!-- SIDE PANEL -->
+<div class="side" id="side">
+  <button class="close-btn" onclick="closeSide()">✕</button>
+  <div class="side-head">
+    <div class="side-type" id="s-type"></div>
+    <div class="side-name" id="s-name"></div>
+    <div class="side-tags" id="s-tags"></div>
+    <div class="side-desc" id="s-desc"></div>
+  </div>
+  <div class="side-body" id="s-body"></div>
+</div>
+
+<!-- BOTTOM BAR -->
+<div class="btmbar">
+  <div class="stat"><div class="stat-val" id="nc">0</div><div class="stat-label">节点</div></div>
+  <div class="btm-divider"></div>
+  <div class="stat"><div class="stat-val" id="lc">0</div><div class="stat-label">关系</div></div>
+  <div class="btm-divider"></div>
+  <div class="legend-items">
+    <div class="li"><div class="li-dot" style="background:#ff6b6b;box-shadow:0 0 5px #ff6b6b"></div>人物</div>
+    <div class="li"><div class="li-dot" style="background:#38bdf8;box-shadow:0 0 5px #38bdf8"></div>地点</div>
+    <div class="li"><div class="li-dot" style="background:#fbbf24;box-shadow:0 0 5px #fbbf24"></div>事件</div>
+    <div class="li"><div class="li-dot" style="background:#a78bfa;box-shadow:0 0 5px #a78bfa"></div>世界观</div>
+  </div>
+</div>
+
+<!-- ZOOM -->
+<div class="zoom-ctrl">
+  <button class="zbtn" onclick="doZoom(1.35)">＋</button>
+  <button class="zbtn" onclick="doZoom(0.74)">－</button>
+  <button class="zbtn" onclick="zoomReset()" style="font-size:13px">⌂</button>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+// ─── DATA ───────────────────────────────────────────────
+const COLOR={character:"#ff6b6b",location:"#38bdf8",event:"#fbbf24",world:"#a78bfa"};
+const LABEL={character:"人物角色",location:"地点场景",event:"关键事件",world:"世界观设定"};
+
+let rawNodes=[
+  {id:"李浩",type:"character",imp:5,desc:"穿越者主角，来自现代的历史学教授，凭借对历史的了解在唐末乱世中步步为营，从一介书生成长为影响历史走向的关键人物。",tags:["主角","穿越者","历史学家"]},
+  {id:"李隆基",type:"character",imp:5,desc:"唐玄宗，开元盛世的缔造者，晚年沉迷声色，重用奸臣，导致安史之乱爆发，是大唐由盛转衰的关键人物。",tags:["皇帝","唐玄宗","开元"]},
+  {id:"杨贵妃",type:"character",imp:4,desc:"李隆基最宠爱的妃子，倾国倾城，其家族把持朝政，马嵬驿兵变中被赐死。",tags:["贵妃","马嵬"]},
+  {id:"安禄山",type:"character",imp:5,desc:"身兼三镇节度使，表面憨厚忠诚，暗中积蓄力量，发动安史之乱，几乎颠覆大唐。",tags:["节度使","叛将","安史之乱"]},
+  {id:"史思明",type:"character",imp:3,desc:"安禄山部将，安史之乱中的重要叛将，后与安庆绪内讧，自立为燕王。",tags:["叛将","节度使"]},
+  {id:"郭子仪",type:"character",imp:4,desc:"唐朝名将，平定安史之乱的主要功臣，忠勇双全，多次力挽狂澜，被封为汾阳王。",tags:["名将","忠臣","平叛"]},
+  {id:"李光弼",type:"character",imp:3,desc:"与郭子仪并称的平叛名将，战功卓著，擅长防守战。",tags:["名将","平叛"]},
+  {id:"杨国忠",type:"character",imp:4,desc:"杨贵妃堂兄，把持朝政，贪腐横行，与安禄山矛盾激化加速了叛乱爆发。",tags:["权臣","奸臣","贪腐"]},
+  {id:"高仙芝",type:"character",imp:3,desc:"唐朝边将，征战西域，后在潼关之战中被宦官诬陷处死。",tags:["边将","西域","潼关"]},
+  {id:"陈玄礼",type:"character",imp:3,desc:"禁军统领，马嵬驿兵变的主导者，逼迫李隆基赐死杨贵妃。",tags:["禁军","兵变"]},
+  {id:"鱼朝恩",type:"character",imp:2,desc:"专权宦官，干预军政，与郭子仪有冲突，后被元载所杀。",tags:["宦官","权宦"]},
+  {id:"长安",type:"location",imp:5,desc:"大唐帝国首都，当时世界上最繁华的城市，安史之乱中被叛军攻陷，后经郭子仪收复。",tags:["首都","西都"]},
+  {id:"洛阳",type:"location",imp:4,desc:"东都，安禄山叛乱后在此建立燕国，是叛军的核心据点。",tags:["东都","燕国","叛军据点"]},
+  {id:"范阳",type:"location",imp:4,desc:"安禄山起兵之地，三镇节度使驻地，安史之乱的策源地。",tags:["起兵地","河北"]},
+  {id:"潼关",type:"location",imp:4,desc:"关中门户，战略要地。哥舒翰镇守于此，因杨国忠逼迫出战而失守，长安门户洞开。",tags:["要塞","关中门户"]},
+  {id:"马嵬驿",type:"location",imp:4,desc:"玄宗西逃途中，禁军兵变之地，杨国忠被杀，杨贵妃被赐死于此。",tags:["兵变","逃亡"]},
+  {id:"灵武",type:"location",imp:3,desc:"肃宗即位之地，平叛的政治中心，郭子仪等人在此重整旗鼓。",tags:["行宫","肃宗即位"]},
+  {id:"扬州",type:"location",imp:2,desc:"江南重要城市，唐代经济中心，安史之乱中成为避乱富庶之地。",tags:["江南","经济"]},
+  {id:"安史之乱",type:"event",imp:5,desc:"755年由安禄山、史思明发动的叛乱，历时8年，是唐朝由盛转衰的转折点，造成大量人口死亡和经济破坏。",tags:["叛乱","转折点","755年"]},
+  {id:"马嵬驿兵变",type:"event",imp:4,desc:"756年，随玄宗西逃的禁军哗变，杀死杨国忠，逼迫玄宗赐死杨贵妃。",tags:["兵变","756年","政变"]},
+  {id:"潼关失守",type:"event",imp:4,desc:"756年，哥舒翰被迫出战，大败于灵宝，潼关失守，叛军长驱直入长安。",tags:["756年","战败"]},
+  {id:"收复两京",type:"event",imp:4,desc:"757年，郭子仪、李光弼率领唐军及回纥援军，先后收复长安和洛阳。",tags:["757年","胜利","平叛"]},
+  {id:"科举入仕",type:"event",imp:3,desc:"李浩利用历史知识在唐代科举考试中脱颖而出，踏入仕途，开始影响历史进程。",tags:["科举","入仕","主角"]},
+  {id:"开元盛世",type:"event",imp:3,desc:"唐玄宗开元年间，政治清明，经济繁荣，万国来朝，是唐朝最鼎盛的时期。",tags:["开元","盛世"]},
+  {id:"节度使制度",type:"world",imp:5,desc:"唐朝边疆军事制度，节度使掌管一方军政财权，安史之乱后演变为藩镇割据，严重削弱中央集权。",tags:["制度","军事","藩镇"]},
+  {id:"藩镇割据",type:"world",imp:4,desc:"安史之乱后形成的政治格局，各地藩镇拥兵自重，名义上臣服唐廷，实则独立，延续至唐朝灭亡。",tags:["政治","格局","割据"]},
+  {id:"均田制瓦解",type:"world",imp:3,desc:"安史之乱后土地兼并加剧，均田制崩溃，两税法取而代之，影响了唐代财政和农民生活。",tags:["土地制度","财政"]},
+  {id:"宦官干政",type:"world",imp:4,desc:"安史之乱后宦官势力膨胀，甚至控制禁军、左右皇位废立，成为晚唐政治的毒瘤之一。",tags:["宦官","政治","晚唐"]},
+  {id:"丝绸之路",type:"world",imp:3,desc:"连接中原与西域的贸易路线，唐代国力鼎盛时期达到顶峰，安史之乱后逐渐衰退。",tags:["贸易","国际","文化交流"]},
+  {id:"唐朝礼制",type:"world",imp:2,desc:"唐代以儒家礼制治国，规范君臣、父子等各种社会关系，是李浩以现代眼光重新审视的文化土壤。",tags:["礼制","儒家","文化"]},
+];
+
+let rawLinks=[
+  {s:"李浩",t:"李隆基",r:"效忠"},
+  {s:"李浩",t:"郭子仪",r:"盟友"},
+  {s:"李浩",t:"科举入仕",r:"参与"},
+  {s:"李浩",t:"安史之乱",r:"试图影响"},
+  {s:"李浩",t:"长安",r:"所在地"},
+  {s:"李浩",t:"节度使制度",r:"深入研究"},
+  {s:"李隆基",t:"杨贵妃",r:"宠爱"},
+  {s:"李隆基",t:"杨国忠",r:"信任"},
+  {s:"李隆基",t:"安禄山",r:"信任→背叛"},
+  {s:"李隆基",t:"长安",r:"统治"},
+  {s:"李隆基",t:"马嵬驿",r:"出逃至"},
+  {s:"李隆基",t:"开元盛世",r:"缔造"},
+  {s:"安禄山",t:"史思明",r:"同盟"},
+  {s:"安禄山",t:"杨国忠",r:"政敌"},
+  {s:"安禄山",t:"范阳",r:"起兵地"},
+  {s:"安禄山",t:"洛阳",r:"占领"},
+  {s:"安禄山",t:"安史之乱",r:"发动"},
+  {s:"史思明",t:"安史之乱",r:"参与"},
+  {s:"郭子仪",t:"李光弼",r:"并肩作战"},
+  {s:"郭子仪",t:"鱼朝恩",r:"矛盾"},
+  {s:"郭子仪",t:"灵武",r:"驻守"},
+  {s:"郭子仪",t:"收复两京",r:"主导"},
+  {s:"李光弼",t:"收复两京",r:"参与"},
+  {s:"陈玄礼",t:"杨贵妃",r:"逼杀"},
+  {s:"陈玄礼",t:"杨国忠",r:"杀死"},
+  {s:"陈玄礼",t:"马嵬驿兵变",r:"主导"},
+  {s:"杨贵妃",t:"马嵬驿兵变",r:"遇难"},
+  {s:"杨国忠",t:"潼关失守",r:"逼战导致"},
+  {s:"高仙芝",t:"潼关",r:"镇守"},
+  {s:"安史之乱",t:"潼关失守",r:"导致"},
+  {s:"潼关失守",t:"马嵬驿兵变",r:"引发"},
+  {s:"马嵬驿兵变",t:"收复两京",r:"之后"},
+  {s:"开元盛世",t:"安史之乱",r:"盛极而衰"},
+  {s:"节度使制度",t:"安禄山",r:"赋予权力"},
+  {s:"节度使制度",t:"藩镇割据",r:"演变为"},
+  {s:"安史之乱",t:"藩镇割据",r:"催生"},
+  {s:"安史之乱",t:"宦官干政",r:"引发"},
+  {s:"安史之乱",t:"均田制瓦解",r:"加速"},
+  {s:"丝绸之路",t:"长安",r:"起点"},
+  {s:"唐朝礼制",t:"科举入仕",r:"规范"},
+  {s:"范阳",t:"节度使制度",r:"驻地"},
+  {s:"马嵬驿",t:"马嵬驿兵变",r:"发生地"},
+  {s:"潼关",t:"潼关失守",r:"发生地"},
+];
+
+// ─── STATE ──────────────────────────────────────────────
+let activeF=new Set(["character","location","event","world"]);
+let sim,svg,g,zoomB,linkSel,nodeG;
+let hoveredId=null, selectedId=null;
+
+// ─── BG PARTICLES ───────────────────────────────────────
+(function bgParticles(){
+  const c=document.getElementById("bg-canvas");
+  const ctx=c.getContext("2d");
+  let pts=[];
+  function resize(){c.width=innerWidth;c.height=innerHeight;pts=Array.from({length:120},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*.8+.2,vx:(Math.random()-.5)*.12,vy:(Math.random()-.5)*.12,a:Math.random()*.4+.1}))}
+  resize();window.addEventListener("resize",resize);
+  function frame(){
+    ctx.clearRect(0,0,c.width,c.height);
+    pts.forEach(p=>{
+      p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0)p.x=c.width;if(p.x>c.width)p.x=0;
+      if(p.y<0)p.y=c.height;if(p.y>c.height)p.y=0;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle=`rgba(167,139,250,${p.a})`;ctx.fill();
+    });
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+// ─── INIT ────────────────────────────────────────────────
+function init(){
+  if (sim) {
+    try { sim.stop(); } catch(e){}
+  }
+  svg=d3.select("#main");
+  svg.selectAll("*").remove(); // 彻底清理旧画布，防止旧测试数据图层残留
+  g=svg.append("g");
+
+  zoomB=d3.zoom().scaleExtent([0.08,5])
+    .on("zoom",e=>{g.attr("transform",e.transform);hideTooltip()});
+  svg.call(zoomB);
+  svg.on("dblclick.zoom",null);
+  svg.on("click",()=>{if(selectedId){selectedId=null;updateHighlight()}closeSide()});
+
+  buildDefs();
+  build();
+  document.getElementById("nc").textContent=rawNodes.length;
+  document.getElementById("lc").textContent=rawLinks.length;
+}
+
+function buildDefs(){
+  const defs=svg.append("defs");
+  Object.entries(COLOR).forEach(([type,col])=>{
+    const f=defs.append("filter").attr("id","glow-"+type).attr("x","-80%").attr("y","-80%").attr("width","260%").attr("height","260%");
+    f.append("feGaussianBlur").attr("stdDeviation","5").attr("result","blur");
+    const m=f.append("feMerge");
+    m.append("feMergeNode").attr("in","blur");
+    m.append("feMergeNode").attr("in","blur");
+    m.append("feMergeNode").attr("in","SourceGraphic");
+    // radial gradient
+    const gr=defs.append("radialGradient").attr("id","grad-"+type).attr("cx","35%").attr("cy","35%").attr("r","65%");
+    gr.append("stop").attr("offset","0%").attr("stop-color",d3.color(col).brighter(1.2));
+    gr.append("stop").attr("offset","100%").attr("stop-color",d3.color(col).darker(.6));
+  });
+}
+
+function r(d){return 7+d.imp*3.8}
+
+function build(){
+  const W=innerWidth,H=innerHeight;
+  g.selectAll("*").remove();
+
+  const nodes=rawNodes.filter(n=>activeF.has(n.type)).map(n=>({...n}));
+  const ids=new Set(nodes.map(n=>n.id));
+  const links=rawLinks.filter(l=>ids.has(l.s)&&ids.has(l.t)).map(l=>({...l,source:l.s,target:l.t}));
+
+  sim=d3.forceSimulation(nodes)
+    .force("link",d3.forceLink(links).id(d=>d.id).distance(d=>90+(5-Math.min(d.source.imp||3,d.target.imp||3))*18))
+    .force("charge",d3.forceManyBody().strength(-320).distanceMax(400))
+    .force("center",d3.forceCenter(W/2,H/2))
+    .force("collision",d3.forceCollide().radius(d=>r(d)+14));
+
+  // link paths (curved)
+  linkSel=g.append("g").selectAll("path")
+    .data(links).join("path")
+    .attr("fill","none")
+    .attr("stroke","rgba(255,255,255,0.1)")
+    .attr("stroke-width",1.2)
+    .attr("class","link-path");
+
+  // link labels
+  const llabel=g.append("g").selectAll("text")
+    .data(links).join("text")
+    .attr("font-size","9.5px").attr("fill","rgba(255,255,255,0.22)")
+    .attr("text-anchor","middle").attr("font-family","Noto Sans SC,sans-serif")
+    .attr("pointer-events","none").text(d=>d.r);
+
+  // node groups
+  nodeG=g.append("g").selectAll("g")
+    .data(nodes).join("g")
+    .attr("cursor","pointer")
+    .call(d3.drag()
+      .on("start",(e,d)=>{if(!e.active)sim.alphaTarget(.3).restart();d.fx=d.x;d.fy=d.y})
+      .on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y})
+      .on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null}))
+    .on("click",(e,d)=>{e.stopPropagation();selectedId=d.id;updateHighlight();showSide(d,links)})
+    .on("mouseover",(e,d)=>{hoveredId=d.id;updateHighlight();showTip(e,d)})
+    .on("mousemove",(e)=>moveTip(e))
+    .on("mouseout",()=>{hoveredId=null;updateHighlight();hideTip()});
+
+  // outer glow ring (pulsing for imp=5)
+  nodeG.append("circle").attr("class","ring")
+    .attr("r",d=>r(d)+8).attr("fill","none")
+    .attr("stroke",d=>COLOR[d.type]).attr("stroke-width",d=>d.imp===5?1.5:.7)
+    .attr("opacity",d=>d.imp===5?.5:.2);
+
+  // main circle
+  nodeG.append("circle").attr("class","main-c")
+    .attr("r",d=>r(d))
+    .attr("fill",d=>`url(#grad-${d.type})`)
+    .attr("filter",d=>"url(#glow-"+d.type+")")
+    .attr("stroke",d=>COLOR[d.type]).attr("stroke-width",1.5).attr("stroke-opacity",.7);
+
+  // inner highlight
+  nodeG.append("circle")
+    .attr("r",d=>r(d)*.45).attr("cx",d=>-r(d)*.18).attr("cy",d=>-r(d)*.18)
+    .attr("fill","rgba(255,255,255,.18)").attr("pointer-events","none");
+
+  // labels
+  nodeG.append("text")
+    .attr("text-anchor","middle").attr("dy","0.35em")
+    .attr("font-size",d=>d.imp>=4?"12px":"10px")
+    .attr("font-weight",d=>d.imp>=4?"600":"400")
+    .attr("fill","#fff").attr("font-family","Noto Sans SC,sans-serif")
+    .attr("pointer-events","none").attr("class","node-label")
+    .text(d=>d.id);
+
+  // pulse animation for imp=5
+  nodeG.filter(d=>d.imp===5).append("circle").attr("class","pulse")
+    .attr("r",d=>r(d)+4).attr("fill","none")
+    .attr("stroke",d=>COLOR[d.type]).attr("stroke-width",2).attr("opacity",0);
+
+  // tick
+  sim.on("tick",()=>{
+    linkSel.attr("d",d=>{
+      const dx=d.target.x-d.source.x,dy=d.target.y-d.source.y;
+      const mx=(d.source.x+d.target.x)/2+dy*.18,my=(d.source.y+d.target.y)/2-dx*.18;
+      return `M${d.source.x},${d.source.y} Q${mx},${my} ${d.target.x},${d.target.y}`;
+    });
+    llabel.attr("x",d=>(d.source.x+d.target.x)/2+(d.target.y-d.source.y)*.09)
+      .attr("y",d=>(d.source.y+d.target.y)/2-(d.target.x-d.source.x)*.09);
+    nodeG.attr("transform",d=>`translate(${d.x},${d.y})`);
+  });
+
+  // pulse keyframe
+  animatePulse();
+}
+
+function animatePulse(){
+  d3.selectAll(".pulse").each(function(d){
+    const el=d3.select(this);
+    (function loop(){
+      el.attr("r",r(d)+4).attr("opacity",.7)
+        .transition().duration(1800).ease(d3.easeCubicOut)
+        .attr("r",r(d)+22).attr("opacity",0)
+        .on("end",loop);
+    })();
+  });
+}
+
+function updateHighlight(){
+  const activeId=hoveredId||selectedId;
+  if(!activeId){
+    nodeG.selectAll(".main-c").attr("opacity",1);
+    nodeG.selectAll(".node-label").attr("opacity",1);
+    nodeG.selectAll(".ring").attr("opacity",d=>d.imp===5?.5:.2);
+    linkSel.attr("stroke","rgba(255,255,255,0.1)").attr("stroke-width",1.2);
+    return;
+  }
+  const links=linkSel.data();
+  const connected=new Set([activeId]);
+  links.forEach(l=>{
+    const s=l.source.id||l.source,t=l.target.id||l.target;
+    if(s===activeId)connected.add(t);
+    if(t===activeId)connected.add(s);
+  });
+  nodeG.selectAll(".main-c").attr("opacity",d=>connected.has(d.id)?1:.15);
+  nodeG.selectAll(".node-label").attr("opacity",d=>connected.has(d.id)?1:.1);
+  nodeG.selectAll(".ring").attr("opacity",d=>connected.has(d.id)?(d.imp===5?.7:.35):.05);
+  linkSel.attr("stroke",d=>{
+    const s=d.source.id||d.source,t=d.target.id||d.target;
+    return (s===activeId||t===activeId)?COLOR[d.source.type||"character"]:"rgba(255,255,255,0.04)";
+  }).attr("stroke-width",d=>{
+    const s=d.source.id||d.source,t=d.target.id||d.target;
+    return (s===activeId||t===activeId)?2:1;
+  });
+}
+
+// ─── SIDE PANEL ─────────────────────────────────────────
+function showSide(d,links){
+  document.getElementById("s-type").textContent=LABEL[d.type];
+  document.getElementById("s-type").style.color=COLOR[d.type];
+  document.getElementById("s-name").textContent=d.id;
+  document.getElementById("s-tags").innerHTML=(d.tags||[]).map(t=>`<span class="side-tag">${t}</span>`).join("");
+  document.getElementById("s-desc").textContent=d.desc||"";
+  const outs=links.filter(l=>(l.source.id||l.source)===d.id);
+  const ins=links.filter(l=>(l.target.id||l.target)===d.id);
+  let html="";
+  if(outs.length){
+    html+=`<div class="sec-title">关联出去</div>`;
+    html+=outs.map(l=>{const t=l.target.id||l.target;return relItem(t,"→",l.r)}).join("");
+  }
+  if(ins.length){
+    html+=`<div class="sec-title">关联进来</div>`;
+    html+=ins.map(l=>{const s=l.source.id||l.source;return relItem(s,"←",l.r)}).join("");
+  }
+  document.getElementById("s-body").innerHTML=html;
+  document.getElementById("side").classList.add("open");
+}
+function relItem(name,dir,rel){
+  const n=rawNodes.find(x=>x.id===name);
+  const col=n?COLOR[n.type]:"#fff";
+  return `<div class="rel-item" onclick="focusNode('${name}')"><div class="rel-dot" style="background:${col};box-shadow:0 0 5px ${col}"></div><span class="rel-name">${name}</span><span class="rel-dir">${dir}</span><span class="rel-type">${rel}</span></div>`;
+}
+function closeSide(){document.getElementById("side").classList.remove("open")}
+function focusNode(id){
+  const d=rawNodes.find(n=>n.id===id);
+  if(!d)return;
+  selectedId=id;updateHighlight();
+  const links=rawLinks.filter(l=>activeF.has((rawNodes.find(x=>x.id===l.s)||{}).type)&&activeF.has((rawNodes.find(x=>x.id===l.t)||{}).type));
+  showSide(d,links.map(l=>({...l,source:l.s,target:l.t})));
+}
+
+// ─── TOOLTIP ────────────────────────────────────────────
+const tipEl=document.getElementById("tip");
+function showTip(e,d){tipEl.innerHTML=`<strong>${d.id}</strong><span>${LABEL[d.type]}</span>`;tipEl.style.opacity=1;moveTip(e)}
+function moveTip(e){tipEl.style.left=(e.clientX+14)+"px";tipEl.style.top=(e.clientY-12)+"px"}
+function hideTip(){tipEl.style.opacity=0}
+function hideTooltip(){hideTip()}
+
+// ─── SEARCH ─────────────────────────────────────────────
+function onSearch(v){
+  const sr=document.getElementById("sr");
+  if(!v.trim()){sr.classList.remove("show");return}
+  const res=rawNodes.filter(n=>n.id.includes(v)||(n.tags||[]).some(t=>t.includes(v)));
+  if(!res.length){sr.classList.remove("show");return}
+  sr.innerHTML=res.slice(0,8).map(n=>`<div class="sr-item" onclick="focusNode('${n.id}');document.getElementById('sr').classList.remove('show');document.getElementById('search').value=''"><div class="sr-dot" style="background:${COLOR[n.type]};box-shadow:0 0 5px ${COLOR[n.type]}"></div>${n.id} <span style="color:var(--mu2);font-size:11px;margin-left:4px">${LABEL[n.type]}</span></div>`).join("");
+  sr.classList.add("show");
+}
+
+// ─── FILTER ─────────────────────────────────────────────
+function toggleF(type){
+  const btn=document.querySelector(`.fb.${type}`);
+  if(activeF.has(type)){if(activeF.size===1)return;activeF.delete(type);btn.classList.add("off")}
+  else{activeF.add(type);btn.classList.remove("off")}
+  selectedId=null;hoveredId=null;closeSide();build();
+}
+
+// ─── ZOOM ────────────────────────────────────────────────
+function doZoom(k){svg.transition().duration(320).call(zoomB.scaleBy,k)}
+function zoomReset(){
+  const W=innerWidth,H=innerHeight;
+  svg.transition().duration(420).call(zoomB.transform,d3.zoomIdentity.translate(W/2,H/2).scale(.85).translate(-W/2,-H/2));
+}
+
+window.addEventListener("resize",()=>{if(sim)sim.force("center",d3.forceCenter(innerWidth/2,innerHeight/2)).alpha(.3).restart()});
+
+window.addEventListener("message", (event) => {
+  if (event.data?.type === "NOVEL_GRAPH_DATA") {
+    try {
+      const projName = event.data.projectName || "未命名项目";
+      const subEl = document.querySelector(".brand-sub");
+      if (subEl) {
+        subEl.textContent = projName;
+      }
+      document.title = `小说知识图谱 · ${projName}`;
+
+      const snapshot = event.data.snapshot;
+      if (snapshot && Array.isArray(snapshot.graphNodes) && Array.isArray(snapshot.graphEdges)) {
+        // 过滤掉所有与“工作流/程序运行”相关的系统节点，只保留与小说中故事、概念、情节设定相关的节点，使用大小写不敏感匹配
+        const storyNodeTypes = new Set([
+          "character", "location", "faction", "event", "scene", 
+          "foreshadowing", "worldrule", "conflict", "relationship", "timelinepoint"
+        ]);
+
+        const storyNodes = snapshot.graphNodes.filter(n => {
+          const typeLower = String(n.node_type || "").toLowerCase();
+          return storyNodeTypes.has(typeLower);
+        });
+        const storyNodeIds = new Set(storyNodes.map(n => n.id));
+
+        rawNodes = storyNodes.map(n => {
+          let meta = {};
+          try { meta = JSON.parse(n.metadata_json || "{}"); } catch(e){}
+          
+          let t = "world";
+          const nt = String(n.node_type || "").toLowerCase();
+          if (nt === "character") t = "character";
+          else if (nt === "location") t = "location";
+          else if (nt === "event" || nt === "scene" || nt === "timelinepoint" || nt === "conflict") t = "event";
+          else t = "world"; // Faction, WorldRule, Foreshadowing 等归入世界设定
+
+          return {
+            id: n.label || n.id, // 用 label 作为显示名字
+            _rawId: n.id,        // 记录原始 id 供连线查找
+            type: t,
+            imp: meta.importance || 3,
+            desc: n.content || "",
+            tags: meta.tags || []
+          };
+        });
+
+        rawLinks = snapshot.graphEdges
+          .filter(e => storyNodeIds.has(e.source_id) && storyNodeIds.has(e.target_id)) // 剔除连到系统节点的废边
+          .map(e => {
+            const sNode = rawNodes.find(n => n._rawId === e.source_id);
+            const tNode = rawNodes.find(n => n._rawId === e.target_id);
+            return {
+              s: sNode ? sNode.id : e.source_id,
+              t: tNode ? tNode.id : e.target_id,
+              r: e.relation_type || "关联"
+            };
+          });
+
+        if (rawNodes.length === 0) {
+          rawNodes.push({ id: "暂无故事设定数据", _rawId: "empty", type: "world", imp: 3, desc: "项目中暂时还没有提取出小说世界观节点", tags: [] });
+        }
+
+        selectedId = null;
+        hoveredId = null;
+        closeSide();
+        init();
+
+        // 渐隐并隐藏 Loading 遮罩层
+        const mask = document.getElementById("loading-mask");
+        if (mask) {
+          mask.style.opacity = "0";
+          mask.style.pointerEvents = "none";
+          setTimeout(() => {
+            mask.style.visibility = "hidden";
+          }, 350);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to parse and render story graph:", err);
+    }
+  }
+});
+</script>
+</body>
+</html>
